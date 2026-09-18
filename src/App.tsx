@@ -7,6 +7,7 @@ import Categorias from '@/pages/Categorias'
 import Configuracoes from '@/pages/Configuracoes'
 import Contas from '@/pages/Contas'
 import Dashboard from '@/pages/Dashboard'
+import Despesas from '@/pages/Despesas'
 import Lancamentos from '@/pages/Lancamentos'
 import Marketplaces from '@/pages/Marketplaces'
 import NotFound from '@/pages/NotFound'
@@ -31,6 +32,7 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route index element={<Dashboard />} />
+          <Route path="/despesas" element={<Despesas />} />
           <Route path="/lancamentos" element={<Lancamentos />} />
           <Route path="/contas" element={<Contas />} />
           <Route path="/categorias" element={<Categorias />} />

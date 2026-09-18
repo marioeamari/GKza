@@ -39,6 +39,115 @@ export interface Conta extends RecordModel {
   saldo_inicial: number
   cor: string
   ativa: boolean
+  dia_fechamento?: number
+  dia_vencimento?: number
+  bandeira?: string
+}
+
+export interface TagItem extends RecordModel {
+  nome: string
+  cor?: string
+}
+
+export interface TipoDespesa extends RecordModel {
+  nome: string
+  codigo: string
+  descricao?: string
+}
+
+export type MetodoPagamentoTipo =
+  | 'pix'
+  | 'cartao'
+  | 'boleto'
+  | 'transferencia'
+  | 'dinheiro'
+  | 'outro'
+
+export interface MetodoPagamento extends RecordModel {
+  nome: string
+  codigo: string
+  tipo: MetodoPagamentoTipo
+  conta_padrao?: string
+  ativo: boolean
+  expand?: {
+    conta_padrao?: Conta
+  }
+}
+
+export interface TipoDizimo extends RecordModel {
+  nome: string
+  descricao?: string
+  soma_resumo?: boolean
+  cor?: string
+}
+
+export type SecaoDespesa = 'contas_mensais_pix_boleto' | 'assinaturas_anuais' | 'cartoes_credito'
+export type RegraRepeticao = 'mensal' | 'anual' | 'parcelado' | 'avulso'
+export type ContextoTipo = 'pessoal' | 'empresa'
+export type OcorrenciaStatus = 'prevista' | 'paga' | 'cancelada'
+
+export interface DespesaCompromisso extends RecordModel {
+  contexto_tipo: ContextoTipo
+  empresa?: string
+  pessoa?: string
+  descricao: string
+  fornecedor?: string
+  categoria?: string
+  tag?: string
+  tipo_despesa?: string
+  metodo_pagamento?: string
+  conta_padrao?: string
+  secao: SecaoDespesa
+  regra_repeticao: RegraRepeticao
+  total_parcelas?: number
+  parcela_inicial?: number
+  dia_vencimento?: number
+  regra_vencimento_texto?: string
+  data_inicio: string
+  valor_estimado: number
+  link_pagamento?: string
+  dizimo?: boolean
+  tipo_dizimo?: string
+  ativo: boolean
+  observacoes?: string
+  expand?: {
+    empresa?: Empresa
+    pessoa?: Pessoa
+    categoria?: Categoria
+    tag?: TagItem
+    tipo_despesa?: TipoDespesa
+    metodo_pagamento?: MetodoPagamento
+    conta_padrao?: Conta
+    tipo_dizimo?: TipoDizimo
+  }
+}
+
+export interface DespesaOcorrencia extends RecordModel {
+  compromisso: string
+  contexto_tipo: ContextoTipo
+  empresa?: string
+  secao: SecaoDespesa
+  conta?: string
+  competencia: string // 'YYYY-MM'
+  numero_parcela?: number
+  total_parcelas?: number
+  data_vencimento: string
+  valor_previsto: number
+  status: OcorrenciaStatus
+  data_pagamento?: string
+  valor_pago?: number
+  lancamento?: string
+  dizimo?: boolean
+  tipo_dizimo?: string
+  link_pagamento?: string
+  observacoes?: string
+  expand?: {
+    compromisso?: DespesaCompromisso
+    empresa?: Empresa
+    conta?: Conta
+    lancamento?: Lancamento
+    tipo_dizimo?: TipoDizimo
+  }
 }
 
 export interface Categoria extends RecordModel {

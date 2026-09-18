@@ -3,8 +3,10 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import {
   BadgeDollarSign,
   Building2,
+  CalendarDays,
   ChevronDown,
   CircleUserRound,
+  CreditCard,
   FilePenLine,
   Grid2X2,
   Home,
@@ -12,6 +14,7 @@ import {
   Menu,
   MoreHorizontal,
   PackageOpen,
+  Receipt,
   Settings,
   SlidersHorizontal,
   Store,
@@ -20,6 +23,7 @@ import {
   WalletCards,
   X,
 } from 'lucide-react'
+import { ContextSelector } from '@/components/ContextSelector'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -47,9 +51,10 @@ import pb from '@/lib/pocketbase/client'
 
 const desktopItems = [
   { to: '/', label: 'Dashboard', icon: Grid2X2, end: true },
+  { to: '/despesas', label: 'Despesas', icon: Receipt },
   { to: '/lancamentos', label: 'Lançamentos', icon: BadgeDollarSign },
-  { to: '/contas', label: 'Contas', icon: WalletCards },
-  { to: '/categorias', label: 'Categorias', icon: Tags },
+  { to: '/contas', label: 'Contas & Cartões', icon: WalletCards },
+  { to: '/categorias', label: 'Classificações', icon: Tags },
   { to: '/marketplaces', label: 'Marketplaces', icon: Store },
   { to: '/cadastros', label: 'Cadastros', icon: Building2 },
   { to: '/configuracoes', label: 'Configurações', icon: Settings },
@@ -57,9 +62,9 @@ const desktopItems = [
 
 const mobileItems = [
   { to: '/', label: 'Início', icon: Home, end: true },
-  { to: '/lancamentos', label: 'Lançamentos', icon: BadgeDollarSign },
-  { to: '/marketplaces', label: 'Marketplaces', icon: Store },
-  { to: '/cadastros', label: 'Cadastros', icon: Building2 },
+  { to: '/despesas', label: 'Despesas', icon: Receipt },
+  { to: '/lancamentos', label: 'Caixa', icon: BadgeDollarSign },
+  { to: '/marketplaces', label: 'Vendas', icon: Store },
 ]
 
 export function AppLayout() {
@@ -76,8 +81,11 @@ export function AppLayout() {
   return (
     <div className="min-h-screen bg-background">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-border bg-white lg:flex">
-        <div className="px-6 py-6">
+        <div className="px-6 py-5">
           <Brand />
+        </div>
+        <div className="px-3 pb-3">
+          <ContextSelector />
         </div>
         <nav className="flex-1 space-y-1 px-3" aria-label="Navegação principal">
           {desktopItems.map(({ to, label, icon: Icon, end }) => (
@@ -133,7 +141,10 @@ export function AppLayout() {
       </aside>
 
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border/80 bg-background/95 px-4 backdrop-blur lg:hidden">
-        <Brand />
+        <div className="flex items-center gap-3">
+          <Brand />
+          <ContextSelector className="w-auto min-w-[120px] max-w-[170px]" compact />
+        </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="rounded-full">
@@ -195,8 +206,9 @@ export function AppLayout() {
             </SheetHeader>
             <div className="mt-6 grid gap-2">
               {[
-                ['/contas', 'Contas financeiras', WalletCards],
-                ['/categorias', 'Categorias', Tags],
+                ['/contas', 'Contas financeiras & Cartões', WalletCards],
+                ['/categorias', 'Hub de Classificações', Tags],
+                ['/cadastros', 'Empresas & Pessoas', Building2],
                 ['/configuracoes', 'Configurações', SlidersHorizontal],
               ].map(([to, label, Icon]) => (
                 <Button

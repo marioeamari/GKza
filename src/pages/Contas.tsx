@@ -58,6 +58,9 @@ const initial = {
   saldo_inicial: 0,
   cor: '#DF5830',
   ativa: true,
+  dia_fechamento: 1,
+  dia_vencimento: 10,
+  bandeira: '',
 }
 
 export default function Contas() {
@@ -120,6 +123,9 @@ export default function Contas() {
             saldo_inicial: account.saldo_inicial,
             cor: account.cor || '#DF5830',
             ativa: account.ativa,
+            dia_fechamento: account.dia_fechamento || 1,
+            dia_vencimento: account.dia_vencimento || 10,
+            bandeira: account.bandeira || '',
           }
         : initial,
     )
@@ -175,9 +181,19 @@ export default function Contas() {
             </div>
           </div>
           <h2 className="mt-5 text-[15px] font-bold">{account.nome}</h2>
-          <Badge variant="outline" className="mt-2">
-            {labels[account.tipo]}
-          </Badge>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <Badge variant="outline">{labels[account.tipo]}</Badge>
+            {account.tipo === 'cartao' && account.bandeira && (
+              <Badge variant="secondary" className="text-[10px]">
+                {account.bandeira}
+              </Badge>
+            )}
+            {account.tipo === 'cartao' && account.dia_vencimento && (
+              <span className="text-[11px] text-muted-foreground">
+                Vence dia {account.dia_vencimento}
+              </span>
+            )}
+          </div>
           <p className="micro-label mt-6">Saldo atual</p>
           <p
             className={`mt-1 text-2xl font-extrabold tabular-nums ${(balances[account.id] || 0) < 0 ? 'text-destructive' : 'text-foreground'}`}
@@ -281,6 +297,44 @@ export default function Contas() {
                 Use o saldo da conta antes do primeiro lançamento.
               </p>
             </div>
+
+            {form.tipo === 'cartao' && (
+              <div className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-secondary/30 p-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Dia Fechamento</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={form.dia_fechamento}
+                    onChange={(e) =>
+                      setForm({ ...form, dia_fechamento: parseInt(e.target.value, 10) || 1 })
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Dia Vencimento</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={form.dia_vencimento}
+                    onChange={(e) =>
+                      setForm({ ...form, dia_vencimento: parseInt(e.target.value, 10) || 10 })
+                    }
+                  />
+                </div>
+                <div className="col-span-2 space-y-1">
+                  <Label className="text-xs">Bandeira / Emissor (opcional)</Label>
+                  <Input
+                    placeholder="Ex.: Mastercard, Visa, Elo..."
+                    value={form.bandeira}
+                    onChange={(e) => setForm({ ...form, bandeira: e.target.value })}
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label>Cor de identificação</Label>
               <div className="flex flex-wrap gap-2">

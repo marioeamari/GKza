@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-18T11:51:04.465Z",
+  "generatedAt": "2026-09-18T14:51:50.413Z",
   "collections": [
     {
       "name": "users",
@@ -252,6 +252,24 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "dia_fechamento",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dia_vencimento",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "bandeira",
+          "type": "text",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": ["CREATE INDEX idx_contas_tipo ON contas (tipo)"]
@@ -682,6 +700,535 @@
         "CREATE INDEX idx_repasses_status ON repasses (status)",
         "CREATE INDEX idx_repasses_data_prevista ON repasses (data_prevista)",
         "CREATE INDEX idx_repasses_marketplace_conta ON repasses (marketplace_conta)"
+      ]
+    },
+    {
+      "name": "tags",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "cor",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": ["CREATE UNIQUE INDEX idx_tags_nome ON tags (nome)"]
+    },
+    {
+      "name": "tipos_despesa",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "codigo",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": ["CREATE UNIQUE INDEX idx_tipos_despesa_codigo ON tipos_despesa (codigo)"]
+    },
+    {
+      "name": "metodos_pagamento",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "codigo",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "tipo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["pix", "cartao", "boleto", "transferencia", "dinheiro", "outro"]
+        },
+        {
+          "name": "conta_padrao",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "contas"
+        },
+        {
+          "name": "ativo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": ["CREATE UNIQUE INDEX idx_metodos_pagamento_codigo ON metodos_pagamento (codigo)"]
+    },
+    {
+      "name": "tipos_dizimo",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "soma_resumo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "cor",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": ["CREATE INDEX idx_tipos_dizimo_nome ON tipos_dizimo (nome)"]
+    },
+    {
+      "name": "despesas_compromisso",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "contexto_tipo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["pessoal", "empresa"]
+        },
+        {
+          "name": "empresa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "empresas"
+        },
+        {
+          "name": "pessoa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "pessoas"
+        },
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "fornecedor",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "categoria",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "categorias"
+        },
+        {
+          "name": "tag",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "tags"
+        },
+        {
+          "name": "tipo_despesa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "tipos_despesa"
+        },
+        {
+          "name": "metodo_pagamento",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "metodos_pagamento"
+        },
+        {
+          "name": "conta_padrao",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "contas"
+        },
+        {
+          "name": "secao",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["contas_mensais_pix_boleto", "assinaturas_anuais", "cartoes_credito"]
+        },
+        {
+          "name": "regra_repeticao",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["mensal", "anual", "parcelado", "avulso"]
+        },
+        {
+          "name": "total_parcelas",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "parcela_inicial",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dia_vencimento",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "regra_vencimento_texto",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "data_inicio",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "valor_estimado",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "link_pagamento",
+          "type": "url",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dizimo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "tipo_dizimo",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "tipos_dizimo"
+        },
+        {
+          "name": "ativo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_desp_comp_contexto ON despesas_compromisso (contexto_tipo, empresa)",
+        "CREATE INDEX idx_desp_comp_secao ON despesas_compromisso (secao)",
+        "CREATE INDEX idx_desp_comp_ativo ON despesas_compromisso (ativo)"
+      ]
+    },
+    {
+      "name": "despesas_ocorrencias",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "compromisso",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "despesas_compromisso"
+        },
+        {
+          "name": "contexto_tipo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["pessoal", "empresa"]
+        },
+        {
+          "name": "empresa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "empresas"
+        },
+        {
+          "name": "secao",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["contas_mensais_pix_boleto", "assinaturas_anuais", "cartoes_credito"]
+        },
+        {
+          "name": "conta",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "contas"
+        },
+        {
+          "name": "competencia",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "numero_parcela",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "total_parcelas",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "data_vencimento",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "valor_previsto",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["prevista", "paga", "cancelada"]
+        },
+        {
+          "name": "data_pagamento",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "valor_pago",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "lancamento",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "lancamentos"
+        },
+        {
+          "name": "dizimo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "tipo_dizimo",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "tipos_dizimo"
+        },
+        {
+          "name": "link_pagamento",
+          "type": "url",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_desp_ocorr_comp ON despesas_ocorrencias (compromisso)",
+        "CREATE INDEX idx_desp_ocorr_mes ON despesas_ocorrencias (competencia)",
+        "CREATE INDEX idx_desp_ocorr_venc ON despesas_ocorrencias (data_vencimento)",
+        "CREATE INDEX idx_desp_ocorr_status ON despesas_ocorrencias (status)",
+        "CREATE INDEX idx_desp_ocorr_ctx ON despesas_ocorrencias (contexto_tipo, empresa)"
       ]
     }
   ]
