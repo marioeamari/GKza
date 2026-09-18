@@ -65,19 +65,52 @@ export function EmpresaDialog({
     const next: Record<string, string> = {}
     if (!form.razao_social.trim()) next.razao_social = 'Informe a razão social.'
     if (!form.nome_fantasia.trim()) next.nome_fantasia = 'Informe o nome fantasia.'
-    if (!isValidCNPJ(form.cnpj)) next.cnpj = 'CNPJ inválido — verifique os dígitos'
+    if (!form.cnpj.trim()) {
+      next.cnpj = 'Informe o CNPJ.'
+    } else if (!isValidCNPJ(form.cnpj)) {
+      next.cnpj = 'CNPJ inválido'
+    }
     setErrors(next)
-    if (Object.keys(next).length) return
+    if (Object.keys(next).length) {
+      toast({
+        variant: 'destructive',
+        title: 'Verifique os dados',
+        description:
+          next.cnpj ||
+          next.razao_social ||
+          next.nome_fantasia ||
+          'Preencha todos os campos obrigatórios corretamente.',
+      })
+      return
+    }
     setSaving(true)
     try {
       await cadastrosService.saveEmpresa(form, record?.id)
-      toast({ title: 'Empresa salva' })
+      toast({ title: 'Empresa salva com sucesso' })
       onOpenChange(false)
       onSaved()
     } catch (error) {
+      const rawMsg = error instanceof Error ? error.message : ''
+      const isDuplicate =
+        /unique/i.test(rawMsg) ||
+        /already in use/i.test(rawMsg) ||
+        /idx_empresas_cnpj/i.test(rawMsg) ||
+        typeof (error as { response?: { data?: Record<string, unknown> } })?.response?.data
+          ?.cnpj !== 'undefined'
+
       const fields = apiFieldErrors(error)
-      if (fields.cnpj) fields.cnpj = 'Já existe um cadastro com este CNPJ'
-      setErrors({ ...fields, form: apiMessage(error) })
+      if (fields.cnpj || isDuplicate) {
+        fields.cnpj = 'Este CNPJ já está cadastrado'
+      }
+
+      const formError = isDuplicate ? 'Este CNPJ já está cadastrado' : apiMessage(error)
+
+      setErrors({ ...fields, form: formError })
+      toast({
+        variant: 'destructive',
+        title: 'Não foi possível salvar',
+        description: formError,
+      })
     } finally {
       setSaving(false)
     }

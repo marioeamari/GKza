@@ -56,7 +56,8 @@ const desktopItems = [
   { to: '/contas', label: 'Contas & Cartões', icon: WalletCards },
   { to: '/categorias', label: 'Classificações', icon: Tags },
   { to: '/marketplaces', label: 'Marketplaces', icon: Store },
-  { to: '/cadastros', label: 'Cadastros', icon: Building2 },
+  { to: '/empresas', label: 'Empresas', icon: Building2 },
+  { to: '/pessoas', label: 'Pessoas', icon: CircleUserRound },
   { to: '/configuracoes', label: 'Configurações', icon: Settings },
 ]
 
@@ -208,7 +209,9 @@ export function AppLayout() {
               {[
                 ['/contas', 'Contas financeiras & Cartões', WalletCards],
                 ['/categorias', 'Hub de Classificações', Tags],
-                ['/cadastros', 'Empresas & Pessoas', Building2],
+                ['/empresas', 'Empresas (CNPJ)', Building2],
+                ['/pessoas', 'Pessoas (CPF)', CircleUserRound],
+                ['/cadastros', 'Central de Cadastros', Building2],
                 ['/configuracoes', 'Configurações', SlidersHorizontal],
               ].map(([to, label, Icon]) => (
                 <Button

@@ -8,9 +8,11 @@ import Configuracoes from '@/pages/Configuracoes'
 import Contas from '@/pages/Contas'
 import Dashboard from '@/pages/Dashboard'
 import Despesas from '@/pages/Despesas'
+import Empresas from '@/pages/Empresas'
 import Lancamentos from '@/pages/Lancamentos'
 import Marketplaces from '@/pages/Marketplaces'
 import NotFound from '@/pages/NotFound'
+import Pessoas from '@/pages/Pessoas'
 import ConfirmEmail from '@/pages/auth/ConfirmEmail'
 import ForgotPassword from '@/pages/auth/ForgotPassword'
 import Login from '@/pages/auth/Login'
@@ -38,6 +40,8 @@ export default function App() {
           <Route path="/categorias" element={<Categorias />} />
           <Route path="/marketplaces" element={<Marketplaces />} />
           <Route path="/cadastros" element={<Cadastros />} />
+          <Route path="/empresas" element={<Empresas />} />
+          <Route path="/pessoas" element={<Pessoas />} />
           <Route path="/configuracoes" element={<Configuracoes />} />
         </Route>
       </Route>

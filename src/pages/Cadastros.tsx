@@ -134,18 +134,20 @@ export default function Cadastros() {
         }
       />
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Tabs value={type} onValueChange={(v) => setParams(v === 'empresas' ? {} : { tipo: v })}>
-          <TabsList className="grid w-full grid-cols-2 sm:w-[300px]">
-            <TabsTrigger value="empresas">
-              <Building2 className="mr-2 h-4 w-4" />
-              Empresas
-            </TabsTrigger>
-            <TabsTrigger value="pessoas">
-              <UserRound className="mr-2 h-4 w-4" />
-              Pessoas
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex flex-wrap items-center gap-2">
+          <Tabs value={type} onValueChange={(v) => setParams(v === 'empresas' ? {} : { tipo: v })}>
+            <TabsList className="grid w-full grid-cols-2 sm:w-[300px]">
+              <TabsTrigger value="empresas">
+                <Building2 className="mr-2 h-4 w-4" />
+                Empresas
+              </TabsTrigger>
+              <TabsTrigger value="pessoas">
+                <UserRound className="mr-2 h-4 w-4" />
+                Pessoas
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
         <div className="relative w-full sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input

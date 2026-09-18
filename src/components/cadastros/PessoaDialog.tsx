@@ -54,19 +54,48 @@ export function PessoaDialog({
     e.preventDefault()
     const next: Record<string, string> = {}
     if (!form.nome.trim()) next.nome = 'Informe o nome completo.'
-    if (!isValidCPF(form.cpf)) next.cpf = 'CPF inválido — verifique os dígitos'
+    if (!form.cpf.trim()) {
+      next.cpf = 'Informe o CPF.'
+    } else if (!isValidCPF(form.cpf)) {
+      next.cpf = 'CPF inválido'
+    }
     setErrors(next)
-    if (Object.keys(next).length) return
+    if (Object.keys(next).length) {
+      toast({
+        variant: 'destructive',
+        title: 'Verifique os dados',
+        description: next.cpf || next.nome || 'Preencha todos os campos obrigatórios corretamente.',
+      })
+      return
+    }
     setSaving(true)
     try {
       await cadastrosService.savePessoa(form, record?.id)
-      toast({ title: 'Pessoa salva' })
+      toast({ title: 'Pessoa salva com sucesso' })
       onOpenChange(false)
       onSaved()
     } catch (error) {
+      const rawMsg = error instanceof Error ? error.message : ''
+      const isDuplicate =
+        /unique/i.test(rawMsg) ||
+        /already in use/i.test(rawMsg) ||
+        /idx_pessoas_cpf/i.test(rawMsg) ||
+        typeof (error as { response?: { data?: Record<string, unknown> } })?.response?.data?.cpf !==
+          'undefined'
+
       const fields = apiFieldErrors(error)
-      if (fields.cpf) fields.cpf = 'Já existe um cadastro com este CPF'
-      setErrors({ ...fields, form: apiMessage(error) })
+      if (fields.cpf || isDuplicate) {
+        fields.cpf = 'Este CPF já está cadastrado'
+      }
+
+      const formError = isDuplicate ? 'Este CPF já está cadastrado' : apiMessage(error)
+
+      setErrors({ ...fields, form: formError })
+      toast({
+        variant: 'destructive',
+        title: 'Não foi possível salvar',
+        description: formError,
+      })
     } finally {
       setSaving(false)
     }
