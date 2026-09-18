@@ -17,13 +17,9 @@ export function ProtectedRoute() {
 }
 
 export function PublicOnlyRoute() {
-  const { user, loading } = useAuth()
-  if (loading)
-    return (
-      <div className="grid min-h-screen place-items-center bg-background">
-        <LoaderCircle className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    )
+  const { user } = useAuth()
+  // As rotas públicas (/login, /cadastro, etc.) devem renderizar o formulário imediatamente.
+  // Nenhum estado de loading de inicialização deve bloquear a tela com spinner infinito.
   if (user) return <Navigate to="/" replace />
   return <Outlet />
 }

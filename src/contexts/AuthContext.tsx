@@ -40,16 +40,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null)
       return
     }
-    const result = await pb.collection<UserRecord>('users').authRefresh()
+    // Timeout de 5s para evitar chamada pendurada indefinidamente se houver instabilidade de rede/servidor
+    const refreshPromise = pb.collection<UserRecord>('users').authRefresh()
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Tempo limite excedido ao validar sessão.')), 5000),
+    )
+    const result = await Promise.race([refreshPromise, timeoutPromise])
     setUser(result.record)
   }, [])
 
   useEffect(() => {
-    const remove = pb.authStore.onChange((_token, record) => setUser(record as UserRecord | null))
+    let mounted = true
+    const remove = pb.authStore.onChange((_token, record) => {
+      if (mounted) {
+        setUser(record as UserRecord | null)
+      }
+    })
+
+    // Timeout de segurança global: garante que o estado de loading de inicialização
+    // nunca exceda 4 segundos, mesmo se a rede congelar ou requisição pendurar
+    const safetyTimeout = setTimeout(() => {
+      if (mounted) {
+        setLoading(false)
+      }
+    }, 4000)
+
     refreshUser()
-      .catch(() => pb.authStore.clear())
-      .finally(() => setLoading(false))
-    return remove
+      .catch(() => {
+        pb.authStore.clear()
+        if (mounted) {
+          setUser(null)
+        }
+      })
+      .finally(() => {
+        clearTimeout(safetyTimeout)
+        if (mounted) {
+          setLoading(false)
+        }
+      })
+
+    return () => {
+      mounted = false
+      clearTimeout(safetyTimeout)
+      remove()
+    }
   }, [refreshUser])
 
   const value = useMemo<AuthContextValue>(

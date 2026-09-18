@@ -24,12 +24,32 @@ export default function Login() {
     setError('')
     setLoading(true)
     try {
-      await login(email, password)
+      // Cria uma promessa com timeout de 10s para a tentativa de login
+      const loginPromise = login(email, password)
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                'O servidor demorou muito para responder. Verifique sua conexão e tente novamente.',
+              ),
+            ),
+          10000,
+        ),
+      )
+      await Promise.race([loginPromise, timeoutPromise])
       const destination =
         (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/'
       navigate(destination, { replace: true })
     } catch (nextError) {
-      setError(apiMessage(nextError, nextError instanceof Error ? nextError.message : undefined))
+      setError(
+        apiMessage(
+          nextError,
+          nextError instanceof Error
+            ? nextError.message
+            : 'Não foi possível entrar. Verifique suas credenciais e tente novamente.',
+        ),
+      )
     } finally {
       setLoading(false)
     }
