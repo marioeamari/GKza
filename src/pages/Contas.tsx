@@ -37,6 +37,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { useAppContext } from '@/contexts/AppContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
 import { apiFieldErrors, apiMessage } from '@/lib/api-error'
@@ -83,6 +84,7 @@ const initialMovement: MovementForm = {
 export default function Contas() {
   const { user } = useAuth()
   const { toast } = useToast()
+  const { activeContext } = useAppContext()
   const [contas, setContas] = useState<Conta[]>([])
   const [categorias, setCategorias] = useState<Categoria[]>([])
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
@@ -248,9 +250,13 @@ export default function Contas() {
   }
   const AccountCard = ({ account, index }: { account: Conta; index: number }) => {
     const Icon = icons[account.tipo]
+    const isInActiveGroup = !activeContext.isAll && activeContext.contaIds.includes(account.id)
+
     return (
       <article
-        className="card-hover rise-in flex flex-col justify-between overflow-hidden rounded-2xl border border-border bg-white shadow-soft"
+        className={`card-hover rise-in flex flex-col justify-between overflow-hidden rounded-2xl border bg-white shadow-soft transition ${
+          isInActiveGroup ? 'border-primary ring-2 ring-primary/20' : 'border-border'
+        }`}
         style={{ animationDelay: `${index * 50}ms` }}
       >
         <div>
@@ -268,6 +274,11 @@ export default function Contas() {
               </span>
               <div className="flex items-center gap-1">
                 {!account.ativa && <Badge variant="secondary">Arquivada</Badge>}
+                {isInActiveGroup && (
+                  <Badge className="bg-primary/10 text-primary border-primary/20 text-[10px]">
+                    No contexto ativo
+                  </Badge>
+                )}
                 <Button
                   variant="outline"
                   size="sm"

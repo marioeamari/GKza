@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { useAppContext } from '@/contexts/AppContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
 import { apiMessage } from '@/lib/api-error'
@@ -40,6 +41,7 @@ const dateKey = (value: string) => value.slice(0, 10)
 export default function Lancamentos() {
   const { user } = useAuth()
   const { toast } = useToast()
+  const { activeContext } = useAppContext()
   const [params, setParams] = useSearchParams()
   const [records, setRecords] = useState<Lancamento[]>([])
   const [contas, setContas] = useState<Conta[]>([])
@@ -70,8 +72,15 @@ export default function Lancamentos() {
     if (month) filters.push(`data >= '${month}-01 00:00:00' && data < '${month}-32 00:00:00'`)
     if (conta) filters.push(`conta = '${conta}'`)
     if (categoria) filters.push(`categoria = '${categoria}'`)
+
+    // Filtro pelo contexto ativo (se não for "Todos")
+    if (!activeContext.isAll && activeContext.contaIds.length > 0) {
+      const contaClauses = activeContext.contaIds.map((id) => `conta = '${id}'`).join(' || ')
+      filters.push(`(${contaClauses})`)
+    }
+
     return filters.join(' && ')
-  }, [params])
+  }, [params, activeContext])
 
   const load = useCallback(
     async (targetPage = 1, append = false) => {
@@ -241,7 +250,7 @@ export default function Lancamentos() {
     <>
       <PageHeader
         title="Lançamentos"
-        description="Todas as entradas e saídas do seu negócio."
+        description={`Todas as entradas e saídas no contexto ${activeContext.label}.`}
         action={
           <PermissionButton allowed={can(user?.role, 'writeFinance')} onClick={openNew}>
             <Plus className="mr-2 h-4 w-4" />

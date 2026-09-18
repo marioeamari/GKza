@@ -156,24 +156,70 @@ export default function Despesas() {
       setEmpresas(emps)
       setPessoas(pess)
 
-      // Carregar compromissos e ocorrências para o contexto ativo
-      const contextFilter =
-        activeContext.type === 'empresa' && activeContext.empresaId
-          ? `contexto_tipo = 'empresa' && empresa = '${activeContext.empresaId}'`
-          : `contexto_tipo = 'pessoal'`
-
-      const [comps, ocs, ocsCartaoAll] = await Promise.all([
-        despesasService.listCompromissos({
-          filter: contextFilter,
+      // Carregar todos os compromissos e ocorrências da competência, depois filtrar pelo grupo ativo
+      const [allComps, allOcs, allOcsCartao] = await Promise.all([
+        despesasService.listCompromissos(),
+        despesasService.listOcorrencias({
+          filter: `competencia = '${currentCompetencia}'`,
         }),
         despesasService.listOcorrencias({
-          filter: `${contextFilter} && competencia = '${currentCompetencia}'`,
-        }),
-        despesasService.listOcorrencias({
-          filter: `${contextFilter} && secao = 'cartoes_credito'`,
+          filter: `secao = 'cartoes_credito'`,
           sort: '-data_vencimento',
         }),
       ])
+
+      // Função de correspondência ao grupo de contexto ativo
+      const isCompromissoInContext = (comp: DespesaCompromisso): boolean => {
+        if (activeContext.isAll) return true
+        const pId = comp.pessoa
+        const eId = comp.empresa
+        const cId = comp.conta_padrao
+
+        if (pId && activeContext.pessoaIds.includes(pId)) return true
+        if (eId && activeContext.empresaIds.includes(eId)) return true
+        if (cId && activeContext.contaIds.includes(cId)) return true
+
+        if (activeContext.hasEmpresas && !activeContext.hasPessoas) {
+          return !!eId && activeContext.empresaIds.includes(eId)
+        }
+
+        if (comp.contexto_tipo === 'pessoal') {
+          if (pId) return activeContext.pessoaIds.includes(pId)
+          if (cId && activeContext.contaIds.includes(cId)) return true
+          if (activeContext.hasPessoas && !cId) return true
+        }
+
+        return false
+      }
+
+      const isOcorrenciaInContext = (oc: DespesaOcorrencia): boolean => {
+        if (activeContext.isAll) return true
+        const comp = oc.expand?.compromisso
+        const pId = comp?.pessoa
+        const eId = comp?.empresa
+        const cId = oc.conta || comp?.conta_padrao
+
+        if (pId && activeContext.pessoaIds.includes(pId)) return true
+        if (eId && activeContext.empresaIds.includes(eId)) return true
+        if (cId && activeContext.contaIds.includes(cId)) return true
+
+        if (activeContext.hasEmpresas && !activeContext.hasPessoas) {
+          return !!eId && activeContext.empresaIds.includes(eId)
+        }
+
+        const ctxTipo = oc.contexto_tipo || comp?.contexto_tipo
+        if (ctxTipo === 'pessoal') {
+          if (pId) return activeContext.pessoaIds.includes(pId)
+          if (cId && activeContext.contaIds.includes(cId)) return true
+          if (activeContext.hasPessoas && !cId) return true
+        }
+
+        return false
+      }
+
+      const comps = allComps.filter(isCompromissoInContext)
+      const ocs = allOcs.filter(isOcorrenciaInContext)
+      const ocsCartaoAll = allOcsCartao.filter(isOcorrenciaInContext)
 
       setCompromissos(comps)
       setOcorrencias(ocs)

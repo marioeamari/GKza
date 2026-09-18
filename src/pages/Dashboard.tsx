@@ -22,6 +22,7 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { Trend } from '@/components/Trend'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useAppContext } from '@/contexts/AppContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCountUp } from '@/hooks/use-count-up'
 import { useFinanceData } from '@/hooks/use-finance-data'
@@ -44,6 +45,7 @@ const delta = (current: number, previous: number) =>
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const { activeContext } = useAppContext()
   const { contas, categorias, lancamentos, loading, error, refresh } = useFinanceData()
   const [params, setParams] = useSearchParams()
   const periodKey = (
@@ -82,13 +84,62 @@ export default function Dashboard() {
   useRealtime('vendas', loadMarketplace)
   useRealtime('repasses', loadMarketplace)
 
-  const paid = lancamentos.filter((item) => item.status === 'pago')
+  // Filtragem dos dados financeiros de acordo com o contexto ativo
+  const filteredContas = useMemo(() => {
+    if (activeContext.isAll) return contas
+    if (activeContext.contaIds.length > 0) {
+      return contas.filter((c) => activeContext.contaIds.includes(c.id))
+    }
+    // Se o contexto não tem contas específicas (ex.: grupo de Filhas ou só empresas),
+    // mantém as contas que pertencem aos membros ou retorna vazio se não houver
+    return contas.filter((c) => {
+      if (activeContext.empresaIds.length > 0) {
+        return false // PJ isolado sem contas adicionadas
+      }
+      return true
+    })
+  }, [contas, activeContext])
+
+  const filteredLancamentos = useMemo(() => {
+    if (activeContext.isAll) return lancamentos
+    return lancamentos.filter((item) => {
+      // Se lançamento aponta para uma conta do grupo
+      if (item.conta && activeContext.contaIds.includes(item.conta)) return true
+      // Se não há filtro estrito de contas no grupo, não exclui arbitrariamente
+      if (activeContext.contaIds.length === 0 && activeContext.hasPessoas) return true
+      return false
+    })
+  }, [lancamentos, activeContext])
+
+  const filteredVendas = useMemo(() => {
+    if (activeContext.isAll) return vendas
+    // Vendas pertencem a marketplace_contas, que são PJ / empresas
+    if (activeContext.hasEmpresas) {
+      return vendas
+    }
+    // Contexto exclusivamente pessoal ("Casa", "Filhas") não mistura vendas de marketplace PJ
+    return []
+  }, [vendas, activeContext])
+
+  const filteredRepasses = useMemo(() => {
+    if (activeContext.isAll) return repasses
+    if (activeContext.hasEmpresas) {
+      return repasses
+    }
+    return []
+  }, [repasses, activeContext])
+
+  const paid = filteredLancamentos.filter((item) => item.status === 'pago')
   const consolidated =
-    contas.filter((item) => item.ativa).reduce((sum, account) => sum + account.saldo_inicial, 0) +
+    filteredContas
+      .filter((item) => item.ativa)
+      .reduce((sum, account) => sum + account.saldo_inicial, 0) +
     paid.reduce((sum, item) => sum + (item.tipo === 'receita' ? item.valor : -item.valor), 0)
   const animatedBalance = useCountUp(consolidated)
-  const inPeriod = lancamentos.filter((item) => isWithin(item.data, period.start, period.end))
-  const previous = lancamentos.filter((item) =>
+  const inPeriod = filteredLancamentos.filter((item) =>
+    isWithin(item.data, period.start, period.end),
+  )
+  const previous = filteredLancamentos.filter((item) =>
     isWithin(item.data, period.previousStart, period.previousEnd),
   )
   const revenues = inPeriod
@@ -104,16 +155,18 @@ export default function Dashboard() {
     .filter((item) => item.tipo === 'despesa' && item.status === 'pago')
     .reduce((sum, item) => sum + item.valor, 0)
   const beforePeriod =
-    contas.filter((item) => item.ativa).reduce((sum, account) => sum + account.saldo_inicial, 0) +
+    filteredContas
+      .filter((item) => item.ativa)
+      .reduce((sum, account) => sum + account.saldo_inicial, 0) +
     paid
       .filter((item) => parseDate(item.data) < period.start)
       .reduce((sum, item) => sum + (item.tipo === 'receita' ? item.valor : -item.valor), 0)
-  const periodSales = vendas.filter((item) => isWithin(item.data, period.start, period.end))
-  const nextPayouts = repasses
+  const periodSales = filteredVendas.filter((item) => isWithin(item.data, period.start, period.end))
+  const nextPayouts = filteredRepasses
     .filter((item) => item.status === 'previsto')
     .sort((a, b) => a.data_prevista.localeCompare(b.data_prevista))
     .slice(0, 4)
-  const latest = lancamentos.slice(0, 5)
+  const latest = filteredLancamentos.slice(0, 5)
 
   if (loading || marketLoading) return <LoadingState label="Montando seu panorama financeiro..." />
   if (error)
@@ -165,7 +218,8 @@ export default function Dashboard() {
                 {formatCurrency(animatedBalance)}
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
-                Saldo atual de {contas.filter((item) => item.ativa).length} contas ativas
+                Saldo atual de {filteredContas.filter((item) => item.ativa).length} contas{' '}
+                {!activeContext.isAll && `no contexto "${activeContext.label}"`}
               </p>
             </div>
           </CardContent>
@@ -229,7 +283,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <CashFlowChart
-              data={lancamentos}
+              data={filteredLancamentos}
               start={period.start}
               end={period.end}
               openingBalance={beforePeriod}

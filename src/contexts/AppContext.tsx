@@ -1,108 +1,269 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { contextoService } from '@/services/contexto'
 import { cadastrosService } from '@/services/cadastros'
-import type { Empresa } from '@/types/domain'
+import type { Conta, ContextoGrupo, ContextoGrupoComMembros, Empresa, Pessoa } from '@/types/domain'
 
-export interface ExpenseContextValue {
-  type: 'pessoal' | 'empresa'
-  empresaId?: string
-  empresa?: Empresa
+export interface ActiveContextValue {
+  /** 'all' se todos visíveis, ou 'group' quando filtrado por grupo de contexto */
+  mode: 'all' | 'group'
+  groupId?: string
+  group?: ContextoGrupoComMembros
   label: string
   sublabel: string
+  color: string
+  // Identificadores de membros que pertencem ao grupo ativo (vazio se mode === 'all')
+  pessoaIds: string[]
+  empresaIds: string[]
+  contaIds: string[]
+  // Flags para compatibilidade com código existente
+  isAll: boolean
+  /** Se o grupo tiver vínculo com pessoa ou for modo pessoal legado */
+  hasPessoas: boolean
+  /** Se o grupo tiver vínculo com empresa */
+  hasEmpresas: boolean
+
+  // Campos legados para compatibilidade reversa com componentes de despesas antigos
+  type: 'pessoal' | 'empresa' | 'all'
+  empresaId?: string
 }
 
 interface AppContextType {
-  activeContext: ExpenseContextValue
-  setContextPessoal: () => void
-  setContextEmpresa: (empresaId: string) => void
+  activeContext: ActiveContextValue
+  setContextAll: () => void
+  setContextGroup: (groupId: string) => void
+  grupos: ContextoGrupoComMembros[]
+  loadingGrupos: boolean
+  refreshGrupos: () => Promise<void>
+  // Cadastros auxiliares legados mantidos para quem usa empresas
   empresas: Empresa[]
   refreshEmpresas: () => Promise<void>
+  // Helpers de verificação rápida
+  matchesContext: (item: {
+    pessoa?: string | null
+    empresa?: string | null
+    conta?: string | null
+    contexto_tipo?: 'pessoal' | 'empresa' | null
+  }) => boolean
 }
 
-const STORAGE_KEY = 'gestao_financeira_contexto'
+const STORAGE_KEY = 'gestao_financeira_contexto_grupo_v2'
+const LEGACY_STORAGE_KEY = 'gestao_financeira_contexto'
 
 const AppContext = createContext<AppContextType | null>(null)
 
 export function AppContextProvider({ children }: { children: ReactNode }) {
+  const [grupos, setGrupos] = useState<ContextoGrupoComMembros[]>([])
   const [empresas, setEmpresas] = useState<Empresa[]>([])
-  const [activeType, setActiveType] = useState<'pessoal' | 'empresa'>('pessoal')
-  const [activeEmpresaId, setActiveEmpresaId] = useState<string>('')
+  const [loadingGrupos, setLoadingGrupos] = useState(true)
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('all')
 
-  const loadEmpresas = async () => {
+  const loadGrupos = useCallback(async () => {
+    try {
+      const list = await contextoService.listGruposComMembros()
+      setGrupos(list)
+    } catch (err) {
+      console.warn('Erro ao carregar grupos de contexto:', err)
+    } finally {
+      setLoadingGrupos(false)
+    }
+  }, [])
+
+  const loadEmpresas = useCallback(async () => {
     try {
       const list = await cadastrosService.listEmpresas()
       setEmpresas(list)
     } catch (err) {
-      console.warn('Erro ao carregar empresas para o seletor de contexto:', err)
+      console.warn('Erro ao carregar empresas:', err)
     }
-  }
-
-  useEffect(() => {
-    loadEmpresas()
   }, [])
 
+  useEffect(() => {
+    loadGrupos()
+    loadEmpresas()
+  }, [loadGrupos, loadEmpresas])
+
+  // Recupera escolha persistida (localStorage)
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
       if (saved) {
         const parsed = JSON.parse(saved)
-        if (parsed.type === 'empresa' && parsed.empresaId) {
-          setActiveType('empresa')
-          setActiveEmpresaId(parsed.empresaId)
+        if (parsed.groupId) {
+          setSelectedGroupId(parsed.groupId)
           return
+        }
+      }
+
+      // Migração de estado legado do seletor anterior ('gestao_financeira_contexto')
+      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
+      if (legacy) {
+        const parsed = JSON.parse(legacy)
+        if (parsed.type === 'empresa' && parsed.empresaId) {
+          // Procura grupo com essa empresa
+          const matchedGroup = grupos.find((g) => g.empresas.some((e) => e.id === parsed.empresaId))
+          if (matchedGroup) {
+            setSelectedGroupId(matchedGroup.id)
+            return
+          }
         }
       }
     } catch {
       /* intentionally ignored */
     }
-    setActiveType('pessoal')
-    setActiveEmpresaId('')
-  }, [])
+    // Default: 'all' (Todos)
+    setSelectedGroupId('all')
+  }, [grupos])
 
-  const setContextPessoal = () => {
-    setActiveType('pessoal')
-    setActiveEmpresaId('')
+  const setContextAll = () => {
+    setSelectedGroupId('all')
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ type: 'pessoal' }))
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ groupId: 'all' }))
     } catch {
       /* intentionally ignored */
     }
   }
 
-  const setContextEmpresa = (id: string) => {
-    setActiveType('empresa')
-    setActiveEmpresaId(id)
+  const setContextGroup = (groupId: string) => {
+    setSelectedGroupId(groupId)
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ type: 'empresa', empresaId: id }))
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ groupId }))
     } catch {
       /* intentionally ignored */
     }
   }
 
-  const currentEmpresa = empresas.find((e) => e.id === activeEmpresaId)
+  // Resolver grupo ativo
+  const currentGroup = grupos.find((g) => g.id === selectedGroupId)
+  const isGroupActive = selectedGroupId !== 'all' && !!currentGroup
 
-  const activeContext: ExpenseContextValue =
-    activeType === 'empresa' && currentEmpresa
-      ? {
-          type: 'empresa',
-          empresaId: currentEmpresa.id,
-          empresa: currentEmpresa,
-          label: currentEmpresa.nome_fantasia || currentEmpresa.razao_social,
-          sublabel: currentEmpresa.cnpj ? `CNPJ ${currentEmpresa.cnpj}` : 'Empresa PJ',
+  const pessoaIds = currentGroup?.pessoas.map((p) => p.id) || []
+  const empresaIds = currentGroup?.empresas.map((e) => e.id) || []
+  const contaIds = currentGroup?.contas.map((c) => c.id) || []
+
+  // Constrói objeto de contexto ativo
+  let activeContext: ActiveContextValue
+  if (isGroupActive && currentGroup) {
+    const totalMembros =
+      currentGroup.pessoas.length + currentGroup.empresas.length + currentGroup.contas.length
+    const resumoPartes: string[] = []
+    if (currentGroup.pessoas.length > 0)
+      resumoPartes.push(`${currentGroup.pessoas.length} pessoa(s)`)
+    if (currentGroup.empresas.length > 0)
+      resumoPartes.push(`${currentGroup.empresas.length} empresa(s)`)
+    if (currentGroup.contas.length > 0) resumoPartes.push(`${currentGroup.contas.length} conta(s)`)
+
+    const sublabel =
+      resumoPartes.length > 0
+        ? resumoPartes.join(' · ')
+        : currentGroup.observacoes || 'Grupo de visualização'
+
+    activeContext = {
+      mode: 'group',
+      groupId: currentGroup.id,
+      group: currentGroup,
+      label: currentGroup.nome,
+      sublabel,
+      color: currentGroup.cor || '#DF5830',
+      pessoaIds,
+      empresaIds,
+      contaIds,
+      isAll: false,
+      hasPessoas: pessoaIds.length > 0,
+      hasEmpresas: empresaIds.length > 0,
+      type: empresaIds.length > 0 && pessoaIds.length === 0 ? 'empresa' : 'pessoal',
+      empresaId: empresaIds[0],
+    }
+  } else {
+    activeContext = {
+      mode: 'all',
+      label: 'Todos os cadastros',
+      sublabel: 'Visão global consolidada (sem filtros)',
+      color: '#DF5830',
+      pessoaIds: [],
+      empresaIds: [],
+      contaIds: [],
+      isAll: true,
+      hasPessoas: true,
+      hasEmpresas: true,
+      type: 'all',
+    }
+  }
+
+  /**
+   * Helper unificado de correspondência de contexto:
+   * Retorna true se o item deve ser exibido sob o contexto ativo.
+   * Quando "Todos" está ativo, retorna true para tudo.
+   * Quando um grupo está ativo:
+   *   - Se o item tiver pessoaId e essa pessoa estiver no grupo -> true
+   *   - Se o item tiver empresaId e essa empresa estiver no grupo -> true
+   *   - Se o item tiver contaId e essa conta estiver no grupo -> true
+   *   - Se o item tiver contexto_tipo === 'pessoal' e o grupo possuir pessoas -> true
+   *   - Se o item tiver contexto_tipo === 'empresa' e tiver empresa associada ao grupo -> true
+   */
+  const matchesContext = useCallback(
+    (item: {
+      pessoa?: string | null
+      empresa?: string | null
+      conta?: string | null
+      contexto_tipo?: 'pessoal' | 'empresa' | null
+    }): boolean => {
+      if (activeContext.isAll) return true
+
+      // Se o grupo não tiver nenhum membro cadastrado, não filtra fora
+      if (
+        activeContext.pessoaIds.length === 0 &&
+        activeContext.empresaIds.length === 0 &&
+        activeContext.contaIds.length === 0
+      ) {
+        return true
+      }
+
+      let matched = false
+
+      if (item.pessoa && activeContext.pessoaIds.includes(item.pessoa)) {
+        return true
+      }
+      if (item.empresa && activeContext.empresaIds.includes(item.empresa)) {
+        return true
+      }
+      if (item.conta && activeContext.contaIds.includes(item.conta)) {
+        return true
+      }
+
+      // Se o item não tem vínculo explícito por ID direto, verifica pelo contexto_tipo:
+      // Se for contexto pessoal e o grupo contém membros pessoa ou contas pessoais
+      if (item.contexto_tipo === 'pessoal') {
+        if (activeContext.pessoaIds.length > 0) {
+          // Se o item tem pessoa especificada e ela NÃO está no grupo, não dá match
+          if (item.pessoa && !activeContext.pessoaIds.includes(item.pessoa)) {
+            return false
+          }
+          return true
         }
-      : {
-          type: 'pessoal',
-          label: 'Pessoal (CPF)',
-          sublabel: 'Despesas pessoais & domésticas',
-        }
+      }
+
+      // Se for despesa de empresa e o grupo contém empresas
+      if (item.contexto_tipo === 'empresa' && item.empresa) {
+        return activeContext.empresaIds.includes(item.empresa)
+      }
+
+      return matched
+    },
+    [activeContext],
+  )
 
   return (
     <AppContext.Provider
       value={{
         activeContext,
-        setContextPessoal,
-        setContextEmpresa,
+        setContextAll,
+        setContextGroup,
+        grupos,
+        loadingGrupos,
+        refreshGrupos: loadGrupos,
         empresas,
         refreshEmpresas: loadEmpresas,
+        matchesContext,
       }}
     >
       {children}

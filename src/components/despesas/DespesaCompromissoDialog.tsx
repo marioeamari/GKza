@@ -223,10 +223,14 @@ export function DespesaCompromissoDialog({
 
     setSubmitting(true)
     try {
+      // Determina contexto_tipo inteligente a partir da seleção ou grupo ativo
+      const isEmpresaContext = activeContext.hasEmpresas && !activeContext.hasPessoas ? true : false
+
+      const defaultEmpresaId = isEmpresaContext ? activeContext.empresaIds[0] : null
+
       const payload: Partial<DespesaCompromisso> = {
-        contexto_tipo: activeContext.type,
-        empresa:
-          activeContext.type === 'empresa' ? activeContext.empresaId : (null as unknown as string),
+        contexto_tipo: isEmpresaContext ? 'empresa' : 'pessoal',
+        empresa: (defaultEmpresaId || null) as unknown as string,
         descricao: form.descricao.trim(),
         fornecedor: form.fornecedor.trim() || (null as unknown as string),
         secao: form.secao,

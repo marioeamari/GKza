@@ -224,6 +224,36 @@ export interface Repasse extends RecordModel {
   }
 }
 
+export type ContextoMembroTipo = 'pessoa' | 'empresa' | 'conta'
+
+export interface ContextoGrupo extends RecordModel {
+  nome: string
+  cor?: string
+  observacoes?: string
+  ordem?: number
+}
+
+export interface ContextoGrupoMembro extends RecordModel {
+  grupo: string
+  tipo: ContextoMembroTipo
+  pessoa?: string
+  empresa?: string
+  conta?: string
+  expand?: {
+    grupo?: ContextoGrupo
+    pessoa?: Pessoa
+    empresa?: Empresa
+    conta?: Conta
+  }
+}
+
+export interface ContextoGrupoComMembros extends ContextoGrupo {
+  membros: ContextoGrupoMembro[]
+  pessoas: Pessoa[]
+  empresas: Empresa[]
+  contas: Conta[]
+}
+
 export interface PeriodRange {
   key: 'current' | 'previous' | '90days'
   label: string

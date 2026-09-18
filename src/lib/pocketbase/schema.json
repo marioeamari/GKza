@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-18T21:26:22.045Z",
+  "generatedAt": "2026-09-18T21:38:36.465Z",
   "collections": [
     {
       "name": "users",
@@ -1229,6 +1229,130 @@
         "CREATE INDEX idx_desp_ocorr_venc ON despesas_ocorrencias (data_vencimento)",
         "CREATE INDEX idx_desp_ocorr_status ON despesas_ocorrencias (status)",
         "CREATE INDEX idx_desp_ocorr_ctx ON despesas_ocorrencias (contexto_tipo, empresa)"
+      ]
+    },
+    {
+      "name": "contexto_grupos",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'",
+        "update": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "cor",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ordem",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_contexto_grupos_nome ON contexto_grupos (nome)",
+        "CREATE INDEX idx_contexto_grupos_ordem ON contexto_grupos (ordem)"
+      ]
+    },
+    {
+      "name": "contexto_grupo_membros",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'",
+        "update": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "grupo",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "contexto_grupos"
+        },
+        {
+          "name": "tipo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["pessoa", "empresa", "conta"]
+        },
+        {
+          "name": "pessoa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "pessoas"
+        },
+        {
+          "name": "empresa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "empresas"
+        },
+        {
+          "name": "conta",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "contas"
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_ctx_membros_grupo ON contexto_grupo_membros (grupo)",
+        "CREATE INDEX idx_ctx_membros_tipo ON contexto_grupo_membros (tipo)",
+        "CREATE INDEX idx_ctx_membros_pessoa ON contexto_grupo_membros (pessoa)",
+        "CREATE INDEX idx_ctx_membros_empresa ON contexto_grupo_membros (empresa)",
+        "CREATE INDEX idx_ctx_membros_conta ON contexto_grupo_membros (conta)"
       ]
     }
   ]

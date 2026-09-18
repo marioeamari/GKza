@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   CreditCard,
+  FolderTree,
   HeartHandshake,
   Layers,
   LoaderCircle,
@@ -12,6 +13,9 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
+import { ContextoVisualizacaoTab } from '@/components/categorias/ContextoVisualizacaoTab'
+import { useAppContext } from '@/contexts/AppContext'
+import { cadastrosService } from '@/services/cadastros'
 
 import { LoadingState } from '@/components/LoadingState'
 import { PageHeader } from '@/components/PageHeader'
@@ -58,7 +62,9 @@ import type {
   Categoria,
   Conta,
   Lancamento,
+  Empresa,
   MetodoPagamento,
+  Pessoa,
   TagItem,
   TipoDespesa,
   TipoDizimo,
@@ -90,6 +96,9 @@ export default function Categorias() {
   const [metodosPagamento, setMetodosPagamento] = useState<MetodoPagamento[]>([])
   const [tiposDizimo, setTiposDizimo] = useState<TipoDizimo[]>([])
   const [contas, setContas] = useState<Conta[]>([])
+  const [pessoas, setPessoas] = useState<Pessoa[]>([])
+  const [empresas, setEmpresas] = useState<Empresa[]>([])
+  const { grupos, refreshGrupos } = useAppContext()
 
   // Modal Categorias
   const [catDialog, setCatDialog] = useState(false)
@@ -154,7 +163,7 @@ export default function Categorias() {
 
   const loadAll = async () => {
     try {
-      const [cats, lcs, tgs, tps, mts, dzs, cts] = await Promise.all([
+      const [cats, lcs, tgs, tps, mts, dzs, cts, pess, emps] = await Promise.all([
         financeService.listCategorias(),
         financeService.listLancamentos(),
         despesasService.listTags(),
@@ -162,6 +171,8 @@ export default function Categorias() {
         despesasService.listMetodosPagamento(),
         despesasService.listTiposDizimo(),
         financeService.listContas(),
+        cadastrosService.listPessoas(),
+        cadastrosService.listEmpresas(),
       ])
       setCategories(cats)
       setLaunches(lcs)
@@ -170,6 +181,8 @@ export default function Categorias() {
       setMetodosPagamento(mts)
       setTiposDizimo(dzs)
       setContas(cts)
+      setPessoas(pess)
+      setEmpresas(emps)
     } catch (e) {
       toast({
         variant: 'destructive',
@@ -457,7 +470,14 @@ export default function Categorias() {
       />
 
       <Tabs value={currentTab} onValueChange={handleTabChange} className="space-y-6">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-xl bg-secondary/60 p-1 sm:grid-cols-5">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-xl bg-secondary/60 p-1 sm:grid-cols-6">
+          <TabsTrigger
+            value="contexto"
+            className="flex items-center gap-1.5 py-2.5 text-xs font-bold sm:text-sm"
+          >
+            <FolderTree className="h-4 w-4 text-primary" />
+            <span>Contexto de Visualização</span>
+          </TabsTrigger>
           <TabsTrigger
             value="categorias"
             className="flex items-center gap-1.5 py-2.5 text-xs font-bold sm:text-sm"
@@ -494,6 +514,20 @@ export default function Categorias() {
             <span>Dízimo & Ofertas</span>
           </TabsTrigger>
         </TabsList>
+
+        {/* ==================== TAB: CONTEXTO DE VISUALIZAÇÃO ==================== */}
+        <TabsContent value="contexto" className="space-y-6">
+          <ContextoVisualizacaoTab
+            userRole={user?.role}
+            grupos={grupos}
+            pessoas={pessoas}
+            empresas={empresas}
+            contas={contas}
+            onRefresh={async () => {
+              await Promise.all([loadAll(), refreshGrupos()])
+            }}
+          />
+        </TabsContent>
 
         {/* ==================== TAB 1: CATEGORIAS ==================== */}
         <TabsContent value="categorias" className="space-y-6">
