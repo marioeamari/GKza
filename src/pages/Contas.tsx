@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Archive,
+  ArrowDownLeft,
+  ArrowUpDown,
+  ArrowUpRight,
   CreditCard,
   Landmark,
   LoaderCircle,
@@ -11,11 +14,9 @@ import {
   Wallet,
 } from 'lucide-react'
 
-import { LancamentoDialog } from '@/components/LancamentoDialog'
-import { LoadingState } from '@/components/LoadingState'
+import { EmptyState, LoadingState } from '@/components/LoadingState'
 import { MoneyInput } from '@/components/MoneyInput'
 import { PageHeader } from '@/components/PageHeader'
-import { PermissionButton } from '@/components/PermissionButton'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -39,10 +40,10 @@ import { Switch } from '@/components/ui/switch'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
 import { apiFieldErrors, apiMessage } from '@/lib/api-error'
-import { formatCurrency } from '@/lib/format'
+import { formatCurrency, toPocketBaseDate } from '@/lib/format'
 import { can } from '@/lib/permissions'
 import { financeService } from '@/services/finance'
-import type { Categoria, Conta, Lancamento } from '@/types/domain'
+import type { Categoria, Conta, Lancamento, TransactionType } from '@/types/domain'
 
 const colors = ['#DF5830', '#1E6F5C', '#2B5BA8', '#4C3A8C', '#B7791F', '#A8556A', '#61737E']
 const labels = {
@@ -63,6 +64,22 @@ const initial = {
   bandeira: '',
 }
 
+interface MovementForm {
+  tipo: TransactionType
+  valor: number
+  descricao: string
+  categoria: string
+  data: string
+}
+
+const initialMovement: MovementForm = {
+  tipo: 'receita',
+  valor: 0,
+  descricao: '',
+  categoria: '',
+  data: new Date().toISOString().slice(0, 10),
+}
+
 export default function Contas() {
   const { user } = useAuth()
   const { toast } = useToast()
@@ -75,7 +92,13 @@ export default function Contas() {
   const [form, setForm] = useState(initial)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
-  const [movement, setMovement] = useState<Conta | null>(null)
+
+  // Estado da movimentação manual de saldo
+  const [movementAccount, setMovementAccount] = useState<Conta | null>(null)
+  const [movementForm, setMovementForm] = useState<MovementForm>(initialMovement)
+  const [movementErrors, setMovementErrors] = useState<Record<string, string>>({})
+  const [savingMovement, setSavingMovement] = useState(false)
+
   const [showArchived, setShowArchived] = useState(false)
   const load = async () => {
     try {
@@ -132,6 +155,7 @@ export default function Contas() {
     setErrors({})
     setDialog(true)
   }
+
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.nome.trim()) return setErrors({ nome: 'Informe o nome da conta.' })
@@ -147,67 +171,146 @@ export default function Contas() {
       setSaving(false)
     }
   }
+
+  const openMovement = (account: Conta) => {
+    setMovementAccount(account)
+    // Categoria padrão de acordo com o tipo inicial 'receita'
+    const defaultCat = categorias.find((c) => c.tipo === 'receita')?.id || ''
+    setMovementForm({
+      tipo: 'receita',
+      valor: 0,
+      descricao: '',
+      categoria: defaultCat,
+      data: new Date().toISOString().slice(0, 10),
+    })
+    setMovementErrors({})
+  }
+
+  const handleMovementTypeChange = (tipo: TransactionType) => {
+    // Ao alternar tipo, ajusta categoria correspondente caso a atual não seja do tipo
+    const validCat = categorias.find((c) => c.tipo === tipo)?.id || ''
+    setMovementForm((prev) => ({
+      ...prev,
+      tipo,
+      categoria: categorias.some((c) => c.id === prev.categoria && c.tipo === tipo)
+        ? prev.categoria
+        : validCat,
+    }))
+  }
+
+  const saveMovement = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!movementAccount) return
+
+    const errs: Record<string, string> = {}
+    if (movementForm.valor <= 0) {
+      errs.valor = 'Informe um valor maior que zero.'
+    }
+    if (!movementForm.descricao.trim()) {
+      errs.descricao = 'Informe uma descrição para a movimentação.'
+    }
+
+    // Se houver categorias do tipo correspondente e nenhuma estiver selecionada, seleciona a primeira
+    let catId = movementForm.categoria
+    const availableCategories = categorias.filter((c) => c.tipo === movementForm.tipo)
+    if (!catId && availableCategories.length > 0) {
+      catId = availableCategories[0].id
+    }
+
+    setMovementErrors(errs)
+    if (Object.keys(errs).length > 0) return
+
+    setSavingMovement(true)
+    try {
+      await financeService.saveLancamento({
+        descricao: movementForm.descricao.trim(),
+        valor: movementForm.valor,
+        tipo: movementForm.tipo,
+        status: 'pago',
+        conta: movementAccount.id,
+        categoria: catId || undefined,
+        data: toPocketBaseDate(movementForm.data),
+        observacoes: `Movimentação registrada em /contas para ${movementAccount.nome}`,
+      })
+
+      toast({
+        title: 'Movimentação realizada',
+        description: `Saldo da conta ${movementAccount.nome} atualizado com sucesso.`,
+      })
+
+      setMovementAccount(null)
+      await load()
+    } catch (error) {
+      setMovementErrors({ ...apiFieldErrors(error), form: apiMessage(error) })
+    } finally {
+      setSavingMovement(false)
+    }
+  }
   const AccountCard = ({ account, index }: { account: Conta; index: number }) => {
     const Icon = icons[account.tipo]
     return (
       <article
-        className="card-hover rise-in overflow-hidden rounded-2xl border border-border bg-white shadow-soft"
+        className="card-hover rise-in flex flex-col justify-between overflow-hidden rounded-2xl border border-border bg-white shadow-soft"
         style={{ animationDelay: `${index * 50}ms` }}
       >
-        <div className="h-1.5" style={{ background: account.cor || '#DF5830' }} />
-        <div className="p-5">
-          <div className="flex items-start justify-between">
-            <span
-              className="grid h-10 w-10 place-items-center rounded-xl"
-              style={{
-                background: `${account.cor || '#DF5830'}18`,
-                color: account.cor || '#DF5830',
-              }}
-            >
-              <Icon className="h-5 w-5" />
-            </span>
-            <div className="flex gap-1">
-              {!account.ativa && <Badge variant="secondary">Arquivada</Badge>}
-              {can(user?.role, 'writeFinance') && (
+        <div>
+          <div className="h-1.5" style={{ background: account.cor || '#DF5830' }} />
+          <div className="p-5 pb-0">
+            <div className="flex items-start justify-between">
+              <span
+                className="grid h-10 w-10 place-items-center rounded-xl"
+                style={{
+                  background: `${account.cor || '#DF5830'}18`,
+                  color: account.cor || '#DF5830',
+                }}
+              >
+                <Icon className="h-5 w-5" />
+              </span>
+              <div className="flex items-center gap-1">
+                {!account.ativa && <Badge variant="secondary">Arquivada</Badge>}
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground"
                   onClick={() => open(account)}
+                  title="Editar dados da conta"
                 >
-                  <Pencil className="h-4 w-4" />
+                  <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                  Editar
                 </Button>
+              </div>
+            </div>
+            <h2 className="mt-4 text-[16px] font-bold text-foreground">{account.nome}</h2>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <Badge variant="outline">{labels[account.tipo]}</Badge>
+              {account.tipo === 'cartao' && account.bandeira && (
+                <Badge variant="secondary" className="text-[10px]">
+                  {account.bandeira}
+                </Badge>
+              )}
+              {account.tipo === 'cartao' && account.dia_vencimento && (
+                <span className="text-[11px] text-muted-foreground">
+                  Vence dia {account.dia_vencimento}
+                </span>
               )}
             </div>
+            <p className="micro-label mt-5">Saldo atual</p>
+            <p
+              className={`mt-1 text-2xl font-extrabold tabular-nums ${(balances[account.id] || 0) < 0 ? 'text-destructive' : 'text-foreground'}`}
+            >
+              {formatCurrency(balances[account.id] || 0)}
+            </p>
           </div>
-          <h2 className="mt-5 text-[15px] font-bold">{account.nome}</h2>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <Badge variant="outline">{labels[account.tipo]}</Badge>
-            {account.tipo === 'cartao' && account.bandeira && (
-              <Badge variant="secondary" className="text-[10px]">
-                {account.bandeira}
-              </Badge>
-            )}
-            {account.tipo === 'cartao' && account.dia_vencimento && (
-              <span className="text-[11px] text-muted-foreground">
-                Vence dia {account.dia_vencimento}
-              </span>
-            )}
-          </div>
-          <p className="micro-label mt-6">Saldo atual</p>
-          <p
-            className={`mt-1 text-2xl font-extrabold tabular-nums ${(balances[account.id] || 0) < 0 ? 'text-destructive' : 'text-foreground'}`}
+        </div>
+
+        <div className="p-5 pt-5">
+          <Button
+            className="w-full bg-primary text-white shadow-sm hover:bg-primary/90 font-medium"
+            onClick={() => openMovement(account)}
           >
-            {formatCurrency(balances[account.id] || 0)}
-          </p>
-          <PermissionButton
-            allowed={can(user?.role, 'writeFinance')}
-            variant="outline"
-            className="mt-5 w-full"
-            onClick={() => setMovement(account)}
-          >
+            <ArrowUpDown className="mr-2 h-4 w-4" />
             Movimentar
-          </PermissionButton>
+          </Button>
         </div>
       </article>
     )
@@ -221,17 +324,37 @@ export default function Contas() {
         title="Contas"
         description="Acompanhe seus saldos e centralize as movimentações."
         action={
-          <PermissionButton allowed={can(user?.role, 'writeFinance')} onClick={() => open()}>
+          <Button
+            className="bg-primary text-white shadow-sm hover:bg-primary/90"
+            onClick={() => open()}
+          >
             <Plus className="mr-2 h-4 w-4" />
             Nova conta
-          </PermissionButton>
+          </Button>
         }
       />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {active.map((a, i) => (
-          <AccountCard key={a.id} account={a} index={i} />
-        ))}
-      </div>
+
+      {contas.length === 0 ? (
+        <EmptyState
+          title="Nenhuma conta cadastrada"
+          description="Crie sua primeira conta bancária, caixa ou cartão para gerenciar seus saldos."
+          action={
+            <Button
+              className="bg-primary text-white shadow-sm hover:bg-primary/90"
+              onClick={() => open()}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Criar primeira conta
+            </Button>
+          }
+        />
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {active.map((a, i) => (
+            <AccountCard key={a.id} account={a} index={i} />
+          ))}
+        </div>
+      )}
       {archived.length > 0 && (
         <section className="mt-8">
           <button
@@ -377,14 +500,198 @@ export default function Contas() {
           </form>
         </DialogContent>
       </Dialog>
-      <LancamentoDialog
-        open={!!movement}
-        onOpenChange={(open) => !open && setMovement(null)}
-        contas={contas}
-        categorias={categorias}
-        presetConta={movement?.id}
-        onSaved={load}
-      />
+      {/* Dialog dedicado de Movimentação de Saldo */}
+      <Dialog
+        open={!!movementAccount}
+        onOpenChange={(open) => {
+          if (!open) {
+            setMovementAccount(null)
+            setMovementErrors({})
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">
+                <ArrowUpDown className="h-4 w-4" />
+              </span>
+              Movimentar saldo
+            </DialogTitle>
+            <DialogDescription>
+              {movementAccount && (
+                <>
+                  Registrar entrada ou saída na conta{' '}
+                  <strong className="font-semibold text-foreground">{movementAccount.nome}</strong>.
+                  O saldo será atualizado imediatamente.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={saveMovement} className="space-y-4">
+            {/* Seletor Tipo: Entrada (receita) ou Saída (despesa) */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Tipo de movimentação</Label>
+              <div className="grid grid-cols-2 gap-2 rounded-xl bg-secondary/60 p-1">
+                <button
+                  type="button"
+                  onClick={() => handleMovementTypeChange('receita')}
+                  className={`flex items-center justify-center gap-2 rounded-lg py-2 text-xs font-bold transition ${
+                    movementForm.tipo === 'receita'
+                      ? 'bg-success text-white shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <ArrowDownLeft className="h-4 w-4" />
+                  Entrada (+ Saldo)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleMovementTypeChange('despesa')}
+                  className={`flex items-center justify-center gap-2 rounded-lg py-2 text-xs font-bold transition ${
+                    movementForm.tipo === 'despesa'
+                      ? 'bg-primary text-white shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <ArrowUpRight className="h-4 w-4" />
+                  Saída (− Saldo)
+                </button>
+              </div>
+            </div>
+
+            {/* Valor */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Valor</Label>
+              <MoneyInput
+                value={movementForm.valor}
+                onChange={(valor) => setMovementForm({ ...movementForm, valor })}
+              />
+              {movementErrors.valor && <p className="field-error">{movementErrors.valor}</p>}
+            </div>
+
+            {/* Descrição */}
+            <div className="space-y-1.5">
+              <Label htmlFor="mov-descricao" className="text-xs font-semibold">
+                Descrição
+              </Label>
+              <Input
+                id="mov-descricao"
+                value={movementForm.descricao}
+                onChange={(e) => setMovementForm({ ...movementForm, descricao: e.target.value })}
+                placeholder={
+                  movementForm.tipo === 'receita'
+                    ? 'Ex.: Depósito inicial, aporte, transferência recebida'
+                    : 'Ex.: Retirada, pagamento avulso, taxa bancária'
+                }
+              />
+              {movementErrors.descricao && (
+                <p className="field-error">{movementErrors.descricao}</p>
+              )}
+            </div>
+
+            {/* Categoria (se houver cadastradas) */}
+            {categorias.filter((c) => c.tipo === movementForm.tipo).length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Categoria (opcional)</Label>
+                <Select
+                  value={movementForm.categoria}
+                  onValueChange={(categoria) => setMovementForm({ ...movementForm, categoria })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione uma categoria" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categorias
+                      .filter((c) => c.tipo === movementForm.tipo)
+                      .map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.nome}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Data */}
+            <div className="space-y-1.5">
+              <Label htmlFor="mov-data" className="text-xs font-semibold">
+                Data
+              </Label>
+              <Input
+                id="mov-data"
+                type="date"
+                value={movementForm.data}
+                onChange={(e) => setMovementForm({ ...movementForm, data: e.target.value })}
+              />
+            </div>
+
+            {/* Resumo do impacto no saldo */}
+            {movementAccount && (
+              <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Saldo atual:</span>
+                  <span className="font-semibold tabular-nums">
+                    {formatCurrency(balances[movementAccount.id] || 0)}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-center justify-between border-t border-border/50 pt-1">
+                  <span className="text-muted-foreground">Novo saldo após movimentação:</span>
+                  <span
+                    className={`font-bold tabular-nums ${
+                      (balances[movementAccount.id] || 0) +
+                        (movementForm.tipo === 'receita'
+                          ? movementForm.valor
+                          : -movementForm.valor) <
+                      0
+                        ? 'text-destructive'
+                        : 'text-foreground'
+                    }`}
+                  >
+                    {formatCurrency(
+                      (balances[movementAccount.id] || 0) +
+                        (movementForm.tipo === 'receita'
+                          ? movementForm.valor
+                          : -movementForm.valor),
+                    )}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {movementErrors.form && (
+              <p className="field-error rounded-lg bg-destructive/10 p-2.5">
+                {movementErrors.form}
+              </p>
+            )}
+
+            <DialogFooter className="pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setMovementAccount(null)}
+                disabled={savingMovement}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={savingMovement}
+                className="bg-primary text-white hover:bg-primary/90"
+              >
+                {savingMovement ? (
+                  <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                Confirmar movimentação
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
