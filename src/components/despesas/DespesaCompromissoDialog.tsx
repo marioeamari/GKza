@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { LoaderCircle, Plus, Save } from 'lucide-react'
 
 import { MoneyInput } from '@/components/MoneyInput'
@@ -164,6 +164,24 @@ export function DespesaCompromissoDialog({
     }
   }, [compromisso, defaultSecao, open, contas, tiposDespesa, metodosPagamento, tiposDizimo])
 
+  // Determina se a conta selecionada (ou a seção) é do tipo Cartão de Crédito
+  const selectedConta = contas.find((c) => c.id === form.conta_padrao)
+  const isSelectedContaCartao = selectedConta?.tipo === 'cartao' || form.secao === 'cartoes_credito'
+
+  // Procura método correspondente ao cartão se existir
+  const cardMatchedMetodo = useMemo(() => {
+    if (!selectedConta || selectedConta.tipo !== 'cartao') return null
+    return (
+      metodosPagamento.find(
+        (m) =>
+          m.conta_padrao === selectedConta.id ||
+          (m.tipo === 'cartao' && m.nome.toLowerCase().includes(selectedConta.nome.toLowerCase())),
+      ) ||
+      metodosPagamento.find((m) => m.tipo === 'cartao') ||
+      null
+    )
+  }, [selectedConta, metodosPagamento])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.descricao.trim()) {
@@ -183,6 +201,26 @@ export function DespesaCompromissoDialog({
       return
     }
 
+    // Validação de compatibilidade entre Cartão de Crédito e Método de pagamento
+    if (isSelectedContaCartao) {
+      if (selectedConta && form.metodo_pagamento) {
+        const selectedMetodo = metodosPagamento.find((m) => m.id === form.metodo_pagamento)
+        if (selectedMetodo && selectedMetodo.tipo !== 'cartao') {
+          toast({
+            variant: 'destructive',
+            title: 'Método de pagamento incompatível',
+            description: `A conta "${selectedConta.nome}" é um cartão de crédito. Não é permitido vincular métodos do tipo "${selectedMetodo.nome}" (ex: Pix/Boleto).`,
+          })
+          return
+        }
+      }
+    }
+
+    // Se for cartão, o método de pagamento implícito é o cartão correspondente (ou nulo)
+    const effectiveMetodoPagamento = isSelectedContaCartao
+      ? cardMatchedMetodo?.id || form.metodo_pagamento || null
+      : form.metodo_pagamento || null
+
     setSubmitting(true)
     try {
       const payload: Partial<DespesaCompromisso> = {
@@ -196,7 +234,7 @@ export function DespesaCompromissoDialog({
         categoria: form.categoria || (null as unknown as string),
         tag: form.tag || (null as unknown as string),
         tipo_despesa: form.tipo_despesa || (null as unknown as string),
-        metodo_pagamento: form.metodo_pagamento || (null as unknown as string),
+        metodo_pagamento: effectiveMetodoPagamento as string,
         conta_padrao: form.conta_padrao || (null as unknown as string),
         pessoa: form.pessoa || (null as unknown as string),
         total_parcelas: form.regra_repeticao === 'parcelado' ? Number(form.total_parcelas) : 1,
@@ -387,7 +425,28 @@ export function DespesaCompromissoDialog({
               <Label>Conta padrão / Cartão</Label>
               <Select
                 value={form.conta_padrao || 'none'}
-                onValueChange={(v) => setForm({ ...form, conta_padrao: v === 'none' ? '' : v })}
+                onValueChange={(v) => {
+                  const contaId = v === 'none' ? '' : v
+                  const c = contas.find((item) => item.id === contaId)
+                  let updatedForm = { ...form, conta_padrao: contaId }
+                  // Se selecionou cartão de crédito
+                  if (c && c.tipo === 'cartao') {
+                    // Ajusta o dia de vencimento com base no cartão se houver
+                    if (c.dia_vencimento) {
+                      updatedForm.dia_vencimento = c.dia_vencimento
+                      updatedForm.regra_vencimento_texto = `${c.dia_vencimento}/m`
+                    }
+                    // Localiza o método correspondente ou limpa o método para não conflitar
+                    const matched = metodosPagamento.find(
+                      (m) =>
+                        m.conta_padrao === c.id ||
+                        (m.tipo === 'cartao' &&
+                          m.nome.toLowerCase().includes(c.nome.toLowerCase())),
+                    )
+                    updatedForm.metodo_pagamento = matched?.id || ''
+                  }
+                  setForm(updatedForm)
+                }}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione conta ou cartão" />
@@ -396,7 +455,7 @@ export function DespesaCompromissoDialog({
                   <SelectItem value="none">Nenhuma</SelectItem>
                   {contas.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
-                      {c.nome} ({c.tipo})
+                      {c.nome} ({c.tipo === 'cartao' ? 'Cartão de Crédito' : c.tipo})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -404,23 +463,47 @@ export function DespesaCompromissoDialog({
             </div>
 
             <div className="space-y-1.5">
-              <Label>Método de pagamento</Label>
-              <Select
-                value={form.metodo_pagamento || 'none'}
-                onValueChange={(v) => setForm({ ...form, metodo_pagamento: v === 'none' ? '' : v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Ex.: Pix-CPF, Pix-CNPJ..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Nenhum</SelectItem>
-                  {metodosPagamento.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.nome}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center justify-between">
+                <Label>Método de pagamento</Label>
+                {isSelectedContaCartao && (
+                  <span className="text-[10px] font-semibold text-primary">
+                    Automático (Cartão)
+                  </span>
+                )}
+              </div>
+              {isSelectedContaCartao ? (
+                <div className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-secondary/40 px-3 py-1 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">
+                    Crédito {selectedConta ? selectedConta.nome : 'Cartão'}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {selectedConta?.dia_fechamento && `Fecha dia ${selectedConta.dia_fechamento}`}
+                    {selectedConta?.dia_vencimento &&
+                      ` · Vence dia ${selectedConta.dia_vencimento}`}
+                  </span>
+                </div>
+              ) : (
+                <Select
+                  value={form.metodo_pagamento || 'none'}
+                  onValueChange={(v) =>
+                    setForm({ ...form, metodo_pagamento: v === 'none' ? '' : v })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Ex.: Pix-CPF, Pix-CNPJ..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Nenhum</SelectItem>
+                    {metodosPagamento
+                      .filter((m) => m.tipo !== 'cartao')
+                      .map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.nome}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
             <div className="space-y-1.5">

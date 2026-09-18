@@ -111,6 +111,10 @@ export default function Despesas() {
   // Ocorrências e compromissos
   const [ocorrencias, setOcorrencias] = useState<DespesaOcorrencia[]>([])
   const [compromissos, setCompromissos] = useState<DespesaCompromisso[]>([])
+  const [cartaoOcorrenciasAll, setCartaoOcorrenciasAll] = useState<DespesaOcorrencia[]>([])
+
+  // Modo de visualização de cartões: 'mes' (mês selecionado) ou 'historico' (todas as compras / histórico completo)
+  const [cartaoViewMode, setCartaoViewMode] = useState<Record<string, 'mes' | 'historico'>>({})
 
   // Modais de ação
   const [baixaModal, setBaixaModal] = useState(false)
@@ -158,17 +162,22 @@ export default function Despesas() {
           ? `contexto_tipo = 'empresa' && empresa = '${activeContext.empresaId}'`
           : `contexto_tipo = 'pessoal'`
 
-      const [comps, ocs] = await Promise.all([
+      const [comps, ocs, ocsCartaoAll] = await Promise.all([
         despesasService.listCompromissos({
           filter: contextFilter,
         }),
         despesasService.listOcorrencias({
           filter: `${contextFilter} && competencia = '${currentCompetencia}'`,
         }),
+        despesasService.listOcorrencias({
+          filter: `${contextFilter} && secao = 'cartoes_credito'`,
+          sort: '-data_vencimento',
+        }),
       ])
 
       setCompromissos(comps)
       setOcorrencias(ocs)
+      setCartaoOcorrenciasAll(ocsCartaoAll)
     } catch (err) {
       toast({
         variant: 'destructive',
@@ -255,14 +264,45 @@ export default function Despesas() {
   // Seção 3: Cartões de Crédito (Agrupados por Cartão)
   const cartaoContas = useMemo(() => contas.filter((c) => c.tipo === 'cartao'), [contas])
 
-  const cartoesGrouped = useMemo(() => {
-    const map = new Map<string, { conta: Conta; ocorrencias: DespesaOcorrencia[] }>()
+  // Filtragem de todas as ocorrências de cartões (para histórico completo)
+  const filteredCartaoOcorrenciasAll = useMemo(() => {
+    return cartaoOcorrenciasAll.filter((oc) => {
+      const comp = oc.expand?.compromisso
+      const desc = comp?.descricao || ''
+      const forn = comp?.fornecedor || ''
+      const matchesSearch =
+        !search ||
+        desc.toLowerCase().includes(search.toLowerCase()) ||
+        forn.toLowerCase().includes(search.toLowerCase())
 
-    // Garante que todos os cartões cadastrados apareçam ou apenas os com ocorrências
+      const matchesTag =
+        filterTag === 'all' || comp?.tag === filterTag || oc.expand?.compromisso?.tag === filterTag
+      const matchesTipo =
+        filterTipo === 'all' ||
+        comp?.tipo_despesa === filterTipo ||
+        oc.expand?.compromisso?.tipo_despesa === filterTipo
+      const matchesStatus = filterStatus === 'all' || oc.status === filterStatus
+
+      return matchesSearch && matchesTag && matchesTipo && matchesStatus
+    })
+  }, [cartaoOcorrenciasAll, search, filterTag, filterTipo, filterStatus])
+
+  const cartoesGrouped = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        conta: Conta
+        ocorrenciasMes: DespesaOcorrencia[]
+        ocorrenciasTodas: DespesaOcorrencia[]
+      }
+    >()
+
+    // Inicializa todos os cartões cadastrados
     cartaoContas.forEach((conta) => {
-      map.set(conta.id, { conta, ocorrencias: [] })
+      map.set(conta.id, { conta, ocorrenciasMes: [], ocorrenciasTodas: [] })
     })
 
+    // Ocorrências do mês
     filteredOcorrencias
       .filter((oc) => oc.secao === 'cartoes_credito')
       .forEach((oc) => {
@@ -279,13 +319,33 @@ export default function Despesas() {
               cor: '#DF5830',
               ativa: true,
             } as Conta)
-          map.set(contaId, { conta: found, ocorrencias: [] })
+          map.set(contaId, { conta: found, ocorrenciasMes: [], ocorrenciasTodas: [] })
         }
-        map.get(contaId)!.ocorrencias.push(oc)
+        map.get(contaId)!.ocorrenciasMes.push(oc)
       })
 
+    // Todas as ocorrências do cartão (histórico geral)
+    filteredCartaoOcorrenciasAll.forEach((oc) => {
+      const contaId =
+        oc.conta || oc.expand?.compromisso?.conta_padrao || cartaoContas[0]?.id || 'unknown'
+      if (!map.has(contaId)) {
+        const found =
+          contas.find((c) => c.id === contaId) ||
+          ({
+            id: contaId,
+            nome: 'Outro Cartão',
+            tipo: 'cartao',
+            saldo_inicial: 0,
+            cor: '#DF5830',
+            ativa: true,
+          } as Conta)
+        map.set(contaId, { conta: found, ocorrenciasMes: [], ocorrenciasTodas: [] })
+      }
+      map.get(contaId)!.ocorrenciasTodas.push(oc)
+    })
+
     return Array.from(map.values())
-  }, [cartaoContas, filteredOcorrencias, contas])
+  }, [cartaoContas, filteredOcorrencias, filteredCartaoOcorrenciasAll, contas])
 
   // Totais do Período
   const totalPrevistoGeral = useMemo(
@@ -669,7 +729,7 @@ export default function Despesas() {
               </h2>
               <p className="text-xs text-muted-foreground">
                 Compras parceladas e rotativas separadas por cartão (NuBank, Porto Seguro, Sicred,
-                etc.).
+                etc.) com controle da fatura, dia de fechamento e vencimento.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -695,70 +755,138 @@ export default function Despesas() {
                 Nenhum cartão cadastrado. Vá em "Contas" para cadastrar seus cartões.
               </div>
             ) : (
-              cartoesGrouped.map(({ conta, ocorrencias: cartaoOcorrencias }) => {
-                const totalCartao = cartaoOcorrencias.reduce(
+              cartoesGrouped.map(({ conta, ocorrenciasMes, ocorrenciasTodas }) => {
+                const currentMode = cartaoViewMode[conta.id] || 'mes'
+                const isHist = currentMode === 'historico'
+                const displayOcorrencias = isHist ? ocorrenciasTodas : ocorrenciasMes
+
+                const totalMes = ocorrenciasMes.reduce((sum, o) => sum + (o.valor_previsto || 0), 0)
+                const totalPagoMes = ocorrenciasMes
+                  .filter((o) => o.status === 'paga')
+                  .reduce((sum, o) => sum + (o.valor_pago || o.valor_previsto || 0), 0)
+
+                const totalTodas = ocorrenciasTodas.reduce(
                   (sum, o) => sum + (o.valor_previsto || 0),
                   0,
                 )
-                const totalPagoCartao = cartaoOcorrencias
+                const totalPagoTodas = ocorrenciasTodas
                   .filter((o) => o.status === 'paga')
                   .reduce((sum, o) => sum + (o.valor_pago || o.valor_previsto || 0), 0)
 
                 return (
                   <div
                     key={conta.id}
-                    className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft"
+                    className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft transition-all"
                   >
-                    <header className="flex flex-wrap items-center justify-between border-b border-border bg-secondary/20 p-4">
+                    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-secondary/25 p-4 sm:p-5">
+                      {/* Dados do Cartão: Nome, Bandeira, Fechamento e Vencimento */}
                       <div className="flex items-center gap-3">
                         <span
-                          className="grid h-9 w-9 place-items-center rounded-xl text-white shadow-xs"
+                          className="grid h-11 w-11 place-items-center rounded-xl text-white shadow-xs"
                           style={{ background: conta.cor || '#4C3A8C' }}
                         >
-                          <CreditCard className="h-5 w-5" />
+                          <CreditCard className="h-6 w-6" />
                         </span>
                         <div>
                           <div className="flex items-center gap-2">
-                            <h3 className="font-extrabold text-foreground">{conta.nome}</h3>
+                            <h3 className="text-base font-extrabold text-foreground sm:text-lg">
+                              {conta.nome}
+                            </h3>
                             {conta.bandeira && (
-                              <Badge variant="outline" className="text-[10px]">
+                              <Badge variant="outline" className="font-semibold text-[10px]">
                                 {conta.bandeira}
                               </Badge>
                             )}
                           </div>
-                          <p className="text-xs text-muted-foreground">
-                            {conta.dia_fechamento && `Fechamento dia ${conta.dia_fechamento}`}
-                            {conta.dia_fechamento && conta.dia_vencimento && ' · '}
-                            {conta.dia_vencimento && `Vencimento dia ${conta.dia_vencimento}`}
-                          </p>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                            <span className="font-medium text-foreground">
+                              {conta.dia_fechamento ? (
+                                <>
+                                  Fatura fecha todo <strong>dia {conta.dia_fechamento}</strong>
+                                </>
+                              ) : (
+                                'Fechamento não informado'
+                              )}
+                            </span>
+                            <span>•</span>
+                            <span className="font-medium text-foreground">
+                              {conta.dia_vencimento ? (
+                                <>
+                                  Vencimento todo <strong>dia {conta.dia_vencimento}</strong>
+                                </>
+                              ) : (
+                                'Vencimento não informado'
+                              )}
+                            </span>
+                          </div>
                         </div>
                       </div>
 
-                      <div className="mt-2 flex items-center gap-3 sm:mt-0">
-                        <div className="text-right">
-                          <p className="micro-label">Fatura no mês</p>
-                          <p className="text-sm font-extrabold tabular-nums text-foreground">
-                            {formatCurrency(totalCartao)}
-                          </p>
+                      {/* Valores e Alternador Mês vs Histórico Completo */}
+                      <div className="flex flex-wrap items-center gap-3">
+                        {/* Seletor de visualização */}
+                        <div className="flex rounded-lg border border-border bg-background p-0.5 text-xs">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCartaoViewMode((prev) => ({ ...prev, [conta.id]: 'mes' }))
+                            }
+                            className={`rounded-md px-2.5 py-1 font-medium transition ${
+                              !isHist
+                                ? 'bg-primary text-white shadow-xs'
+                                : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                          >
+                            Mês atual ({formatCompetenciaDisplay(currentCompetencia)})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCartaoViewMode((prev) => ({ ...prev, [conta.id]: 'historico' }))
+                            }
+                            className={`rounded-md px-2.5 py-1 font-medium transition ${
+                              isHist
+                                ? 'bg-primary text-white shadow-xs'
+                                : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                          >
+                            Todas as compras ({ocorrenciasTodas.length})
+                          </button>
                         </div>
-                        {totalPagoCartao > 0 && (
-                          <div className="text-right">
-                            <p className="micro-label text-success">Baixado</p>
-                            <p className="text-xs font-bold tabular-nums text-success">
-                              {formatCurrency(totalPagoCartao)}
+
+                        {/* Indicadores financeiros */}
+                        <div className="flex items-center gap-3">
+                          <div className="rounded-xl border border-border bg-white px-3 py-1 text-right">
+                            <p className="micro-label">
+                              {isHist ? 'Total Compras' : 'Fatura do Mês'}
+                            </p>
+                            <p className="text-sm font-extrabold tabular-nums text-foreground">
+                              {formatCurrency(isHist ? totalTodas : totalMes)}
                             </p>
                           </div>
-                        )}
+                          {(isHist ? totalPagoTodas : totalPagoMes) > 0 && (
+                            <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-1 text-right">
+                              <p className="micro-label text-success">Baixado</p>
+                              <p className="text-xs font-bold tabular-nums text-success">
+                                {formatCurrency(isHist ? totalPagoTodas : totalPagoMes)}
+                              </p>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </header>
 
-                    {cartaoOcorrencias.length === 0 ? (
-                      <div className="p-6 text-center text-xs text-muted-foreground">
-                        Nenhuma compra ou parcela neste cartão para o mês selecionado.
+                    {displayOcorrencias.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-muted-foreground">
+                        {isHist
+                          ? 'Nenhuma compra realizada com este cartão de crédito.'
+                          : `Nenhuma compra ou parcela neste cartão para ${formatCompetenciaDisplay(
+                              currentCompetencia,
+                            )}. Clique em "Todas as compras" para ver o histórico geral.`}
                       </div>
                     ) : (
                       <div className="divide-y divide-border">
-                        {cartaoOcorrencias.map((oc) => (
+                        {displayOcorrencias.map((oc) => (
                           <OcorrenciaRow
                             key={oc.id}
                             ocorrencia={oc}
@@ -957,6 +1085,11 @@ function OcorrenciaRow({
               Venc: <strong>{formatDate(ocorrencia.data_vencimento)}</strong>
               {comp?.regra_vencimento_texto && ` (${comp.regra_vencimento_texto})`}
             </span>
+            {ocorrencia.competencia && (
+              <span className="font-mono text-[11px] text-muted-foreground/80">
+                Comp: {ocorrencia.competencia}
+              </span>
+            )}
             {isPaga && ocorrencia.data_pagamento && (
               <span className="text-success font-medium">
                 Pago em: {formatDate(ocorrencia.data_pagamento)}
