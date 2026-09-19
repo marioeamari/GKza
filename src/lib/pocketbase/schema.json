@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-19T04:45:49.482Z",
+  "generatedAt": "2026-09-19T04:53:42.919Z",
   "collections": [
     {
       "name": "users",
@@ -1415,6 +1415,60 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "draft_tipo",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "draft_descricao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "draft_valor",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "draft_data_transacao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "draft_categoria",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "draft_conta",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "draft_observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "draft_comprovante_texto",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "draft_json",
+          "type": "text",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [
