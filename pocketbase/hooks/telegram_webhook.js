@@ -84,9 +84,10 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
   // Helpers de Sessão inline
   const getSession = (chatId) => {
     try {
+      const strChatId = String(chatId)
       const records = $app.findRecordsByFilter(
         'telegram_sessions',
-        `chat_id = '${chatId}'`,
+        `chat_id = '${strChatId}'`,
         '-updated',
         1,
         0,
@@ -94,33 +95,60 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       if (records && records.length > 0) {
         return records[0]
       }
-    } catch (_) {}
+    } catch (err) {
+      console.log('Error getting session for ' + chatId + ': ' + err.message)
+    }
     return null
   }
 
-  // Helper seguro para ler draft_data como objeto JS nativo (evita Go slice/map proxy TypeError)
+  // Helper robusto para ler draft_data como objeto JS nativo plano
   const getDraftFromSession = (session) => {
     if (!session) return {}
     try {
-      let raw = session.get('draft_data')
-      if (!raw) return {}
-      if (typeof raw === 'string') {
+      // No PocketBase v0.36 Goja, session.get('draft_data') ou session.getString('draft_data')
+      let raw = null
+      try {
+        raw = session.get('draft_data')
+      } catch (_) {}
+
+      if (raw === null || raw === undefined || raw === '') {
         try {
-          const parsedStr = JSON.parse(raw)
-          if (parsedStr && typeof parsedStr === 'object' && !Array.isArray(parsedStr)) {
-            return parsedStr
+          const strVal = session.getString('draft_data')
+          if (strVal && strVal !== '{}') {
+            raw = strVal
           }
-          return {}
-        } catch (_) {
+        } catch (_) {}
+      }
+
+      if (!raw) return {}
+
+      if (typeof raw === 'string') {
+        const trimmed = raw.trim()
+        if (!trimmed || trimmed === '{}' || trimmed === '[]') return {}
+        try {
+          const parsed = JSON.parse(trimmed)
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            return parsed
+          }
+        } catch (parseErr) {
+          console.log('JSON parse string error on draft_data:', parseErr.message)
           return {}
         }
       }
-      // Se for objeto retornado pelo runtime do PocketBase, clonar via JSON para garantir JS Object puro
-      const jsonStr = JSON.stringify(raw)
-      const parsed = JSON.parse(jsonStr)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed
+
+      // Se for Go map/proxy do Goja, clonar via JSON.stringify e depois JSON.parse
+      try {
+        const jsonStr = JSON.stringify(raw)
+        if (jsonStr && jsonStr !== '{}') {
+          const parsed = JSON.parse(jsonStr)
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            return parsed
+          }
+        }
+      } catch (cloneErr) {
+        console.log('JSON stringify clone error on draft_data:', cloneErr.message)
       }
+
       return {}
     } catch (e) {
       console.log('Error reading draft_data from session:', e.message)
@@ -130,14 +158,17 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
 
   const saveSession = (chatId, state, draftData, pendingQuestion, contextoNome) => {
     try {
-      let session = getSession(chatId)
+      const strChatId = String(chatId)
+      let session = getSession(strChatId)
       if (!session) {
         const col = $app.findCollectionByNameOrId('telegram_sessions')
         session = new Record(col)
-        session.set('chat_id', String(chatId))
+        session.set('chat_id', strChatId)
       }
+
       session.set('state', state || 'idle')
-      // Garantir que draftData seja um clone serializável JSON sem referências Go
+
+      // Construir um objeto JavaScript limpo e explícito, garantindo valores primitivos seguros
       let safeDraft = {}
       if (draftData && typeof draftData === 'object' && !Array.isArray(draftData)) {
         try {
@@ -146,29 +177,34 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
           safeDraft = Object.assign({}, draftData)
         }
       }
+
       session.set('draft_data', safeDraft)
       session.set('pending_question', pendingQuestion || '')
       if (contextoNome !== undefined) {
         session.set('contexto_nome', contextoNome || '')
       }
+
       $app.save(session)
       return session
     } catch (err) {
-      console.log('Failed to save session:', err.message)
+      console.log('Failed to save session for ' + chatId + ': ' + err.message)
       return null
     }
   }
 
   const clearSessionDraft = (chatId) => {
     try {
-      const session = getSession(chatId)
+      const strChatId = String(chatId)
+      const session = getSession(strChatId)
       if (session) {
         session.set('state', 'idle')
         session.set('draft_data', {})
         session.set('pending_question', '')
         $app.save(session)
       }
-    } catch (_) {}
+    } catch (err) {
+      console.log('Failed to clear session for ' + chatId + ': ' + err.message)
+    }
   }
 
   // Gerador de teclado inline com paginação
@@ -233,7 +269,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
         [{ text: '❌ Cancelar', callback_data: 'cancel:draft' }],
       ],
     }
-    saveSession(chatId, 'awaiting_tipo', draft, 'tipo')
+    saveSession(chatId, 'awaiting_tipo', draft, 'tipo', draft.contexto_nome || '')
     sendTelegramMsg(
       chatId,
       'Escolha o tipo do lançamento:\n(Toque na opção desejada abaixo)',
@@ -268,7 +304,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     if (items.length === 0) {
       // Se não houver categoria cadastrada, marcar como vazia mas respondida e seguir
       draft.categoria = 'skip'
-      saveSession(chatId, 'processing', draft, 'categoria')
+      saveSession(chatId, 'processing', draft, 'categoria', draft.contexto_nome || '')
       checkNextStep(chatId, draft)
       return
     }
@@ -276,7 +312,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     const totalPages = Math.ceil(items.length / pageSize)
     const keyboard = buildInlineKeyboard('cat', items, curPage, pageSize, totalPages)
 
-    saveSession(chatId, 'awaiting_categoria', draft, 'categoria')
+    saveSession(chatId, 'awaiting_categoria', draft, 'categoria', draft.contexto_nome || '')
     const pageInd = totalPages > 1 ? ` (Página ${curPage + 1}/${totalPages})` : ''
     sendTelegramMsg(
       chatId,
@@ -317,7 +353,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
 
     if (items.length === 0) {
       draft.conta = 'skip'
-      saveSession(chatId, 'processing', draft, 'conta')
+      saveSession(chatId, 'processing', draft, 'conta', draft.contexto_nome || '')
       checkNextStep(chatId, draft)
       return
     }
@@ -325,7 +361,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     const totalPages = Math.ceil(items.length / pageSize)
     const keyboard = buildInlineKeyboard('conta', items, curPage, pageSize, totalPages)
 
-    saveSession(chatId, 'awaiting_conta', draft, 'conta')
+    saveSession(chatId, 'awaiting_conta', draft, 'conta', draft.contexto_nome || '')
     const pageInd = totalPages > 1 ? ` (Página ${curPage + 1}/${totalPages})` : ''
     sendTelegramMsg(
       chatId,
@@ -353,7 +389,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     const totalPages = Math.ceil(items.length / pageSize)
     const keyboard = buildInlineKeyboard('ctx', items, curPage, pageSize, totalPages)
 
-    saveSession(chatId, 'awaiting_contexto', draft, 'contexto')
+    saveSession(chatId, 'awaiting_contexto', draft, 'contexto', draft.contexto_nome || '')
     const pageInd = totalPages > 1 ? ` (Página ${curPage + 1}/${totalPages})` : ''
     sendTelegramMsg(
       chatId,
@@ -511,16 +547,53 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       return
     }
 
+    // Se o tipo mudou, verificar se a categoria atual pertence ao mesmo tipo
+    if (draft.categoria && draft.categoria !== 'skip') {
+      try {
+        const catRec = $app.findRecordById('categorias', draft.categoria)
+        if (catRec.getString('tipo') && catRec.getString('tipo') !== draft.tipo) {
+          // Incompatível com o novo tipo: limpar para perguntar novamente de acordo com o tipo escolhido
+          draft.categoria = null
+        }
+      } catch (_) {
+        draft.categoria = null
+      }
+    }
+
     // 2. Categoria (botões do sistema)
     if (!draft.categoria) {
       askCategoria(chatId, draft, 0)
       return
     }
 
+    // Se a categoria selecionada foi apagada ou id é inválido
+    if (draft.categoria && draft.categoria !== 'skip') {
+      try {
+        $app.findRecordById('categorias', draft.categoria)
+      } catch (_) {
+        // Categoria não existe mais, pedir novamente
+        draft.categoria = null
+        askCategoria(chatId, draft, 0)
+        return
+      }
+    }
+
     // 3. Conta / Cartão (botões do sistema)
     if (!draft.conta) {
       askConta(chatId, draft, 0)
       return
+    }
+
+    // Se o usuário selecionou uma conta mas ela foi apagada ou id é inválido
+    if (draft.conta && draft.conta !== 'skip') {
+      try {
+        $app.findRecordById('contas', draft.conta)
+      } catch (_) {
+        // Conta não existe mais, pedir novamente
+        draft.conta = null
+        askConta(chatId, draft, 0)
+        return
+      }
     }
 
     // 4. Contexto / Grupo (se ainda não definido no draft ou na sessão)
@@ -532,14 +605,14 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     // 5. Valor (numérico)
     const numVal = parseFloat(draft.valor)
     if (!numVal || isNaN(numVal) || numVal <= 0) {
-      saveSession(chatId, 'awaiting_valor', draft, 'valor')
+      saveSession(chatId, 'awaiting_valor', draft, 'valor', draft.contexto_nome || '')
       sendTelegramMsg(chatId, '💬 Por favor, digite o VALOR em reais (ex: 184,32 ou 250):')
       return
     }
 
     // 6. Descrição (texto)
     if (!draft.descricao || draft.descricao.trim() === '') {
-      saveSession(chatId, 'awaiting_descricao', draft, 'descricao')
+      saveSession(chatId, 'awaiting_descricao', draft, 'descricao', draft.contexto_nome || '')
       sendTelegramMsg(
         chatId,
         '💬 Por favor, digite a DESCRIÇÃO ou nome do favorecido/recebimento (ex: CPFL Energia, Supermercado, Aluguel):',
@@ -705,40 +778,49 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       }
 
       // Persistir na sessão ANTES de calcular o próximo passo
-      saveSession(cbChatId, 'processing', draft, 'tipo')
+      saveSession(cbChatId, 'processing', draft, 'tipo', draft.contexto_nome || '')
       sendTelegramMsg(
         cbChatId,
         '✔️ Tipo selecionado: ' + (draft.tipo === 'receita' ? 'Receita' : 'Despesa'),
       )
-      checkNextStep(cbChatId, draft)
+      // Carregar sessão recém-salva para garantir estado sincronizado
+      const updatedSession1 = getSession(cbChatId)
+      const freshDraft1 = getDraftFromSession(updatedSession1)
+      checkNextStep(cbChatId, Object.keys(freshDraft1).length > 0 ? freshDraft1 : draft)
       return e.json(200, { ok: true })
     }
 
     if (cbData.startsWith('cat:')) {
       draft.categoria = cbData.replace('cat:', '')
       // Persistir na sessão ANTES de calcular o próximo passo
-      saveSession(cbChatId, 'processing', draft, 'categoria')
+      saveSession(cbChatId, 'processing', draft, 'categoria', draft.contexto_nome || '')
       let catNome = draft.categoria
       try {
         const cRec = $app.findRecordById('categorias', draft.categoria)
         catNome = cRec.getString('nome')
       } catch (_) {}
       sendTelegramMsg(cbChatId, '✔️ Categoria selecionada: ' + catNome)
-      checkNextStep(cbChatId, draft)
+      // Carregar sessão recém-salva para garantir estado sincronizado
+      const updatedSession2 = getSession(cbChatId)
+      const freshDraft2 = getDraftFromSession(updatedSession2)
+      checkNextStep(cbChatId, Object.keys(freshDraft2).length > 0 ? freshDraft2 : draft)
       return e.json(200, { ok: true })
     }
 
     if (cbData.startsWith('conta:')) {
       draft.conta = cbData.replace('conta:', '')
       // Persistir na sessão ANTES de calcular o próximo passo
-      saveSession(cbChatId, 'processing', draft, 'conta')
+      saveSession(cbChatId, 'processing', draft, 'conta', draft.contexto_nome || '')
       let contaNome = draft.conta
       try {
         const cRec = $app.findRecordById('contas', draft.conta)
         contaNome = cRec.getString('nome')
       } catch (_) {}
       sendTelegramMsg(cbChatId, '✔️ Conta selecionada: ' + contaNome)
-      checkNextStep(cbChatId, draft)
+      // Carregar sessão recém-salva para garantir estado sincronizado
+      const updatedSession3 = getSession(cbChatId)
+      const freshDraft3 = getDraftFromSession(updatedSession3)
+      checkNextStep(cbChatId, Object.keys(freshDraft3).length > 0 ? freshDraft3 : draft)
       return e.json(200, { ok: true })
     }
 
@@ -760,7 +842,10 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
           sendTelegramMsg(cbChatId, '✔️ Contexto selecionado: ' + draft.contexto_nome)
         } catch (_) {}
       }
-      checkNextStep(cbChatId, draft)
+      // Carregar sessão recém-salva para garantir estado sincronizado
+      const updatedSession4 = getSession(cbChatId)
+      const freshDraft4 = getDraftFromSession(updatedSession4)
+      checkNextStep(cbChatId, Object.keys(freshDraft4).length > 0 ? freshDraft4 : draft)
       return e.json(200, { ok: true })
     }
 
@@ -876,7 +961,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       return e.json(200, { ok: true })
     }
     currentDraft.valor = num
-    saveSession(chatId, 'processing', currentDraft, 'valor')
+    saveSession(chatId, 'processing', currentDraft, 'valor', currentDraft.contexto_nome || '')
     sendTelegramMsg(chatId, '✔️ Valor registrado: R$ ' + num.toFixed(2).replace('.', ','))
     checkNextStep(chatId, currentDraft)
     return e.json(200, { ok: true })
@@ -884,7 +969,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
 
   if (currentState === 'awaiting_descricao') {
     currentDraft.descricao = rawText
-    saveSession(chatId, 'processing', currentDraft, 'descricao')
+    saveSession(chatId, 'processing', currentDraft, 'descricao', currentDraft.contexto_nome || '')
     sendTelegramMsg(chatId, '✔️ Descrição registrada: ' + rawText)
     checkNextStep(chatId, currentDraft)
     return e.json(200, { ok: true })
@@ -915,7 +1000,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
         if (filePath.endsWith('.png')) mimeType = 'image/png'
         else if (filePath.endsWith('.webp')) mimeType = 'image/webp'
 
-        // Baixar bytes da imagem para enviar em base64 (evita falhas de DNS/resolução externa no gateway)
+        // Baixar bytes da imagem
         try {
           const imgDownload = $http.send({
             url: fileUrl,
@@ -929,20 +1014,21 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
           console.log('Direct image download failed:', dlErr.message)
         }
 
-        // Tentar visão computacional: primeiro com base64, depois fallback com URL pública do Telegram
         const visionPrompt =
-          'Você é um extrator especialista de comprovantes financeiros brasileiros (Pix, boletos, TED, transferências bancárias, cartões, notas fiscais).\n' +
-          'Analise com máxima atenção cada detalhe e transcreva com exatidão:\n' +
-          '- VALOR EXATO (R$)\n' +
-          '- DATA E HORA da transação\n' +
-          '- BANCO OU INSTITUIÇÃO DE ORIGEM (ex: NuBank, Banco Inter, Itaú, Bradesco, Sicredi, Caixa)\n' +
-          '- NOME DO FAVORECIDO / DESTINATÁRIO\n' +
-          '- NOME DO PAGADOR / ORIGEM\n' +
-          '- TIPO DA TRANSAÇÃO: Pix enviado, Pix recebido, Pagamento de Boleto, Compra no Cartão de Débito/Crédito ou TED\n' +
-          '- IDENTIFICADOR / CÓDIGO DE AUTENTICAÇÃO PIX se presente.\n' +
-          (rawText ? 'Legenda informada pelo usuário: ' + rawText : '')
+          'Você é um extrator especialista de comprovantes financeiros brasileiros (Pix, boletos, TED, transferências bancárias, cartões, recibos).\n' +
+          'Analise com atenção máxima todos os detalhes visuais do comprovante e extraia com exatidão:\n' +
+          '1. VALOR TOTAL (em R$):\n' +
+          '2. DATA E HORA da transação:\n' +
+          '3. TIPO DA OPERAÇÃO: Pix Enviado, Pix Recebido, Pagamento de Boleto, Compra no Débito, Compra no Crédito, Transferência TED/DOC ou Saque:\n' +
+          '4. INSTITUIÇÃO OU BANCO PAGADOR/ORIGEM (ex: NuBank, Banco Inter, Sicredi, Caixa Econômica, Itaú, Bradesco, Santander):\n' +
+          '5. INSTITUIÇÃO OU BANCO RECEBEDOR:\n' +
+          '6. NOME DO FAVORECIDO / DESTINATÁRIO (completo ou razão social / nome fantasia):\n' +
+          '7. CNPJ OU CPF DO FAVORECIDO:\n' +
+          '8. NOME DO PAGADOR:\n' +
+          '9. IDENTIFICADOR OU ID DE TRANSAÇÃO PIX / CÓDIGO DE AUTENTICAÇÃO:\n' +
+          (rawText ? '10. LEGENDA / TEXTO ENVIADO JUNTO: ' + rawText : '')
 
-        // 1ª tentativa: base64 (se disponível)
+        // 1ª tentativa: via imagem base64
         if (base64Data) {
           try {
             const dataUri = 'data:' + mimeType + ';base64,' + base64Data
@@ -952,7 +1038,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
                 {
                   role: 'system',
                   content:
-                    'Extraia com precisão absoluta os dados de comprovantes financeiros brasileiros.',
+                    'Você é um extrator de comprovantes bancários brasileiros. Transcreva com fidelidade cada campo encontrado.',
                 },
                 {
                   role: 'user',
@@ -971,7 +1057,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
           }
         }
 
-        // 2ª tentativa: URL direta caso base64 tenha falhado
+        // 2ª tentativa: via URL direta se base64 não funcionou
         if (!ocrExtractedText) {
           try {
             const vRes2 = $ai.chat({
@@ -980,7 +1066,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
                 {
                   role: 'system',
                   content:
-                    'Extraia com precisão absoluta os dados de comprovantes financeiros brasileiros.',
+                    'Você é um extrator de comprovantes bancários brasileiros. Transcreva com fidelidade cada campo encontrado.',
                 },
                 {
                   role: 'user',
@@ -1004,14 +1090,14 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     }
 
     if (!ocrExtractedText && !rawText) {
-      // Se a imagem não pôde ser lida por visão computacional e não veio texto
+      // Se o gateway de IA não suportar visão direta para a foto, orientar o usuário com clareza
       sendTelegramMsg(
         chatId,
         '📷 Recebi a imagem do seu comprovante!\n\n' +
-          '⚠️ Não foi possível extrair o texto automaticamente desta foto (imagem pode estar com baixa resolução ou formato não suportado).\n\n' +
-          '💬 Por favor, digite os dados da transação em texto, por exemplo:\n' +
+          '💡 Por favor, envie uma legenda ou mensagem curta com os dados principais para eu lançar de imediato. Exemplo:\n' +
           '👉 "CPFL Energia, R$ 184,32, NuBank"\n' +
-          'Ou envie: "R$ 50,00 no almoço"',
+          '👉 "Pix padaria 25,50 Inter"\n\n' +
+          'Com essa mensagem, eu identifico tudo e registro para você!',
       )
       return e.json(200, { ok: true })
     }
@@ -1042,38 +1128,64 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     bandeira: c.getString('bandeira'),
   }))
 
+  let grupoList = []
+  try {
+    grupoList = $app.findRecordsByFilter('contexto_grupos', '', 'ordem,nome', 50, 0)
+  } catch (_) {}
+  const grupoNames = grupoList.map((g) => ({
+    id: g.id,
+    nome: g.getString('nome'),
+  }))
+
   const savedContexto = session ? session.getString('contexto_nome') : ''
 
   const extractionPrompt =
-    'Você é o motor de classificação financeira do GKza.\n' +
-    'Analise as informações abaixo (OCR da imagem e/ou texto digitado) e extraia um objeto JSON com os dados do lançamento:\n\n' +
-    (ocrExtractedText ? 'DADOS DO COMPROVANTE (OCR):\n' + ocrExtractedText + '\n\n' : '') +
-    (rawText ? 'TEXTO/LEGENDA DO USUÁRIO:\n' + rawText + '\n\n' : '') +
+    'Você é o motor de classificação e estruturação financeira do ERP GKza.\n' +
+    'Analise todas as informações abaixo (OCR de comprovante brasileiro Pix/Boleto/Cartão e/ou texto do usuário) e extraia um objeto JSON rigoroso para lançamento financeiro:\n\n' +
+    (ocrExtractedText
+      ? '=== OCR / DETALHES DO COMPROVANTE ===\n' + ocrExtractedText + '\n\n'
+      : '') +
+    (rawText ? '=== TEXTO / LEGENDA DO USUÁRIO ===\n' + rawText + '\n\n' : '') +
     'CONTEXTO ATIVO SALVO: ' +
     (savedContexto || 'Nenhum') +
     '\n\n' +
-    'LISTA DE CATEGORIAS DISPONÍVEIS NO SISTEMA:\n' +
+    'LISTA DE CATEGORIAS CADASTRADAS NO GKZA:\n' +
     JSON.stringify(catNames) +
     '\n\n' +
-    'LISTA DE CONTAS DISPONÍVEIS NO SISTEMA:\n' +
+    'LISTA DE CONTAS BANCÁRIAS / CARTÕES CADASTRADOS NO GKZA:\n' +
     JSON.stringify(contaNames) +
     '\n\n' +
-    'REGRAS:\n' +
-    '1. Retorne ESTRITAMENTE um objeto JSON válido, sem texto antes ou depois, sem markdown no formato:\n' +
+    'LISTA DE CONTEXTOS / GRUPOS CADASTRADOS NO GKZA:\n' +
+    JSON.stringify(grupoNames) +
+    '\n\n' +
+    'DIRETRIZES BRASILEIRAS DE CLASSIFICAÇÃO:\n' +
+    '1. TIPO: Se o comprovante indicar "Pix enviado", "Pagamento Efetuado", "Transferência Realizada", "Débito", ou se for conta de luz/água/fornecedor/aluguel, é "despesa". Se indicar "Pix Recebido", "Crédito em Conta" ou venda, é "receita".\n' +
+    '2. DESCRIÇÃO: Priorize o NOME DO FAVORECIDO / DESTINATÁRIO (ex: "CPFL Energia", "Padaria Central", "Supermercado Tauste", "João Silva"). Se for recebimento, o nome do pagador/cliente.\n' +
+    '3. VALOR: Número decimal positivo em Reais (ex: 184.32). Extraia o valor principal pago.\n' +
+    '4. DATA: Data da transação no formato "YYYY-MM-DD" (se o comprovante tiver data, use ela; caso contrário hoje).\n' +
+    '5. CONTA_ID: Identifique a instituição financeira emissora (ex: NuBank / Nubank Pagamentos S.A. -> conta NuBank; Banco Inter -> conta Banco Inter; Sicredi -> conta Sicred; Caixa -> Caixa Principal). Selecione o "id" exato da lista de contas acima. Se tiver forte indício, preencha.\n' +
+    '6. CATEGORIA_ID: Associe o favorecido/finalidade à melhor categoria da lista. Ex:\n' +
+    '   - CPFL, Enel, Sabesp, Vivo, Claro, Internet -> "Utilities"\n' +
+    '   - Aluguel, Imobiliária -> "Aluguel"\n' +
+    '   - Fornecedor de mercadorias, insumos, comércio -> "Fornecedores"\n' +
+    '   - Impostos, DARF, DAS, Simples Nacional, FGTS -> "Impostos"\n' +
+    '   - Mercado Livre, Shopee, Amazon -> "Vendas Marketplace" ou "Comissões" (se custo)\n' +
+    '   - Gasolina, Correios, Transporte -> "Frete" ou similar\n' +
+    '   - Anúncios, Meta Ads, Google Ads -> "Marketing"\n' +
+    '   Preencha o "id" exato da lista de categorias caso haja correspondência lógica.\n' +
+    '7. CONTEXTO_NOME: Se o texto ou comprovante fizer referência explícita a algum grupo da lista de contextos (ex: "Casa", "Padaria Estrela Dourada", "Pessoal (CPF)", "Filhas"), preencha o nome exato. Se houver CONTEXTO ATIVO SALVO, preserve-o.\n\n' +
+    'RETORNE ESTRITAMENTE UM JSON NO FORMATO:\n' +
     '{\n' +
     '  "tipo": "despesa" | "receita" | null,\n' +
     '  "descricao": string ou null,\n' +
     '  "valor": number ou null,\n' +
     '  "data": "YYYY-MM-DD" ou null,\n' +
-    '  "categoria_id": string (id exato da categoria acima) ou null,\n' +
-    '  "conta_id": string (id exato da conta acima) ou null,\n' +
+    '  "categoria_id": string ou null,\n' +
+    '  "conta_id": string ou null,\n' +
+    '  "contexto_nome": string ou null,\n' +
     '  "observacoes": string,\n' +
-    '  "status": "pago" | "pendente"\n' +
-    '}\n' +
-    '2. Se tiver certeza da categoria pela lista, preencha categoria_id. Se for incerto ou duvidoso, use null.\n' +
-    '3. Se identificar a conta bancária/cartão (ex: NuBank, Banco Inter, Sicred, Caixa), preencha conta_id. Se for incerto, use null.\n' +
-    '4. Se o tipo for evidente (Pix enviado, conta paga = despesa; Pix recebido = receita), preencha. Se incerto, use null.\n' +
-    '5. Em valor, use somente número com ponto decimal (ex: 184.32). Se não encontrar, use null.'
+    '  "status": "pago"\n' +
+    '}'
 
   let parsedDraft = null
   try {
@@ -1082,7 +1194,8 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       messages: [
         {
           role: 'system',
-          content: 'Você é um analisador JSON estrito. Responda apenas com o objeto JSON pedido.',
+          content:
+            'Você é um analisador JSON estrito para o ERP GKza. Responda apenas com o objeto JSON pedido, sem markdown e sem preâmbulo.',
         },
         {
           role: 'user',
@@ -1112,44 +1225,140 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     console.log('Error in LLM JSON extraction:', errJson.message)
   }
 
+  // Extração determinística de fallback se o LLM não extraiu o valor mas havia texto numérico
+  let fallbackValor = null
+  if (rawText) {
+    const matchReais =
+      rawText.match(/R\$\s*([0-9.,]+)/i) || rawText.match(/\b([0-9]+[.,][0-9]{2})\b/)
+    if (matchReais && matchReais[1]) {
+      let vStr = matchReais[1]
+      if (vStr.includes(',') && vStr.includes('.')) {
+        vStr = vStr.replace(/\./g, '').replace(',', '.')
+      } else if (vStr.includes(',')) {
+        vStr = vStr.replace(',', '.')
+      }
+      const p = parseFloat(vStr)
+      if (!isNaN(p) && p > 0) fallbackValor = p
+    }
+  }
+
+  // Identificação determinística de conta por palavras-chave se não veio do LLM
+  let fallbackContaId = null
+  const combinedText = ((ocrExtractedText || '') + ' ' + (rawText || '')).toLowerCase()
+  for (let k = 0; k < contaNames.length; k++) {
+    const cItem = contaNames[k]
+    const cLower = cItem.nome.toLowerCase()
+    if (combinedText.includes(cLower)) {
+      fallbackContaId = cItem.id
+      break
+    }
+    if (
+      cLower.includes('nubank') &&
+      (combinedText.includes('nu') ||
+        combinedText.includes('nubank') ||
+        combinedText.includes('nu pagamentos'))
+    ) {
+      fallbackContaId = cItem.id
+      break
+    }
+    if (
+      cLower.includes('inter') &&
+      (combinedText.includes('inter') || combinedText.includes('banco inter'))
+    ) {
+      fallbackContaId = cItem.id
+      break
+    }
+    if (
+      cLower.includes('sicred') &&
+      (combinedText.includes('sicredi') || combinedText.includes('sicred'))
+    ) {
+      fallbackContaId = cItem.id
+      break
+    }
+  }
+
+  // Identificação determinística de tipo por palavras-chave
+  let fallbackTipo = null
+  if (
+    combinedText.includes('pix enviado') ||
+    combinedText.includes('pagamento efetuado') ||
+    combinedText.includes('pago com sucesso') ||
+    combinedText.includes('gastei') ||
+    combinedText.includes('comprovante de transferência enviada')
+  ) {
+    fallbackTipo = 'despesa'
+  } else if (
+    combinedText.includes('pix recebido') ||
+    combinedText.includes('recebi') ||
+    combinedText.includes('transferência recebida')
+  ) {
+    fallbackTipo = 'receita'
+  }
+
+  const finalTipo = parsedDraft && parsedDraft.tipo ? parsedDraft.tipo : fallbackTipo || 'despesa'
+  const finalDescricao =
+    parsedDraft && parsedDraft.descricao
+      ? parsedDraft.descricao.trim()
+      : rawText || 'Lançamento via Telegram'
+  const finalValor =
+    parsedDraft && parsedDraft.valor && !isNaN(parseFloat(parsedDraft.valor))
+      ? parseFloat(parsedDraft.valor)
+      : fallbackValor || null
+  const finalData =
+    parsedDraft && parsedDraft.data ? parsedDraft.data : new Date().toISOString().slice(0, 10)
+  const finalCategoria = parsedDraft && parsedDraft.categoria_id ? parsedDraft.categoria_id : null
+  const finalConta =
+    parsedDraft && parsedDraft.conta_id ? parsedDraft.conta_id : fallbackContaId || null
+
+  let finalContexto = savedContexto || ''
+  if (!finalContexto && parsedDraft && parsedDraft.contexto_nome) {
+    finalContexto = parsedDraft.contexto_nome
+  }
+
+  // Se o draft anterior já tinha dados que não vieram nesta mensagem (merge inteligente em vez de resetar)
   const draft = {
-    tipo: parsedDraft && parsedDraft.tipo ? parsedDraft.tipo : null,
-    descricao: parsedDraft && parsedDraft.descricao ? parsedDraft.descricao : '',
-    valor: parsedDraft && parsedDraft.valor ? parseFloat(parsedDraft.valor) : null,
-    data:
-      parsedDraft && parsedDraft.data ? parsedDraft.data : new Date().toISOString().slice(0, 10),
-    categoria: parsedDraft && parsedDraft.categoria_id ? parsedDraft.categoria_id : null,
-    conta: parsedDraft && parsedDraft.conta_id ? parsedDraft.conta_id : null,
+    tipo: finalTipo || currentDraft.tipo || null,
+    descricao:
+      finalDescricao && finalDescricao !== 'Lançamento via Telegram'
+        ? finalDescricao
+        : currentDraft.descricao || finalDescricao || '',
+    valor: finalValor !== null && finalValor > 0 ? finalValor : currentDraft.valor || null,
+    data: finalData || currentDraft.data || new Date().toISOString().slice(0, 10),
+    categoria: finalCategoria || currentDraft.categoria || null,
+    conta: finalConta || currentDraft.conta || null,
     status: parsedDraft && parsedDraft.status ? parsedDraft.status : 'pago',
     observacoes:
       parsedDraft && parsedDraft.observacoes
         ? parsedDraft.observacoes
         : 'Registrado via Telegram GKza',
-    contexto_nome: savedContexto || '',
-    contexto_definido: !!savedContexto,
+    contexto_nome: finalContexto || currentDraft.contexto_nome || '',
+    contexto_definido: !!(finalContexto || currentDraft.contexto_nome),
   }
 
-  // Se veio da imagem o OCR detalhado, guardar no rascunho
   if (ocrExtractedText) {
     draft.ocr_resumo = ocrExtractedText.slice(0, 300)
   }
 
-  // Notificar o usuário do que foi compreendido
+  // Notificar o usuário com clareza do que foi identificado
   if (draft.descricao && draft.valor) {
-    const valFmt = 'R$ ' + draft.valor.toFixed(2).replace('.', ',')
+    const valFmt = 'R$ ' + Number(draft.valor).toFixed(2).replace('.', ',')
+    const tipoBadge = draft.tipo === 'receita' ? '🟢 Receita' : '🔴 Despesa'
     sendTelegramMsg(
       chatId,
-      '🔎 Identifiquei: ' +
+      '🔎 Identifiquei no comprovante:\n' +
+        '• ' +
+        tipoBadge +
+        '\n' +
+        '• ' +
         draft.descricao +
-        ' (' +
-        valFmt +
-        ')' +
-        (draft.tipo ? ' • ' + (draft.tipo === 'receita' ? '🟢 Receita' : '🔴 Despesa') : ''),
+        '\n' +
+        '• ' +
+        valFmt,
     )
   }
 
   // Salvar o draft na sessão e acionar o fluxo de opções (rádios) para o que faltar
-  saveSession(chatId, 'processing', draft, 'next', savedContexto)
+  saveSession(chatId, 'processing', draft, 'next', finalContexto)
   checkNextStep(chatId, draft)
 
   return e.json(200, { ok: true })
