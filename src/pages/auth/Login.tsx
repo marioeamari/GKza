@@ -24,17 +24,17 @@ export default function Login() {
     setError('')
     setLoading(true)
     try {
-      // Cria uma promessa com timeout de 10s para a tentativa de login
+      // Permite tempo adequado considerando retry automático em caso de instabilidade
       const loginPromise = login(email, password)
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(
           () =>
             reject(
               new Error(
-                'O servidor demorou muito para responder. Verifique sua conexão e tente novamente.',
+                'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.',
               ),
             ),
-          10000,
+          15000,
         ),
       )
       await Promise.race([loginPromise, timeoutPromise])
@@ -45,9 +45,7 @@ export default function Login() {
       setError(
         apiMessage(
           nextError,
-          nextError instanceof Error
-            ? nextError.message
-            : 'Não foi possível entrar. Verifique suas credenciais e tente novamente.',
+          'Não foi possível entrar. Verifique suas credenciais e tente novamente.',
         ),
       )
     } finally {

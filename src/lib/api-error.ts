@@ -12,12 +12,44 @@ const messages: Record<string, string> = {
   'Must be a valid email address.': 'Informe um e-mail válido.',
 }
 
+export function isNetworkOrServerUnavailable(error: unknown): boolean {
+  if (error instanceof ClientResponseError) {
+    // status 0 indica falha de rede/CORS/Failed to fetch; 502/503/504 indicam gateway/servidor indisponível
+    if (
+      error.status === 0 ||
+      error.status === 502 ||
+      error.status === 503 ||
+      error.status === 504
+    ) {
+      return true
+    }
+  }
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase()
+    return (
+      msg.includes('failed to fetch') ||
+      msg.includes('networkerror') ||
+      msg.includes('network request failed') ||
+      msg.includes('load failed') ||
+      msg.includes('503') ||
+      msg.includes('service temporarily unavailable') ||
+      msg.includes('tempo limite excedido')
+    )
+  }
+  return false
+}
+
 export function apiMessage(
   error: unknown,
   fallback = 'Não foi possível concluir a ação. Tente novamente.',
 ) {
+  if (isNetworkOrServerUnavailable(error)) {
+    return 'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.'
+  }
+
   if (!(error instanceof ClientResponseError))
     return error instanceof Error ? error.message : fallback
+
   const responseMessage = typeof error.response?.message === 'string' ? error.response.message : ''
   if (messages[responseMessage]) return messages[responseMessage]
   const details = error.response?.data
@@ -25,7 +57,9 @@ export function apiMessage(
     const first = Object.values(details)[0] as { message?: string } | undefined
     if (first?.message) return messages[first.message] || first.message
   }
-  return error.status === 0 ? 'Sem conexão com o servidor. Verifique sua internet.' : fallback
+  return error.status === 0
+    ? 'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.'
+    : fallback
 }
 
 export function apiFieldErrors(error: unknown): FormErrors {

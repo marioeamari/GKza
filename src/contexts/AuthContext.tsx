@@ -91,14 +91,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       login: async (email, password) => {
-        const result = await pb
-          .collection<UserRecord>('users')
-          .authWithPassword(email.trim(), password)
-        if (!result.record.active) {
-          pb.authStore.clear()
-          throw new Error('Este acesso está desativado. Fale com um administrador.')
+        const trimmedEmail = email.trim()
+        const maxRetries = 2
+        let lastError: unknown
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          try {
+            const result = await pb
+              .collection<UserRecord>('users')
+              .authWithPassword(trimmedEmail, password)
+
+            if (!result.record.active) {
+              pb.authStore.clear()
+              throw new Error('Este acesso está desativado. Fale com um administrador.')
+            }
+            return result
+          } catch (err) {
+            lastError = err
+
+            // Não tenta novamente se for erro de credenciais inválidas (400) ou usuário desativado
+            const isClientError =
+              err instanceof Error &&
+              (err.message.includes('Este acesso está desativado') ||
+                err.message.includes('Failed to authenticate'))
+
+            if (isClientError || attempt === maxRetries) {
+              throw err
+            }
+
+            // Espera breve com backoff antes da próxima tentativa em caso de erro transitório de rede/503
+            await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)))
+          }
         }
-        return result
+
+        throw lastError
       },
       signUp: async ({ name, email, password }) => {
         await pb.collection<UserRecord>('users').create({
