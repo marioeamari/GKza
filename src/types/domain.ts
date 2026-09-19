@@ -254,6 +254,34 @@ export interface ContextoGrupoComMembros extends ContextoGrupo {
   contas: Conta[]
 }
 
+export type TelegramRegistroStatus = 'pendente' | 'aprovado' | 'descartado'
+
+export interface TelegramRegistroPendente extends RecordModel {
+  descricao: string
+  valor: number
+  tipo: TransactionType
+  data: string
+  status: TelegramRegistroStatus
+  conta?: string
+  categoria?: string
+  empresa?: string
+  pessoa?: string
+  contexto_nome?: string
+  telegram_chat_id?: string
+  telegram_message_id?: string
+  telegram_origem?: string
+  comprovante_texto?: string
+  observacoes?: string
+  lancamento_gerado?: string
+  expand?: {
+    conta?: Conta
+    categoria?: Categoria
+    empresa?: Empresa
+    pessoa?: Pessoa
+    lancamento_gerado?: Lancamento
+  }
+}
+
 export interface PeriodRange {
   key: 'current' | 'previous' | '90days'
   label: string

@@ -5,6 +5,7 @@ import { currencyInput, parseCurrency } from '@/lib/format'
 interface MoneyInputProps {
   value: number
   onChange: (value: number) => void
+  onBlur?: () => void
   id?: string
   disabled?: boolean
   placeholder?: string

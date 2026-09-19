@@ -239,27 +239,29 @@ export function TelegramIntegrationCard() {
 
         <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs space-y-2 text-foreground/80 leading-relaxed">
           <p className="font-semibold text-foreground flex items-center gap-1.5">
-            💡 Como funciona a automação via Telegram:
+            💡 Como funciona a automação via Telegram (Novo Fluxo com Registros Pendentes):
           </p>
           <ul className="list-disc pl-4 space-y-1">
             <li>
-              <strong>Modo Rápido Direto:</strong> ao enviar foto ou texto de comprovante com dados
-              essenciais identificados (tipo, valor, data e descrição), o lançamento é criado
-              diretamente no sistema sem burocracia ou perguntas passo a passo.
+              <strong>Extração direta com resumo:</strong> ao enviar foto ou texto de comprovante, o
+              bot extrai os dados e responde com um resumo completo e botões{' '}
+              <strong>✅ Confirmar</strong> e <strong>❌ Descartar</strong>, sem perguntas passo a
+              passo.
             </li>
             <li>
-              <strong>Conferência no Sistema Web:</strong> a conferência, edição ou exclusão do
-              lançamento é feita diretamente no sistema web em <em>/despesas</em> ou{' '}
-              <em>/lancamentos</em>.
+              <strong>Registro Pendente:</strong> ao confirmar no Telegram, o bot cria um{' '}
+              <em>Registro Pendente</em> em <strong>/lancamentos (Aba Pendentes)</strong> sem lançar
+              direto no caixa.
             </li>
             <li>
-              <strong>Opções interativas sob demanda:</strong> caso a extração falhe ou faltem dados
-              críticos (valor ou data), o bot entra no fluxo com botões inline interativos.
+              <strong>Aprovação no Sistema:</strong> o usuário revisa o comprovante no sistema web,
+              podendo ajustar categoria, conta bancária, data e valor antes de efetivar o lançamento
+              real.
             </li>
             <li>
-              <strong>Anti-duplicidade inteligente:</strong> se houver lançamento no mesmo dia com o
-              mesmo valor e tipo, o bot alerta no Telegram e pede confirmação antes de gravar
-              duplicado.
+              <strong>Verificação Anti-duplicidade:</strong> ao aprovar na tela web, o sistema avisa
+              caso já exista lançamento idêntico na mesma data, permitindo aprovar ou descartar com
+              segurança.
             </li>
             <li>
               <strong>Troca de contexto:</strong> use o comando <code>/contexto &lt;nome&gt;</code>{' '}

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-19T04:24:17.237Z",
+  "generatedAt": "2026-09-19T04:38:44.996Z",
   "collections": [
     {
       "name": "users",
@@ -1419,6 +1419,141 @@
       ],
       "indexes": [
         "CREATE UNIQUE INDEX idx_telegram_sessions_chat_id ON telegram_sessions (chat_id)"
+      ]
+    },
+    {
+      "name": "telegram_registros_pendentes",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "valor",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "tipo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["receita", "despesa"]
+        },
+        {
+          "name": "data",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["pendente", "aprovado", "descartado"]
+        },
+        {
+          "name": "conta",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "contas"
+        },
+        {
+          "name": "categoria",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "categorias"
+        },
+        {
+          "name": "empresa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "empresas"
+        },
+        {
+          "name": "pessoa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "pessoas"
+        },
+        {
+          "name": "contexto_nome",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "telegram_chat_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "telegram_message_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "telegram_origem",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "comprovante_texto",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "lancamento_gerado",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "lancamentos"
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_tel_reg_pend_status ON telegram_registros_pendentes (status)",
+        "CREATE INDEX idx_tel_reg_pend_data ON telegram_registros_pendentes (data)",
+        "CREATE INDEX idx_tel_reg_pend_chat ON telegram_registros_pendentes (telegram_chat_id)"
       ]
     }
   ]
