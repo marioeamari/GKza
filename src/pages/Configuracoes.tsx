@@ -2,6 +2,7 @@ import { Building2, CalendarDays, CircleUserRound, Cloud, Coins } from 'lucide-r
 import { Link } from 'react-router-dom'
 import { PageHeader } from '@/components/PageHeader'
 import { ProfileSettings } from '@/components/settings/ProfileSettings'
+import { TelegramIntegrationCard } from '@/components/settings/TelegramIntegrationCard'
 import { UserManagement } from '@/components/settings/UserManagement'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -18,6 +19,7 @@ export default function Configuracoes() {
       />
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,.8fr)]">
         <div className="space-y-5">
+          <TelegramIntegrationCard />
           <ProfileSettings />
           {user?.role === 'admin' && <UserManagement />}
           <Card>
