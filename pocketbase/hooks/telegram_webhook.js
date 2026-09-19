@@ -106,7 +106,11 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       if (!raw) return {}
       if (typeof raw === 'string') {
         try {
-          return JSON.parse(raw)
+          const parsedStr = JSON.parse(raw)
+          if (parsedStr && typeof parsedStr === 'object' && !Array.isArray(parsedStr)) {
+            return parsedStr
+          }
+          return {}
         } catch (_) {
           return {}
         }
@@ -133,9 +137,15 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
         session.set('chat_id', String(chatId))
       }
       session.set('state', state || 'idle')
-      // Garantir que draftData seja serializável e salvo limpo
-      const safeDraft =
-        draftData && typeof draftData === 'object' && !Array.isArray(draftData) ? draftData : {}
+      // Garantir que draftData seja um clone serializável JSON sem referências Go
+      let safeDraft = {}
+      if (draftData && typeof draftData === 'object' && !Array.isArray(draftData)) {
+        try {
+          safeDraft = JSON.parse(JSON.stringify(draftData))
+        } catch (_) {
+          safeDraft = Object.assign({}, draftData)
+        }
+      }
       session.set('draft_data', safeDraft)
       session.set('pending_question', pendingQuestion || '')
       if (contextoNome !== undefined) {
@@ -256,8 +266,9 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     }))
 
     if (items.length === 0) {
-      // Se não houver categoria cadastrada
-      draft.categoria = ''
+      // Se não houver categoria cadastrada, marcar como vazia mas respondida e seguir
+      draft.categoria = 'skip'
+      saveSession(chatId, 'processing', draft, 'categoria')
       checkNextStep(chatId, draft)
       return
     }
@@ -305,7 +316,8 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     })
 
     if (items.length === 0) {
-      draft.conta = ''
+      draft.conta = 'skip'
+      saveSession(chatId, 'processing', draft, 'conta')
       checkNextStep(chatId, draft)
       return
     }
@@ -418,8 +430,8 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       rec.set('tipo', draft.tipo || 'despesa')
       rec.set('data', dataIso)
       rec.set('status', draft.status || 'pago')
-      if (draft.conta) rec.set('conta', draft.conta)
-      if (draft.categoria) rec.set('categoria', draft.categoria)
+      if (draft.conta && draft.conta !== 'skip') rec.set('conta', draft.conta)
+      if (draft.categoria && draft.categoria !== 'skip') rec.set('categoria', draft.categoria)
       if (draft.empresa) rec.set('empresa', draft.empresa)
       if (draft.pessoa) rec.set('pessoa', draft.pessoa)
 
@@ -490,35 +502,43 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     }
   }
 
-  // Máquina de estados: verifica o próximo dado pendente
+  // Máquina de estados: verifica o próximo dado pendente na ordem fixa:
+  // tipo → categoria → conta/cartão → contexto → valor → descrição → data → confirmação
   const checkNextStep = (chatId, draft) => {
-    // 1. Tipo
+    // 1. Tipo (despesa ou receita)
     if (!draft.tipo) {
       askTipo(chatId, draft)
       return
     }
 
-    // 2. Categoria (lista)
+    // 2. Categoria (botões do sistema)
     if (!draft.categoria) {
       askCategoria(chatId, draft, 0)
       return
     }
 
-    // 3. Conta (lista)
+    // 3. Conta / Cartão (botões do sistema)
     if (!draft.conta) {
       askConta(chatId, draft, 0)
       return
     }
 
-    // 4. Valor (texto livre)
-    if (!draft.valor) {
+    // 4. Contexto / Grupo (se ainda não definido no draft ou na sessão)
+    if (!draft.contexto_definido && !draft.contexto_nome) {
+      askContexto(chatId, draft, 0)
+      return
+    }
+
+    // 5. Valor (numérico)
+    const numVal = parseFloat(draft.valor)
+    if (!numVal || isNaN(numVal) || numVal <= 0) {
       saveSession(chatId, 'awaiting_valor', draft, 'valor')
       sendTelegramMsg(chatId, '💬 Por favor, digite o VALOR em reais (ex: 184,32 ou 250):')
       return
     }
 
-    // 5. Descrição (texto livre)
-    if (!draft.descricao) {
+    // 6. Descrição (texto)
+    if (!draft.descricao || draft.descricao.trim() === '') {
       saveSession(chatId, 'awaiting_descricao', draft, 'descricao')
       sendTelegramMsg(
         chatId,
@@ -527,24 +547,37 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       return
     }
 
-    // Todos os dados preenchidos: pedir confirmação final com botões
-    let contaNome = draft.conta
-    try {
-      const cRec = $app.findRecordById('contas', draft.conta)
-      contaNome = cRec.getString('nome')
-    } catch (_) {}
+    // 7. Data (se não preenchida, padrão Hoje)
+    if (!draft.data) {
+      draft.data = new Date().toISOString().slice(0, 10)
+    }
 
-    let catNome = draft.categoria
-    try {
-      const kRec = $app.findRecordById('categorias', draft.categoria)
-      catNome = kRec.getString('nome')
-    } catch (_) {}
+    // 8. Todos os campos preenchidos: exibir confirmação com todos os dados
+    let contaNome = 'Padrão / Geral'
+    if (draft.conta && draft.conta !== 'skip') {
+      try {
+        const cRec = $app.findRecordById('contas', draft.conta)
+        contaNome = cRec.getString('nome')
+      } catch (_) {
+        contaNome = draft.conta
+      }
+    }
 
-    const vNum = parseFloat(draft.valor) || 0
-    const valorFmt = 'R$ ' + vNum.toFixed(2).replace('.', ',')
+    let catNome = 'Geral'
+    if (draft.categoria && draft.categoria !== 'skip') {
+      try {
+        const kRec = $app.findRecordById('categorias', draft.categoria)
+        catNome = kRec.getString('nome')
+      } catch (_) {
+        catNome = draft.categoria
+      }
+    }
+
+    const valorFmt = 'R$ ' + numVal.toFixed(2).replace('.', ',')
     const tipoLabel = draft.tipo === 'receita' ? '🟢 Receita' : '🔴 Despesa'
+    const dataFmt = draft.data ? draft.data.slice(0, 10).split('-').reverse().join('/') : 'Hoje'
 
-    const confirmMsg =
+    let confirmMsg =
       '📋 Por favor, confirme os dados antes do lançamento:\n\n' +
       '• Tipo: ' +
       tipoLabel +
@@ -562,9 +595,14 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       contaNome +
       '\n' +
       '• Data: ' +
-      (draft.data ? draft.data.slice(0, 10).split('-').reverse().join('/') : 'Hoje') +
-      '\n\n' +
-      'Deseja registrar agora?'
+      dataFmt +
+      '\n'
+
+    if (draft.contexto_nome) {
+      confirmMsg += '• Contexto: ' + draft.contexto_nome + '\n'
+    }
+
+    confirmMsg += '\nDeseja registrar agora?'
 
     const confirmKb = {
       inline_keyboard: [
@@ -575,7 +613,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       ],
     }
 
-    saveSession(chatId, 'awaiting_confirmation', draft, 'confirmation')
+    saveSession(chatId, 'awaiting_confirmation', draft, 'confirmation', draft.contexto_nome || '')
     sendTelegramMsg(chatId, confirmMsg, confirmKb)
   }
 
@@ -650,8 +688,24 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
 
     // Tratar seleções de campo
     if (cbData.startsWith('tipo:')) {
-      draft.tipo = cbData.replace('tipo:', '')
-      saveSession(cbChatId, session ? session.getString('state') : 'processing', draft, 'tipo')
+      const chosenTipo = cbData.replace('tipo:', '')
+      const previousTipo = draft.tipo
+      draft.tipo = chosenTipo
+
+      // Se o usuário trocou o tipo (ex: de despesa para receita), a categoria anterior pode ser inválida para o novo tipo
+      if (draft.categoria && previousTipo && previousTipo !== chosenTipo) {
+        try {
+          const cRec = $app.findRecordById('categorias', draft.categoria)
+          if (cRec.getString('tipo') !== chosenTipo) {
+            draft.categoria = null
+          }
+        } catch (_) {
+          draft.categoria = null
+        }
+      }
+
+      // Persistir na sessão ANTES de calcular o próximo passo
+      saveSession(cbChatId, 'processing', draft, 'tipo')
       sendTelegramMsg(
         cbChatId,
         '✔️ Tipo selecionado: ' + (draft.tipo === 'receita' ? 'Receita' : 'Despesa'),
@@ -662,7 +716,8 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
 
     if (cbData.startsWith('cat:')) {
       draft.categoria = cbData.replace('cat:', '')
-      saveSession(cbChatId, session ? session.getString('state') : 'processing', draft, 'categoria')
+      // Persistir na sessão ANTES de calcular o próximo passo
+      saveSession(cbChatId, 'processing', draft, 'categoria')
       let catNome = draft.categoria
       try {
         const cRec = $app.findRecordById('categorias', draft.categoria)
@@ -675,7 +730,8 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
 
     if (cbData.startsWith('conta:')) {
       draft.conta = cbData.replace('conta:', '')
-      saveSession(cbChatId, session ? session.getString('state') : 'processing', draft, 'conta')
+      // Persistir na sessão ANTES de calcular o próximo passo
+      saveSession(cbChatId, 'processing', draft, 'conta')
       let contaNome = draft.conta
       try {
         const cRec = $app.findRecordById('contas', draft.conta)
@@ -691,26 +747,16 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       if (ctxId === 'none') {
         draft.contexto_id = ''
         draft.contexto_nome = ''
-        saveSession(
-          cbChatId,
-          session ? session.getString('state') : 'processing',
-          draft,
-          'contexto',
-          '',
-        )
+        draft.contexto_definido = true
+        saveSession(cbChatId, 'processing', draft, 'contexto', '')
         sendTelegramMsg(cbChatId, '✔️ Contexto selecionado: Geral')
       } else {
         draft.contexto_id = ctxId
+        draft.contexto_definido = true
         try {
           const gRec = $app.findRecordById('contexto_grupos', ctxId)
           draft.contexto_nome = gRec.getString('nome')
-          saveSession(
-            cbChatId,
-            session ? session.getString('state') : 'processing',
-            draft,
-            'contexto',
-            draft.contexto_nome,
-          )
+          saveSession(cbChatId, 'processing', draft, 'contexto', draft.contexto_nome)
           sendTelegramMsg(cbChatId, '✔️ Contexto selecionado: ' + draft.contexto_nome)
         } catch (_) {}
       }
@@ -839,7 +885,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
   if (currentState === 'awaiting_descricao') {
     currentDraft.descricao = rawText
     saveSession(chatId, 'processing', currentDraft, 'descricao')
-    sendTelegramMsg(chatId, '✔️ Descrição: ' + rawText)
+    sendTelegramMsg(chatId, '✔️ Descrição registrada: ' + rawText)
     checkNextStep(chatId, currentDraft)
     return e.json(200, { ok: true })
   }
@@ -1080,6 +1126,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
         ? parsedDraft.observacoes
         : 'Registrado via Telegram GKza',
     contexto_nome: savedContexto || '',
+    contexto_definido: !!savedContexto,
   }
 
   // Se veio da imagem o OCR detalhado, guardar no rascunho
