@@ -98,6 +98,32 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     return null
   }
 
+  // Helper seguro para ler draft_data como objeto JS nativo (evita Go slice/map proxy TypeError)
+  const getDraftFromSession = (session) => {
+    if (!session) return {}
+    try {
+      let raw = session.get('draft_data')
+      if (!raw) return {}
+      if (typeof raw === 'string') {
+        try {
+          return JSON.parse(raw)
+        } catch (_) {
+          return {}
+        }
+      }
+      // Se for objeto retornado pelo runtime do PocketBase, clonar via JSON para garantir JS Object puro
+      const jsonStr = JSON.stringify(raw)
+      const parsed = JSON.parse(jsonStr)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed
+      }
+      return {}
+    } catch (e) {
+      console.log('Error reading draft_data from session:', e.message)
+      return {}
+    }
+  }
+
   const saveSession = (chatId, state, draftData, pendingQuestion, contextoNome) => {
     try {
       let session = getSession(chatId)
@@ -107,7 +133,10 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
         session.set('chat_id', String(chatId))
       }
       session.set('state', state || 'idle')
-      session.set('draft_data', draftData || {})
+      // Garantir que draftData seja serializável e salvo limpo
+      const safeDraft =
+        draftData && typeof draftData === 'object' && !Array.isArray(draftData) ? draftData : {}
+      session.set('draft_data', safeDraft)
       session.set('pending_question', pendingQuestion || '')
       if (contextoNome !== undefined) {
         session.set('contexto_nome', contextoNome || '')
@@ -214,6 +243,13 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       cats = $app.findRecordsByFilter('categorias', filter, 'nome', 50, 0)
     } catch (_) {}
 
+    // Fallback: se não achar com filtro de tipo, tentar todas as categorias
+    if (cats.length === 0 && draft.tipo) {
+      try {
+        cats = $app.findRecordsByFilter('categorias', '', 'nome', 50, 0)
+      } catch (_) {}
+    }
+
     const items = cats.map((c) => ({
       id: c.id,
       label: c.getString('nome'),
@@ -230,9 +266,10 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     const keyboard = buildInlineKeyboard('cat', items, curPage, pageSize, totalPages)
 
     saveSession(chatId, 'awaiting_categoria', draft, 'categoria')
+    const pageInd = totalPages > 1 ? ` (Página ${curPage + 1}/${totalPages})` : ''
     sendTelegramMsg(
       chatId,
-      '📂 Selecione a Categoria do sistema:\n(Use os botões abaixo)',
+      '📂 Selecione a Categoria do sistema' + pageInd + ':\n(Use os botões abaixo)',
       keyboard,
     )
   }
@@ -244,6 +281,13 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     try {
       contas = $app.findRecordsByFilter('contas', 'ativa = true', 'nome', 50, 0)
     } catch (_) {
+      try {
+        contas = $app.findRecordsByFilter('contas', '', 'nome', 50, 0)
+      } catch (_) {}
+    }
+
+    // Se não encontrou nenhuma ativa, trazer todas
+    if (contas.length === 0) {
       try {
         contas = $app.findRecordsByFilter('contas', '', 'nome', 50, 0)
       } catch (_) {}
@@ -270,9 +314,10 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     const keyboard = buildInlineKeyboard('conta', items, curPage, pageSize, totalPages)
 
     saveSession(chatId, 'awaiting_conta', draft, 'conta')
+    const pageInd = totalPages > 1 ? ` (Página ${curPage + 1}/${totalPages})` : ''
     sendTelegramMsg(
       chatId,
-      '🏦 Selecione a Conta/Cartão do sistema:\n(Use os botões abaixo)',
+      '🏦 Selecione a Conta/Cartão do sistema' + pageInd + ':\n(Use os botões abaixo)',
       keyboard,
     )
   }
@@ -297,7 +342,12 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     const keyboard = buildInlineKeyboard('ctx', items, curPage, pageSize, totalPages)
 
     saveSession(chatId, 'awaiting_contexto', draft, 'contexto')
-    sendTelegramMsg(chatId, '🏢 Selecione o Contexto / Grupo:\n(Toque na opção desejada)', keyboard)
+    const pageInd = totalPages > 1 ? ` (Página ${curPage + 1}/${totalPages})` : ''
+    sendTelegramMsg(
+      chatId,
+      '🏢 Selecione o Contexto / Grupo' + pageInd + ':\n(Toque na opção desejada)',
+      keyboard,
+    )
   }
 
   // Executar criação definitiva do lançamento com anti-duplicidade
@@ -535,18 +585,25 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
   if (callbackQuery) {
     const cbId = callbackQuery.id
     const cbData = callbackQuery.data || ''
-    const cbChatId = callbackQuery.message ? callbackQuery.message.chat.id : null
+    const cbChatId =
+      callbackQuery.message && callbackQuery.message.chat
+        ? callbackQuery.message.chat.id
+        : callbackQuery.from
+          ? callbackQuery.from.id
+          : null
     const cbMsgId = callbackQuery.message ? callbackQuery.message.message_id : null
+
+    // Resposta imediata obrigatória para o Telegram parar a animação do botão (relógio)
+    if (cbId) {
+      answerCallbackQuery(cbId, 'Opção registrada!')
+    }
 
     if (!cbChatId) {
       return e.json(200, { ok: true })
     }
 
     const session = getSession(cbChatId)
-    const draft = (session ? session.get('draft_data') : null) || {}
-
-    // Resposta imediata para Telegram parar animação de carregamento
-    answerCallbackQuery(cbId, 'Opção registrada!')
+    const draft = getDraftFromSession(session)
 
     // Se o usuário clicar em Cancelar
     if (cbData === 'cancel:draft') {
@@ -568,7 +625,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       const targetPage = parseInt(parts[2], 10) || 0
 
       if (cbMsgId) {
-        // Remover teclado antigo
+        // Remover teclado antigo antes de re-renderizar
         editTelegramReplyMarkup(cbChatId, cbMsgId, { inline_keyboard: [] })
       }
 
@@ -586,7 +643,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       return e.json(200, { ok: true })
     }
 
-    // Remover teclado da mensagem onde clicou para evitar cliques duplicados
+    // Remover teclado da mensagem onde clicou para cumprir a regra "teclado some ao clicar" e evitar cliques múltiplos
     if (cbMsgId) {
       editTelegramReplyMarkup(cbChatId, cbMsgId, { inline_keyboard: [] })
     }
@@ -594,6 +651,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     // Tratar seleções de campo
     if (cbData.startsWith('tipo:')) {
       draft.tipo = cbData.replace('tipo:', '')
+      saveSession(cbChatId, session ? session.getString('state') : 'processing', draft, 'tipo')
       sendTelegramMsg(
         cbChatId,
         '✔️ Tipo selecionado: ' + (draft.tipo === 'receita' ? 'Receita' : 'Despesa'),
@@ -604,6 +662,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
 
     if (cbData.startsWith('cat:')) {
       draft.categoria = cbData.replace('cat:', '')
+      saveSession(cbChatId, session ? session.getString('state') : 'processing', draft, 'categoria')
       let catNome = draft.categoria
       try {
         const cRec = $app.findRecordById('categorias', draft.categoria)
@@ -616,6 +675,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
 
     if (cbData.startsWith('conta:')) {
       draft.conta = cbData.replace('conta:', '')
+      saveSession(cbChatId, session ? session.getString('state') : 'processing', draft, 'conta')
       let contaNome = draft.conta
       try {
         const cRec = $app.findRecordById('contas', draft.conta)
@@ -631,12 +691,26 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       if (ctxId === 'none') {
         draft.contexto_id = ''
         draft.contexto_nome = ''
+        saveSession(
+          cbChatId,
+          session ? session.getString('state') : 'processing',
+          draft,
+          'contexto',
+          '',
+        )
         sendTelegramMsg(cbChatId, '✔️ Contexto selecionado: Geral')
       } else {
         draft.contexto_id = ctxId
         try {
           const gRec = $app.findRecordById('contexto_grupos', ctxId)
           draft.contexto_nome = gRec.getString('nome')
+          saveSession(
+            cbChatId,
+            session ? session.getString('state') : 'processing',
+            draft,
+            'contexto',
+            draft.contexto_nome,
+          )
           sendTelegramMsg(cbChatId, '✔️ Contexto selecionado: ' + draft.contexto_nome)
         } catch (_) {}
       }
@@ -672,7 +746,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
   // Verificar se o usuário está no meio de uma resposta de texto livre (ex: awaiting_valor ou awaiting_descricao)
   const session = getSession(chatId)
   const currentState = session ? session.getString('state') : 'idle'
-  const currentDraft = (session ? session.get('draft_data') : null) || {}
+  const currentDraft = getDraftFromSession(session)
 
   // Tratar comando /start ou /ajuda
   if (rawText.startsWith('/start') || rawText.startsWith('/ajuda') || rawText.startsWith('/help')) {
@@ -756,6 +830,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       return e.json(200, { ok: true })
     }
     currentDraft.valor = num
+    saveSession(chatId, 'processing', currentDraft, 'valor')
     sendTelegramMsg(chatId, '✔️ Valor registrado: R$ ' + num.toFixed(2).replace('.', ','))
     checkNextStep(chatId, currentDraft)
     return e.json(200, { ok: true })
@@ -763,6 +838,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
 
   if (currentState === 'awaiting_descricao') {
     currentDraft.descricao = rawText
+    saveSession(chatId, 'processing', currentDraft, 'descricao')
     sendTelegramMsg(chatId, '✔️ Descrição: ' + rawText)
     checkNextStep(chatId, currentDraft)
     return e.json(200, { ok: true })
