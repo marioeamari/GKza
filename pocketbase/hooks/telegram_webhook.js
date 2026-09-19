@@ -418,7 +418,8 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
   }
 
   // Executar criação definitiva do lançamento com anti-duplicidade
-  const finalizeLancamento = (chatId, draft) => {
+  // autoCreated: boolean que indica se foi registrado no modo rápido direto
+  const finalizeLancamento = (chatId, draft, autoCreated) => {
     try {
       const valor = parseFloat(draft.valor)
       if (!valor || isNaN(valor) || valor <= 0) {
@@ -534,17 +535,17 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
 
       // Obter nomes para exibição amigável
       let contaNome = 'Conta Padrão'
-      if (draft.conta) {
+      if (finalContaId) {
         try {
-          const cRec = $app.findRecordById('contas', draft.conta)
+          const cRec = $app.findRecordById('contas', finalContaId)
           contaNome = cRec.getString('nome')
         } catch (_) {}
       }
 
       let catNome = 'Geral'
-      if (draft.categoria) {
+      if (finalCatId) {
         try {
-          const kRec = $app.findRecordById('categorias', draft.categoria)
+          const kRec = $app.findRecordById('categorias', finalCatId)
           catNome = kRec.getString('nome')
         } catch (_) {}
       }
@@ -557,32 +558,59 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       const valorFmt = 'R$ ' + Number(valor).toFixed(2).replace('.', ',')
       const dataFmt = dateOnly.split('-').reverse().join('/')
 
-      const successMsg =
-        '✅ ' +
-        tipoLabel +
-        ' confirmada e registrada no GKza!\n\n' +
-        '• ' +
-        tipoEmoji +
-        ' Tipo: ' +
-        tipoLabel +
-        '\n' +
-        '• 📝 Descrição: ' +
-        (draft.descricao || '-') +
-        '\n' +
-        '• 💰 Valor: ' +
-        valorFmt +
-        '\n' +
-        '• 📂 Categoria: ' +
-        catNome +
-        '\n' +
-        '• 🏦 Conta: ' +
-        contaNome +
-        '\n' +
-        '• 📅 Data: ' +
-        dataFmt +
-        '\n' +
-        (draft.contexto_nome ? '• 🏢 Contexto: ' + draft.contexto_nome + '\n' : '') +
-        '\nStatus: Concluído com sucesso no sistema.'
+      const pageLink = draft.tipo === 'despesa' ? '/despesas' : '/lancamentos'
+      const descFmt = draft.descricao || '-'
+      const ctxFmt = draft.contexto_nome ? draft.contexto_nome : 'Geral'
+
+      let successMsg = ''
+      if (autoCreated) {
+        successMsg =
+          '✅ ' +
+          tipoLabel +
+          ' registrada: ' +
+          descFmt +
+          ', ' +
+          valorFmt +
+          ', categoria ' +
+          catNome +
+          ', conta ' +
+          contaNome +
+          ', contexto ' +
+          ctxFmt +
+          '.\n\n' +
+          'Confira os dados no sistema em ' +
+          pageLink +
+          ' — lá você pode editar ou excluir caso algo tenha ficado errado.'
+      } else {
+        successMsg =
+          '✅ ' +
+          tipoLabel +
+          ' confirmada e registrada no GKza!\n\n' +
+          '• ' +
+          tipoEmoji +
+          ' Tipo: ' +
+          tipoLabel +
+          '\n' +
+          '• 📝 Descrição: ' +
+          descFmt +
+          '\n' +
+          '• 💰 Valor: ' +
+          valorFmt +
+          '\n' +
+          '• 📂 Categoria: ' +
+          catNome +
+          '\n' +
+          '• 🏦 Conta: ' +
+          contaNome +
+          '\n' +
+          '• 📅 Data: ' +
+          dataFmt +
+          '\n' +
+          (draft.contexto_nome ? '• 🏢 Contexto: ' + draft.contexto_nome + '\n' : '') +
+          '\nConfira ou ajuste os dados no sistema em ' +
+          pageLink +
+          '.'
+      }
 
       sendTelegramMsg(chatId, successMsg)
     } catch (errSave) {
@@ -910,13 +938,13 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     }
 
     if (cbData === 'confirm:yes') {
-      finalizeLancamento(cbChatId, draft)
+      finalizeLancamento(cbChatId, draft, false)
       return e.json(200, { ok: true })
     }
 
     if (cbData === 'confirm_dupe:yes') {
       draft.force_duplicate = true
-      finalizeLancamento(cbChatId, draft)
+      finalizeLancamento(cbChatId, draft, true)
       return e.json(200, { ok: true })
     }
 
@@ -944,11 +972,12 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     clearSessionDraft(chatId)
     const welcome =
       '👋 Olá! Eu sou o Agente Financeiro Inteligente do GKza.\n\n' +
-      'Estou pronto para automatizar seus lançamentos:\n' +
+      'Estou pronto para automatizar seus lançamentos de forma rápida:\n' +
       '• Envie a foto de um comprovante Pix, boleto ou recibo.\n' +
       '• Ou descreva o gasto/receita em texto (ex: "Gastei R$ 184,32 na CPFL pelo NuBank").\n\n' +
-      '💡 Quando eu precisar de alguma informação do sistema (Categoria, Conta, Contexto ou Tipo), ' +
-      'apresentarei opções com botões interativos para você escolher com apenas um toque!\n\n' +
+      '⚡ MODO RÁPIDO: Comprovantes legíveis são registrados diretamente no sistema sem burocracia, ' +
+      'e você pode conferir ou editar tudo depois em /despesas ou /lancamentos!\n\n' +
+      '💡 Se faltar algum dado essencial (valor ou data), perguntarei com botões interativos.\n\n' +
       'Comandos:\n' +
       '• /ajuda - Mostra esta mensagem\n' +
       '• /contexto <nome> - Define o contexto/empresa padrão\n' +
@@ -1003,55 +1032,68 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     }
   }
 
-  // Se o usuário estiver respondendo um campo de texto livre que faltava
-  if (currentState === 'awaiting_valor') {
-    // Extrair valor numérico
-    let cleanVal = rawText.replace(/R\$/gi, '').replace(/\s/g, '')
-    if (cleanVal.includes(',') && cleanVal.includes('.')) {
-      cleanVal = cleanVal.replace(/\./g, '').replace(',', '.')
-    } else if (cleanVal.includes(',')) {
-      cleanVal = cleanVal.replace(',', '.')
-    }
-    const num = parseFloat(cleanVal)
-    if (isNaN(num) || num <= 0) {
-      sendTelegramMsg(
-        chatId,
-        '⚠️ Não compreendi o valor. Por favor, envie apenas o número em reais (ex: 184,32 ou 250):',
-      )
-      return e.json(200, { ok: true })
-    }
-    currentDraft.valor = num
-    saveSession(chatId, 'processing', currentDraft, 'valor', currentDraft.contexto_nome || '')
-    sendTelegramMsg(chatId, '✔️ Valor registrado: R$ ' + num.toFixed(2).replace('.', ','))
-    checkNextStep(chatId, currentDraft)
-    return e.json(200, { ok: true })
-  }
+  // EXCEÇÃO 2: Se o usuário estiver respondendo a uma pergunta pendente de uma sessão já em andamento (somente texto sem foto)
+  const isPendingInteractiveAnswer =
+    !photos &&
+    session &&
+    (currentState === 'awaiting_valor' ||
+      currentState === 'awaiting_descricao' ||
+      currentState === 'awaiting_confirmation' ||
+      currentState === 'awaiting_tipo' ||
+      currentState === 'awaiting_categoria' ||
+      currentState === 'awaiting_conta' ||
+      currentState === 'awaiting_contexto' ||
+      currentState === 'awaiting_duplicate_confirm')
 
-  if (currentState === 'awaiting_descricao') {
-    currentDraft.descricao = rawText
-    saveSession(chatId, 'processing', currentDraft, 'descricao', currentDraft.contexto_nome || '')
-    sendTelegramMsg(chatId, '✔️ Descrição registrada: ' + rawText)
-    checkNextStep(chatId, currentDraft)
-    return e.json(200, { ok: true })
-  }
-
-  // Se o bot estiver aguardando confirmação e o usuário responder em texto
-  if (currentState === 'awaiting_confirmation') {
-    const lower = rawText.toLowerCase()
-    if (
-      lower === 'sim' ||
-      lower === 's' ||
-      lower === 'ok' ||
-      lower.includes('confirma') ||
-      lower.includes('registrar')
-    ) {
-      finalizeLancamento(chatId, currentDraft)
+  if (isPendingInteractiveAnswer) {
+    if (currentState === 'awaiting_valor') {
+      // Extrair valor numérico
+      let cleanVal = rawText.replace(/R\$/gi, '').replace(/\s/g, '')
+      if (cleanVal.includes(',') && cleanVal.includes('.')) {
+        cleanVal = cleanVal.replace(/\./g, '').replace(',', '.')
+      } else if (cleanVal.includes(',')) {
+        cleanVal = cleanVal.replace(',', '.')
+      }
+      const num = parseFloat(cleanVal)
+      if (isNaN(num) || num <= 0) {
+        sendTelegramMsg(
+          chatId,
+          '⚠️ Não compreendi o valor. Por favor, envie apenas o número em reais (ex: 184,32 ou 250):',
+        )
+        return e.json(200, { ok: true })
+      }
+      currentDraft.valor = num
+      saveSession(chatId, 'processing', currentDraft, 'valor', currentDraft.contexto_nome || '')
+      sendTelegramMsg(chatId, '✔️ Valor registrado: R$ ' + num.toFixed(2).replace('.', ','))
+      checkNextStep(chatId, currentDraft)
       return e.json(200, { ok: true })
     }
-    if (lower === 'não' || lower === 'nao' || lower === 'n' || lower.includes('cancela')) {
-      clearSessionDraft(chatId)
-      sendTelegramMsg(chatId, '❌ Lançamento cancelado.')
+
+    if (currentState === 'awaiting_descricao') {
+      currentDraft.descricao = rawText
+      saveSession(chatId, 'processing', currentDraft, 'descricao', currentDraft.contexto_nome || '')
+      sendTelegramMsg(chatId, '✔️ Descrição registrada: ' + rawText)
+      checkNextStep(chatId, currentDraft)
       return e.json(200, { ok: true })
+    }
+
+    if (currentState === 'awaiting_confirmation') {
+      const lower = rawText.toLowerCase()
+      if (
+        lower === 'sim' ||
+        lower === 's' ||
+        lower === 'ok' ||
+        lower.includes('confirma') ||
+        lower.includes('registrar')
+      ) {
+        finalizeLancamento(chatId, currentDraft, false)
+        return e.json(200, { ok: true })
+      }
+      if (lower === 'não' || lower === 'nao' || lower === 'n' || lower.includes('cancela')) {
+        clearSessionDraft(chatId)
+        sendTelegramMsg(chatId, '❌ Lançamento cancelado.')
+        return e.json(200, { ok: true })
+      }
     }
   }
 
@@ -1439,7 +1481,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
 
   // Se o draft anterior já tinha dados que não vieram nesta mensagem (merge inteligente em vez de resetar)
   const draft = {
-    tipo: finalTipo || currentDraft.tipo || null,
+    tipo: finalTipo || currentDraft.tipo || 'despesa',
     descricao:
       finalDescricao && finalDescricao !== 'Lançamento via Telegram'
         ? finalDescricao
@@ -1461,7 +1503,69 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     draft.ocr_resumo = ocrExtractedText.slice(0, 300)
   }
 
-  // Notificar o usuário com clareza do que foi identificado
+  // Preencher defaults compatíveis imediatos para Categoria e Conta caso não tenham sido extraídos
+  if (!draft.categoria || draft.categoria === 'skip') {
+    try {
+      const fallbackCats = $app.findRecordsByFilter(
+        'categorias',
+        `tipo = '${draft.tipo || 'despesa'}'`,
+        'nome',
+        1,
+        0,
+      )
+      if (fallbackCats.length > 0) {
+        draft.categoria = fallbackCats[0].id
+      } else {
+        const anyCat = $app.findRecordsByFilter('categorias', '', 'nome', 1, 0)
+        if (anyCat.length > 0) draft.categoria = anyCat[0].id
+      }
+    } catch (_) {}
+  }
+
+  if (!draft.conta || draft.conta === 'skip') {
+    try {
+      const fallbackContas = $app.findRecordsByFilter('contas', 'ativa = true', 'nome', 1, 0)
+      if (fallbackContas.length > 0) {
+        draft.conta = fallbackContas[0].id
+      } else {
+        const anyConta = $app.findRecordsByFilter('contas', '', 'nome', 1, 0)
+        if (anyConta.length > 0) draft.conta = anyConta[0].id
+      }
+    } catch (_) {}
+  }
+
+  // Se o contexto não tiver sido preenchido, verificar se há um contexto padrão/ativo ou deixar Geral
+  if (!draft.contexto_nome && savedContexto) {
+    draft.contexto_nome = savedContexto
+    draft.contexto_definido = true
+  }
+
+  // VERIFICAÇÃO DOS DADOS ESSENCIAIS PARA O NOVO FLUXO RÁPIDO:
+  // Essenciais: tipo ('despesa' | 'receita'), valor (> 0), data e ao menos uma descrição identificável
+  const hasValidTipo = draft.tipo === 'despesa' || draft.tipo === 'receita'
+  const hasValidValor =
+    draft.valor !== null &&
+    draft.valor !== undefined &&
+    !isNaN(parseFloat(draft.valor)) &&
+    parseFloat(draft.valor) > 0
+  const hasValidData = !!draft.data
+  const hasValidDescricao =
+    draft.descricao &&
+    draft.descricao.trim().length > 0 &&
+    draft.descricao.trim() !== 'Lançamento via Telegram'
+
+  const canAutoCreate = hasValidTipo && hasValidValor && hasValidData && hasValidDescricao
+
+  if (canAutoCreate) {
+    // Salvar estado na sessão como processing antes de finalizar
+    saveSession(chatId, 'processing', draft, 'auto_create', draft.contexto_nome || '')
+    // Criar o lançamento diretamente sem passar pelo questionamento de botões!
+    finalizeLancamento(chatId, draft, true)
+    return e.json(200, { ok: true })
+  }
+
+  // EXCEÇÃO: Extração falhou ou ficou ilegível (sem valor, sem data ou sem descrição clara)
+  // Notificar o que foi possível capturar e acionar o fluxo interativo passo a passo
   if (draft.descricao && draft.valor) {
     const valFmt = 'R$ ' + Number(draft.valor).toFixed(2).replace('.', ',')
     const tipoBadge = draft.tipo === 'receita' ? '🟢 Receita' : '🔴 Despesa'
@@ -1475,12 +1579,13 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
         draft.descricao +
         '\n' +
         '• ' +
-        valFmt,
+        valFmt +
+        '\n\nPrecisamos completar alguns dados essenciais:',
     )
   }
 
   // Salvar o draft na sessão e acionar o fluxo de opções (rádios) para o que faltar
-  saveSession(chatId, 'processing', draft, 'next', finalContexto)
+  saveSession(chatId, 'processing', draft, 'next', draft.contexto_nome || '')
   checkNextStep(chatId, draft)
 
   return e.json(200, { ok: true })

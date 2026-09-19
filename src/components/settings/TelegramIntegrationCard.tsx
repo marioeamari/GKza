@@ -243,24 +243,23 @@ export function TelegramIntegrationCard() {
           </p>
           <ul className="list-disc pl-4 space-y-1">
             <li>
-              <strong>Fotos de comprovantes (OCR aprimorado):</strong> envie fotos de alta resolução
-              de Pix, boletos ou recibos. Se a leitura da foto estiver ilegível, o bot avisa e
-              solicita os dados em texto.
+              <strong>Modo Rápido Direto:</strong> ao enviar foto ou texto de comprovante com dados
+              essenciais identificados (tipo, valor, data e descrição), o lançamento é criado
+              diretamente no sistema sem burocracia ou perguntas passo a passo.
             </li>
             <li>
-              <strong>Opções interativas (botões inline):</strong> quando faltar Categoria, Conta,
-              Contexto ou Tipo, o bot apresenta botões clicáveis (tipo radio button) com as opções
-              do sistema e paginação, evitando digitação manual de listas.
+              <strong>Conferência no Sistema Web:</strong> a conferência, edição ou exclusão do
+              lançamento é feita diretamente no sistema web em <em>/despesas</em> ou{' '}
+              <em>/lancamentos</em>.
             </li>
             <li>
-              <strong>Mensagens de texto:</strong> ex.:{' '}
-              <em>&quot;Paguei R$ 184,32 de energia CPFL pelo NuBank&quot;</em> ou{' '}
-              <em>&quot;Recebi R$ 1.500 de serviço&quot;</em>.
+              <strong>Opções interativas sob demanda:</strong> caso a extração falhe ou faltem dados
+              críticos (valor ou data), o bot entra no fluxo com botões inline interativos.
             </li>
             <li>
-              <strong>Anti-duplicidade e confirmação:</strong> antes de efetivar o lançamento no
-              caixa, o bot apresenta o resumo completo com botões de confirmação e alerta sobre
-              duplicidade no mesmo dia.
+              <strong>Anti-duplicidade inteligente:</strong> se houver lançamento no mesmo dia com o
+              mesmo valor e tipo, o bot alerta no Telegram e pede confirmação antes de gravar
+              duplicado.
             </li>
             <li>
               <strong>Troca de contexto:</strong> use o comando <code>/contexto &lt;nome&gt;</code>{' '}
