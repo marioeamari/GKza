@@ -90,6 +90,14 @@ export const contextoService = {
   },
 
   removeMembro: async (membroId: string): Promise<boolean> => {
-    return pb.collection('contexto_grupo_membros').delete(membroId)
+    try {
+      return await pb.collection('contexto_grupo_membros').delete(membroId)
+    } catch (err: any) {
+      // Se já foi removido (404), trata como sucesso idempotente
+      if (err?.status === 404 || err?.response?.status === 404) {
+        return true
+      }
+      throw err
+    }
   },
 }

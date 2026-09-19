@@ -187,25 +187,37 @@ export function ContextoVisualizacaoTab({
     }
   }
 
-  // Abrir modal de membros
-  const openMembrosDialog = (g: ContextoGrupoComMembros) => {
+  // Abrir modal de membros com sincronização fresca
+  const openMembrosDialog = async (g: ContextoGrupoComMembros) => {
     setActiveGrupoParaMembros(g)
     setActiveMembroTab('pessoa')
     setMembroSearch('')
     setMembrosModal(true)
+
+    // Re-fetch fresco dos membros para garantir IDs atualizados
+    try {
+      const freshList = await contextoService.listGruposComMembros()
+      const freshGroup = freshList.find((item) => item.id === g.id)
+      if (freshGroup) {
+        setActiveGrupoParaMembros(freshGroup)
+      }
+    } catch (err) {
+      console.warn('Erro ao sincronizar membros do grupo:', err)
+    }
   }
 
   // Adicionar membro ao grupo
   const handleAddMembro = async (tipo: ContextoMembroTipo, refId: string) => {
     if (!activeGrupoParaMembros) return
+    const grupoId = activeGrupoParaMembros.id
     setSavingMembro(true)
     try {
-      await contextoService.addMembro(activeGrupoParaMembros.id, tipo, refId)
+      await contextoService.addMembro(grupoId, tipo, refId)
       toast({ title: 'Membro adicionado ao grupo' })
       await onRefresh()
-      // Atualiza o grupo ativo localmente
+      // Atualiza o grupo ativo com a listagem mais fresca do backend
       const freshList = await contextoService.listGruposComMembros()
-      const updated = freshList.find((g) => g.id === activeGrupoParaMembros.id)
+      const updated = freshList.find((g) => g.id === grupoId)
       if (updated) setActiveGrupoParaMembros(updated)
     } catch (err) {
       toast({
@@ -221,20 +233,67 @@ export function ContextoVisualizacaoTab({
   // Remover membro do grupo
   const handleRemoveMembro = async (membroId: string) => {
     if (!activeGrupoParaMembros) return
+    const grupoId = activeGrupoParaMembros.id
+
+    // Remoção otimista imediata na UI local
+    const membroRemovido = activeGrupoParaMembros.membros.find((m) => m.id === membroId)
+    const refId =
+      membroRemovido?.tipo === 'pessoa'
+        ? membroRemovido.pessoa || membroRemovido.expand?.pessoa?.id
+        : membroRemovido?.tipo === 'empresa'
+          ? membroRemovido.empresa || membroRemovido.expand?.empresa?.id
+          : membroRemovido?.tipo === 'conta'
+            ? membroRemovido.conta || membroRemovido.expand?.conta?.id
+            : null
+
+    setActiveGrupoParaMembros((prev) => {
+      if (!prev) return null
+      const updatedMembros = prev.membros.filter((m) => m.id !== membroId)
+      return {
+        ...prev,
+        membros: updatedMembros,
+        pessoas:
+          membroRemovido?.tipo === 'pessoa' && refId
+            ? prev.pessoas.filter((p) => p.id !== refId)
+            : prev.pessoas,
+        empresas:
+          membroRemovido?.tipo === 'empresa' && refId
+            ? prev.empresas.filter((e) => e.id !== refId)
+            : prev.empresas,
+        contas:
+          membroRemovido?.tipo === 'conta' && refId
+            ? prev.contas.filter((c) => c.id !== refId)
+            : prev.contas,
+      }
+    })
+
     setSavingMembro(true)
     try {
       await contextoService.removeMembro(membroId)
       toast({ title: 'Membro removido do grupo' })
       await onRefresh()
       const freshList = await contextoService.listGruposComMembros()
-      const updated = freshList.find((g) => g.id === activeGrupoParaMembros.id)
+      const updated = freshList.find((g) => g.id === grupoId)
       if (updated) setActiveGrupoParaMembros(updated)
-    } catch (err) {
-      toast({
-        variant: 'destructive',
-        title: 'Erro ao remover membro',
-        description: apiMessage(err),
-      })
+    } catch (err: any) {
+      // 404 significa que já não existe no banco: sucesso idempotente
+      if (err?.status === 404 || err?.response?.status === 404) {
+        toast({ title: 'Membro removido do grupo' })
+        await onRefresh()
+        const freshList = await contextoService.listGruposComMembros()
+        const updated = freshList.find((g) => g.id === grupoId)
+        if (updated) setActiveGrupoParaMembros(updated)
+      } else {
+        // Erro real (permissão, rede etc.): desfaz e avisa com mensagem amigável
+        toast({
+          variant: 'destructive',
+          title: 'Erro ao remover membro',
+          description: apiMessage(err),
+        })
+        const freshList = await contextoService.listGruposComMembros().catch(() => [])
+        const restored = freshList.find((g) => g.id === grupoId)
+        if (restored) setActiveGrupoParaMembros(restored)
+      }
     } finally {
       setSavingMembro(false)
     }
