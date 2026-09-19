@@ -15,7 +15,7 @@ onBootstrap((e) => {
   try {
     const payload = {
       url: webhookUrl,
-      allowed_updates: ['message', 'edited_message'],
+      allowed_updates: ['message', 'edited_message', 'callback_query'],
     }
     if (secret) {
       payload.secret_token = secret

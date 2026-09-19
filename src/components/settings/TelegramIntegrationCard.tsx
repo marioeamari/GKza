@@ -243,8 +243,14 @@ export function TelegramIntegrationCard() {
           </p>
           <ul className="list-disc pl-4 space-y-1">
             <li>
-              <strong>Fotos de comprovantes:</strong> envie imagem de Pix, boletos ou recibos
-              diretamente no chat do bot.
+              <strong>Fotos de comprovantes (OCR aprimorado):</strong> envie fotos de alta resolução
+              de Pix, boletos ou recibos. Se a leitura da foto estiver ilegível, o bot avisa e
+              solicita os dados em texto.
+            </li>
+            <li>
+              <strong>Opções interativas (botões inline):</strong> quando faltar Categoria, Conta,
+              Contexto ou Tipo, o bot apresenta botões clicáveis (tipo radio button) com as opções
+              do sistema e paginação, evitando digitação manual de listas.
             </li>
             <li>
               <strong>Mensagens de texto:</strong> ex.:{' '}
@@ -252,14 +258,15 @@ export function TelegramIntegrationCard() {
               <em>&quot;Recebi R$ 1.500 de serviço&quot;</em>.
             </li>
             <li>
-              <strong>Nada entra sem confirmação:</strong> quando o valor estiver ilegível ou
-              faltarem dados da conta ou categoria, o agente pergunta no chat antes de criar o
-              lançamento.
+              <strong>Anti-duplicidade e confirmação:</strong> antes de efetivar o lançamento no
+              caixa, o bot apresenta o resumo completo com botões de confirmação e alerta sobre
+              duplicidade no mesmo dia.
             </li>
             <li>
               <strong>Troca de contexto:</strong> use o comando <code>/contexto &lt;nome&gt;</code>{' '}
               no chat (ex: <code>/contexto Casa</code> ou{' '}
-              <code>/contexto Padaria Estrela Dourada</code>).
+              <code>/contexto Padaria Estrela Dourada</code>) ou apenas <code>/contexto</code> para
+              escolher pelos botões.
             </li>
           </ul>
         </div>
