@@ -19,6 +19,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
   }
 
   const body = e.requestInfo().body || {}
+  const updateId = body.update_id ? String(body.update_id) : ''
   const callbackQuery = body.callback_query || null
   const message = body.message || body.edited_message || null
 
@@ -153,7 +154,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     }
   }
 
-  const saveSession = (chatId, state, draftData, pendingQuestion, contextoNome) => {
+  const saveSession = (chatId, state, draftData, pendingQuestion, contextoNome, lastMessageId) => {
     try {
       const strChatId = String(chatId)
       let session = getSession(strChatId)
@@ -174,10 +175,14 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
         }
       }
 
-      session.set('draft_data', safeDraft)
+      // No Goja do PocketBase v0.36 campos JSON são serializados de forma 100% confiável quando stringificados
+      session.set('draft_data', JSON.stringify(safeDraft))
       session.set('pending_question', pendingQuestion || '')
       if (contextoNome !== undefined) {
         session.set('contexto_nome', contextoNome || '')
+      }
+      if (lastMessageId !== undefined) {
+        session.set('last_message_id', String(lastMessageId))
       }
 
       $app.save(session)
@@ -194,7 +199,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       const session = getSession(strChatId)
       if (session) {
         session.set('state', 'idle')
-        session.set('draft_data', {})
+        session.set('draft_data', '{}')
         session.set('pending_question', '')
         $app.save(session)
       }
@@ -286,21 +291,21 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
   }
 
   // Apresentar o RESUMO DIRETO com botões "✅ Confirmar" e "❌ Descartar"
-  // Esta é a tela central do novo fluxo: 1 única confirmação sem perguntas encadeadas
+  // Esta é a tela central do fluxo v0.0.16: 1 única confirmação sem perguntas encadeadas
   const showConfirmationSummary = (chatId, draft) => {
     const valor = parseFloat(draft.valor)
     if (!valor || isNaN(valor) || valor <= 0) {
-      // Falta o valor essencial — pede apenas ele
+      // Falta o valor essencial — pede apenas ele UMA vez
       saveSession(chatId, 'awaiting_valor', draft, 'valor', draft.contexto_nome || '')
       sendTelegramMsg(
         chatId,
-        '💬 Não consegui identificar o VALOR do comprovante.\nPor favor, digite o valor em reais (ex: 184,32 ou 250):',
+        '⚠️ Não foi possível identificar o valor do comprovante. Por favor, digite o valor em reais (ex: 184,32):',
       )
       return
     }
 
     // Nomes amigáveis para conta e categoria sugeridas
-    let contaNome = 'A definir no sistema'
+    let contaNome = ''
     if (draft.conta && draft.conta !== 'skip') {
       try {
         const cRec = $app.findRecordById('contas', draft.conta)
@@ -308,7 +313,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       } catch (_) {}
     }
 
-    let catNome = 'A definir no sistema'
+    let catNome = ''
     if (draft.categoria && draft.categoria !== 'skip') {
       try {
         const kRec = $app.findRecordById('categorias', draft.categoria)
@@ -323,33 +328,31 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       dataFmt = draft.data.slice(0, 10).split('-').reverse().join('/')
     }
 
-    let resumoMsg =
-      '📋 Resumo dos dados coletados do comprovante:\n\n' +
-      '• Tipo: ' +
-      tipoLabel +
-      '\n' +
-      '• Descrição: ' +
-      (draft.descricao || '-') +
-      '\n' +
-      '• Valor: ' +
-      valorFmt +
-      '\n' +
-      '• Data: ' +
-      dataFmt +
-      '\n' +
-      '• Conta (sugerida): ' +
-      contaNome +
-      '\n' +
-      '• Categoria (sugerida): ' +
-      catNome +
-      '\n'
+    let resumoMsg = '📋 Resumo dos dados coletados do comprovante:\n\n'
+    resumoMsg += '• Tipo: ' + tipoLabel + '\n'
 
+    // Descrição: se não houver favorecido/descrição clara, omitir ou deixar neutro sem "-"
+    if (draft.descricao && draft.descricao.trim() && draft.descricao.trim() !== '-') {
+      resumoMsg += '• Descrição: ' + draft.descricao.trim() + '\n'
+    }
+
+    resumoMsg += '• Valor: ' + valorFmt + '\n'
+    resumoMsg += '• Data: ' + dataFmt + '\n'
+
+    // Conta e Categoria: só exibir se de fato foi sugerida/identificada.
+    // Se não determinada na imagem, omitir do resumo em vez de exibir texto literal "A definir no sistema"
+    if (contaNome) {
+      resumoMsg += '• Conta (sugerida): ' + contaNome + '\n'
+    }
+    if (catNome) {
+      resumoMsg += '• Categoria (sugerida): ' + catNome + '\n'
+    }
     if (draft.contexto_nome) {
       resumoMsg += '• Contexto: ' + draft.contexto_nome + '\n'
     }
 
     resumoMsg +=
-      '\nDeseja enviar como Registro Pendente para o sistema?\n(Você poderá ajustar conta, categoria e valores antes de aprovar em /lancamentos)'
+      '\nDeseja enviar como Registro Pendente para o sistema?\n(Você poderá definir/ajustar conta, categoria e valores antes de aprovar em /lancamentos)'
 
     const kb = {
       inline_keyboard: [
@@ -443,12 +446,27 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
   }
 
   const chatId = message.chat.id
+  const currentMsgId = message.message_id ? String(message.message_id) : ''
   const rawText = (message.text || message.caption || '').trim()
   const photos = message.photo || null
 
   const session = getSession(chatId)
   const currentState = session ? session.getString('state') : 'idle'
   const currentDraft = getDraftFromSession(session)
+  const lastProcessedMsgId = session ? session.getString('last_message_id') : ''
+
+  // DEDUPLICAÇÃO DE UPDATES / MENSAGENS REPETIDAS:
+  // Se o Telegram reenviar o mesmo update_id ou message_id já processado para este chat,
+  // responder 200 imediatamente sem executar o fluxo novamente (evita re-envio em loop).
+  if (currentMsgId && lastProcessedMsgId) {
+    const parts = lastProcessedMsgId.split(':')
+    const savedMsgId = parts[0]
+    const savedUpdateId = parts[1] || ''
+    if (savedMsgId === currentMsgId || (updateId && savedUpdateId === updateId)) {
+      console.log('Duplicate Telegram update detected and skipped:', currentMsgId, updateId)
+      return e.json(200, { ok: true, duplicate: true })
+    }
+  }
 
   // Comandos /start, /ajuda
   if (rawText.startsWith('/start') || rawText.startsWith('/ajuda') || rawText.startsWith('/help')) {
@@ -457,7 +475,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       '👋 Olá! Eu sou o assistente do GKza para comprovantes.\n\n' +
       'O novo fluxo é direto e sem perguntas chatas:\n' +
       '1. Envie a foto de um comprovante Pix, boleto ou recibo (ou descreva em texto).\n' +
-      '2. Eu retorno o resumo dos dados extraídos pedindo apenas sua confirmação (✅ Confirmar / ❌ Descartar).\n' +
+      '2. Eu retorno o resumo dos dados coletados pedindo apenas sua confirmação (✅ Confirmar / ❌ Descartar).\n' +
       '3. Ao confirmar, crio um Registro Pendente no sistema.\n' +
       '4. Acesse o sistema em /lancamentos na aba "Pendentes" para aprovar e lançar!\n\n' +
       'Comandos:\n' +
@@ -523,6 +541,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
 
   // Se o usuário está respondendo à ÚNICA pergunta pendente permitida: VALOR faltante
   if (!photos && session && currentState === 'awaiting_valor') {
+    // Normalizar entrada de valor monetário em reais (ex.: "115,16", "R$ 115,16", "115.16", "250")
     let cleanVal = rawText.replace(/R\$/gi, '').replace(/\s/g, '')
     if (cleanVal.includes(',') && cleanVal.includes('.')) {
       cleanVal = cleanVal.replace(/\./g, '').replace(',', '.')
@@ -538,7 +557,21 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       return e.json(200, { ok: true })
     }
 
+    // Atualizar o rascunho em memória diretamente
     currentDraft.valor = num
+    const trackingMsgId = currentMsgId + (updateId ? ':' + updateId : '')
+
+    // Salvar sessão diretamente no estado awaiting_summary_confirm com o valor já incorporado
+    saveSession(
+      chatId,
+      'awaiting_summary_confirm',
+      currentDraft,
+      'summary',
+      currentDraft.contexto_nome || '',
+      trackingMsgId,
+    )
+
+    // Mostrar resumo com os botões inline para o usuário confirmar
     showConfirmationSummary(chatId, currentDraft)
     return e.json(200, { ok: true })
   }
@@ -577,8 +610,6 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
 
   if (photos && photos.length > 0) {
     const bestPhoto = photos[photos.length - 1]
-    let base64Data = ''
-    let mimeType = 'image/jpeg'
 
     try {
       const fileRes = $http.send({
@@ -591,9 +622,11 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
         const filePath = fileRes.json.result.file_path
         const fileUrl = 'https://api.telegram.org/file/bot' + token + '/' + filePath
 
+        let mimeType = 'image/jpeg'
         if (filePath.endsWith('.png')) mimeType = 'image/png'
         else if (filePath.endsWith('.webp')) mimeType = 'image/webp'
 
+        let base64Data = ''
         try {
           const imgDownload = $http.send({
             url: fileUrl,
@@ -643,11 +676,11 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
               ocrExtractedText = vRes.choices[0].message.content || ''
             }
           } catch (vErr1) {
-            console.log('Vision base64 error:', vErr1.message)
+            console.log('Vision base64 extraction error:', vErr1.message)
           }
         }
 
-        // Tentativa 2: fileUrl
+        // Tentativa 2: fileUrl caso base64 tenha falhado
         if (!ocrExtractedText) {
           try {
             const vRes2 = $ai.chat({
@@ -671,7 +704,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
               ocrExtractedText = vRes2.choices[0].message.content || ''
             }
           } catch (vErr2) {
-            console.log('Vision URL error:', vErr2.message)
+            console.log('Vision URL extraction error:', vErr2.message)
           }
         }
       }
@@ -734,11 +767,11 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     '\n\n' +
     'DIRETRIZES:\n' +
     '1. TIPO: "despesa" se foi pagamento/Pix enviado/débito/saída; "receita" se foi Pix recebido/crédito/entrada.\n' +
-    '2. DESCRIÇÃO: Priorize o NOME DO FAVORECIDO / DESTINATÁRIO (ex: "CPFL Energia", "Supermercado Tauste", "João Silva") ou razão social.\n' +
-    '3. VALOR: Número decimal positivo em Reais (ex: 184.32).\n' +
+    '2. DESCRIÇÃO: Priorize o NOME DO FAVORECIDO / DESTINATÁRIO (ex: "CPFL Energia", "Supermercado Tauste", "João Silva") ou razão social. Se ausente, deixe vazio.\n' +
+    '3. VALOR: Número decimal positivo em Reais (ex: 184.32). Se não estiver visível ou não tiver certeza absoluta, retorne null.\n' +
     '4. DATA: Data da transação no formato "YYYY-MM-DD" (se ilegível ou ausente, use hoje).\n' +
-    '5. CONTA_ID: Se identificar a instituição (NuBank, Inter, Sicred, Caixa), preencha o "id" exato da lista de contas.\n' +
-    '6. CATEGORIA_ID: Sugira a melhor categoria da lista correspondente.\n' +
+    '5. CONTA_ID: Se identificar a instituição (NuBank, Inter, Sicredi, Caixa), preencha o "id" exato da lista de contas. Se não identificar, retorne null.\n' +
+    '6. CATEGORIA_ID: Se identificar claramente o ramo (energia, aluguel, etc), sugira a categoria correspondente. Se não identificar com certeza, retorne null.\n' +
     '7. CONTEXTO_NOME: Preserve o CONTEXTO ATIVO SALVO ou infira dos grupos listados.\n\n' +
     'RETORNE ESTRITAMENTE UM JSON NO FORMATO:\n' +
     '{\n' +
@@ -896,10 +929,15 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
   }
 
   const finalTipo = parsedDraft && parsedDraft.tipo ? parsedDraft.tipo : fallbackTipo || 'despesa'
-  const finalDescricao =
-    parsedDraft && parsedDraft.descricao
-      ? parsedDraft.descricao.trim()
-      : fallbackDescricao || rawText || 'Comprovante Telegram'
+  let finalDescricao = ''
+  if (parsedDraft && parsedDraft.descricao && parsedDraft.descricao.trim()) {
+    finalDescricao = parsedDraft.descricao.trim()
+  } else if (fallbackDescricao) {
+    finalDescricao = fallbackDescricao
+  } else if (!photos && rawText) {
+    finalDescricao = rawText
+  }
+
   const finalValor =
     parsedDraft && parsedDraft.valor && !isNaN(parseFloat(parsedDraft.valor))
       ? parseFloat(parsedDraft.valor)
@@ -918,6 +956,8 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
   }
 
   // Montar novo rascunho (substitui qualquer anterior)
+  // Observação: Não forçar categoria nem conta com a primeira do banco caso não identificadas;
+  // o usuário define confortavelmente na tela de aprovação no web se o bot não identificou com precisão.
   const draft = {
     tipo: finalTipo,
     descricao: finalDescricao,
@@ -934,24 +974,26 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
       chatId,
   }
 
-  // Fallbacks de categoria e conta se ainda nulos
-  if (!draft.categoria) {
-    try {
-      const fbCats = $app.findRecordsByFilter('categorias', `tipo = '${draft.tipo}'`, 'nome', 1, 0)
-      if (fbCats.length > 0) draft.categoria = fbCats[0].id
-    } catch (_) {}
-  }
+  const trackingMsgId = currentMsgId + (updateId ? ':' + updateId : '')
 
-  if (!draft.conta) {
-    try {
-      const fbContas = $app.findRecordsByFilter('contas', 'ativa = true', 'nome', 1, 0)
-      if (fbContas.length > 0) draft.conta = fbContas[0].id
-    } catch (_) {}
+  // Salvar rascunho e decidir a mensagem a ser enviada
+  if (!draft.valor || draft.valor <= 0) {
+    saveSession(chatId, 'awaiting_valor', draft, 'valor', draft.contexto_nome || '', trackingMsgId)
+    sendTelegramMsg(
+      chatId,
+      '⚠️ Não foi possível identificar o valor do comprovante. Por favor, digite o valor em reais (ex: 184,32):',
+    )
+  } else {
+    saveSession(
+      chatId,
+      'awaiting_summary_confirm',
+      draft,
+      'summary',
+      draft.contexto_nome || '',
+      trackingMsgId,
+    )
+    showConfirmationSummary(chatId, draft)
   }
-
-  // Salvar rascunho e exibir resumo imediatamente
-  saveSession(chatId, 'awaiting_summary_confirm', draft, 'summary', draft.contexto_nome || '')
-  showConfirmationSummary(chatId, draft)
 
   return e.json(200, { ok: true })
 })
