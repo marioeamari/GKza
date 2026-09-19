@@ -11,6 +11,7 @@ import Despesas from '@/pages/Despesas'
 import Empresas from '@/pages/Empresas'
 import Lancamentos from '@/pages/Lancamentos'
 import Marketplaces from '@/pages/Marketplaces'
+import Pendentes from '@/pages/Pendentes'
 import NotFound from '@/pages/NotFound'
 import Pessoas from '@/pages/Pessoas'
 import ConfirmEmail from '@/pages/auth/ConfirmEmail'
@@ -34,6 +35,7 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route index element={<Dashboard />} />
+          <Route path="/pendentes" element={<Pendentes />} />
           <Route path="/despesas" element={<Despesas />} />
           <Route path="/lancamentos" element={<Lancamentos />} />
           <Route path="/contas" element={<Contas />} />

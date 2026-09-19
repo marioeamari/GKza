@@ -1,27 +1,24 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   BadgeDollarSign,
   Building2,
-  CalendarDays,
   ChevronDown,
   CircleUserRound,
-  CreditCard,
   FilePenLine,
   Grid2X2,
   Home,
   LogOut,
-  Menu,
   MoreHorizontal,
-  PackageOpen,
   Receipt,
+  Send,
   Settings,
   SlidersHorizontal,
+  Sparkles,
   Store,
   Tags,
   UserRound,
   WalletCards,
-  X,
 } from 'lucide-react'
 import { ContextSelector } from '@/components/ContextSelector'
 
@@ -48,36 +45,76 @@ import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 import { initials, roleLabel } from '@/lib/format'
 import pb from '@/lib/pocketbase/client'
-
-const desktopItems = [
-  { to: '/', label: 'Dashboard', icon: Grid2X2, end: true },
-  { to: '/despesas', label: 'Despesas', icon: Receipt },
-  { to: '/lancamentos', label: 'Lançamentos', icon: BadgeDollarSign },
-  { to: '/contas', label: 'Contas & Cartões', icon: WalletCards },
-  { to: '/categorias', label: 'Classificações', icon: Tags },
-  { to: '/marketplaces', label: 'Marketplaces', icon: Store },
-  { to: '/empresas', label: 'Empresas', icon: Building2 },
-  { to: '/pessoas', label: 'Pessoas', icon: CircleUserRound },
-  { to: '/configuracoes', label: 'Configurações', icon: Settings },
-]
-
-const mobileItems = [
-  { to: '/', label: 'Início', icon: Home, end: true },
-  { to: '/despesas', label: 'Despesas', icon: Receipt },
-  { to: '/lancamentos', label: 'Caixa', icon: BadgeDollarSign },
-  { to: '/marketplaces', label: 'Vendas', icon: Store },
-]
+import { telegramPendentesService } from '@/services/telegramPendentes'
 
 export function AppLayout() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [moreOpen, setMoreOpen] = useState(false)
+  const [pendentesCount, setPendentesCount] = useState(0)
+
   const avatarUrl = user?.avatar ? pb.files.getURL(user, user.avatar, { thumb: '100x100' }) : ''
   const signOut = () => {
     logout()
     navigate('/login')
   }
+
+  // Contagem em tempo real de registros pendentes do Telegram
+  useEffect(() => {
+    const fetchCount = () => {
+      telegramPendentesService.countPendentes().then((count) => setPendentesCount(count))
+    }
+
+    fetchCount()
+
+    try {
+      pb.collection('telegram_registros_pendentes').subscribe('*', () => {
+        fetchCount()
+      })
+    } catch {
+      /* intentionally ignored */
+    }
+
+    return () => {
+      try {
+        pb.collection('telegram_registros_pendentes').unsubscribe('*')
+      } catch {
+        /* intentionally ignored */
+      }
+    }
+  }, [])
+
+  const desktopItems = [
+    { to: '/', label: 'Dashboard', icon: Grid2X2, end: true },
+    {
+      to: '/pendentes',
+      label: 'Triagem',
+      icon: Sparkles,
+      badge: pendentesCount,
+      highlight: pendentesCount > 0,
+    },
+    { to: '/despesas', label: 'Despesas', icon: Receipt },
+    { to: '/lancamentos', label: 'Lançamentos', icon: BadgeDollarSign },
+    { to: '/contas', label: 'Contas & Cartões', icon: WalletCards },
+    { to: '/categorias', label: 'Classificações', icon: Tags },
+    { to: '/marketplaces', label: 'Marketplaces', icon: Store },
+    { to: '/empresas', label: 'Empresas', icon: Building2 },
+    { to: '/pessoas', label: 'Pessoas', icon: CircleUserRound },
+    { to: '/configuracoes', label: 'Configurações', icon: Settings },
+  ]
+
+  const mobileItems = [
+    { to: '/', label: 'Início', icon: Home, end: true },
+    {
+      to: '/pendentes',
+      label: 'Triagem',
+      icon: Sparkles,
+      badge: pendentesCount,
+    },
+    { to: '/despesas', label: 'Despesas', icon: Receipt },
+    { to: '/lancamentos', label: 'Caixa', icon: BadgeDollarSign },
+  ]
 
   return (
     <div className="min-h-screen bg-background">
@@ -89,15 +126,34 @@ export function AppLayout() {
           <ContextSelector />
         </div>
         <nav className="flex-1 space-y-1 px-3" aria-label="Navegação principal">
-          {desktopItems.map(({ to, label, icon: Icon, end }) => (
+          {desktopItems.map(({ to, label, icon: Icon, end, badge, highlight }) => (
             <NavLink
               key={to}
               to={to}
               end={end}
-              className={({ isActive }) => cn('nav-item', isActive && 'nav-item-active')}
+              className={({ isActive }) =>
+                cn(
+                  'nav-item relative flex items-center justify-between',
+                  isActive && 'nav-item-active',
+                  highlight && !isActive && 'text-foreground font-semibold',
+                )
+              }
             >
-              <Icon className="h-5 w-5" strokeWidth={1.75} />
-              <span>{label}</span>
+              <div className="flex items-center gap-3">
+                <Icon
+                  className={cn('h-5 w-5', highlight ? 'text-primary' : '')}
+                  strokeWidth={1.75}
+                />
+                <span>{label}</span>
+              </div>
+              {badge !== undefined && badge > 0 && (
+                <Badge
+                  variant="secondary"
+                  className="h-5 px-1.5 text-[11px] font-extrabold bg-primary text-white border-0 shadow-xs"
+                >
+                  {badge}
+                </Badge>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -176,16 +232,23 @@ export function AppLayout() {
       </main>
 
       <nav className="mobile-nav lg:hidden" aria-label="Navegação móvel">
-        {mobileItems.map(({ to, label, icon: Icon, end }) => (
+        {mobileItems.map(({ to, label, icon: Icon, end, badge }) => (
           <NavLink
             key={to}
             to={to}
             end={end}
             className={({ isActive }) =>
-              cn('mobile-nav-item', isActive && 'mobile-nav-item-active')
+              cn('mobile-nav-item relative', isActive && 'mobile-nav-item-active')
             }
           >
-            <Icon className="h-5 w-5" strokeWidth={1.75} />
+            <div className="relative">
+              <Icon className="h-5 w-5" strokeWidth={1.75} />
+              {badge !== undefined && badge > 0 && (
+                <span className="absolute -top-1 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-extrabold text-white">
+                  {badge}
+                </span>
+              )}
+            </div>
             <span>{label}</span>
           </NavLink>
         ))}
@@ -207,6 +270,7 @@ export function AppLayout() {
             </SheetHeader>
             <div className="mt-6 grid gap-2">
               {[
+                ['/marketplaces', 'Marketplaces & Vendas', Store],
                 ['/contas', 'Contas financeiras & Cartões', WalletCards],
                 ['/categorias', 'Hub de Classificações', Tags],
                 ['/empresas', 'Empresas (CNPJ)', Building2],

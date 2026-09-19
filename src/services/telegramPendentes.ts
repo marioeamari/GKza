@@ -1,20 +1,59 @@
 import type { RecordListOptions } from 'pocketbase'
 import pb from '@/lib/pocketbase/client'
-import type { Lancamento, TelegramRegistroPendente } from '@/types/domain'
+import { despesasService } from '@/services/despesas'
+import type { DespesaCompromisso, Lancamento, TelegramRegistroPendente } from '@/types/domain'
+
+export interface TriagemLancamentoInput {
+  descricao: string
+  valor: number
+  tipo: 'receita' | 'despesa'
+  data: string
+  conta: string
+  categoria: string
+  empresa?: string
+  pessoa?: string
+  observacoes?: string
+}
+
+export interface TriagemDespesaInput {
+  descricao: string
+  fornecedor?: string
+  secao: 'contas_mensais_pix_boleto' | 'assinaturas_anuais' | 'cartoes_credito'
+  regra_repeticao: 'mensal' | 'anual' | 'parcelado' | 'avulso'
+  categoria?: string
+  tag?: string
+  tipo_despesa?: string
+  metodo_pagamento?: string
+  conta_padrao?: string
+  pessoa?: string
+  empresa?: string
+  contexto_tipo: 'pessoal' | 'empresa'
+  total_parcelas?: number
+  parcela_inicial?: number
+  dia_vencimento?: number
+  regra_vencimento_texto?: string
+  data_inicio: string
+  valor_estimado: number
+  link_pagamento?: string
+  dizimo?: boolean
+  tipo_dizimo?: string
+  ativo?: boolean
+  observacoes?: string
+}
 
 export const telegramPendentesService = {
   listPendentes: (options?: RecordListOptions) =>
     pb.collection<TelegramRegistroPendente>('telegram_registros_pendentes').getFullList({
       sort: '-created',
       filter: "status = 'pendente'",
-      expand: 'conta,categoria,empresa,pessoa',
+      expand: 'conta,categoria,empresa,pessoa,lancamento_gerado,compromisso_gerado',
       ...options,
     }),
 
   pagePendentes: (page = 1, perPage = 20, options?: RecordListOptions) =>
     pb.collection<TelegramRegistroPendente>('telegram_registros_pendentes').getList(page, perPage, {
       sort: '-created',
-      expand: 'conta,categoria,empresa,pessoa',
+      expand: 'conta,categoria,empresa,pessoa,lancamento_gerado,compromisso_gerado',
       ...options,
     }),
 
@@ -54,47 +93,160 @@ export const telegramPendentesService = {
     }
   },
 
-  aprovarELancar: async (
-    pendenteId: string,
-    lancamentoData: {
-      descricao: string
-      valor: number
-      tipo: 'receita' | 'despesa'
-      data: string
-      conta: string
-      categoria: string
-      empresa?: string
-      pessoa?: string
-      observacoes?: string
-    },
-  ) => {
-    // 1. Criar o lançamento oficial
+  // 1. Destino: Apenas Lançamento no Caixa Real
+  triarComoLancamento: async (pendenteId: string, input: TriagemLancamentoInput) => {
     const lancamento = await pb.collection<Lancamento>('lancamentos').create({
-      descricao: lancamentoData.descricao,
-      valor: lancamentoData.valor,
-      tipo: lancamentoData.tipo,
-      data: lancamentoData.data,
+      descricao: input.descricao,
+      valor: input.valor,
+      tipo: input.tipo,
+      data: input.data,
       status: 'pago',
-      conta: lancamentoData.conta,
-      categoria: lancamentoData.categoria,
-      empresa: lancamentoData.empresa || '',
-      pessoa: lancamentoData.pessoa || '',
-      observacoes: lancamentoData.observacoes || 'Importado via Telegram (aprovado no sistema)',
+      conta: input.conta,
+      categoria: input.categoria,
+      empresa: input.empresa || '',
+      pessoa: input.pessoa || '',
+      observacoes: input.observacoes || 'Importado via Telegram (triagem lançamento)',
     })
 
-    // 2. Marcar o registro pendente como aprovado e vincular o lançamento gerado
     await pb.collection('telegram_registros_pendentes').update(pendenteId, {
       status: 'aprovado',
       lancamento_gerado: lancamento.id,
-      conta: lancamentoData.conta,
-      categoria: lancamentoData.categoria,
-      descricao: lancamentoData.descricao,
-      valor: lancamentoData.valor,
-      data: lancamentoData.data,
-      empresa: lancamentoData.empresa || '',
-      pessoa: lancamentoData.pessoa || '',
+      conta: input.conta,
+      categoria: input.categoria,
+      descricao: input.descricao,
+      valor: input.valor,
+      data: input.data,
+      empresa: input.empresa || '',
+      pessoa: input.pessoa || '',
     })
 
     return lancamento
+  },
+
+  // 2. Destino: Apenas Despesa (Compromisso Recorrente em /despesas)
+  triarComoDespesa: async (pendenteId: string, input: TriagemDespesaInput) => {
+    const payload: Partial<DespesaCompromisso> = {
+      contexto_tipo: input.contexto_tipo,
+      empresa: (input.empresa || null) as unknown as string,
+      pessoa: (input.pessoa || null) as unknown as string,
+      descricao: input.descricao.trim(),
+      fornecedor: input.fornecedor?.trim() || (null as unknown as string),
+      secao: input.secao,
+      regra_repeticao: input.regra_repeticao,
+      categoria: input.categoria || (null as unknown as string),
+      tag: input.tag || (null as unknown as string),
+      tipo_despesa: input.tipo_despesa || (null as unknown as string),
+      metodo_pagamento: input.metodo_pagamento || (null as unknown as string),
+      conta_padrao: input.conta_padrao || (null as unknown as string),
+      total_parcelas: input.regra_repeticao === 'parcelado' ? Number(input.total_parcelas) : 1,
+      parcela_inicial: input.regra_repeticao === 'parcelado' ? Number(input.parcela_inicial) : 1,
+      dia_vencimento: Number(input.dia_vencimento) || 10,
+      regra_vencimento_texto: input.regra_vencimento_texto || `${input.dia_vencimento || 10}/m`,
+      data_inicio: `${input.data_inicio} 00:00:00.000Z`,
+      valor_estimado: Number(input.valor_estimado),
+      link_pagamento: input.link_pagamento || (null as unknown as string),
+      dizimo: input.dizimo || false,
+      tipo_dizimo:
+        input.dizimo && input.tipo_dizimo ? input.tipo_dizimo : (null as unknown as string),
+      ativo: input.ativo !== false,
+      observacoes: input.observacoes || (null as unknown as string),
+    }
+
+    const compromisso = await despesasService.saveCompromisso(payload)
+    await despesasService.gerarOcorrenciasParaCompromisso(compromisso)
+
+    // Atualiza o registro pendente
+    await pb.collection('telegram_registros_pendentes').update(pendenteId, {
+      status: 'aprovado',
+      compromisso_gerado: compromisso.id,
+      conta: input.conta_padrao || '',
+      categoria: input.categoria || '',
+      descricao: input.descricao,
+      valor: input.valor_estimado,
+      empresa: input.empresa || '',
+      pessoa: input.pessoa || '',
+    })
+
+    return compromisso
+  },
+
+  // 3. Destino: Ambos (Cria o Lançamento do Caixa E o Compromisso Recorrente)
+  triarComoAmbos: async (
+    pendenteId: string,
+    lancamentoInput: TriagemLancamentoInput,
+    despesaInput: TriagemDespesaInput,
+  ) => {
+    // A. Cria o compromisso e suas ocorrências
+    const payloadCompromisso: Partial<DespesaCompromisso> = {
+      contexto_tipo: despesaInput.contexto_tipo,
+      empresa: (despesaInput.empresa || null) as unknown as string,
+      pessoa: (despesaInput.pessoa || null) as unknown as string,
+      descricao: despesaInput.descricao.trim(),
+      fornecedor: despesaInput.fornecedor?.trim() || (null as unknown as string),
+      secao: despesaInput.secao,
+      regra_repeticao: despesaInput.regra_repeticao,
+      categoria: despesaInput.categoria || (null as unknown as string),
+      tag: despesaInput.tag || (null as unknown as string),
+      tipo_despesa: despesaInput.tipo_despesa || (null as unknown as string),
+      metodo_pagamento: despesaInput.metodo_pagamento || (null as unknown as string),
+      conta_padrao: despesaInput.conta_padrao || (null as unknown as string),
+      total_parcelas:
+        despesaInput.regra_repeticao === 'parcelado' ? Number(despesaInput.total_parcelas) : 1,
+      parcela_inicial:
+        despesaInput.regra_repeticao === 'parcelado' ? Number(despesaInput.parcela_inicial) : 1,
+      dia_vencimento: Number(despesaInput.dia_vencimento) || 10,
+      regra_vencimento_texto:
+        despesaInput.regra_vencimento_texto || `${despesaInput.dia_vencimento || 10}/m`,
+      data_inicio: `${despesaInput.data_inicio} 00:00:00.000Z`,
+      valor_estimado: Number(despesaInput.valor_estimado),
+      link_pagamento: despesaInput.link_pagamento || (null as unknown as string),
+      dizimo: despesaInput.dizimo || false,
+      tipo_dizimo:
+        despesaInput.dizimo && despesaInput.tipo_dizimo
+          ? despesaInput.tipo_dizimo
+          : (null as unknown as string),
+      ativo: despesaInput.ativo !== false,
+      observacoes: despesaInput.observacoes || (null as unknown as string),
+    }
+
+    const compromisso = await despesasService.saveCompromisso(payloadCompromisso)
+    await despesasService.gerarOcorrenciasParaCompromisso(compromisso)
+
+    // B. Cria o lançamento no caixa oficial
+    const lancamento = await pb.collection<Lancamento>('lancamentos').create({
+      descricao: lancamentoInput.descricao,
+      valor: lancamentoInput.valor,
+      tipo: lancamentoInput.tipo,
+      data: lancamentoInput.data,
+      status: 'pago',
+      conta: lancamentoInput.conta,
+      categoria: lancamentoInput.categoria,
+      empresa: lancamentoInput.empresa || '',
+      pessoa: lancamentoInput.pessoa || '',
+      observacoes:
+        lancamentoInput.observacoes ||
+        `Importado via Telegram (compromisso: ${compromisso.descricao})`,
+    })
+
+    // C. Atualiza o registro pendente vinculando ambos
+    await pb.collection('telegram_registros_pendentes').update(pendenteId, {
+      status: 'aprovado',
+      lancamento_gerado: lancamento.id,
+      compromisso_gerado: compromisso.id,
+      conta: lancamentoInput.conta,
+      categoria: lancamentoInput.categoria,
+      descricao: lancamentoInput.descricao,
+      valor: lancamentoInput.valor,
+      data: lancamentoInput.data,
+      empresa: lancamentoInput.empresa || '',
+      pessoa: lancamentoInput.pessoa || '',
+    })
+
+    return { lancamento, compromisso }
+  },
+
+  // Método legado compatível para chamadas anteriores
+  aprovarELancar: async (pendenteId: string, lancamentoData: TriagemLancamentoInput) => {
+    return telegramPendentesService.triarComoLancamento(pendenteId, lancamentoData)
   },
 }

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-19T04:53:42.919Z",
+  "generatedAt": "2026-09-19T05:11:57.511Z",
   "collections": [
     {
       "name": "users",
@@ -1602,6 +1602,25 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "compromisso_gerado",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "despesas_compromisso"
+        },
+        {
+          "name": "comprovante_foto",
+          "type": "file",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "comprovante_foto_url",
+          "type": "text",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [

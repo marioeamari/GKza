@@ -271,14 +271,18 @@ export interface TelegramRegistroPendente extends RecordModel {
   telegram_message_id?: string
   telegram_origem?: string
   comprovante_texto?: string
+  comprovante_foto?: string
+  comprovante_foto_url?: string
   observacoes?: string
   lancamento_gerado?: string
+  compromisso_gerado?: string
   expand?: {
     conta?: Conta
     categoria?: Categoria
     empresa?: Empresa
     pessoa?: Pessoa
     lancamento_gerado?: Lancamento
+    compromisso_gerado?: DespesaCompromisso
   }
 }
 
