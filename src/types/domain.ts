@@ -276,6 +276,11 @@ export interface TelegramRegistroPendente extends RecordModel {
   observacoes?: string
   lancamento_gerado?: string
   compromisso_gerado?: string
+  // Campos Open Finance / Pluggy
+  external_id?: string
+  origem_tipo?: 'telegram' | 'open_finance' | string
+  banco_nome?: string
+  pluggy_item_id?: string
   expand?: {
     conta?: Conta
     categoria?: Categoria
@@ -284,6 +289,16 @@ export interface TelegramRegistroPendente extends RecordModel {
     lancamento_gerado?: Lancamento
     compromisso_gerado?: DespesaCompromisso
   }
+}
+
+export interface PluggyItemRecord extends RecordModel {
+  item_id: string
+  connector_id?: number
+  connector_name: string
+  connector_image_url?: string
+  status?: string
+  last_sync_at?: string
+  error_message?: string
 }
 
 export interface PeriodRange {

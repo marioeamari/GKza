@@ -455,10 +455,12 @@ export function TriagemPendenteDialog({
           <div className="flex flex-wrap items-center gap-2">
             <Badge
               variant="outline"
-              className="border-primary/30 bg-primary/10 text-primary font-bold"
+              className="border-primary/30 bg-primary/10 text-primary font-bold text-xs"
             >
               <Sparkles className="mr-1 h-3 w-3" />
-              Triagem de Comprovante Telegram
+              {item?.origem_tipo === 'open_finance' || item?.external_id?.startsWith('pluggy_')
+                ? `Triagem Open Finance (${item?.banco_nome || 'Banco'})`
+                : 'Triagem de Comprovante Telegram'}
             </Badge>
             {item?.contexto_nome && (
               <Badge variant="secondary" className="text-xs">
@@ -466,11 +468,11 @@ export function TriagemPendenteDialog({
               </Badge>
             )}
           </div>
-          <DialogTitle className="text-xl font-bold">Definir Destino do Registro</DialogTitle>
+          <DialogTitle className="text-xl font-bold">Definir Destino da Transação</DialogTitle>
           <DialogDescription>
-            Escolha se este comprovante representa um <strong>Lançamento de Caixa</strong>, uma{' '}
+            Escolha se esta transação representa um <strong>Lançamento de Caixa</strong>, uma{' '}
             <strong>Despesa Recorrente</strong> ou <strong>Ambos</strong> (pagamento imediato +
-            compromisso futuro).
+            compromisso futuro). Nada entra direto no caixa.
           </DialogDescription>
         </DialogHeader>
 
@@ -504,15 +506,17 @@ export function TriagemPendenteDialog({
           </Alert>
         )}
 
-        {/* Card de Informações extraídas do Telegram (OCR / Foto) */}
+        {/* Card de Informações extraídas do Telegram ou Open Finance */}
         <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-1 font-bold text-foreground">
               <FileText className="h-3.5 w-3.5 text-primary" />
-              Dados Coletados pela IA do Telegram
+              {item?.origem_tipo === 'open_finance' || item?.external_id?.startsWith('pluggy_')
+                ? 'Dados Importados do Open Finance'
+                : 'Dados Coletados pelo Telegram'}
             </span>
             <span className="text-[11px] text-muted-foreground">
-              Chegada:{' '}
+              Recebido:{' '}
               {item
                 ? formatDate(item.created, {
                     day: '2-digit',
@@ -526,16 +530,20 @@ export function TriagemPendenteDialog({
 
           <div className="grid gap-2 sm:grid-cols-3 text-[11px]">
             <div>
-              <span className="text-muted-foreground">Valor identificado:</span>{' '}
+              <span className="text-muted-foreground">Valor apurado:</span>{' '}
               <strong className="text-foreground">{item ? formatCurrency(item.valor) : '-'}</strong>
             </div>
             <div>
-              <span className="text-muted-foreground">Tipo inicial:</span>{' '}
+              <span className="text-muted-foreground">Tipo sugerido:</span>{' '}
               <strong className="text-foreground capitalize">{item?.tipo || 'despesa'}</strong>
             </div>
             <div>
               <span className="text-muted-foreground">Origem:</span>{' '}
-              <strong className="text-foreground">{item?.telegram_origem || 'Bot Telegram'}</strong>
+              <strong className="text-foreground">
+                {item?.origem_tipo === 'open_finance' || item?.external_id?.startsWith('pluggy_')
+                  ? `Open Finance (${item?.banco_nome || 'Banco'})`
+                  : item?.telegram_origem || 'Telegram'}
+              </strong>
             </div>
           </div>
 
@@ -553,7 +561,7 @@ export function TriagemPendenteDialog({
                 rel="noreferrer"
                 className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"
               >
-                🖼️ Ver comprovante/anexo original
+                🖼️ Ver anexo / comprovante original
               </a>
             </div>
           )}

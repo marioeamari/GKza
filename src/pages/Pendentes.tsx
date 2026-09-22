@@ -10,11 +10,13 @@ import {
   Filter,
   Image as ImageIcon,
   Inbox,
+  Landmark,
   Layers,
   LoaderCircle,
   Receipt,
   RefreshCw,
   Search,
+  Send,
   Sparkles,
   Trash2,
 } from 'lucide-react'
@@ -53,6 +55,7 @@ import pb from '@/lib/pocketbase/client'
 import { cadastrosService } from '@/services/cadastros'
 import { despesasService } from '@/services/despesas'
 import { financeService } from '@/services/finance'
+import { pluggyService } from '@/services/pluggy'
 import { telegramPendentesService } from '@/services/telegramPendentes'
 import type {
   Categoria,
@@ -75,6 +78,8 @@ export default function Pendentes() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [filtroTipo, setFiltroTipo] = useState<'all' | 'receita' | 'despesa'>('all')
+  const [filtroOrigem, setFiltroOrigem] = useState<'all' | 'telegram' | 'open_finance'>('all')
+  const [syncingPluggy, setSyncingPluggy] = useState(false)
 
   // Dados auxiliares para o formulário de triagem
   const [contas, setContas] = useState<Conta[]>([])
@@ -110,6 +115,26 @@ export default function Pendentes() {
       setLoading(false)
     }
   }, [toast])
+
+  const handleSyncOpenFinance = async () => {
+    try {
+      setSyncingPluggy(true)
+      const res = await pluggyService.syncItem()
+      toast({
+        title: 'Sincronização Open Finance realizada!',
+        description: `${res.imported_pendentes} novas transações importadas para triagem (${res.skipped_duplicates} duplicadas ignoradas).`,
+      })
+      await loadPendentes()
+    } catch (err) {
+      toast({
+        variant: 'destructive',
+        title: 'Falha na sincronização Open Finance',
+        description: apiMessage(err),
+      })
+    } finally {
+      setSyncingPluggy(false)
+    }
+  }
 
   useEffect(() => {
     loadPendentes()
@@ -180,15 +205,21 @@ export default function Pendentes() {
     }
   }
 
-  // Filtragem local por texto e tipo
+  // Filtragem local por texto, tipo e origem
   const filteredPendentes = pendentes.filter((item) => {
     if (filtroTipo !== 'all' && item.tipo !== filtroTipo) return false
+    if (filtroOrigem !== 'all') {
+      const isOF = item.origem_tipo === 'open_finance' || item.external_id?.startsWith('pluggy_')
+      if (filtroOrigem === 'open_finance' && !isOF) return false
+      if (filtroOrigem === 'telegram' && isOF) return false
+    }
     if (!searchTerm.trim()) return true
     const term = searchTerm.toLowerCase()
     return (
       item.descricao?.toLowerCase().includes(term) ||
       item.comprovante_texto?.toLowerCase().includes(term) ||
       item.contexto_nome?.toLowerCase().includes(term) ||
+      item.banco_nome?.toLowerCase().includes(term) ||
       item.expand?.conta?.nome?.toLowerCase().includes(term) ||
       item.expand?.categoria?.nome?.toLowerCase().includes(term)
     )
@@ -197,19 +228,32 @@ export default function Pendentes() {
   return (
     <>
       <PageHeader
-        title="Triagem de Comprovantes"
-        description="Comprovantes enviados pelo Telegram aguardando definição de destino: Lançamento de Caixa ou Despesa Recorrente."
+        title="Triagem de Comprovantes & Open Finance"
+        description="Transações do Open Finance e comprovantes do Telegram aguardando definição de destino: Lançamento de Caixa ou Despesa Recorrente."
         action={
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={loadPendentes}
-            disabled={loading}
-            className="font-bold text-xs"
-          >
-            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Atualizar lista
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSyncOpenFinance}
+              disabled={syncingPluggy || loading}
+              className="font-bold text-xs"
+              title="Buscar transações recentes de bancos conectados"
+            >
+              <Landmark className="mr-1.5 h-3.5 w-3.5 text-primary" />
+              {syncingPluggy ? 'Sincronizando...' : 'Puxar Open Finance'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadPendentes}
+              disabled={loading}
+              className="font-bold text-xs"
+            >
+              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Atualizar lista
+            </Button>
+          </div>
         }
       />
 
@@ -222,10 +266,12 @@ export default function Pendentes() {
               Destino flexível definido por você na plataforma
             </h3>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Ao lançar o comprovante no Telegram, nada é presumido. Na triagem abaixo, você escolhe
-              se ele vira um <strong className="text-foreground">Lançamento de Caixa</strong>{' '}
-              (/lancamentos), uma <strong className="text-foreground">Despesa Recorrente</strong>{' '}
-              (/despesas) ou <strong className="text-foreground">Ambos</strong>.
+              Tanto os comprovantes enviados no Telegram quanto as transações conectadas pelo{' '}
+              <strong className="text-foreground">Open Finance (Pluggy)</strong> entram nesta mesma
+              esteira de triagem. Nada entra direto no caixa: você escolhe se o item vira um{' '}
+              <strong className="text-foreground">Lançamento de Caixa</strong> (/lancamentos), uma{' '}
+              <strong className="text-foreground">Despesa Recorrente</strong> (/despesas) ou{' '}
+              <strong className="text-foreground">Ambos</strong>.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -258,10 +304,24 @@ export default function Pendentes() {
         </div>
         <div className="flex items-center gap-2">
           <Select
+            value={filtroOrigem}
+            onValueChange={(v) => setFiltroOrigem(v as 'all' | 'telegram' | 'open_finance')}
+          >
+            <SelectTrigger className="w-[170px] bg-white">
+              <SelectValue placeholder="Origem" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas as origens</SelectItem>
+              <SelectItem value="open_finance">🏦 Open Finance</SelectItem>
+              <SelectItem value="telegram">💬 Telegram</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select
             value={filtroTipo}
             onValueChange={(v) => setFiltroTipo(v as 'all' | 'receita' | 'despesa')}
           >
-            <SelectTrigger className="w-[160px] bg-white">
+            <SelectTrigger className="w-[150px] bg-white">
               <SelectValue placeholder="Tipo" />
             </SelectTrigger>
             <SelectContent>
@@ -306,6 +366,9 @@ export default function Pendentes() {
               ? pb.files.getURL(item, item.comprovante_foto)
               : item.comprovante_foto_url || ''
 
+            const isOpenFinance =
+              item.origem_tipo === 'open_finance' || item.external_id?.startsWith('pluggy_')
+
             return (
               <div
                 key={item.id}
@@ -329,6 +392,10 @@ export default function Pendentes() {
                         <Eye className="h-4 w-4" />
                       </span>
                     </button>
+                  ) : isOpenFinance ? (
+                    <div className="hidden sm:flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20">
+                      <Landmark className="h-7 w-7 text-primary" />
+                    </div>
                   ) : (
                     <div className="hidden sm:flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-secondary/60 text-muted-foreground border border-border">
                       <FileText className="h-7 w-7 text-primary/70" />
@@ -347,8 +414,28 @@ export default function Pendentes() {
                         {item.tipo === 'receita' ? '🟢 Receita' : '🔴 Despesa'}
                       </span>
 
+                      {/* Badge de Origem */}
+                      {isOpenFinance ? (
+                        <Badge
+                          variant="outline"
+                          className="border-primary/40 bg-primary/10 text-primary font-bold text-xs"
+                        >
+                          <Landmark className="mr-1 h-3 w-3" />
+                          {item.banco_nome || 'Open Finance'}
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300 font-bold text-xs"
+                        >
+                          <Send className="mr-1 h-3 w-3" />
+                          Telegram
+                        </Badge>
+                      )}
+
                       <span className="text-base font-extrabold text-foreground truncate">
-                        {item.descricao || 'Comprovante Telegram'}
+                        {item.descricao ||
+                          (isOpenFinance ? 'Transação Open Finance' : 'Comprovante Telegram')}
                       </span>
 
                       {item.contexto_nome && (
