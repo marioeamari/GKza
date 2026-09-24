@@ -3,16 +3,24 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
   const stateStr = e.requestInfo().query.state
   const error = e.requestInfo().query.error
 
+  console.log('[Google Callback] Início da requisição callback:', {
+    hasCode: !!code,
+    hasState: !!stateStr,
+    hasError: !!error,
+  })
+
   const siteUrl =
     $os.getenv('SITE_URL') || 'https://gestao-financeira-e-marketplaces-d7ede.goskip.app'
 
   const targetRedirect = siteUrl + '/configuracoes?google_calendar=status'
 
   if (error) {
+    console.log('[Google Callback] Parâmetro error presente na query:', error)
     return e.redirect(302, targetRedirect + '&error=' + encodeURIComponent(error))
   }
 
   if (!code) {
+    console.log('[Google Callback] Parâmetro code ausente')
     return e.redirect(302, targetRedirect + '&error=no_code')
   }
 
@@ -26,6 +34,7 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
   const redirectUri = instanceUrl + '/backend/v1/google/callback'
 
   if (!clientId || !clientSecret) {
+    console.log('[Google Callback] Credenciais OAuth não configuradas no servidor')
     return e.redirect(302, targetRedirect + '&error=missing_credentials')
   }
 
@@ -58,8 +67,15 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
 
     if (tokenRes.statusCode !== 200 || !tokenRes.json) {
       const errMsg = (tokenRes.json && tokenRes.json.error_description) || 'Falha ao obter tokens'
+      console.log('[Google Callback] Falha na troca de tokens com Google:', {
+        statusCode: tokenRes.statusCode,
+        error_description: errMsg,
+        body: tokenRes.json || tokenRes.raw,
+      })
       return e.redirect(302, targetRedirect + '&error=' + encodeURIComponent(errMsg))
     }
+
+    console.log('[Google Callback] Sucesso na troca de tokens com Google (statusCode 200)')
 
     const accessToken = tokenRes.json.access_token || ''
     const refreshToken = tokenRes.json.refresh_token || ''
@@ -86,11 +102,17 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
     if (!userId) {
       try {
         const adminUser = $app.findFirstRecordByData('users', 'role', 'admin')
-        if (adminUser) userId = adminUser.id
+        if (adminUser) {
+          userId = adminUser.id
+          console.log('[Google Callback] UserId identificado via fallback admin:', userId)
+        }
       } catch (_) {}
+    } else {
+      console.log('[Google Callback] UserId identificado via state:', userId)
     }
 
     if (!userId) {
+      console.log('[Google Callback] Usuário não identificado (sem state e sem admin fallback)')
       return e.redirect(302, targetRedirect + '&error=user_not_identified')
     }
 
@@ -117,8 +139,15 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
     configRec.set('last_error', '')
     $app.save(configRec)
 
+    console.log('[Google Callback] Configuração salva com sucesso:', {
+      userId: userId,
+      email: googleEmail,
+      hasRefreshToken: !!refreshToken,
+    })
+
     return e.redirect(302, targetRedirect + '&success=1')
   } catch (err) {
+    console.log('[Google Callback] Exceção capturada durante fluxo de callback:', err)
     return e.redirect(302, targetRedirect + '&error=' + encodeURIComponent('' + err))
   }
 })

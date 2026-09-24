@@ -23,7 +23,10 @@ routerAdd(
     try {
       configRec = $app.findFirstRecordByData('google_calendar_config', 'user', auth.id)
     } catch (_) {
-      return e.json(400, { error: 'Conta Google não conectada para este usuário.' })
+      return e.json(400, {
+        error:
+          'Conta Google não conectada para este usuário. Conecte em Configurações → Google Calendar → Conectar com Google Calendar.',
+      })
     }
 
     const refreshToken = configRec.getString('refresh_token')

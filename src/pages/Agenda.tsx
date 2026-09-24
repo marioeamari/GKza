@@ -64,6 +64,16 @@ export default function Agenda() {
   const handleSyncGoogle = async () => {
     setSyncingGoogle(true)
     try {
+      const status = await googleCalendarService.getStatus()
+      if (!status.is_connected) {
+        toast({
+          title: 'Google Calendar não conectado',
+          description:
+            'Conecte sua conta em Configurações → Google Calendar → Conectar com Google Calendar.',
+        })
+        return
+      }
+
       const res = await googleCalendarService.syncNow()
       toast({
         title: 'Sincronização Google concluída!',
@@ -72,13 +82,21 @@ export default function Agenda() {
       loadData()
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Tente novamente.'
-      toast({
-        title: 'Sincronização pendente',
-        description: message.includes('Credenciais')
-          ? 'Credenciais OAuth do Google Calendar ainda não cadastradas.'
-          : message,
-        variant: 'destructive',
-      })
+      if (message.includes('não conectada')) {
+        toast({
+          title: 'Google Calendar não conectado',
+          description:
+            'Conecte sua conta em Configurações → Google Calendar → Conectar com Google Calendar.',
+        })
+      } else {
+        toast({
+          title: 'Sincronização pendente',
+          description: message.includes('Credenciais')
+            ? 'Credenciais OAuth do Google Calendar ainda não cadastradas.'
+            : message,
+          variant: 'destructive',
+        })
+      }
     } finally {
       setSyncingGoogle(false)
     }
