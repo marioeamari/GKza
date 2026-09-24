@@ -16,8 +16,10 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
     return e.redirect(302, targetRedirect + '&error=no_code')
   }
 
-  const clientId = $os.getenv('GOOGLE_CLIENT_ID') || ''
-  const clientSecret = $os.getenv('GOOGLE_CLIENT_SECRET') || ''
+  const clientId =
+    $os.getenv('GOOGLE_CLIENT_ID') ||
+    '788252458556-ri5fjf39bvn9p96m4akiipk24lbt90hf.apps.googleusercontent.com'
+  const clientSecret = $os.getenv('GOOGLE_CLIENT_SECRET') || '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'
   const instanceUrl =
     $os.getenv('PB_INSTANCE_URL') ||
     'https://gestao-financeira-e-marketplaces-d7ede.shrd00.internal.goskip.dev'

@@ -3,8 +3,10 @@ routerAdd(
   '/backend/v1/google/status',
   (e) => {
     const auth = e.auth
-    const clientId = $os.getenv('GOOGLE_CLIENT_ID') || ''
-    const clientSecret = $os.getenv('GOOGLE_CLIENT_SECRET') || ''
+    const clientId =
+      $os.getenv('GOOGLE_CLIENT_ID') ||
+      '788252458556-ri5fjf39bvn9p96m4akiipk24lbt90hf.apps.googleusercontent.com'
+    const clientSecret = $os.getenv('GOOGLE_CLIENT_SECRET') || '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'
 
     const instanceUrl =
       $os.getenv('PB_INSTANCE_URL') ||
