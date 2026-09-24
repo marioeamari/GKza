@@ -19,6 +19,10 @@ import {
   Tags,
   UserRound,
   WalletCards,
+  CalendarCheck2,
+  CalendarDays,
+  Target,
+  ListTodo,
 } from 'lucide-react'
 import { ContextSelector } from '@/components/ContextSelector'
 
@@ -96,6 +100,10 @@ export function AppLayout() {
     },
     { to: '/despesas', label: 'Despesas', icon: Receipt },
     { to: '/lancamentos', label: 'Lançamentos', icon: BadgeDollarSign },
+    { to: '/metas-agenda', label: 'Metas & Agenda', icon: Target },
+    { to: '/habitos', label: 'Hábitos & Rotinas', icon: CalendarCheck2 },
+    { to: '/agenda', label: 'Agenda', icon: CalendarDays },
+    { to: '/projetos', label: 'Projetos & Tarefas', icon: ListTodo },
     { to: '/contas', label: 'Contas & Cartões', icon: WalletCards },
     { to: '/categorias', label: 'Classificações', icon: Tags },
     { to: '/marketplaces', label: 'Marketplaces', icon: Store },
@@ -270,6 +278,10 @@ export function AppLayout() {
             </SheetHeader>
             <div className="mt-6 grid gap-2">
               {[
+                ['/metas-agenda', 'Painel Metas & Agenda', Target],
+                ['/habitos', 'Hábitos & Rotinas', CalendarCheck2],
+                ['/agenda', 'Agenda de Compromissos', CalendarDays],
+                ['/projetos', 'Projetos & Tarefas', ListTodo],
                 ['/marketplaces', 'Marketplaces & Vendas', Store],
                 ['/contas', 'Contas financeiras & Cartões', WalletCards],
                 ['/categorias', 'Hub de Classificações', Tags],

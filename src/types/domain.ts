@@ -301,6 +301,151 @@ export interface PluggyItemRecord extends RecordModel {
   error_message?: string
 }
 
+// ----------------------------------------------------
+// Metas, Hábitos, Rotinas, Agenda, Projetos e Tarefas
+// ----------------------------------------------------
+
+export type HabitoStatusRegistro = 'feito' | 'nao_feito' | 'dispensado'
+
+export interface MetaHabito extends RecordModel {
+  nome: string
+  descricao?: string
+  contexto_tipo: ContextoTipo
+  pessoa?: string
+  empresa?: string
+  dias_semana: number[] // 0: Dom, 1: Seg, ..., 6: Sab
+  horario?: string // HH:mm
+  data_inicio: string
+  ativo: boolean
+  cor?: string
+  expand?: {
+    pessoa?: Pessoa
+    empresa?: Empresa
+  }
+}
+
+export interface MetaHabitoRegistro extends RecordModel {
+  habito: string
+  data: string // YYYY-MM-DD
+  status: HabitoStatusRegistro
+  observacao?: string
+  expand?: {
+    habito?: MetaHabito
+  }
+}
+
+export type AgendaEventoStatus = 'ativo' | 'cancelado' | 'concluido'
+export type AgendaEventoRecorrencia = 'nenhuma' | 'diaria' | 'semanal' | 'mensal' | 'anual'
+export type AgendaEventoOrigem = 'sistema' | 'google'
+
+export interface AgendaEvento extends RecordModel {
+  titulo: string
+  descricao?: string
+  contexto_tipo: ContextoTipo
+  pessoa?: string
+  empresa?: string
+  data_inicio: string
+  data_fim?: string
+  dia_inteiro?: boolean
+  local?: string
+  recorrencia?: AgendaEventoRecorrencia
+  status: AgendaEventoStatus
+  origem: AgendaEventoOrigem
+  google_event_id?: string
+  cor?: string
+  expand?: {
+    pessoa?: Pessoa
+    empresa?: Empresa
+  }
+}
+
+export type ProjetoStatus = 'planejamento' | 'em_andamento' | 'concluido' | 'pausado' | 'cancelado'
+
+export interface Projeto extends RecordModel {
+  nome: string
+  objetivo?: string
+  descricao?: string
+  contexto_tipo: ContextoTipo
+  pessoa?: string
+  empresa?: string
+  prazo?: string
+  status: ProjetoStatus
+  cor?: string
+  expand?: {
+    pessoa?: Pessoa
+    empresa?: Empresa
+  }
+}
+
+export type TarefaEtapa = 'a_fazer' | 'em_progresso' | 'concluida'
+export type TarefaPrioridade = 'baixa' | 'media' | 'alta' | 'urgente'
+
+export interface TarefaChecklistItem {
+  id: string
+  texto: string
+  feito: boolean
+}
+
+export interface Tarefa extends RecordModel {
+  titulo: string
+  descricao?: string
+  projeto?: string
+  responsavel?: string
+  etapa: TarefaEtapa
+  prioridade: TarefaPrioridade
+  contexto_tipo: ContextoTipo
+  pessoa?: string
+  empresa?: string
+  prazo?: string
+  checklist?: TarefaChecklistItem[]
+  ordem?: number
+  evento_agenda?: string
+  expand?: {
+    projeto?: Projeto
+    responsavel?: UserRecord
+    pessoa?: Pessoa
+    empresa?: Empresa
+    evento_agenda?: AgendaEvento
+  }
+}
+
+export type MetaTipoProgresso = 'manual' | 'tarefas'
+export type MetaStatus = 'em_andamento' | 'atingida' | 'cancelada'
+
+export interface MetaMeta extends RecordModel {
+  titulo: string
+  descricao?: string
+  contexto_tipo: ContextoTipo
+  pessoa?: string
+  empresa?: string
+  prazo?: string
+  tipo_progresso: MetaTipoProgresso
+  progresso_manual?: number
+  alvo_descricao?: string
+  projeto?: string
+  tarefas?: string[]
+  status: MetaStatus
+  cor?: string
+  expand?: {
+    pessoa?: Pessoa
+    empresa?: Empresa
+    projeto?: Projeto
+    tarefas?: Tarefa[]
+  }
+}
+
+export interface GoogleCalendarStatusResponse {
+  configured: boolean
+  client_id_present: boolean
+  client_secret_present: boolean
+  redirect_uri: string
+  is_connected: boolean
+  connected_email?: string
+  last_sync_at?: string
+  last_error?: string
+  sync_ativo: boolean
+}
+
 export interface PeriodRange {
   key: 'current' | 'previous' | '90days'
   label: string

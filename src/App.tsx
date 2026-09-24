@@ -11,9 +11,13 @@ import Despesas from '@/pages/Despesas'
 import Empresas from '@/pages/Empresas'
 import Lancamentos from '@/pages/Lancamentos'
 import Marketplaces from '@/pages/Marketplaces'
-import Pendentes from '@/pages/Pendentes'
 import NotFound from '@/pages/NotFound'
+import Pendentes from '@/pages/Pendentes'
 import Pessoas from '@/pages/Pessoas'
+import MetasAgendaHub from '@/pages/MetasAgendaHub'
+import HabitosRotinas from '@/pages/HabitosRotinas'
+import Agenda from '@/pages/Agenda'
+import ProjetosTarefas from '@/pages/ProjetosTarefas'
 import ConfirmEmail from '@/pages/auth/ConfirmEmail'
 import ForgotPassword from '@/pages/auth/ForgotPassword'
 import Login from '@/pages/auth/Login'
@@ -42,9 +46,13 @@ export default function App() {
           <Route path="/categorias" element={<Categorias />} />
           <Route path="/marketplaces" element={<Marketplaces />} />
           <Route path="/cadastros" element={<Cadastros />} />
-          <Route path="/empresas" element={<Empresas />} />
-          <Route path="/pessoas" element={<Pessoas />} />
-          <Route path="/configuracoes" element={<Configuracoes />} />
+          <Route path="/cadastros/pessoas" element={<Pessoas />} />
+          <Route path="/cadastros/empresas" element={<Empresas />} />
+          <Route path="/metas-agenda" element={<MetasAgendaHub />} />
+          <Route path="/habitos" element={<HabitosRotinas />} />
+          <Route path="/agenda" element={<Agenda />} />
+          <Route path="/projetos" element={<ProjetosTarefas />} />
+          <Route path="/configuracoes" element={<Configuracoes />} />{' '}
         </Route>
       </Route>
       <Route path="/inicio" element={<Navigate to="/" replace />} />
