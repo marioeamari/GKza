@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   CalendarDays,
   CheckCircle2,
@@ -7,6 +8,7 @@ import {
   Unlink,
   ExternalLink,
   ShieldCheck,
+  KeyRound,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -17,9 +19,11 @@ import type { GoogleCalendarStatusResponse } from '@/types/domain'
 
 export function GoogleCalendarCard() {
   const { toast } = useToast()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [status, setStatus] = useState<GoogleCalendarStatusResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
+  const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
 
   const loadStatus = async () => {
@@ -37,21 +41,54 @@ export function GoogleCalendarCard() {
     loadStatus()
   }, [])
 
+  // Tratar retorno do redirect de autorização do Google Calendar
+  useEffect(() => {
+    const isGoogleCalendar = searchParams.get('google_calendar')
+    const success = searchParams.get('success')
+    const error = searchParams.get('error')
+
+    if (isGoogleCalendar) {
+      if (success === '1') {
+        toast({
+          title: 'Google Calendar Conectado!',
+          description:
+            'Sua conta Google foi vinculada com sucesso. Os eventos já podem ser sincronizados.',
+        })
+        loadStatus()
+      } else if (error) {
+        toast({
+          title: 'Erro ao conectar Google Calendar',
+          description: decodeURIComponent(error),
+          variant: 'destructive',
+        })
+      }
+
+      // Limpar parâmetros da URL
+      const newParams = new URLSearchParams(searchParams)
+      newParams.delete('google_calendar')
+      newParams.delete('success')
+      newParams.delete('error')
+      setSearchParams(newParams, { replace: true })
+    }
+  }, [searchParams, setSearchParams, toast])
+
   const handleConnect = async () => {
+    setConnecting(true)
     try {
       const res = await googleCalendarService.getAuthUrl()
       if (res.url) {
         window.location.href = res.url
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Verifique os logs.'
+      const message = err instanceof Error ? err.message : 'Verifique as configurações.'
       toast({
-        title: 'Credenciais OAuth Ausentes',
+        title: 'Falha ao iniciar conexão',
         description: message.includes('GOOGLE_CLIENT_ID')
           ? 'As credenciais GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET ainda não foram salvas nas variáveis de ambiente do sistema.'
           : message,
         variant: 'destructive',
       })
+      setConnecting(false)
     }
   }
 
@@ -176,9 +213,22 @@ export function GoogleCalendarCard() {
               <p className="text-[11px] leading-relaxed">
                 Toda a arquitetura de sincronização bidirecional, suporte a eventos recorrentes,
                 fuso horário <code>America/Sao_Paulo</code> e prevenção de duplicatas via{' '}
-                <code>google_event_id</code> está implementada no backend.
+                <code>google_event_id</code> está implementada e pronta para uso.
               </p>
-              {!status?.configured && (
+
+              {status?.configured ? (
+                <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] space-y-1.5">
+                  <p className="font-semibold flex items-center gap-1 text-emerald-800">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                    Credenciais OAuth configuradas no servidor
+                  </p>
+                  <p className="text-emerald-700">
+                    O Client ID e Client Secret do Google Calendar estão ativos no backend. Clique
+                    no botão abaixo para autorizar o acesso à sua conta Google e iniciar a
+                    sincronização.
+                  </p>
+                </div>
+              ) : (
                 <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px] space-y-1">
                   <p className="font-semibold flex items-center gap-1">
                     <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
@@ -188,22 +238,27 @@ export function GoogleCalendarCard() {
                     Para conectar, registre os segredos <code>GOOGLE_CLIENT_ID</code> e{' '}
                     <code>GOOGLE_CLIENT_SECRET</code> no painel.
                   </p>
-                  <p className="font-mono text-[10px] break-all select-all bg-white p-1 rounded border border-amber-300">
-                    Redirect URI:{' '}
-                    {status?.redirect_uri ||
-                      'https://gestao-financeira-e-marketplaces-d7ede.shrd00.internal.goskip.dev/backend/v1/google/callback'}
-                  </p>
                 </div>
               )}
+
+              <div className="pt-1 text-[11px] text-muted-foreground flex items-center gap-1.5">
+                <KeyRound className="h-3.5 w-3.5 text-primary shrink-0" />
+                <span>Redirect URI autorizado:</span>
+                <code className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded select-all break-all">
+                  {status?.redirect_uri ||
+                    'https://gestao-financeira-e-marketplaces-d7ede.shrd00.internal.goskip.dev/backend/v1/google/callback'}
+                </code>
+              </div>
             </div>
 
             <Button
               size="sm"
               onClick={handleConnect}
+              disabled={connecting}
               className="w-full bg-primary hover:bg-primary/90 text-white text-xs gap-1.5"
             >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Conectar com Google Calendar
+              <ExternalLink className={`h-3.5 w-3.5 ${connecting ? 'animate-spin' : ''}`} />
+              {connecting ? 'Redirecionando para o Google...' : 'Conectar com Google Calendar'}
             </Button>
           </div>
         )}
