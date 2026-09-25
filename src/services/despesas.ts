@@ -418,10 +418,40 @@ export const despesasService = {
         ? compromisso.valor_parcela
         : compromisso.valor_estimado
 
-    // 1. Pagamento Avulso / Pontual (à vista, uma única ocorrência na data de início)
+    // Verifica se a conta vinculada é cartão de crédito para alinhar ao ciclo da fatura
+    let contaCartaoObj: Conta | null = null
+    if (compromisso.conta_padrao) {
+      try {
+        const c = await pb.collection<Conta>('contas').getOne(compromisso.conta_padrao)
+        if (c.tipo === 'cartao') {
+          contaCartaoObj = c
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // 1. Pagamento Avulso / Pontual (à vista, uma única ocorrência)
     if (isAvulso) {
-      const startDate = new Date(compromisso.data_inicio)
-      const compStr = `${startDate.getUTCFullYear()}-${(startDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
+      const dataCompraStr = compromisso.data_inicio
+        ? compromisso.data_inicio.slice(0, 10)
+        : new Date().toISOString().slice(0, 10)
+
+      let compStr: string
+      let dueDateIso: string
+
+      if (contaCartaoObj) {
+        // Alinhado ao ciclo da fatura do cartão
+        const { calcularFaturaCartao } = await import('@/lib/cartao-fatura')
+        const ciclo = calcularFaturaCartao(contaCartaoObj, dataCompraStr)
+        compStr = ciclo.competencia
+        dueDateIso = `${ciclo.dataVencimento}T12:00:00.000Z`
+      } else {
+        const startDate = new Date(compromisso.data_inicio)
+        compStr = `${startDate.getUTCFullYear()}-${(startDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
+        dueDateIso = startDate.toISOString()
+      }
+
       const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
         filter: `compromisso = '${compromisso.id}'`,
       })
@@ -433,7 +463,7 @@ export const despesasService = {
           secao: compromisso.secao,
           conta: compromisso.conta_padrao || null,
           competencia: compStr,
-          data_vencimento: startDate.toISOString(),
+          data_vencimento: dueDateIso,
           valor_previsto: compromisso.valor_estimado,
           valor_estimado_original: compromisso.valor_estimado,
           valor_ajustado_manualmente: false,
@@ -451,40 +481,107 @@ export const despesasService = {
     if (isParcelado) {
       const total = compromisso.total_parcelas || 1
       const inicial = compromisso.parcela_inicial || 1
-      const startDate = new Date(compromisso.data_inicio)
-      const day = compromisso.dia_vencimento || startDate.getUTCDate() || 10
+      const dataCompraStr = compromisso.data_inicio
+        ? compromisso.data_inicio.slice(0, 10)
+        : new Date().toISOString().slice(0, 10)
 
-      for (let p = inicial; p <= total; p++) {
-        const offset = p - inicial
-        const ano = startDate.getUTCFullYear()
-        const mes = startDate.getUTCMonth() + offset
-        const dueDate = despesasService.calcularDataVencimentoNoMes(ano, mes, day)
-        const compStr = `${dueDate.getUTCFullYear()}-${(dueDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
+      if (contaCartaoObj) {
+        // Regra para cartão de crédito parcelado:
+        // A parcela 1 entra na fatura do ciclo da compra (data_inicio).
+        // Cada parcela subsequente avança 1 ciclo de fatura (mês subsequente).
+        const { calcularFaturaCartao } = await import('@/lib/cartao-fatura')
+        const cicloBase = calcularFaturaCartao(contaCartaoObj, dataCompraStr)
+        const [cBaseAnoStr, cBaseMesStr] = cicloBase.competencia.split('-')
+        const cBaseAno = parseInt(cBaseAnoStr, 10)
+        const cBaseMesZero = parseInt(cBaseMesStr, 10) - 1
 
-        const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-          filter: `compromisso = '${compromisso.id}' && numero_parcela = ${p}`,
-        })
+        const diaFechamento = contaCartaoObj.dia_fechamento || 10
+        const diaVencimento = contaCartaoObj.dia_vencimento || 20
 
-        if (existing.totalItems === 0) {
-          await pb.collection('despesas_ocorrencias').create({
-            compromisso: compromisso.id,
-            contexto_tipo: compromisso.contexto_tipo,
-            empresa: compromisso.empresa || null,
-            secao: compromisso.secao,
-            conta: compromisso.conta_padrao || null,
-            competencia: compStr,
-            numero_parcela: p,
-            total_parcelas: total,
-            data_vencimento: dueDate.toISOString(),
-            valor_previsto: valorUnitario,
-            valor_estimado_original: valorUnitario,
-            valor_ajustado_manualmente: false,
-            status: 'prevista',
-            dizimo: compromisso.dizimo || false,
-            tipo_dizimo: compromisso.tipo_dizimo || null,
-            link_pagamento: compromisso.link_pagamento || null,
-            observacoes: `Parcela ${p}/${total}`,
+        for (let p = inicial; p <= total; p++) {
+          const offset = p - inicial
+          // Mês de fechamento desta parcela
+          const fMonthDate = new Date(Date.UTC(cBaseAno, cBaseMesZero + offset, 1))
+          const fYear = fMonthDate.getUTCFullYear()
+          const fMonth = fMonthDate.getUTCMonth() // 0-based
+          const compStr = `${fYear}-${String(fMonth + 1).padStart(2, '0')}`
+
+          // Vencimento da fatura correspondente a este fechamento
+          let vYear = fYear
+          let vMonth = fMonth
+          if (diaVencimento < diaFechamento) {
+            vMonth += 1
+          }
+          const vMonthDate = new Date(Date.UTC(vYear, vMonth, 1))
+          const realVYear = vMonthDate.getUTCFullYear()
+          const realVMonth = vMonthDate.getUTCMonth()
+          const maxDiasVenc = new Date(Date.UTC(realVYear, realVMonth + 1, 0)).getUTCDate()
+          const realDiaVenc = Math.min(diaVencimento, maxDiasVenc)
+          const dueDateIso = `${realVYear}-${String(realVMonth + 1).padStart(2, '0')}-${String(realDiaVenc).padStart(2, '0')}T12:00:00.000Z`
+
+          const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
+            filter: `compromisso = '${compromisso.id}' && numero_parcela = ${p}`,
           })
+
+          if (existing.totalItems === 0) {
+            await pb.collection('despesas_ocorrencias').create({
+              compromisso: compromisso.id,
+              contexto_tipo: compromisso.contexto_tipo,
+              empresa: compromisso.empresa || null,
+              secao: compromisso.secao,
+              conta: compromisso.conta_padrao || null,
+              competencia: compStr,
+              numero_parcela: p,
+              total_parcelas: total,
+              data_vencimento: dueDateIso,
+              valor_previsto: valorUnitario,
+              valor_estimado_original: valorUnitario,
+              valor_ajustado_manualmente: false,
+              status: 'prevista',
+              dizimo: compromisso.dizimo || false,
+              tipo_dizimo: compromisso.tipo_dizimo || null,
+              link_pagamento: compromisso.link_pagamento || null,
+              observacoes: `Parcela ${p}/${total}`,
+            })
+          }
+        }
+      } else {
+        // Contas não-cartão: lógica padrão com dia_vencimento
+        const startDate = new Date(compromisso.data_inicio)
+        const day = compromisso.dia_vencimento || startDate.getUTCDate() || 10
+
+        for (let p = inicial; p <= total; p++) {
+          const offset = p - inicial
+          const ano = startDate.getUTCFullYear()
+          const mes = startDate.getUTCMonth() + offset
+          const dueDate = despesasService.calcularDataVencimentoNoMes(ano, mes, day)
+          const compStr = `${dueDate.getUTCFullYear()}-${(dueDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
+
+          const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
+            filter: `compromisso = '${compromisso.id}' && numero_parcela = ${p}`,
+          })
+
+          if (existing.totalItems === 0) {
+            await pb.collection('despesas_ocorrencias').create({
+              compromisso: compromisso.id,
+              contexto_tipo: compromisso.contexto_tipo,
+              empresa: compromisso.empresa || null,
+              secao: compromisso.secao,
+              conta: compromisso.conta_padrao || null,
+              competencia: compStr,
+              numero_parcela: p,
+              total_parcelas: total,
+              data_vencimento: dueDate.toISOString(),
+              valor_previsto: valorUnitario,
+              valor_estimado_original: valorUnitario,
+              valor_ajustado_manualmente: false,
+              status: 'prevista',
+              dizimo: compromisso.dizimo || false,
+              tipo_dizimo: compromisso.tipo_dizimo || null,
+              link_pagamento: compromisso.link_pagamento || null,
+              observacoes: `Parcela ${p}/${total}`,
+            })
+          }
         }
       }
       return

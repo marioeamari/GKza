@@ -22,8 +22,9 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
+import { Badge } from '@/components/ui/badge'
 import { apiMessage } from '@/lib/api-error'
-import { getAvisoFaturaCartao } from '@/lib/cartao-fatura'
+import { calcularFaturaCartao, getAvisoFaturaCartao } from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { despesasService } from '@/services/despesas'
 import type { Conta, DespesaCompromisso, DespesaOcorrencia } from '@/types/domain'
@@ -58,6 +59,10 @@ export function BaixaOcorrenciaDialog({
 
   const selectedContaObj = contas.find((c) => c.id === contaId)
   const isContaCartao = selectedContaObj?.tipo === 'cartao'
+  const faturaCiclo =
+    isContaCartao && selectedContaObj && dataPagamento
+      ? calcularFaturaCartao(selectedContaObj, dataPagamento)
+      : null
   const avisoCartao = isContaCartao ? getAvisoFaturaCartao(selectedContaObj, dataPagamento) : null
 
   useEffect(() => {
@@ -157,9 +162,18 @@ export function BaixaOcorrenciaDialog({
       }
 
       if (isContaCartao) {
+        let cicloToastInfo = ''
+        if (faturaCiclo) {
+          const dateObj = new Date(faturaCiclo.dataFechamento + 'T12:00:00')
+          const mesAno = dateObj.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+          const [vy, vm, vd] = faturaCiclo.dataVencimento.split('-')
+          cicloToastInfo = ` à fatura de ${mesAno} (vence ${vd}/${vm})`
+        }
         toast({
           title: 'Compra registrada no cartão!',
-          description: `Valor de ${formatCurrency(valorPago)} integrado à fatura do cartão. A saída real do caixa ocorrerá no pagamento da fatura.`,
+          description: cicloToastInfo
+            ? `Compra vinculada${cicloToastInfo}. A saída real do caixa ocorrerá no pagamento da fatura.`
+            : `Valor de ${formatCurrency(valorPago)} integrado à fatura do cartão. A saída real do caixa ocorrerá no pagamento da fatura.`,
         })
       } else {
         toast({
@@ -256,10 +270,31 @@ export function BaixaOcorrenciaDialog({
                   ))}
               </SelectContent>
             </Select>
-            {avisoCartao && (
-              <p className="rounded-lg bg-primary/10 p-2 text-xs font-semibold text-primary">
-                {avisoCartao}
-              </p>
+            {isContaCartao && faturaCiclo && (
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center gap-1.5">
+                  <Badge
+                    variant="outline"
+                    className="border-primary/40 bg-primary/10 text-primary font-bold text-xs px-2.5 py-1"
+                  >
+                    Fatura de{' '}
+                    {(() => {
+                      const dateObj = new Date(faturaCiclo.dataFechamento + 'T12:00:00')
+                      const mesAno = dateObj.toLocaleDateString('pt-BR', {
+                        month: 'short',
+                        year: 'numeric',
+                      })
+                      const [vy, vm, vd] = faturaCiclo.dataVencimento.split('-')
+                      return `${mesAno.charAt(0).toUpperCase() + mesAno.slice(1)} · vence ${vd}/${vm}`
+                    })()}
+                  </Badge>
+                </div>
+                {avisoCartao && (
+                  <p className="rounded-lg bg-primary/10 p-2 text-xs font-semibold text-primary">
+                    {avisoCartao}
+                  </p>
+                )}
+              </div>
             )}
           </div>
 

@@ -39,6 +39,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useAppContext } from '@/contexts/AppContext'
 import { useToast } from '@/hooks/use-toast'
 import { apiMessage } from '@/lib/api-error'
+import { calcularFaturaCartao, getAvisoFaturaCartao } from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { despesasService } from '@/services/despesas'
 import type {
@@ -322,7 +323,26 @@ export function DespesaCompromissoDialog({
 
   // Conta de pagamento selecionada
   const selectedConta = contas.find((c) => c.id === form.conta_padrao)
-  const isSelectedContaCartao = selectedConta?.tipo === 'cartao' || form.secao === 'cartoes_credito'
+  // Conta de cartão efetiva: se a conta selecionada for tipo cartão, ou se a seção for cartões de crédito e houver conta de cartão
+  const isContaCartao = selectedConta?.tipo === 'cartao'
+  const isSelectedContaCartao = isContaCartao || form.secao === 'cartoes_credito'
+
+  // Ciclo da fatura para compras no cartão (calculado em tempo real com base na conta e data_inicio)
+  const faturaCicloCartao = useMemo(() => {
+    if (!selectedConta || selectedConta.tipo !== 'cartao' || !form.data_inicio) return null
+    return calcularFaturaCartao(selectedConta, form.data_inicio)
+  }, [selectedConta, form.data_inicio])
+
+  const avisoFaturaCartao = useMemo(() => {
+    if (!selectedConta || selectedConta.tipo !== 'cartao' || !form.data_inicio) return null
+    return getAvisoFaturaCartao(selectedConta, form.data_inicio)
+  }, [selectedConta, form.data_inicio])
+
+  // Data de vencimento formatada ou dia de vencimento derivado do ciclo do cartão
+  const dataVencimentoCicloCartaoFormatada = useMemo(() => {
+    if (!faturaCicloCartao) return null
+    return formatDate(faturaCicloCartao.dataVencimento)
+  }, [faturaCicloCartao])
 
   // Método de pagamento selecionado
   const selectedMetodoPagamento = useMemo(() => {
@@ -426,10 +446,12 @@ export function DespesaCompromissoDialog({
   ])
 
   // Verificação de compatibilidade entre dia de vencimento e data de início
-  // Isenta pagamentos imediatos (Pix, débito, transferência, dinheiro ou caixa), onde o vencimento não se aplica.
+  // Isenta pagamentos imediatos (Pix, débito, transferência, dinheiro ou caixa) e compras no cartão de crédito
+  // (onde o vencimento é por natureza governado pelo ciclo da fatura, não pela data da compra).
   const avisoIncompatibilidadeData = useMemo(() => {
     if (form.regra_repeticao === 'avulso') return null
     if (isMetodoIsentoDeVencimento) return null
+    if (isSelectedContaCartao) return null
     if (!form.data_inicio) return null
     const day = parseInt(form.data_inicio.slice(8, 10), 10)
     const diaVenc = Number(form.dia_vencimento)
@@ -439,7 +461,13 @@ export function DespesaCompromissoDialog({
       )}) está marcada para o dia ${day}, enquanto o dia de vencimento fixado é ${diaVenc}. Ajuste um dos campos para manter a consistência dos vencimentos.`
     }
     return null
-  }, [form.data_inicio, form.dia_vencimento, form.regra_repeticao, isMetodoIsentoDeVencimento])
+  }, [
+    form.data_inicio,
+    form.dia_vencimento,
+    form.regra_repeticao,
+    isMetodoIsentoDeVencimento,
+    isSelectedContaCartao,
+  ])
 
   // Rótulo dinâmico do campo de valor (Item 9)
   const labelValor = useMemo(() => {
@@ -521,8 +549,13 @@ export function DespesaCompromissoDialog({
     }
 
     // Regra de validação estrita da data de primeira cobrança vs dia de vencimento (Item 10)
-    // Não se aplica a pagamentos sem dependência de vencimento (Pix, débito, transferência, dinheiro, caixa)
-    if (form.regra_repeticao !== 'avulso' && !isMetodoIsentoDeVencimento && form.data_inicio) {
+    // Não se aplica a pagamentos sem dependência de vencimento (Pix, débito, transferência, dinheiro, caixa) nem a compras no cartão
+    if (
+      form.regra_repeticao !== 'avulso' &&
+      !isMetodoIsentoDeVencimento &&
+      !isSelectedContaCartao &&
+      form.data_inicio
+    ) {
       const day = parseInt(form.data_inicio.slice(8, 10), 10)
       const diaVenc = Number(form.dia_vencimento)
       if (diaVenc && day !== diaVenc) {
@@ -804,13 +837,16 @@ export function DespesaCompromissoDialog({
               <div className="space-y-1.5">
                 <Label className="font-semibold">Seção do painel (Visualização)</Label>
                 <Select
-                  value={form.secao}
+                  value={isSelectedContaCartao ? 'cartoes_credito' : form.secao}
+                  disabled={isSelectedContaCartao}
                   onValueChange={(v) => {
                     const s = v as SecaoDespesa
                     setForm({ ...form, secao: s })
                   }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger
+                    className={isSelectedContaCartao ? 'bg-secondary/40 font-medium' : ''}
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -823,9 +859,15 @@ export function DespesaCompromissoDialog({
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-[11px] text-muted-foreground">
-                  Onde este compromisso será visualizado na interface de Despesas.
-                </p>
+                {isSelectedContaCartao ? (
+                  <p className="text-[11px] font-medium text-primary">
+                    Bloqueado em Cartões de Crédito para compras no cartão.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    Onde este compromisso será visualizado na interface de Despesas.
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -1077,12 +1119,14 @@ export function DespesaCompromissoDialog({
                 />
               </div>
 
-              {/* Data da primeira cobrança ou vencimento único */}
+              {/* Data da primeira cobrança / data da compra */}
               <div className="space-y-1.5">
                 <Label className="font-semibold">
-                  {form.regra_repeticao === 'avulso'
-                    ? 'Data de vencimento *'
-                    : '1ª cobrança / Início *'}
+                  {isSelectedContaCartao
+                    ? 'Data da compra *'
+                    : form.regra_repeticao === 'avulso'
+                      ? 'Data de vencimento *'
+                      : '1ª cobrança / Início *'}
                 </Label>
                 <Input
                   type="date"
@@ -1090,7 +1134,7 @@ export function DespesaCompromissoDialog({
                   onChange={(e) => {
                     const newDate = e.target.value
                     let newDay = form.dia_vencimento
-                    if (newDate) {
+                    if (newDate && !isSelectedContaCartao) {
                       newDay = parseInt(newDate.slice(8, 10), 10) || form.dia_vencimento
                     }
                     setForm({
@@ -1101,33 +1145,104 @@ export function DespesaCompromissoDialog({
                   }}
                   required
                 />
+                {isSelectedContaCartao && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Data em que a compra no cartão foi/será realizada.
+                  </p>
+                )}
               </div>
 
-              {/* Dia de vencimento (somente visível para repetições mensais ou parceladas) */}
-              {form.regra_repeticao !== 'avulso' && (
+              {/* Dia de vencimento (ou exibição de vencimento atrelado ao cartão) */}
+              {isSelectedContaCartao ? (
                 <div className="space-y-1.5">
-                  <Label className="font-semibold">Dia de vencimento (1 a 31)</Label>
+                  <Label className="font-semibold text-muted-foreground">Data de vencimento</Label>
                   <Input
-                    type="number"
-                    min={1}
-                    max={31}
-                    value={form.dia_vencimento}
-                    onChange={(e) => {
-                      const day = parseInt(e.target.value, 10) || 10
-                      setForm({
-                        ...form,
-                        dia_vencimento: day,
-                      })
-                    }}
+                    type="text"
+                    disabled
+                    value={
+                      dataVencimentoCicloCartaoFormatada
+                        ? `Vencimento: ${dataVencimentoCicloCartaoFormatada}`
+                        : selectedConta?.dia_vencimento
+                          ? `Todo dia ${selectedConta.dia_vencimento}`
+                          : 'Vinculado ao cartão'
+                    }
+                    className="bg-secondary/40 font-medium text-xs cursor-not-allowed text-foreground"
                   />
-                  <p className="text-[11px] text-muted-foreground">
-                    Dias 29, 30 ou 31 são ajustados no último dia dos meses curtos.
+                  <p className="text-[11px] font-medium text-primary">
+                    Vencimento definido pelo ciclo do cartão
+                    {dataVencimentoCicloCartaoFormatada
+                      ? `: ${dataVencimentoCicloCartaoFormatada}`
+                      : ''}
                   </p>
                 </div>
+              ) : (
+                form.regra_repeticao !== 'avulso' && (
+                  <div className="space-y-1.5">
+                    <Label className="font-semibold">Dia de vencimento (1 a 31)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={form.dia_vencimento}
+                      onChange={(e) => {
+                        const day = parseInt(e.target.value, 10) || 10
+                        setForm({
+                          ...form,
+                          dia_vencimento: day,
+                        })
+                      }}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Dias 29, 30 ou 31 são ajustados no último dia dos meses curtos.
+                    </p>
+                  </div>
+                )
               )}
             </div>
 
-            {/* Alerta de incompatibilidade entre data da 1ª cobrança e dia de vencimento */}
+            {/* Badge dinâmica do ciclo do cartão e aviso em tempo real */}
+            {isSelectedContaCartao && (
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {faturaCicloCartao ? (
+                    <Badge
+                      variant="outline"
+                      className="border-primary/40 bg-primary/10 text-primary font-bold text-xs px-2.5 py-1"
+                    >
+                      Fatura de{' '}
+                      {(() => {
+                        const dateObj = new Date(faturaCicloCartao.dataFechamento + 'T12:00:00')
+                        const mesAno = dateObj.toLocaleDateString('pt-BR', {
+                          month: 'short',
+                          year: 'numeric',
+                        })
+                        const [vy, vm, vd] = faturaCicloCartao.dataVencimento.split('-')
+                        return `${mesAno.charAt(0).toUpperCase() + mesAno.slice(1)} · vence ${vd}/${vm}`
+                      })()}
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className="border-primary/40 bg-primary/10 text-primary text-xs"
+                    >
+                      Ciclo do Cartão de Crédito
+                    </Badge>
+                  )}
+                  {selectedConta && (
+                    <span className="text-xs text-muted-foreground">
+                      Cartão: <strong>{selectedConta.nome}</strong> (fecha dia{' '}
+                      {selectedConta.dia_fechamento || 10}, vence dia{' '}
+                      {selectedConta.dia_vencimento || 20})
+                    </span>
+                  )}
+                </div>
+                {avisoFaturaCartao && (
+                  <p className="text-xs font-semibold text-primary">{avisoFaturaCartao}</p>
+                )}
+              </div>
+            )}
+
+            {/* Alerta de incompatibilidade entre data da 1ª cobrança e dia de vencimento (somente não-cartão) */}
             {avisoIncompatibilidadeData && (
               <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1159,6 +1274,8 @@ export function DespesaCompromissoDialog({
                     const c = contas.find((item) => item.id === contaId)
                     let updated = { ...form, conta_padrao: contaId }
                     if (c && c.tipo === 'cartao') {
+                      // Fixa a seção em 'cartoes_credito' automaticamente
+                      updated.secao = 'cartoes_credito'
                       if (c.dia_vencimento) {
                         updated.dia_vencimento = c.dia_vencimento
                       }
