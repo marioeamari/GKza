@@ -66,28 +66,45 @@ export function AppLayout() {
 
   // Contagem em tempo real de registros pendentes do Telegram
   useEffect(() => {
+    let active = true
     const fetchCount = () => {
-      telegramPendentesService.countPendentes().then((count) => setPendentesCount(count))
+      telegramPendentesService
+        .countPendentes()
+        .then((count) => {
+          if (active) setPendentesCount(count)
+        })
+        .catch(() => {})
     }
 
     fetchCount()
 
-    try {
-      pb.collection('telegram_registros_pendentes').subscribe('*', () => {
+    let unsubscribeFn: (() => Promise<void>) | undefined
+    pb.collection('telegram_registros_pendentes')
+      .subscribe('*', () => {
         fetchCount()
       })
-    } catch {
-      /* intentionally ignored */
-    }
+      .then((unsub) => {
+        if (!active) {
+          unsub().catch(() => {})
+        } else {
+          unsubscribeFn = unsub
+        }
+      })
+      .catch(() => {})
 
     return () => {
-      try {
-        pb.collection('telegram_registros_pendentes').unsubscribe('*')
-      } catch {
-        /* intentionally ignored */
+      active = false
+      if (unsubscribeFn) {
+        unsubscribeFn().catch(() => {})
+      } else {
+        try {
+          pb.collection('telegram_registros_pendentes').unsubscribe('*')
+        } catch {
+          /* intentionally ignored */
+        }
       }
     }
-  }, [])
+  }, [location.pathname])
 
   const desktopItems = [
     { to: '/', label: 'Dashboard', icon: Grid2X2, end: true },

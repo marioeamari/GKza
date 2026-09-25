@@ -163,21 +163,28 @@ export default function Pendentes() {
       .catch(() => {})
 
     // Subscrição em tempo real para atualizações na coleção de pendentes
-    try {
-      pb.collection('telegram_registros_pendentes').subscribe('*', (e) => {
+    let active = true
+    let unsubscribeFn: (() => Promise<void>) | undefined
+
+    pb.collection('telegram_registros_pendentes')
+      .subscribe('*', (e) => {
         if (e.action === 'create' || e.action === 'update' || e.action === 'delete') {
-          loadPendentes()
+          if (active) loadPendentes()
         }
       })
-    } catch {
-      /* intentionally ignored */
-    }
+      .then((unsub) => {
+        if (!active) {
+          unsub().catch(() => {})
+        } else {
+          unsubscribeFn = unsub
+        }
+      })
+      .catch(() => {})
 
     return () => {
-      try {
-        pb.collection('telegram_registros_pendentes').unsubscribe('*')
-      } catch {
-        /* intentionally ignored */
+      active = false
+      if (unsubscribeFn) {
+        unsubscribeFn().catch(() => {})
       }
     }
   }, [loadPendentes])

@@ -1,7 +1,16 @@
 import type { RecordListOptions } from 'pocketbase'
 import pb from '@/lib/pocketbase/client'
 import { despesasService } from '@/services/despesas'
-import type { DespesaCompromisso, Lancamento, TelegramRegistroPendente } from '@/types/domain'
+import type {
+  DespesaCompromisso,
+  Lancamento,
+  ModalidadeParcelamento,
+  RegraRepeticao,
+  SecaoDespesa,
+  TelegramRegistroPendente,
+  TipoValorDespesa,
+  TitularTipo,
+} from '@/types/domain'
 
 export interface TriagemLancamentoInput {
   descricao: string
@@ -18,21 +27,28 @@ export interface TriagemLancamentoInput {
 export interface TriagemDespesaInput {
   descricao: string
   fornecedor?: string
-  secao: 'contas_mensais_pix_boleto' | 'assinaturas_anuais' | 'cartoes_credito'
-  regra_repeticao: 'mensal' | 'anual' | 'parcelado' | 'avulso'
+  secao: SecaoDespesa
+  regra_repeticao: RegraRepeticao
   categoria?: string
-  tag?: string
+  tag?: string // Destino da despesa / Centro de custo
   tipo_despesa?: string
   metodo_pagamento?: string
   conta_padrao?: string
   pessoa?: string
   empresa?: string
-  contexto_tipo: 'pessoal' | 'empresa'
+  contexto_tipo?: 'pessoal' | 'empresa'
+  titular_tipo?: TitularTipo
+  titular_pessoa?: string
+  titular_empresa?: string
+  tipo_valor?: TipoValorDespesa
+  modalidade_parcelamento?: ModalidadeParcelamento
   total_parcelas?: number
   parcela_inicial?: number
+  valor_parcela?: number
   dia_vencimento?: number
   regra_vencimento_texto?: string
   data_inicio: string
+  data_fim_calculada?: string
   valor_estimado: number
   link_pagamento?: string
   dizimo?: boolean
@@ -125,25 +141,63 @@ export const telegramPendentesService = {
 
   // 2. Destino: Apenas Despesa (Compromisso Recorrente em /despesas)
   triarComoDespesa: async (pendenteId: string, input: TriagemDespesaInput) => {
+    const isParcelado =
+      input.modalidade_parcelamento === 'parcelado' || input.regra_repeticao === 'parcelado'
+    const totalParcelasNum = isParcelado ? Math.max(1, Number(input.total_parcelas) || 1) : 1
+    const parcelaInicialNum = isParcelado ? Math.max(1, Number(input.parcela_inicial) || 1) : 1
+    const titularTipo = input.titular_tipo || (input.empresa ? 'cnpj' : 'cpf')
+
     const payload: Partial<DespesaCompromisso> = {
-      contexto_tipo: input.contexto_tipo,
-      empresa: (input.empresa || null) as unknown as string,
-      pessoa: (input.pessoa || null) as unknown as string,
       descricao: input.descricao.trim(),
       fornecedor: input.fornecedor?.trim() || (null as unknown as string),
-      secao: input.secao,
-      regra_repeticao: input.regra_repeticao,
       categoria: input.categoria || (null as unknown as string),
       tag: input.tag || (null as unknown as string),
-      tipo_despesa: input.tipo_despesa || (null as unknown as string),
-      metodo_pagamento: input.metodo_pagamento || (null as unknown as string),
-      conta_padrao: input.conta_padrao || (null as unknown as string),
-      total_parcelas: input.regra_repeticao === 'parcelado' ? Number(input.total_parcelas) : 1,
-      parcela_inicial: input.regra_repeticao === 'parcelado' ? Number(input.parcela_inicial) : 1,
-      dia_vencimento: Number(input.dia_vencimento) || 10,
-      regra_vencimento_texto: input.regra_vencimento_texto || `${input.dia_vencimento || 10}/m`,
+      secao: input.secao,
+
+      titular_tipo: titularTipo,
+      titular_pessoa:
+        titularTipo === 'cpf' && (input.titular_pessoa || input.pessoa)
+          ? input.titular_pessoa || input.pessoa
+          : (null as unknown as string),
+      titular_empresa:
+        titularTipo === 'cnpj' && (input.titular_empresa || input.empresa)
+          ? input.titular_empresa || input.empresa
+          : (null as unknown as string),
+
+      contexto_tipo: titularTipo === 'cnpj' ? 'empresa' : 'pessoal',
+      empresa:
+        titularTipo === 'cnpj' && (input.titular_empresa || input.empresa)
+          ? input.titular_empresa || input.empresa
+          : (null as unknown as string),
+      pessoa:
+        input.pessoa ||
+        (titularTipo === 'cpf' ? input.titular_pessoa : null) ||
+        (null as unknown as string),
+
+      regra_repeticao: isParcelado ? 'parcelado' : input.regra_repeticao,
+      tipo_valor: input.tipo_valor || 'fixo',
+      modalidade_parcelamento:
+        input.modalidade_parcelamento || (isParcelado ? 'parcelado' : 'a_vista'),
+      total_parcelas: totalParcelasNum,
+      parcela_inicial: parcelaInicialNum,
+      valor_parcela: isParcelado ? Number(input.valor_estimado) : (null as unknown as number),
+      dia_vencimento:
+        input.regra_repeticao === 'avulso'
+          ? parseInt(input.data_inicio.slice(8, 10), 10) || 10
+          : Number(input.dia_vencimento) || 10,
+      regra_vencimento_texto:
+        input.regra_vencimento_texto ||
+        (input.regra_repeticao === 'avulso'
+          ? 'Único'
+          : isParcelado
+            ? `${input.dia_vencimento || 10}/m (${totalParcelasNum}x)`
+            : `${input.dia_vencimento || 10}/m`),
       data_inicio: `${input.data_inicio} 00:00:00.000Z`,
+      data_fim_calculada: input.data_fim_calculada || (null as unknown as string),
       valor_estimado: Number(input.valor_estimado),
+
+      conta_padrao: input.conta_padrao || (null as unknown as string),
+      metodo_pagamento: input.metodo_pagamento || (null as unknown as string),
       link_pagamento: input.link_pagamento || (null as unknown as string),
       dizimo: input.dizimo || false,
       tipo_dizimo:
@@ -163,8 +217,8 @@ export const telegramPendentesService = {
       categoria: input.categoria || '',
       descricao: input.descricao,
       valor: input.valor_estimado,
-      empresa: input.empresa || '',
-      pessoa: input.pessoa || '',
+      empresa: input.empresa || input.titular_empresa || '',
+      pessoa: input.pessoa || input.titular_pessoa || '',
     })
 
     return compromisso
@@ -177,28 +231,68 @@ export const telegramPendentesService = {
     despesaInput: TriagemDespesaInput,
   ) => {
     // A. Cria o compromisso e suas ocorrências
+    const isParcelado =
+      despesaInput.modalidade_parcelamento === 'parcelado' ||
+      despesaInput.regra_repeticao === 'parcelado'
+    const totalParcelasNum = isParcelado ? Math.max(1, Number(despesaInput.total_parcelas) || 1) : 1
+    const parcelaInicialNum = isParcelado
+      ? Math.max(1, Number(despesaInput.parcela_inicial) || 1)
+      : 1
+    const titularTipo = despesaInput.titular_tipo || (despesaInput.empresa ? 'cnpj' : 'cpf')
+
     const payloadCompromisso: Partial<DespesaCompromisso> = {
-      contexto_tipo: despesaInput.contexto_tipo,
-      empresa: (despesaInput.empresa || null) as unknown as string,
-      pessoa: (despesaInput.pessoa || null) as unknown as string,
       descricao: despesaInput.descricao.trim(),
       fornecedor: despesaInput.fornecedor?.trim() || (null as unknown as string),
-      secao: despesaInput.secao,
-      regra_repeticao: despesaInput.regra_repeticao,
       categoria: despesaInput.categoria || (null as unknown as string),
       tag: despesaInput.tag || (null as unknown as string),
-      tipo_despesa: despesaInput.tipo_despesa || (null as unknown as string),
-      metodo_pagamento: despesaInput.metodo_pagamento || (null as unknown as string),
-      conta_padrao: despesaInput.conta_padrao || (null as unknown as string),
-      total_parcelas:
-        despesaInput.regra_repeticao === 'parcelado' ? Number(despesaInput.total_parcelas) : 1,
-      parcela_inicial:
-        despesaInput.regra_repeticao === 'parcelado' ? Number(despesaInput.parcela_inicial) : 1,
-      dia_vencimento: Number(despesaInput.dia_vencimento) || 10,
+      secao: despesaInput.secao,
+
+      titular_tipo: titularTipo,
+      titular_pessoa:
+        titularTipo === 'cpf' && (despesaInput.titular_pessoa || despesaInput.pessoa)
+          ? despesaInput.titular_pessoa || despesaInput.pessoa
+          : (null as unknown as string),
+      titular_empresa:
+        titularTipo === 'cnpj' && (despesaInput.titular_empresa || despesaInput.empresa)
+          ? despesaInput.titular_empresa || despesaInput.empresa
+          : (null as unknown as string),
+
+      contexto_tipo: titularTipo === 'cnpj' ? 'empresa' : 'pessoal',
+      empresa:
+        titularTipo === 'cnpj' && (despesaInput.titular_empresa || despesaInput.empresa)
+          ? despesaInput.titular_empresa || despesaInput.empresa
+          : (null as unknown as string),
+      pessoa:
+        despesaInput.pessoa ||
+        (titularTipo === 'cpf' ? despesaInput.titular_pessoa : null) ||
+        (null as unknown as string),
+
+      regra_repeticao: isParcelado ? 'parcelado' : despesaInput.regra_repeticao,
+      tipo_valor: despesaInput.tipo_valor || 'fixo',
+      modalidade_parcelamento:
+        despesaInput.modalidade_parcelamento || (isParcelado ? 'parcelado' : 'a_vista'),
+      total_parcelas: totalParcelasNum,
+      parcela_inicial: parcelaInicialNum,
+      valor_parcela: isParcelado
+        ? Number(despesaInput.valor_estimado)
+        : (null as unknown as number),
+      dia_vencimento:
+        despesaInput.regra_repeticao === 'avulso'
+          ? parseInt(despesaInput.data_inicio.slice(8, 10), 10) || 10
+          : Number(despesaInput.dia_vencimento) || 10,
       regra_vencimento_texto:
-        despesaInput.regra_vencimento_texto || `${despesaInput.dia_vencimento || 10}/m`,
+        despesaInput.regra_vencimento_texto ||
+        (despesaInput.regra_repeticao === 'avulso'
+          ? 'Único'
+          : isParcelado
+            ? `${despesaInput.dia_vencimento || 10}/m (${totalParcelasNum}x)`
+            : `${despesaInput.dia_vencimento || 10}/m`),
       data_inicio: `${despesaInput.data_inicio} 00:00:00.000Z`,
+      data_fim_calculada: despesaInput.data_fim_calculada || (null as unknown as string),
       valor_estimado: Number(despesaInput.valor_estimado),
+
+      conta_padrao: despesaInput.conta_padrao || (null as unknown as string),
+      metodo_pagamento: despesaInput.metodo_pagamento || (null as unknown as string),
       link_pagamento: despesaInput.link_pagamento || (null as unknown as string),
       dizimo: despesaInput.dizimo || false,
       tipo_dizimo:

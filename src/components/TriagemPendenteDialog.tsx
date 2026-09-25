@@ -1,14 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  AlertCircle,
   AlertTriangle,
   ArrowRight,
   BadgeDollarSign,
+  Building2,
   Check,
+  CreditCard,
   FileText,
+  HeartHandshake,
+  Info,
   Layers,
   LoaderCircle,
+  Plus,
   Receipt,
   Sparkles,
+  UserCheck,
+  UserRound,
   X,
 } from 'lucide-react'
 
@@ -42,6 +50,7 @@ import { useToast } from '@/hooks/use-toast'
 import { apiMessage } from '@/lib/api-error'
 import { dateOnly, formatCurrency, formatDate, toPocketBaseDate } from '@/lib/format'
 import pb from '@/lib/pocketbase/client'
+import { despesasService } from '@/services/despesas'
 import {
   telegramPendentesService,
   type TriagemDespesaInput,
@@ -53,6 +62,7 @@ import type {
   Empresa,
   Lancamento,
   MetodoPagamento,
+  ModalidadeParcelamento,
   Pessoa,
   RegraRepeticao,
   SecaoDespesa,
@@ -60,6 +70,8 @@ import type {
   TelegramRegistroPendente,
   TipoDespesa,
   TipoDizimo,
+  TipoValorDespesa,
+  TitularTipo,
   TransactionType,
 } from '@/types/domain'
 
@@ -100,6 +112,15 @@ export function TriagemPendenteDialog({
   const [destino, setDestino] = useState<DestinoTriagem>('lancamento')
   const [activeStepTab, setActiveStepTab] = useState<'lancamento' | 'despesa'>('lancamento')
 
+  // Estado para cadastro inline de novo Destino da despesa / Centro de custo
+  const [creatingTag, setCreatingTag] = useState(false)
+  const [newTagName, setNewTagName] = useState('')
+  const [localTags, setLocalTags] = useState<TagItem[]>(tags)
+
+  useEffect(() => {
+    setLocalTags(tags)
+  }, [tags])
+
   // Form Lançamento
   const [lancForm, setLancForm] = useState({
     descricao: '',
@@ -113,25 +134,34 @@ export function TriagemPendenteDialog({
     observacoes: '',
   })
 
-  // Form Despesa
+  // Form Despesa (Alinhado exatamente com DespesaCompromissoDialog)
   const [despForm, setDespForm] = useState({
+    // Grupo 1: Despesa & Finalidade
     descricao: '',
     fornecedor: '',
-    secao: 'contas_mensais_pix_boleto' as SecaoDespesa,
-    regra_repeticao: 'mensal' as RegraRepeticao,
     categoria: '',
-    tag: '',
-    tipo_despesa: '',
-    metodo_pagamento: '',
-    conta_padrao: '',
-    pessoa: '',
-    empresa: '',
+    tag: '', // Destino da despesa / Centro de custo
+    secao: 'contas_mensais_pix_boleto' as SecaoDespesa,
+
+    // Grupo 2: Titular da despesa
+    titular_tipo: 'cpf' as TitularTipo,
+    titular_pessoa: '',
+    titular_empresa: '',
+
+    // Grupo 3: Cobrança e valores (regras independentes)
+    regra_repeticao: 'mensal' as RegraRepeticao,
+    tipo_valor: 'fixo' as TipoValorDespesa,
+    modalidade_parcelamento: 'a_vista' as ModalidadeParcelamento,
     total_parcelas: 1,
     parcela_inicial: 1,
     dia_vencimento: 10,
-    regra_vencimento_texto: '10/m',
     data_inicio: new Date().toISOString().slice(0, 10),
     valor_estimado: 0,
+
+    // Grupo 4: Pagamento & Acompanhamento
+    conta_padrao: '',
+    metodo_pagamento: '',
+    pessoa_responsavel: '',
     link_pagamento: '',
     dizimo: false,
     tipo_dizimo: '',
@@ -145,7 +175,7 @@ export function TriagemPendenteDialog({
   const [confirmedDuplicate, setConfirmedDuplicate] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  // Preenchimento inicial a partir do item do Telegram
+  // Preenchimento inicial a partir do item do Telegram / Open Finance
   useEffect(() => {
     if (!open || !item) return
     setErrors({})
@@ -157,11 +187,16 @@ export function TriagemPendenteDialog({
     const dataInit = item.data ? dateOnly(item.data) : new Date().toISOString().slice(0, 10)
     const contaInit = item.conta || contas.find((c) => c.ativa)?.id || ''
     const catInit = item.categoria || ''
-    const empInit =
-      item.empresa || (activeContext.hasEmpresas ? activeContext.empresaIds[0] || '' : '')
-    const pessInit =
-      item.pessoa || (activeContext.hasPessoas ? activeContext.pessoaIds[0] || '' : '')
     const descInit = item.descricao && item.descricao !== '-' ? item.descricao : ''
+
+    // Titular default a partir do contexto ativo
+    const defaultEmpresaId =
+      item.empresa ||
+      (activeContext.empresaIds.length > 0 ? activeContext.empresaIds[0] : empresas[0]?.id || '')
+    const defaultPessoaId =
+      item.pessoa ||
+      (activeContext.pessoaIds.length > 0 ? activeContext.pessoaIds[0] : pessoas[0]?.id || '')
+    const preferCnpj = item.empresa ? true : activeContext.hasEmpresas && !activeContext.hasPessoas
 
     // Inicializa formulário de lançamento
     setLancForm({
@@ -171,8 +206,8 @@ export function TriagemPendenteDialog({
       data: dataInit,
       conta: contaInit,
       categoria: catInit,
-      empresa: empInit,
-      pessoa: pessInit,
+      empresa: item.empresa || (preferCnpj ? defaultEmpresaId : ''),
+      pessoa: item.pessoa || (!preferCnpj ? defaultPessoaId : ''),
       observacoes:
         item.observacoes || (item.contexto_nome ? `Contexto: ${item.contexto_nome}` : ''),
     })
@@ -180,34 +215,47 @@ export function TriagemPendenteDialog({
     // Extrair dia de vencimento a partir da data do comprovante
     let dueDay = 10
     if (dataInit) {
-      const parsedD = new Date(dataInit)
-      if (!isNaN(parsedD.getDate())) {
-        dueDay = parsedD.getUTCDate()
+      try {
+        const parsedD = new Date(dataInit)
+        if (!isNaN(parsedD.getDate())) {
+          dueDay = parsedD.getUTCDate()
+        }
+      } catch (_) {
+        dueDay = 10
       }
     }
 
-    // Inicializa formulário de despesa (compromisso recorrente)
+    const defaultMetodo = metodosPagamento[0]?.id || ''
+    const defaultDizimoTipo = tiposDizimo[0]?.id || ''
+    const defaultTag = tags[0]?.id || ''
+
+    // Inicializa formulário de despesa (compromisso recorrente) com 4 grupos alinhados
     setDespForm({
       descricao: descInit,
       fornecedor: descInit,
-      secao: 'contas_mensais_pix_boleto',
-      regra_repeticao: 'mensal',
       categoria: catInit,
-      tag: tags[0]?.id || '',
-      tipo_despesa: tiposDespesa[0]?.id || '',
-      metodo_pagamento: metodosPagamento[0]?.id || '',
-      conta_padrao: contaInit,
-      pessoa: pessInit,
-      empresa: empInit,
+      tag: defaultTag,
+      secao: 'contas_mensais_pix_boleto',
+
+      titular_tipo: preferCnpj ? 'cnpj' : 'cpf',
+      titular_pessoa: defaultPessoaId,
+      titular_empresa: defaultEmpresaId,
+
+      regra_repeticao: 'mensal',
+      tipo_valor: 'fixo',
+      modalidade_parcelamento: 'a_vista',
       total_parcelas: 1,
       parcela_inicial: 1,
       dia_vencimento: dueDay,
-      regra_vencimento_texto: `${dueDay}/m`,
       data_inicio: dataInit,
       valor_estimado: valorInit,
+
+      conta_padrao: contaInit,
+      metodo_pagamento: defaultMetodo,
+      pessoa_responsavel: '',
       link_pagamento: '',
       dizimo: false,
-      tipo_dizimo: tiposDizimo[0]?.id || '',
+      tipo_dizimo: defaultDizimoTipo,
       ativo: true,
       observacoes: item.comprovante_texto
         ? `Extraído do comprovante Telegram: ${item.comprovante_texto.slice(0, 200)}`
@@ -227,9 +275,9 @@ export function TriagemPendenteDialog({
     } else {
       setDuplicates([])
     }
-  }, [contas, item, open, activeContext, tags, tiposDespesa, metodosPagamento, tiposDizimo])
+  }, [contas, item, open, activeContext, tags, metodosPagamento, tiposDizimo, empresas, pessoas])
 
-  // Categorias compatíveis com tipo de lançamento
+  // Categorias compatíveis
   const lancCategoryOptions = useMemo(
     () => categorias.filter((c) => c.tipo === lancForm.tipo),
     [categorias, lancForm.tipo],
@@ -240,9 +288,8 @@ export function TriagemPendenteDialog({
     [categorias],
   )
 
-  // Opções de contas para o select "Conta padrão / Cartão" da despesa:
-  // Restaura listagem de TODAS as contas ativas cadastradas (bancaria, caixa, cartao, marketplace) ordenadas por nome,
-  // preservando a conta já vinculada mesmo se inativa, consistente com /despesas.
+  // Opções de contas para o select "Conta de pagamento prevista / Cartão" da despesa:
+  // Lista TODAS as contas ativas cadastradas ordenadas por nome, preservando a vinculada se inativa.
   const despContaOptions = useMemo(() => {
     const list = contas.filter((c) => {
       if (c.ativa) return true
@@ -254,26 +301,196 @@ export function TriagemPendenteDialog({
       .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }))
   }, [contas, despForm.conta_padrao])
 
-  // Conta selecionada na Despesa (identificar se é cartão)
+  // Identificação do Titular da Despesa selecionado
+  const titularSelecionado = useMemo(() => {
+    if (despForm.titular_tipo === 'cnpj') {
+      const emp = empresas.find((e) => e.id === despForm.titular_empresa)
+      return {
+        tipo: 'CNPJ',
+        label: emp ? `${emp.nome_fantasia} (${emp.cnpj || 'Sem CNPJ'})` : 'Nenhuma empresa',
+        id: emp?.id,
+        nome: emp?.nome_fantasia || 'Empresa',
+      }
+    } else {
+      const pes = pessoas.find((p) => p.id === despForm.titular_pessoa)
+      return {
+        tipo: 'Pessoal/CPF',
+        label: pes ? `${pes.nome} (${pes.cpf || 'Sem CPF'})` : 'Nenhuma pessoa',
+        id: pes?.id,
+        nome: pes?.nome || 'Pessoal',
+      }
+    }
+  }, [despForm.titular_tipo, despForm.titular_empresa, despForm.titular_pessoa, empresas, pessoas])
+
+  // Conta selecionada na Despesa
   const selectedDespConta = contas.find((c) => c.id === despForm.conta_padrao)
   const isSelectedDespContaCartao =
     selectedDespConta?.tipo === 'cartao' || despForm.secao === 'cartoes_credito'
 
-  const cardMatchedMetodo = useMemo(() => {
-    if (!selectedDespConta || selectedDespConta.tipo !== 'cartao') return null
-    return (
-      metodosPagamento.find(
-        (m) =>
-          m.conta_padrao === selectedDespConta.id ||
-          (m.tipo === 'cartao' &&
-            m.nome.toLowerCase().includes(selectedDespConta.nome.toLowerCase())),
-      ) ||
-      metodosPagamento.find((m) => m.tipo === 'cartao') ||
-      null
-    )
-  }, [selectedDespConta, metodosPagamento])
+  // Método selecionado
+  const selectedMetodoPagamento = useMemo(() => {
+    if (!despForm.metodo_pagamento) return null
+    return metodosPagamento.find((m) => m.id === despForm.metodo_pagamento) || null
+  }, [despForm.metodo_pagamento, metodosPagamento])
 
-  // Foto do comprovante (se anexada ao registro)
+  // Identifica se o método é isento de vencimento fixo (Pix, débito, transferência, dinheiro ou caixa)
+  const isMetodoIsentoDeVencimento = useMemo(() => {
+    if (selectedDespConta?.tipo === 'caixa') return true
+
+    if (selectedMetodoPagamento) {
+      const tipo = selectedMetodoPagamento.tipo
+      if (tipo === 'pix' || tipo === 'dinheiro' || tipo === 'transferencia') return true
+      const nomeLower = (selectedMetodoPagamento.nome || '').toLowerCase()
+      if (
+        nomeLower.includes('pix') ||
+        nomeLower.includes('dinheiro') ||
+        nomeLower.includes('transferência') ||
+        nomeLower.includes('transferencia') ||
+        nomeLower.includes('débito') ||
+        nomeLower.includes('debito')
+      ) {
+        return true
+      }
+    }
+    return false
+  }, [selectedDespConta, selectedMetodoPagamento])
+
+  // Aviso orientativo NÃO-bloqueante: Cartão de Crédito + Pix/Boleto
+  const avisoCartaoMetodoNaoCartao = useMemo(() => {
+    if (!isSelectedDespContaCartao || !selectedDespConta || !despForm.metodo_pagamento) return null
+    if (!selectedMetodoPagamento || selectedMetodoPagamento.tipo === 'cartao') return null
+
+    const metodoNome = selectedMetodoPagamento.nome || 'Pix/Boleto'
+    return `A conta "${selectedDespConta.nome}" é um cartão de crédito e o método selecionado é ${metodoNome} — se a intenção é pagar a fatura do cartão, tudo bem; se a intenção é pagamento direto, considere escolher uma conta bancária.`
+  }, [
+    isSelectedDespContaCartao,
+    selectedDespConta,
+    despForm.metodo_pagamento,
+    selectedMetodoPagamento,
+  ])
+
+  // Aviso de diferença de titularidade entre conta e despesa
+  const titularidadeContaDiferente = useMemo(() => {
+    if (!selectedDespConta) return null
+    const nomeConta = selectedDespConta.nome.toLowerCase()
+    const isContaPJ =
+      nomeConta.includes('pj') ||
+      nomeConta.includes('empresa') ||
+      nomeConta.includes('corporativo') ||
+      nomeConta.includes('inter')
+    const isTitularCNPJ = despForm.titular_tipo === 'cnpj'
+
+    if (isTitularCNPJ && !isContaPJ && selectedDespConta.tipo !== 'caixa') {
+      return `A despesa pertence a uma empresa (${titularSelecionado.nome}), mas a conta de pagamento (${selectedDespConta.nome}) aparenta ser pessoal.`
+    }
+    if (!isTitularCNPJ && isContaPJ) {
+      return `A despesa pertence a pessoa física (${titularSelecionado.nome}), mas o pagamento sairá de uma conta empresarial (${selectedDespConta.nome}).`
+    }
+    return null
+  }, [selectedDespConta, despForm.titular_tipo, titularSelecionado])
+
+  // Cálculos de parcelamento
+  const calculoParcelamento = useMemo(() => {
+    const isParcelado = despForm.modalidade_parcelamento === 'parcelado'
+    if (!isParcelado || !despForm.data_inicio) {
+      return null
+    }
+
+    const total = Math.max(1, Number(despForm.total_parcelas) || 1)
+    const inicial = Math.max(1, Math.min(Number(despForm.parcela_inicial) || 1, total))
+    const parcelasRestantes = total - inicial + 1
+    const valorParcela = Number(despForm.valor_estimado) || 0
+    const valorTotalCalculado = valorParcela * total
+
+    try {
+      const [y, m] = despForm.data_inicio.split('-').map((v) => parseInt(v, 10))
+      const mesInicialZero = m - 1
+      const mesFinalZero = mesInicialZero + (parcelasRestantes - 1)
+      const dueDay = despForm.dia_vencimento || 10
+      const lastDate = despesasService.calcularDataVencimentoNoMes(y, mesFinalZero, dueDay)
+      return {
+        total,
+        inicial,
+        parcelasRestantes,
+        valorParcela,
+        valorTotalCalculado,
+        ultimaData: lastDate,
+        ultimaDataFormatada: formatDate(lastDate.toISOString()),
+      }
+    } catch (_) {
+      return null
+    }
+  }, [
+    despForm.modalidade_parcelamento,
+    despForm.data_inicio,
+    despForm.total_parcelas,
+    despForm.parcela_inicial,
+    despForm.valor_estimado,
+    despForm.dia_vencimento,
+  ])
+
+  // Verificação de compatibilidade entre dia de vencimento e data de início
+  // Isenta pagamentos imediatos (Pix, débito, transferência, dinheiro ou caixa)
+  const avisoIncompatibilidadeData = useMemo(() => {
+    if (despForm.regra_repeticao === 'avulso') return null
+    if (isMetodoIsentoDeVencimento) return null
+    if (!despForm.data_inicio) return null
+    const day = parseInt(despForm.data_inicio.slice(8, 10), 10)
+    const diaVenc = Number(despForm.dia_vencimento)
+    if (diaVenc && day !== diaVenc) {
+      return `A data da primeira cobrança (${formatDate(
+        despForm.data_inicio,
+      )}) está marcada para o dia ${day}, enquanto o dia de vencimento fixado é ${diaVenc}. Ajuste um dos campos para manter a consistência dos vencimentos.`
+    }
+    return null
+  }, [
+    despForm.data_inicio,
+    despForm.dia_vencimento,
+    despForm.regra_repeticao,
+    isMetodoIsentoDeVencimento,
+  ])
+
+  // Rótulo dinâmico do campo de valor
+  const labelValor = useMemo(() => {
+    if (despForm.modalidade_parcelamento === 'parcelado') {
+      return 'Valor da parcela (cada uma) *'
+    }
+    if (despForm.regra_repeticao === 'avulso') {
+      return 'Valor da cobrança *'
+    }
+    if (despForm.tipo_valor === 'variavel') {
+      return 'Valor mensal estimado *'
+    }
+    return 'Valor mensal fixo *'
+  }, [despForm.modalidade_parcelamento, despForm.regra_repeticao, despForm.tipo_valor])
+
+  // Criar novo Destino inline
+  const handleCreateNewTag = async () => {
+    const nome = newTagName.trim()
+    if (!nome) return
+    try {
+      const nova = await despesasService.saveTag({
+        nome,
+        cor: '#DF5830',
+      })
+      setLocalTags((prev) => [...prev, nova])
+      setDespForm((prev) => ({ ...prev, tag: nova.id }))
+      setNewTagName('')
+      setCreatingTag(false)
+      toast({
+        title: 'Destino criado',
+        description: `O destino/centro de custo "${nome}" foi cadastrado com sucesso.`,
+      })
+    } catch (err) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao criar destino',
+        description: apiMessage(err),
+      })
+    }
+  }
+
+  // Foto do comprovante
   const fotoUrl = useMemo(() => {
     if (!item) return ''
     if (item.comprovante_foto) {
@@ -319,7 +536,7 @@ export function TriagemPendenteDialog({
 
     const nextErrors: Record<string, string> = {}
 
-    // Validações Lançamento (quando destino é 'lancamento' ou 'ambos')
+    // Validações Lançamento
     if (destino === 'lancamento' || destino === 'ambos') {
       if (!lancForm.descricao.trim())
         nextErrors.lancDescricao = 'Informe a descrição do lançamento.'
@@ -329,20 +546,39 @@ export function TriagemPendenteDialog({
       if (!lancForm.categoria) nextErrors.lancCategoria = 'Selecione a categoria financeira.'
     }
 
-    // Validações Despesa (quando destino é 'despesa' ou 'ambos')
+    // Validações Despesa
     if (destino === 'despesa' || destino === 'ambos') {
-      if (!despForm.descricao.trim())
-        nextErrors.despDescricao = 'Informe o produto ou serviço (descrição).'
+      if (!despForm.descricao.trim()) nextErrors.despDescricao = 'Informe a descrição da despesa.'
       if (despForm.valor_estimado <= 0)
         nextErrors.despValor = 'Informe um valor maior que zero para a despesa.'
 
-      // Nota: Permitido combinar conta de cartão de crédito com método Pix/Boleto (fatura paga via Pix)
+      if (despForm.titular_tipo === 'cnpj' && !despForm.titular_empresa) {
+        nextErrors.despTitular = 'Selecione a empresa titular da obrigação.'
+      }
+      if (despForm.titular_tipo === 'cpf' && !despForm.titular_pessoa && pessoas.length > 0) {
+        nextErrors.despTitular = 'Selecione a pessoa titular da obrigação.'
+      }
+
+      // Consistência de dia de vencimento vs data da 1ª cobrança
+      // Não bloqueia para métodos imediatos (Pix, débito, dinheiro, transferência ou caixa)
+      if (
+        despForm.regra_repeticao !== 'avulso' &&
+        !isMetodoIsentoDeVencimento &&
+        despForm.data_inicio
+      ) {
+        const day = parseInt(despForm.data_inicio.slice(8, 10), 10)
+        const diaVenc = Number(despForm.dia_vencimento)
+        if (diaVenc && day !== diaVenc) {
+          nextErrors.despVencimento = `A data da 1ª cobrança (${formatDate(
+            despForm.data_inicio,
+          )}) é no dia ${day}, mas o dia de vencimento está definido como ${diaVenc}. Ajuste para o mesmo dia do mês.`
+        }
+      }
     }
 
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) {
       if (destino === 'ambos') {
-        // Se o erro está na aba que não está visível, troca para ela
         if (
           nextErrors.lancDescricao ||
           nextErrors.lancValor ||
@@ -368,7 +604,7 @@ export function TriagemPendenteDialog({
         variant: 'destructive',
         title: 'Possível duplicidade identificada',
         description:
-          'Existe outro lançamento com mesmo valor na mesma data. Clique em "Confirmar mesmo assim" se desejar prosseguir.',
+          'Existe outro lançamento com mesmo valor na mesma data. Clique em confirmar novamente se desejar prosseguir.',
       })
       return
     }
@@ -387,36 +623,64 @@ export function TriagemPendenteDialog({
         observacoes: lancForm.observacoes.trim() || undefined,
       }
 
-      const isEmpresaContext = despForm.empresa
-        ? true
-        : activeContext.hasEmpresas && !activeContext.hasPessoas
+      const isParcelado = despForm.modalidade_parcelamento === 'parcelado'
+      const totalParcelasNum = isParcelado ? Math.max(1, Number(despForm.total_parcelas) || 1) : 1
+      const parcelaInicialNum = isParcelado ? Math.max(1, Number(despForm.parcela_inicial) || 1) : 1
 
-      const effectiveMetodoPagamento = isSelectedDespContaCartao
-        ? cardMatchedMetodo?.id || despForm.metodo_pagamento || undefined
-        : despForm.metodo_pagamento || undefined
+      let dataFimIso: string | undefined = undefined
+      if (isParcelado && calculoParcelamento?.ultimaData) {
+        dataFimIso = calculoParcelamento.ultimaData.toISOString()
+      }
 
       const despInput: TriagemDespesaInput = {
         descricao: despForm.descricao.trim(),
         fornecedor: despForm.fornecedor.trim() || undefined,
-        secao: despForm.secao,
-        regra_repeticao: despForm.regra_repeticao,
         categoria: despForm.categoria || undefined,
         tag: despForm.tag || undefined,
-        tipo_despesa: despForm.tipo_despesa || undefined,
-        metodo_pagamento: effectiveMetodoPagamento,
-        conta_padrao: despForm.conta_padrao || undefined,
-        pessoa: despForm.pessoa || undefined,
-        empresa: despForm.empresa || undefined,
-        contexto_tipo: isEmpresaContext ? 'empresa' : 'pessoal',
-        total_parcelas:
-          despForm.regra_repeticao === 'parcelado' ? Number(despForm.total_parcelas) : 1,
-        parcela_inicial:
-          despForm.regra_repeticao === 'parcelado' ? Number(despForm.parcela_inicial) : 1,
-        dia_vencimento: Number(despForm.dia_vencimento) || 10,
+        secao: despForm.secao,
+
+        titular_tipo: despForm.titular_tipo,
+        titular_pessoa:
+          despForm.titular_tipo === 'cpf' && despForm.titular_pessoa
+            ? despForm.titular_pessoa
+            : undefined,
+        titular_empresa:
+          despForm.titular_tipo === 'cnpj' && despForm.titular_empresa
+            ? despForm.titular_empresa
+            : undefined,
+
+        contexto_tipo: despForm.titular_tipo === 'cnpj' ? 'empresa' : 'pessoal',
+        empresa:
+          despForm.titular_tipo === 'cnpj' && despForm.titular_empresa
+            ? despForm.titular_empresa
+            : undefined,
+        pessoa:
+          despForm.pessoa_responsavel ||
+          (despForm.titular_tipo === 'cpf' ? despForm.titular_pessoa : undefined) ||
+          undefined,
+
+        regra_repeticao: isParcelado ? 'parcelado' : despForm.regra_repeticao,
+        tipo_valor: despForm.tipo_valor,
+        modalidade_parcelamento: despForm.modalidade_parcelamento,
+        total_parcelas: totalParcelasNum,
+        parcela_inicial: parcelaInicialNum,
+        valor_parcela: isParcelado ? Number(despForm.valor_estimado) : undefined,
+        dia_vencimento:
+          despForm.regra_repeticao === 'avulso'
+            ? parseInt(despForm.data_inicio.slice(8, 10), 10) || 10
+            : Number(despForm.dia_vencimento) || 10,
         regra_vencimento_texto:
-          despForm.regra_vencimento_texto || `${despForm.dia_vencimento || 10}/m`,
+          despForm.regra_repeticao === 'avulso'
+            ? 'Único'
+            : isParcelado
+              ? `${despForm.dia_vencimento}/m (${totalParcelasNum}x)`
+              : `${despForm.dia_vencimento}/m`,
         data_inicio: despForm.data_inicio,
+        data_fim_calculada: dataFimIso,
         valor_estimado: Number(despForm.valor_estimado),
+
+        conta_padrao: despForm.conta_padrao || undefined,
+        metodo_pagamento: despForm.metodo_pagamento || undefined,
         link_pagamento: despForm.link_pagamento || undefined,
         dizimo: despForm.dizimo,
         tipo_dizimo: despForm.dizimo && despForm.tipo_dizimo ? despForm.tipo_dizimo : undefined,
@@ -434,13 +698,13 @@ export function TriagemPendenteDialog({
         await telegramPendentesService.triarComoDespesa(item.id, despInput)
         toast({
           title: 'Triagem concluída: Despesa cadastrada!',
-          description: `“${despInput.descricao}” virou compromisso recorrente em /despesas com ocorrências geradas.`,
+          description: `“${despInput.descricao}” virou compromisso em /despesas com ocorrências geradas.`,
         })
       } else {
         await telegramPendentesService.triarComoAmbos(item.id, lancInput, despInput)
         toast({
           title: 'Triagem concluída: Lançamento + Despesa gerados!',
-          description: `Criado o lançamento no caixa e o compromisso recorrente em /despesas.`,
+          description: `Criado o lançamento no caixa e o compromisso em /despesas.`,
         })
       }
 
@@ -618,7 +882,7 @@ export function TriagemPendenteDialog({
                 <span className="font-extrabold text-sm">Despesa</span>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Compromisso recorrente. Vai para <strong>/despesas</strong> com ocorrências futuras.
+                Compromisso em <strong>/despesas</strong> com ocorrências futuras.
               </p>
             </button>
 
@@ -871,239 +1135,556 @@ export function TriagemPendenteDialog({
             </div>
           )}
 
-          {/* FORMULÁRIO: Despesa Recorrente */}
+          {/* FORMULÁRIO: Despesa Recorrente (4 GRUPOS IGUAIS A DESPESACOMPROMISSODIALOG) */}
           {(destino === 'despesa' || (destino === 'ambos' && activeStepTab === 'despesa')) && (
-            <div className="space-y-3 rounded-xl border border-border p-3.5 bg-white">
-              <div className="flex items-center justify-between pb-1 border-b border-border">
-                <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                  <Receipt className="h-4 w-4 text-primary" />
-                  Detalhes do Compromisso Recorrente (/despesas)
-                </span>
-                {destino === 'ambos' && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs font-bold text-muted-foreground h-7"
-                    onClick={() => setActiveStepTab('lancamento')}
-                  >
-                    Voltar aos dados de Caixa
-                  </Button>
+            <div className="space-y-4">
+              {/* =========================================================
+                  GRUPO 1: DESPESA & FINALIDADE
+                 ========================================================= */}
+              <div className="rounded-xl border border-border bg-white p-3.5 shadow-soft space-y-3">
+                <div className="flex items-center justify-between border-b border-border pb-1.5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                    <Receipt className="h-3.5 w-3.5" />
+                    1. Despesa & Finalidade
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground">
+                    O que é e para quem se paga
+                  </span>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label className="text-xs font-bold">Descrição da despesa *</Label>
+                    <Input
+                      value={despForm.descricao}
+                      onChange={(e) =>
+                        setDespForm((prev) => ({ ...prev, descricao: e.target.value }))
+                      }
+                      placeholder="Ex.: Internet Fibra, CPFL Energia, Assinatura Google..."
+                      required
+                    />
+                    {errors.despDescricao && (
+                      <p className="text-xs text-destructive">{errors.despDescricao}</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Fornecedor / favorecido</Label>
+                    <Input
+                      value={despForm.fornecedor}
+                      onChange={(e) =>
+                        setDespForm((prev) => ({ ...prev, fornecedor: e.target.value }))
+                      }
+                      placeholder="Ex.: ConectPlus, CPFL, Vivo..."
+                    />
+                    <p className="text-[10px] text-muted-foreground">Quem recebe o pagamento.</p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">
+                      Categoria financeira (Finalidade)
+                    </Label>
+                    <Select
+                      value={despForm.categoria || 'none'}
+                      onValueChange={(v) =>
+                        setDespForm((prev) => ({ ...prev, categoria: v === 'none' ? '' : v }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione categoria" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nenhuma</SelectItem>
+                        {despCategoryOptions.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.nome}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[10px] text-muted-foreground">
+                      Educação, Internet, Energia, Impostos, etc.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold">
+                        Destino da despesa / Centro de custo
+                      </Label>
+                      {!creatingTag && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-5 px-1.5 text-[10px] text-primary"
+                          onClick={() => setCreatingTag(true)}
+                        >
+                          <Plus className="mr-0.5 h-3 w-3" /> Novo destino
+                        </Button>
+                      )}
+                    </div>
+
+                    {creatingTag ? (
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          value={newTagName}
+                          onChange={(e) => setNewTagName(e.target.value)}
+                          placeholder="Novo destino (Ex: KzaMari, Rafa...)"
+                          className="h-8 text-xs"
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-8 px-2 text-xs bg-primary text-white"
+                          onClick={handleCreateNewTag}
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2 text-xs"
+                          onClick={() => setCreatingTag(false)}
+                        >
+                          Cancelar
+                        </Button>
+                      </div>
+                    ) : (
+                      <Select
+                        value={despForm.tag || 'none'}
+                        onValueChange={(v) =>
+                          setDespForm((prev) => ({ ...prev, tag: v === 'none' ? '' : v }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="A quem a despesa se refere" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Nenhum</SelectItem>
+                          {localTags.map((t) => (
+                            <SelectItem key={t.id} value={t.id}>
+                              {t.nome}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <p className="text-[10px] text-muted-foreground">
+                      A quem se refere (ex: Eu/Casa, Rafa, WeeKids).
+                    </p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Seção do painel /despesas</Label>
+                    <Select
+                      value={despForm.secao}
+                      onValueChange={(v) => {
+                        const s = v as SecaoDespesa
+                        setDespForm((prev) => ({ ...prev, secao: s }))
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="contas_mensais_pix_boleto">
+                          Boletos & Contas Mensais Pix
+                        </SelectItem>
+                        <SelectItem value="assinaturas_anuais">Assinaturas Anuais</SelectItem>
+                        <SelectItem value="cartoes_credito">
+                          Cartões de Crédito (Parcelados/Rotativos)
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[10px] text-muted-foreground">
+                      Visualização na interface de Despesas.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* =========================================================
+                  GRUPO 2: TITULAR E DESTINO
+                 ========================================================= */}
+              <div className="rounded-xl border border-border bg-white p-3.5 shadow-soft space-y-3">
+                <div className="flex items-center justify-between border-b border-border pb-1.5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                    <UserCheck className="h-3.5 w-3.5" />
+                    2. Titular da Despesa
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground">
+                    A quem a obrigação legal pertence
+                  </span>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Tipo do Titular</Label>
+                    <Select
+                      value={despForm.titular_tipo}
+                      onValueChange={(v) => {
+                        const t = v as TitularTipo
+                        setDespForm((prev) => ({
+                          ...prev,
+                          titular_tipo: t,
+                          titular_pessoa: t === 'cpf' ? pessoas[0]?.id || '' : '',
+                          titular_empresa: t === 'cnpj' ? empresas[0]?.id || '' : '',
+                        }))
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cpf">
+                          <div className="flex items-center gap-2">
+                            <UserRound className="h-3.5 w-3.5 text-primary" />
+                            <span>Pessoal / CPF</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="cnpj">
+                          <div className="flex items-center gap-2">
+                            <Building2 className="h-3.5 w-3.5 text-primary" />
+                            <span>Empresa / CNPJ</span>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">
+                      {despForm.titular_tipo === 'cnpj'
+                        ? 'Empresa / CNPJ Titular *'
+                        : 'Pessoa / CPF Titular *'}
+                    </Label>
+                    {despForm.titular_tipo === 'cnpj' ? (
+                      <Select
+                        value={despForm.titular_empresa || 'none'}
+                        onValueChange={(v) =>
+                          setDespForm((prev) => ({
+                            ...prev,
+                            titular_empresa: v === 'none' ? '' : v,
+                          }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione o CNPJ" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Selecione uma empresa</SelectItem>
+                          {empresas.map((e) => (
+                            <SelectItem key={e.id} value={e.id}>
+                              {e.nome_fantasia} ({e.cnpj || 'Sem CNPJ'})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Select
+                        value={despForm.titular_pessoa || 'none'}
+                        onValueChange={(v) =>
+                          setDespForm((prev) => ({
+                            ...prev,
+                            titular_pessoa: v === 'none' ? '' : v,
+                          }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione a pessoa física" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Selecione uma pessoa</SelectItem>
+                          {pessoas.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.nome} ({p.cpf || 'Sem CPF'})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {errors.despTitular && (
+                      <p className="text-xs text-destructive">{errors.despTitular}</p>
+                    )}
+                    <p className="text-[10px] text-muted-foreground">
+                      Proprietário da obrigação legal (independente da conta bancária).
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* =========================================================
+                  GRUPO 3: COBRANÇA E VALORES
+                 ========================================================= */}
+              <div className="rounded-xl border border-border bg-white p-3.5 shadow-soft space-y-3">
+                <div className="flex items-center justify-between border-b border-border pb-1.5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
+                    3. Cobrança e Valores
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground">
+                    Repetição, previsibilidade e parcelamento
+                  </span>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {/* Repetição */}
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Repetição</Label>
+                    <Select
+                      value={despForm.regra_repeticao}
+                      onValueChange={(v) =>
+                        setDespForm((prev) => ({
+                          ...prev,
+                          regra_repeticao: v as RegraRepeticao,
+                        }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="mensal">Mensal recorrente (sem fim)</SelectItem>
+                        <SelectItem value="anual">Anual recorrente (assinatura)</SelectItem>
+                        <SelectItem value="avulso">Pagamento único / Pontual</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Valor Previsto: Fixo ou Variável */}
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Previsibilidade do Valor</Label>
+                    <Select
+                      value={despForm.tipo_valor}
+                      onValueChange={(v) =>
+                        setDespForm((prev) => ({ ...prev, tipo_valor: v as TipoValorDespesa }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fixo">Valor fixo</SelectItem>
+                        <SelectItem value="variavel">Valor variável (estimativa)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Parcelamento: À vista ou Parcelado */}
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Parcelamento</Label>
+                    <Select
+                      value={despForm.modalidade_parcelamento}
+                      onValueChange={(v) => {
+                        const m = v as ModalidadeParcelamento
+                        setDespForm((prev) => ({
+                          ...prev,
+                          modalidade_parcelamento: m,
+                          total_parcelas: m === 'parcelado' ? Math.max(2, prev.total_parcelas) : 1,
+                        }))
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="a_vista">À vista / Integral</SelectItem>
+                        <SelectItem value="parcelado">Parcelado em N vezes</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Bloco de Parcelamento Condicional */}
+                {despForm.modalidade_parcelamento === 'parcelado' && (
+                  <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs font-semibold">
+                          Quantidade total de parcelas (N×)
+                        </Label>
+                        <Input
+                          type="number"
+                          min={2}
+                          max={120}
+                          value={despForm.total_parcelas}
+                          onChange={(e) =>
+                            setDespForm((prev) => ({
+                              ...prev,
+                              total_parcelas: parseInt(e.target.value, 10) || 2,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs font-semibold">Parcela inicial</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={despForm.total_parcelas}
+                          value={despForm.parcela_inicial}
+                          onChange={(e) =>
+                            setDespForm((prev) => ({
+                              ...prev,
+                              parcela_inicial: parseInt(e.target.value, 10) || 1,
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    {calculoParcelamento && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-primary/15 pt-2 text-[11px] text-foreground">
+                        <div>
+                          <span>Total previsto: </span>
+                          <strong className="text-primary font-bold">
+                            {formatCurrency(calculoParcelamento.valorTotalCalculado)}
+                          </strong>{' '}
+                          ({calculoParcelamento.total}x de{' '}
+                          {formatCurrency(calculoParcelamento.valorParcela)})
+                        </div>
+                        <div>
+                          <span>Término: </span>
+                          <strong>{calculoParcelamento.ultimaDataFormatada}</strong>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Valores e Vencimento */}
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-bold">{labelValor}</Label>
+                    <MoneyInput
+                      value={despForm.valor_estimado}
+                      onChange={(v) => setDespForm((prev) => ({ ...prev, valor_estimado: v }))}
+                    />
+                    {errors.despValor && (
+                      <p className="text-xs text-destructive">{errors.despValor}</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">
+                      {despForm.regra_repeticao === 'avulso'
+                        ? 'Data de vencimento *'
+                        : '1ª cobrança / Início *'}
+                    </Label>
+                    <Input
+                      type="date"
+                      value={despForm.data_inicio}
+                      onChange={(e) => {
+                        const newDate = e.target.value
+                        let newDay = despForm.dia_vencimento
+                        if (newDate) {
+                          newDay = parseInt(newDate.slice(8, 10), 10) || despForm.dia_vencimento
+                        }
+                        setDespForm((prev) => ({
+                          ...prev,
+                          data_inicio: newDate,
+                          dia_vencimento: newDay,
+                        }))
+                      }}
+                      required
+                    />
+                  </div>
+
+                  {despForm.regra_repeticao !== 'avulso' && (
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Dia de vencimento (1 a 31)</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={31}
+                        value={despForm.dia_vencimento}
+                        onChange={(e) => {
+                          const day = parseInt(e.target.value, 10) || 10
+                          setDespForm((prev) => ({
+                            ...prev,
+                            dia_vencimento: day,
+                          }))
+                        }}
+                      />
+                      <p className="text-[10px] text-muted-foreground">
+                        Dias 29 a 31 ajustados em meses curtos.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {avisoIncompatibilidadeData && (
+                  <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <p>{avisoIncompatibilidadeData}</p>
+                  </div>
+                )}
+                {errors.despVencimento && (
+                  <p className="text-xs text-destructive font-medium">{errors.despVencimento}</p>
                 )}
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1 sm:col-span-2">
-                  <Label className="text-xs font-bold">Produto / Serviço (Descrição) *</Label>
-                  <Input
-                    value={despForm.descricao}
-                    onChange={(e) =>
-                      setDespForm((prev) => ({ ...prev, descricao: e.target.value }))
-                    }
-                    placeholder="Ex.: Internet Fibra, Energia CPFL, Aluguel..."
-                    required
-                  />
-                  {errors.despDescricao && (
-                    <p className="text-xs text-destructive">{errors.despDescricao}</p>
-                  )}
+              {/* =========================================================
+                  GRUPO 4: PAGAMENTO & ACOMPANHAMENTO
+                 ========================================================= */}
+              <div className="rounded-xl border border-border bg-white p-3.5 shadow-soft space-y-3">
+                <div className="flex items-center justify-between border-b border-border pb-1.5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
+                    4. Pagamento & Acompanhamento
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground">
+                    De onde o dinheiro sai e como é pago
+                  </span>
                 </div>
 
-                <div className="space-y-1">
-                  <Label className="text-xs font-bold">Fornecedor / Pessoa (opcional)</Label>
-                  <Input
-                    value={despForm.fornecedor}
-                    onChange={(e) =>
-                      setDespForm((prev) => ({ ...prev, fornecedor: e.target.value }))
-                    }
-                    placeholder="Ex.: ConectPlus, CPFL, Vivo..."
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-bold">Valor estimado / Parcela *</Label>
-                  <MoneyInput
-                    value={despForm.valor_estimado}
-                    onChange={(v) => setDespForm((prev) => ({ ...prev, valor_estimado: v }))}
-                  />
-                  {errors.despValor && (
-                    <p className="text-xs text-destructive">{errors.despValor}</p>
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-bold">Seção do painel /despesas</Label>
-                  <Select
-                    value={despForm.secao}
-                    onValueChange={(v) => {
-                      const s = v as SecaoDespesa
-                      let rep = despForm.regra_repeticao
-                      if (s === 'cartoes_credito' && rep !== 'parcelado') rep = 'parcelado'
-                      if (s === 'assinaturas_anuais') rep = 'anual'
-                      if (s === 'contas_mensais_pix_boleto' && rep === 'anual') rep = 'mensal'
-                      setDespForm((prev) => ({ ...prev, secao: s, regra_repeticao: rep }))
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="contas_mensais_pix_boleto">
-                        Boletos & Contas Mensais Pix
-                      </SelectItem>
-                      <SelectItem value="assinaturas_anuais">Assinaturas Anuais</SelectItem>
-                      <SelectItem value="cartoes_credito">
-                        Cartões de Crédito (Parcelados/Rotativos)
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-bold">Regra de repetição</Label>
-                  <Select
-                    value={despForm.regra_repeticao}
-                    onValueChange={(v) =>
-                      setDespForm((prev) => ({ ...prev, regra_repeticao: v as RegraRepeticao }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="mensal">Mensal recorrente</SelectItem>
-                      <SelectItem value="parcelado">Parcelado em N vezes</SelectItem>
-                      <SelectItem value="anual">Anual (Assinatura)</SelectItem>
-                      <SelectItem value="avulso">Avulso / Pontual</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {despForm.regra_repeticao === 'parcelado' && (
-                  <>
-                    <div className="space-y-1">
-                      <Label className="text-xs font-bold">Total de parcelas (N×)</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={120}
-                        value={despForm.total_parcelas}
-                        onChange={(e) =>
-                          setDespForm((prev) => ({
-                            ...prev,
-                            total_parcelas: parseInt(e.target.value, 10) || 1,
-                          }))
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">
+                      Conta de pagamento prevista / Cartão
+                    </Label>
+                    <Select
+                      value={despForm.conta_padrao || 'none'}
+                      onValueChange={(v) => {
+                        const contaId = v === 'none' ? '' : v
+                        const c = contas.find((item) => item.id === contaId)
+                        let updated = { ...despForm, conta_padrao: contaId }
+                        if (c && c.tipo === 'cartao') {
+                          if (c.dia_vencimento) {
+                            updated.dia_vencimento = c.dia_vencimento
+                          }
+                          const matched = metodosPagamento.find(
+                            (m) =>
+                              m.conta_padrao === c.id ||
+                              (m.tipo === 'cartao' &&
+                                m.nome.toLowerCase().includes(c.nome.toLowerCase())),
+                          )
+                          if (matched) updated.metodo_pagamento = matched.id
                         }
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs font-bold">Parcela inicial</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={despForm.total_parcelas}
-                        value={despForm.parcela_inicial}
-                        onChange={(e) =>
-                          setDespForm((prev) => ({
-                            ...prev,
-                            parcela_inicial: parseInt(e.target.value, 10) || 1,
-                          }))
-                        }
-                      />
-                    </div>
-                  </>
-                )}
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-bold">Dia de vencimento (1 a 31)</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={31}
-                    value={despForm.dia_vencimento}
-                    onChange={(e) => {
-                      const day = parseInt(e.target.value, 10) || 10
-                      setDespForm((prev) => ({
-                        ...prev,
-                        dia_vencimento: day,
-                        regra_vencimento_texto: `${day}/m`,
-                      }))
-                    }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-bold">Data de início / 1ª cobrança</Label>
-                  <Input
-                    type="date"
-                    value={despForm.data_inicio}
-                    onChange={(e) =>
-                      setDespForm((prev) => ({ ...prev, data_inicio: e.target.value }))
-                    }
-                    required
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-bold">Conta padrão / Cartão</Label>
-                  <Select
-                    value={despForm.conta_padrao || 'none'}
-                    onValueChange={(v) => {
-                      const contaId = v === 'none' ? '' : v
-                      const c = contas.find((item) => item.id === contaId)
-                      let updated = { ...despForm, conta_padrao: contaId }
-                      if (c && c.tipo === 'cartao') {
-                        if (c.dia_vencimento) {
-                          updated.dia_vencimento = c.dia_vencimento
-                          updated.regra_vencimento_texto = `${c.dia_vencimento}/m`
-                        }
-                        const matched = metodosPagamento.find(
-                          (m) =>
-                            m.conta_padrao === c.id ||
-                            (m.tipo === 'cartao' &&
-                              m.nome.toLowerCase().includes(c.nome.toLowerCase())),
-                        )
-                        updated.metodo_pagamento = matched?.id || ''
-                      }
-                      setDespForm(updated)
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione conta ou cartão" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Nenhuma</SelectItem>
-                      {despContaOptions.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.nome} ({c.tipo === 'cartao' ? 'Cartão de Crédito' : c.tipo})
-                          {!c.ativa ? ' · (Inativa)' : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-bold">Método de pagamento</Label>
-                    {isSelectedDespContaCartao && (
-                      <span className="text-[10px] font-semibold text-primary">
-                        Automático (Cartão)
-                      </span>
-                    )}
+                        setDespForm(updated)
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione conta de onde o dinheiro sairá" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nenhuma</SelectItem>
+                        {despContaOptions.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.nome}
+                            {c.tipo === 'cartao' && c.bandeira ? ` (${c.bandeira})` : ''}
+                            {c.tipo !== 'cartao'
+                              ? ` · [${c.tipo === 'caixa' ? 'Caixa' : c.tipo === 'bancaria' ? 'Banco' : 'Marketplace'}]`
+                              : ' · [Cartão]'}
+                            {!c.ativa ? ' · (Inativa)' : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  {isSelectedDespContaCartao ? (
-                    <div className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-secondary/40 px-3 py-1 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">
-                        Crédito {selectedDespConta ? selectedDespConta.nome : 'Cartão'}
-                      </span>
-                      <span className="text-[11px] text-muted-foreground">
-                        {selectedDespConta?.dia_fechamento &&
-                          `Fecha dia ${selectedDespConta.dia_fechamento}`}
-                        {selectedDespConta?.dia_vencimento &&
-                          ` · Vence dia ${selectedDespConta.dia_vencimento}`}
-                      </span>
-                    </div>
-                  ) : (
+
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Método de pagamento</Label>
                     <Select
                       value={despForm.metodo_pagamento || 'none'}
                       onValueChange={(v) =>
@@ -1114,149 +1695,75 @@ export function TriagemPendenteDialog({
                       }
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Ex.: Pix-CPF, Pix-CNPJ..." />
+                        <SelectValue placeholder="Pix, Boleto, Cartão, Débito..." />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Nenhum</SelectItem>
-                        {metodosPagamento
-                          .filter((m) => m.tipo !== 'cartao')
-                          .map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.nome}
-                            </SelectItem>
-                          ))}
+                        {metodosPagamento.map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            {m.nome}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
-                  )}
-                  {errors.despMetodo && (
-                    <p className="text-xs text-destructive">{errors.despMetodo}</p>
-                  )}
+                    {avisoCartaoMetodoNaoCartao && (
+                      <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-500/10 p-2 text-[11px] text-amber-900 mt-1">
+                        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                        <p className="leading-relaxed">{avisoCartaoMetodoNaoCartao}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Pessoa responsável (opcional)</Label>
+                    <Select
+                      value={despForm.pessoa_responsavel || 'none'}
+                      onValueChange={(v) =>
+                        setDespForm((prev) => ({
+                          ...prev,
+                          pessoa_responsavel: v === 'none' ? '' : v,
+                        }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Quem acompanha ou executa" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nenhuma</SelectItem>
+                        {pessoas.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.nome}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Link de pagamento (opcional)</Label>
+                    <Input
+                      type="url"
+                      value={despForm.link_pagamento}
+                      onChange={(e) =>
+                        setDespForm((prev) => ({ ...prev, link_pagamento: e.target.value }))
+                      }
+                      placeholder="https://..."
+                    />
+                  </div>
                 </div>
 
-                <div className="space-y-1">
-                  <Label className="text-xs font-bold">Tipo de Despesa</Label>
-                  <Select
-                    value={despForm.tipo_despesa || 'none'}
-                    onValueChange={(v) =>
-                      setDespForm((prev) => ({ ...prev, tipo_despesa: v === 'none' ? '' : v }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Fixa ou Fixa / Variável" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Nenhum</SelectItem>
-                      {tiposDespesa.map((tp) => (
-                        <SelectItem key={tp.id} value={tp.id}>
-                          {tp.nome}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-bold">Destino da despesa / Centro de custo</Label>
-                  <Select
-                    value={despForm.tag || 'none'}
-                    onValueChange={(v) =>
-                      setDespForm((prev) => ({ ...prev, tag: v === 'none' ? '' : v }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione destino" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Nenhum</SelectItem>
-                      {tags.map((t) => (
-                        <SelectItem key={t.id} value={t.id}>
-                          {t.nome}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-bold">Categoria financeira</Label>
-                  <Select
-                    value={despForm.categoria || 'none'}
-                    onValueChange={(v) =>
-                      setDespForm((prev) => ({ ...prev, categoria: v === 'none' ? '' : v }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione categoria" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Nenhuma</SelectItem>
-                      {despCategoryOptions.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.nome}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-bold">Empresa (opcional)</Label>
-                  <Select
-                    value={despForm.empresa || 'none'}
-                    onValueChange={(v) =>
-                      setDespForm((prev) => ({ ...prev, empresa: v === 'none' ? '' : v }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Nenhuma" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Nenhuma</SelectItem>
-                      {empresas.map((emp) => (
-                        <SelectItem key={emp.id} value={emp.id}>
-                          {emp.nome_fantasia}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-bold">Pessoa responsável (opcional)</Label>
-                  <Select
-                    value={despForm.pessoa || 'none'}
-                    onValueChange={(v) =>
-                      setDespForm((prev) => ({ ...prev, pessoa: v === 'none' ? '' : v }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Nenhuma" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Nenhuma</SelectItem>
-                      {pessoas.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.nome}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1 sm:col-span-2">
-                  <Label className="text-xs font-bold">Link de pagamento (opcional)</Label>
-                  <Input
-                    type="url"
-                    value={despForm.link_pagamento}
-                    onChange={(e) =>
-                      setDespForm((prev) => ({ ...prev, link_pagamento: e.target.value }))
-                    }
-                    placeholder="https://..."
-                  />
-                </div>
+                {titularidadeContaDiferente && (
+                  <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-500/10 p-2.5 text-xs text-amber-900">
+                    <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                    <div>
+                      <p className="font-bold">Atenção à titularidade cruzada:</p>
+                      <p>{titularidadeContaDiferente}</p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Dízimo / Ofertas */}
-                <div className="rounded-xl border border-border bg-secondary/20 p-2.5 sm:col-span-2 space-y-2">
+                <div className="rounded-xl border border-border bg-secondary/20 p-2.5 space-y-2">
                   <div className="flex items-center justify-between">
                     <div>
                       <Label className="font-bold text-xs text-foreground">
@@ -1297,8 +1804,8 @@ export function TriagemPendenteDialog({
                   )}
                 </div>
 
-                <div className="space-y-1 sm:col-span-2">
-                  <Label className="text-xs font-bold">Observações</Label>
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold">Observações</Label>
                   <Textarea
                     rows={2}
                     value={despForm.observacoes}
