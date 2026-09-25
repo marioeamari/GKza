@@ -306,6 +306,17 @@ export function DespesaCompromissoDialog({
     }
   }, [form.titular_tipo, form.titular_empresa, form.titular_pessoa, empresas, pessoas])
 
+  // Opções de contas para o select "Conta de pagamento prevista / Cartão":
+  // Apenas cartões de crédito cadastrados (tipo="cartao") e ativos (ativa=true).
+  // Preserva a conta já vinculada no compromisso em edição mesmo que não seja cartão ou esteja inativa.
+  const contasCartaoOptions = useMemo(() => {
+    return contas.filter((c) => {
+      if (c.tipo === 'cartao' && c.ativa) return true
+      if (form.conta_padrao && c.id === form.conta_padrao) return true
+      return false
+    })
+  }, [contas, form.conta_padrao])
+
   // Conta de pagamento selecionada
   const selectedConta = contas.find((c) => c.id === form.conta_padrao)
   const isSelectedContaCartao = selectedConta?.tipo === 'cartao' || form.secao === 'cartoes_credito'
@@ -1127,9 +1138,12 @@ export function DespesaCompromissoDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Nenhuma</SelectItem>
-                    {contas.map((c) => (
+                    {contasCartaoOptions.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
-                        {c.nome} ({c.tipo === 'cartao' ? 'Cartão de Crédito' : c.tipo})
+                        {c.nome}
+                        {c.bandeira ? ` (${c.bandeira})` : ''}
+                        {c.tipo !== 'cartao' ? ` · [${c.tipo}]` : ''}
+                        {!c.ativa ? ' · (Inativa)' : ''}
                       </SelectItem>
                     ))}
                   </SelectContent>
