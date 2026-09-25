@@ -136,6 +136,10 @@ export default function Despesas() {
   const [filterTitular, setFilterTitular] = useState('all') // Titular da despesa (CPF ou CNPJ)
   const [filterCategoria, setFilterCategoria] = useState('all') // Categoria financeira (finalidade)
   const [filterStatus, setFilterStatus] = useState('all')
+  const [filterSecao, setFilterSecao] = useState('all') // Seção do painel: 'all' | 'contas_mensais_pix_boleto' | 'assinaturas_anuais' | 'cartoes_credito'
+
+  // Ocorrências atrasadas (status 'prevista' com vencimento anterior ao mês atual)
+  const [ocorrenciasAtrasadas, setOcorrenciasAtrasadas] = useState<DespesaOcorrencia[]>([])
 
   const loadData = useCallback(async () => {
     try {
@@ -158,8 +162,8 @@ export default function Despesas() {
       setEmpresas(emps)
       setPessoas(pess)
 
-      // Carregar todos os compromissos e ocorrências da competência, depois filtrar pelo grupo ativo
-      const [allComps, allOcs, allOcsCartao] = await Promise.all([
+      // Carregar compromissos, ocorrências da competência, cartões e ocorrências atrasadas
+      const [allComps, allOcs, allOcsCartao, allOcsAtrasadas] = await Promise.all([
         despesasService.listCompromissos(),
         despesasService.listOcorrencias({
           filter: `competencia = '${currentCompetencia}'`,
@@ -167,6 +171,10 @@ export default function Despesas() {
         despesasService.listOcorrencias({
           filter: `secao = 'cartoes_credito'`,
           sort: '-data_vencimento',
+        }),
+        despesasService.listOcorrencias({
+          filter: `status = 'prevista' && competencia < '${currentCompetencia}'`,
+          sort: 'data_vencimento',
         }),
       ])
 
@@ -222,10 +230,12 @@ export default function Despesas() {
       const comps = allComps.filter(isCompromissoInContext)
       const ocs = allOcs.filter(isOcorrenciaInContext)
       const ocsCartaoAll = allOcsCartao.filter(isOcorrenciaInContext)
+      const ocsAtrasadas = allOcsAtrasadas.filter(isOcorrenciaInContext)
 
       setCompromissos(comps)
       setOcorrencias(ocs)
       setCartaoOcorrenciasAll(ocsCartaoAll)
+      setOcorrenciasAtrasadas(ocsAtrasadas)
     } catch (err) {
       toast({
         variant: 'destructive',
@@ -308,15 +318,73 @@ export default function Despesas() {
         (filterTitular === 'cnpj' &&
           (comp?.titular_tipo === 'cnpj' || comp?.contexto_tipo === 'empresa'))
 
+      const matchesSecao = filterSecao === 'all' || oc.secao === filterSecao
+
       const matchesStatus = filterStatus === 'all' || oc.status === filterStatus
 
-      return matchesSearch && matchesTag && matchesCategoria && matchesTitular && matchesStatus
+      return (
+        matchesSearch &&
+        matchesTag &&
+        matchesCategoria &&
+        matchesTitular &&
+        matchesSecao &&
+        matchesStatus
+      )
     })
-  }, [ocorrencias, search, filterTag, filterCategoria, filterTitular, filterStatus])
+  }, [ocorrencias, search, filterTag, filterCategoria, filterTitular, filterSecao, filterStatus])
+
+  // Filtragem das ocorrências atrasadas de competências passadas
+  const filteredOcorrenciasAtrasadas = useMemo(() => {
+    return ocorrenciasAtrasadas.filter((oc) => {
+      const comp = oc.expand?.compromisso
+      const desc = comp?.descricao || ''
+      const forn = comp?.fornecedor || ''
+      const matchesSearch =
+        !search ||
+        desc.toLowerCase().includes(search.toLowerCase()) ||
+        forn.toLowerCase().includes(search.toLowerCase())
+
+      const matchesTag =
+        filterTag === 'all' || comp?.tag === filterTag || oc.expand?.compromisso?.tag === filterTag
+
+      const matchesCategoria =
+        filterCategoria === 'all' ||
+        comp?.categoria === filterCategoria ||
+        oc.expand?.compromisso?.categoria === filterCategoria
+
+      const matchesTitular =
+        filterTitular === 'all' ||
+        (filterTitular === 'cpf' &&
+          (comp?.titular_tipo === 'cpf' || comp?.contexto_tipo === 'pessoal')) ||
+        (filterTitular === 'cnpj' &&
+          (comp?.titular_tipo === 'cnpj' || comp?.contexto_tipo === 'empresa'))
+
+      const matchesSecao = filterSecao === 'all' || oc.secao === filterSecao
+
+      const matchesStatus = filterStatus === 'all' || oc.status === filterStatus
+
+      return (
+        matchesSearch &&
+        matchesTag &&
+        matchesCategoria &&
+        matchesTitular &&
+        matchesSecao &&
+        matchesStatus
+      )
+    })
+  }, [
+    ocorrenciasAtrasadas,
+    search,
+    filterTag,
+    filterCategoria,
+    filterTitular,
+    filterSecao,
+    filterStatus,
+  ])
 
   // Seção 1: Boletos & Contas Mensais Pix
   const secaoBoletosPix = useMemo(
-    () => filteredOcorrencias.filter((oc) => oc.secao === 'contas_mensais_pix_boleto'),
+    () => filteredOcorrencias.filter((oc) => !oc.secao || oc.secao === 'contas_mensais_pix_boleto'),
     [filteredOcorrencias],
   )
 
@@ -355,11 +423,28 @@ export default function Despesas() {
         (filterTitular === 'cnpj' &&
           (comp?.titular_tipo === 'cnpj' || comp?.contexto_tipo === 'empresa'))
 
+      const matchesSecao = filterSecao === 'all' || oc.secao === filterSecao
+
       const matchesStatus = filterStatus === 'all' || oc.status === filterStatus
 
-      return matchesSearch && matchesTag && matchesCategoria && matchesTitular && matchesStatus
+      return (
+        matchesSearch &&
+        matchesTag &&
+        matchesCategoria &&
+        matchesTitular &&
+        matchesSecao &&
+        matchesStatus
+      )
     })
-  }, [cartaoOcorrenciasAll, search, filterTag, filterCategoria, filterTitular, filterStatus])
+  }, [
+    cartaoOcorrenciasAll,
+    search,
+    filterTag,
+    filterCategoria,
+    filterTitular,
+    filterSecao,
+    filterStatus,
+  ])
 
   const cartoesGrouped = useMemo(() => {
     const map = new Map<
@@ -664,6 +749,19 @@ export default function Despesas() {
             </SelectContent>
           </Select>
 
+          {/* Seção */}
+          <Select value={filterSecao} onValueChange={setFilterSecao}>
+            <SelectTrigger className="h-9 w-44 text-xs">
+              <SelectValue placeholder="Todas as Seções" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas as Seções</SelectItem>
+              <SelectItem value="contas_mensais_pix_boleto">Boletos & Pix Mensais</SelectItem>
+              <SelectItem value="assinaturas_anuais">Assinaturas Anuais</SelectItem>
+              <SelectItem value="cartoes_credito">Cartões de Crédito</SelectItem>
+            </SelectContent>
+          </Select>
+
           {/* Status */}
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="h-9 w-32 text-xs">
@@ -680,6 +778,7 @@ export default function Despesas() {
             filterTag !== 'all' ||
             filterCategoria !== 'all' ||
             filterTitular !== 'all' ||
+            filterSecao !== 'all' ||
             filterStatus !== 'all') && (
             <Button
               variant="ghost"
@@ -689,6 +788,7 @@ export default function Despesas() {
                 setFilterTag('all')
                 setFilterCategoria('all')
                 setFilterTitular('all')
+                setFilterSecao('all')
                 setFilterStatus('all')
               }}
               className="h-9 text-xs text-primary"
@@ -700,313 +800,380 @@ export default function Despesas() {
       </div>
 
       {/* ========================================================
+          DESTAQUE: DESPESAS PREVISTAS ATRASADAS (MESES ANTERIORES)
+         ======================================================== */}
+      {filteredOcorrenciasAtrasadas.length > 0 && (
+        <div className="mt-6 rounded-2xl border border-destructive/30 bg-destructive/5 p-4 shadow-soft">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="grid h-8 w-8 place-items-center rounded-lg bg-destructive text-white">
+                <AlertCircle className="h-4 w-4" />
+              </span>
+              <div>
+                <h3 className="text-base font-extrabold text-destructive flex items-center gap-2">
+                  Despesas Atrasadas Pendentes
+                  <Badge variant="destructive" className="text-xs">
+                    {filteredOcorrenciasAtrasadas.length}{' '}
+                    {filteredOcorrenciasAtrasadas.length === 1 ? 'pendência' : 'pendências'}
+                  </Badge>
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Despesas previstas de competências anteriores que ainda não foram baixadas nem
+                  pagas.
+                </p>
+              </div>
+            </div>
+            <div className="text-xs font-bold text-destructive">
+              Total Atrasado:{' '}
+              {formatCurrency(
+                filteredOcorrenciasAtrasadas.reduce(
+                  (acc, curr) => acc + (curr.valor_previsto || 0),
+                  0,
+                ),
+              )}
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-destructive/20 bg-white">
+            <div className="divide-y divide-border">
+              {filteredOcorrenciasAtrasadas.map((oc) => (
+                <OcorrenciaRow
+                  key={oc.id}
+                  ocorrencia={oc}
+                  isAtrasada
+                  onBaixar={() => handleOpenBaixa(oc)}
+                  onEstornar={() => setEstornando(oc)}
+                  onEditarCompromisso={() =>
+                    oc.expand?.compromisso && handleOpenEditarCompromisso(oc.expand.compromisso)
+                  }
+                  onExcluirCompromisso={() =>
+                    oc.expand?.compromisso && setDeletandoCompromisso(oc.expand.compromisso)
+                  }
+                  canEdit={can(user?.role, 'writeFinance')}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
           AS 3 SEÇÕES PRINCIPAIS CONFORME A PLANILHA DO USUÁRIO
          ======================================================== */}
       <div className="mt-8 space-y-8">
         {/* SEÇÃO 1: Pagamentos por boletos, e contas mensais pagas por pix */}
-        <section className="space-y-3">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
-                Pagamentos por boletos, e contas mensais pagas por pix
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                Água, energia, internet, escola, aluguel, segurança, dízimos e transferências
-                mensais.
-              </p>
+        {(filterSecao === 'all' || filterSecao === 'contas_mensais_pix_boleto') && (
+          <section className="space-y-3">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
+                  Pagamentos por boletos, e contas mensais pagas por pix
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Água, energia, internet, escola, aluguel, segurança, dízimos e transferências
+                  mensais.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-muted-foreground">
+                  Total:{' '}
+                  {formatCurrency(
+                    secaoBoletosPix.reduce((acc, curr) => acc + (curr.valor_previsto || 0), 0),
+                  )}
+                </span>
+                <PermissionButton
+                  size="sm"
+                  variant="outline"
+                  allowed={can(user?.role, 'writeFinance')}
+                  onClick={() => handleOpenNovoCompromisso('contas_mensais_pix_boleto')}
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
+                </PermissionButton>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-muted-foreground">
-                Total:{' '}
-                {formatCurrency(
-                  secaoBoletosPix.reduce((acc, curr) => acc + (curr.valor_previsto || 0), 0),
-                )}
-              </span>
-              <PermissionButton
-                size="sm"
-                variant="outline"
-                allowed={can(user?.role, 'writeFinance')}
-                onClick={() => handleOpenNovoCompromisso('contas_mensais_pix_boleto')}
-              >
-                <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
-              </PermissionButton>
-            </div>
-          </div>
 
-          <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft">
-            {secaoBoletosPix.length === 0 ? (
-              <div className="p-8 text-center text-sm text-muted-foreground">
-                Nenhum boleto ou conta mensal Pix nesta competência.
-              </div>
-            ) : (
-              <div className="divide-y divide-border">
-                {secaoBoletosPix.map((oc) => (
-                  <OcorrenciaRow
-                    key={oc.id}
-                    ocorrencia={oc}
-                    onBaixar={() => handleOpenBaixa(oc)}
-                    onEstornar={() => setEstornando(oc)}
-                    onEditarCompromisso={() =>
-                      oc.expand?.compromisso && handleOpenEditarCompromisso(oc.expand.compromisso)
-                    }
-                    onExcluirCompromisso={() =>
-                      oc.expand?.compromisso && setDeletandoCompromisso(oc.expand.compromisso)
-                    }
-                    canEdit={can(user?.role, 'writeFinance')}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
+            <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft">
+              {secaoBoletosPix.length === 0 ? (
+                <div className="p-8 text-center text-sm text-muted-foreground">
+                  Nenhum boleto ou conta mensal Pix nesta competência.
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {secaoBoletosPix.map((oc) => (
+                    <OcorrenciaRow
+                      key={oc.id}
+                      ocorrencia={oc}
+                      onBaixar={() => handleOpenBaixa(oc)}
+                      onEstornar={() => setEstornando(oc)}
+                      onEditarCompromisso={() =>
+                        oc.expand?.compromisso && handleOpenEditarCompromisso(oc.expand.compromisso)
+                      }
+                      onExcluirCompromisso={() =>
+                        oc.expand?.compromisso && setDeletandoCompromisso(oc.expand.compromisso)
+                      }
+                      canEdit={can(user?.role, 'writeFinance')}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* SEÇÃO 2: Assinaturas anuais */}
-        <section className="space-y-3">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
-                Assinaturas anuais
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                Domínios, ferramentas, softwares e renovações de ciclo anual.
-              </p>
+        {(filterSecao === 'all' || filterSecao === 'assinaturas_anuais') && (
+          <section className="space-y-3">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
+                  Assinaturas anuais
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Domínios, ferramentas, softwares e renovações de ciclo anual.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-muted-foreground">
+                  Total:{' '}
+                  {formatCurrency(
+                    secaoAssinaturas.reduce((acc, curr) => acc + (curr.valor_previsto || 0), 0),
+                  )}
+                </span>
+                <PermissionButton
+                  size="sm"
+                  variant="outline"
+                  allowed={can(user?.role, 'writeFinance')}
+                  onClick={() => handleOpenNovoCompromisso('assinaturas_anuais')}
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
+                </PermissionButton>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-muted-foreground">
-                Total:{' '}
-                {formatCurrency(
-                  secaoAssinaturas.reduce((acc, curr) => acc + (curr.valor_previsto || 0), 0),
-                )}
-              </span>
-              <PermissionButton
-                size="sm"
-                variant="outline"
-                allowed={can(user?.role, 'writeFinance')}
-                onClick={() => handleOpenNovoCompromisso('assinaturas_anuais')}
-              >
-                <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
-              </PermissionButton>
-            </div>
-          </div>
 
-          <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft">
-            {secaoAssinaturas.length === 0 ? (
-              <div className="p-8 text-center text-sm text-muted-foreground">
-                Nenhuma assinatura anual com vencimento neste mês.
-              </div>
-            ) : (
-              <div className="divide-y divide-border">
-                {secaoAssinaturas.map((oc) => (
-                  <OcorrenciaRow
-                    key={oc.id}
-                    ocorrencia={oc}
-                    onBaixar={() => handleOpenBaixa(oc)}
-                    onEstornar={() => setEstornando(oc)}
-                    onEditarCompromisso={() =>
-                      oc.expand?.compromisso && handleOpenEditarCompromisso(oc.expand.compromisso)
-                    }
-                    onExcluirCompromisso={() =>
-                      oc.expand?.compromisso && setDeletandoCompromisso(oc.expand.compromisso)
-                    }
-                    canEdit={can(user?.role, 'writeFinance')}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
+            <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft">
+              {secaoAssinaturas.length === 0 ? (
+                <div className="p-8 text-center text-sm text-muted-foreground">
+                  Nenhuma assinatura anual com vencimento neste mês.
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {secaoAssinaturas.map((oc) => (
+                    <OcorrenciaRow
+                      key={oc.id}
+                      ocorrencia={oc}
+                      onBaixar={() => handleOpenBaixa(oc)}
+                      onEstornar={() => setEstornando(oc)}
+                      onEditarCompromisso={() =>
+                        oc.expand?.compromisso && handleOpenEditarCompromisso(oc.expand.compromisso)
+                      }
+                      onExcluirCompromisso={() =>
+                        oc.expand?.compromisso && setDeletandoCompromisso(oc.expand.compromisso)
+                      }
+                      canEdit={can(user?.role, 'writeFinance')}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* SEÇÃO 3: Cartões de Crédito (NuBank, Porto Seguro, Sicred e cadastráveis) */}
-        <section className="space-y-4">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
-                Cartões de Crédito
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                Compras parceladas e rotativas separadas por cartão (NuBank, Porto Seguro, Sicred,
-                etc.) com controle da fatura, dia de fechamento e vencimento.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <PermissionButton
-                size="sm"
-                variant="outline"
-                allowed={can(user?.role, 'writeFinance')}
-                onClick={() => handleOpenNovoCompromisso('cartoes_credito')}
-              >
-                <Plus className="mr-1 h-3.5 w-3.5" /> Nova compra parcelada
-              </PermissionButton>
-              <Button size="sm" variant="ghost" asChild>
-                <Link to="/contas">
-                  <CreditCard className="mr-1 h-3.5 w-3.5" /> Gerenciar cartões
-                </Link>
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-5">
-            {cartoesGrouped.length === 0 ? (
-              <div className="rounded-2xl border border-border bg-white p-8 text-center text-sm text-muted-foreground shadow-soft">
-                Nenhum cartão cadastrado. Vá em "Contas" para cadastrar seus cartões.
+        {(filterSecao === 'all' || filterSecao === 'cartoes_credito') && (
+          <section className="space-y-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
+                  Cartões de Crédito
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Compras parceladas e rotativas separadas por cartão (NuBank, Porto Seguro, Sicred,
+                  etc.) com controle da fatura, dia de fechamento e vencimento.
+                </p>
               </div>
-            ) : (
-              cartoesGrouped.map(({ conta, ocorrenciasMes, ocorrenciasTodas }) => {
-                const currentMode = cartaoViewMode[conta.id] || 'mes'
-                const isHist = currentMode === 'historico'
-                const displayOcorrencias = isHist ? ocorrenciasTodas : ocorrenciasMes
+              <div className="flex items-center gap-2">
+                <PermissionButton
+                  size="sm"
+                  variant="outline"
+                  allowed={can(user?.role, 'writeFinance')}
+                  onClick={() => handleOpenNovoCompromisso('cartoes_credito')}
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" /> Nova compra parcelada
+                </PermissionButton>
+                <Button size="sm" variant="ghost" asChild>
+                  <Link to="/contas">
+                    <CreditCard className="mr-1 h-3.5 w-3.5" /> Gerenciar cartões
+                  </Link>
+                </Button>
+              </div>
+            </div>
 
-                const totalMes = ocorrenciasMes.reduce((sum, o) => sum + (o.valor_previsto || 0), 0)
-                const totalPagoMes = ocorrenciasMes
-                  .filter((o) => o.status === 'paga')
-                  .reduce((sum, o) => sum + (o.valor_pago || o.valor_previsto || 0), 0)
+            <div className="space-y-5">
+              {cartoesGrouped.length === 0 ? (
+                <div className="rounded-2xl border border-border bg-white p-8 text-center text-sm text-muted-foreground shadow-soft">
+                  Nenhum cartão cadastrado. Vá em "Contas" para cadastrar seus cartões.
+                </div>
+              ) : (
+                cartoesGrouped.map(({ conta, ocorrenciasMes, ocorrenciasTodas }) => {
+                  const currentMode = cartaoViewMode[conta.id] || 'mes'
+                  const isHist = currentMode === 'historico'
+                  const displayOcorrencias = isHist ? ocorrenciasTodas : ocorrenciasMes
 
-                const totalTodas = ocorrenciasTodas.reduce(
-                  (sum, o) => sum + (o.valor_previsto || 0),
-                  0,
-                )
-                const totalPagoTodas = ocorrenciasTodas
-                  .filter((o) => o.status === 'paga')
-                  .reduce((sum, o) => sum + (o.valor_pago || o.valor_previsto || 0), 0)
+                  const totalMes = ocorrenciasMes.reduce(
+                    (sum, o) => sum + (o.valor_previsto || 0),
+                    0,
+                  )
+                  const totalPagoMes = ocorrenciasMes
+                    .filter((o) => o.status === 'paga')
+                    .reduce((sum, o) => sum + (o.valor_pago || o.valor_previsto || 0), 0)
 
-                return (
-                  <div
-                    key={conta.id}
-                    className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft transition-all"
-                  >
-                    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-secondary/25 p-4 sm:p-5">
-                      {/* Dados do Cartão: Nome, Bandeira, Fechamento e Vencimento */}
-                      <div className="flex items-center gap-3">
-                        <span
-                          className="grid h-11 w-11 place-items-center rounded-xl text-white shadow-xs"
-                          style={{ background: conta.cor || '#4C3A8C' }}
-                        >
-                          <CreditCard className="h-6 w-6" />
-                        </span>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="text-base font-extrabold text-foreground sm:text-lg">
-                              {conta.nome}
-                            </h3>
-                            {conta.bandeira && (
-                              <Badge variant="outline" className="font-semibold text-[10px]">
-                                {conta.bandeira}
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                            <span className="font-medium text-foreground">
-                              {conta.dia_fechamento ? (
-                                <>
-                                  Fatura fecha todo <strong>dia {conta.dia_fechamento}</strong>
-                                </>
-                              ) : (
-                                'Fechamento não informado'
-                              )}
-                            </span>
-                            <span>•</span>
-                            <span className="font-medium text-foreground">
-                              {conta.dia_vencimento ? (
-                                <>
-                                  Vencimento todo <strong>dia {conta.dia_vencimento}</strong>
-                                </>
-                              ) : (
-                                'Vencimento não informado'
-                              )}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
+                  const totalTodas = ocorrenciasTodas.reduce(
+                    (sum, o) => sum + (o.valor_previsto || 0),
+                    0,
+                  )
+                  const totalPagoTodas = ocorrenciasTodas
+                    .filter((o) => o.status === 'paga')
+                    .reduce((sum, o) => sum + (o.valor_pago || o.valor_previsto || 0), 0)
 
-                      {/* Valores e Alternador Mês vs Histórico Completo */}
-                      <div className="flex flex-wrap items-center gap-3">
-                        {/* Seletor de visualização */}
-                        <div className="flex rounded-lg border border-border bg-background p-0.5 text-xs">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setCartaoViewMode((prev) => ({ ...prev, [conta.id]: 'mes' }))
-                            }
-                            className={`rounded-md px-2.5 py-1 font-medium transition ${
-                              !isHist
-                                ? 'bg-primary text-white shadow-xs'
-                                : 'text-muted-foreground hover:text-foreground'
-                            }`}
-                          >
-                            Mês atual ({formatCompetenciaDisplay(currentCompetencia)})
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setCartaoViewMode((prev) => ({ ...prev, [conta.id]: 'historico' }))
-                            }
-                            className={`rounded-md px-2.5 py-1 font-medium transition ${
-                              isHist
-                                ? 'bg-primary text-white shadow-xs'
-                                : 'text-muted-foreground hover:text-foreground'
-                            }`}
-                          >
-                            Todas as compras ({ocorrenciasTodas.length})
-                          </button>
-                        </div>
-
-                        {/* Indicadores financeiros */}
+                  return (
+                    <div
+                      key={conta.id}
+                      className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft transition-all"
+                    >
+                      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-secondary/25 p-4 sm:p-5">
+                        {/* Dados do Cartão: Nome, Bandeira, Fechamento e Vencimento */}
                         <div className="flex items-center gap-3">
-                          <div className="rounded-xl border border-border bg-white px-3 py-1 text-right">
-                            <p className="micro-label">
-                              {isHist ? 'Total Compras' : 'Fatura do Mês'}
-                            </p>
-                            <p className="text-sm font-extrabold tabular-nums text-foreground">
-                              {formatCurrency(isHist ? totalTodas : totalMes)}
-                            </p>
+                          <span
+                            className="grid h-11 w-11 place-items-center rounded-xl text-white shadow-xs"
+                            style={{ background: conta.cor || '#4C3A8C' }}
+                          >
+                            <CreditCard className="h-6 w-6" />
+                          </span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-base font-extrabold text-foreground sm:text-lg">
+                                {conta.nome}
+                              </h3>
+                              {conta.bandeira && (
+                                <Badge variant="outline" className="font-semibold text-[10px]">
+                                  {conta.bandeira}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                              <span className="font-medium text-foreground">
+                                {conta.dia_fechamento ? (
+                                  <>
+                                    Fatura fecha todo <strong>dia {conta.dia_fechamento}</strong>
+                                  </>
+                                ) : (
+                                  'Fechamento não informado'
+                                )}
+                              </span>
+                              <span>•</span>
+                              <span className="font-medium text-foreground">
+                                {conta.dia_vencimento ? (
+                                  <>
+                                    Vencimento todo <strong>dia {conta.dia_vencimento}</strong>
+                                  </>
+                                ) : (
+                                  'Vencimento não informado'
+                                )}
+                              </span>
+                            </div>
                           </div>
-                          {(isHist ? totalPagoTodas : totalPagoMes) > 0 && (
-                            <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-1 text-right">
-                              <p className="micro-label text-success">Baixado</p>
-                              <p className="text-xs font-bold tabular-nums text-success">
-                                {formatCurrency(isHist ? totalPagoTodas : totalPagoMes)}
+                        </div>
+
+                        {/* Valores e Alternador Mês vs Histórico Completo */}
+                        <div className="flex flex-wrap items-center gap-3">
+                          {/* Seletor de visualização */}
+                          <div className="flex rounded-lg border border-border bg-background p-0.5 text-xs">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCartaoViewMode((prev) => ({ ...prev, [conta.id]: 'mes' }))
+                              }
+                              className={`rounded-md px-2.5 py-1 font-medium transition ${
+                                !isHist
+                                  ? 'bg-primary text-white shadow-xs'
+                                  : 'text-muted-foreground hover:text-foreground'
+                              }`}
+                            >
+                              Mês atual ({formatCompetenciaDisplay(currentCompetencia)})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCartaoViewMode((prev) => ({ ...prev, [conta.id]: 'historico' }))
+                              }
+                              className={`rounded-md px-2.5 py-1 font-medium transition ${
+                                isHist
+                                  ? 'bg-primary text-white shadow-xs'
+                                  : 'text-muted-foreground hover:text-foreground'
+                              }`}
+                            >
+                              Todas as compras ({ocorrenciasTodas.length})
+                            </button>
+                          </div>
+
+                          {/* Indicadores financeiros */}
+                          <div className="flex items-center gap-3">
+                            <div className="rounded-xl border border-border bg-white px-3 py-1 text-right">
+                              <p className="micro-label">
+                                {isHist ? 'Total Compras' : 'Fatura do Mês'}
+                              </p>
+                              <p className="text-sm font-extrabold tabular-nums text-foreground">
+                                {formatCurrency(isHist ? totalTodas : totalMes)}
                               </p>
                             </div>
-                          )}
+                            {(isHist ? totalPagoTodas : totalPagoMes) > 0 && (
+                              <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-1 text-right">
+                                <p className="micro-label text-success">Baixado</p>
+                                <p className="text-xs font-bold tabular-nums text-success">
+                                  {formatCurrency(isHist ? totalPagoTodas : totalPagoMes)}
+                                </p>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </header>
+                      </header>
 
-                    {displayOcorrencias.length === 0 ? (
-                      <div className="p-8 text-center text-xs text-muted-foreground">
-                        {isHist
-                          ? 'Nenhuma compra realizada com este cartão de crédito.'
-                          : `Nenhuma compra ou parcela neste cartão para ${formatCompetenciaDisplay(
-                              currentCompetencia,
-                            )}. Clique em "Todas as compras" para ver o histórico geral.`}
-                      </div>
-                    ) : (
-                      <div className="divide-y divide-border">
-                        {displayOcorrencias.map((oc) => (
-                          <OcorrenciaRow
-                            key={oc.id}
-                            ocorrencia={oc}
-                            onBaixar={() => handleOpenBaixa(oc)}
-                            onEstornar={() => setEstornando(oc)}
-                            onEditarCompromisso={() =>
-                              oc.expand?.compromisso &&
-                              handleOpenEditarCompromisso(oc.expand.compromisso)
-                            }
-                            onExcluirCompromisso={() =>
-                              oc.expand?.compromisso &&
-                              setDeletandoCompromisso(oc.expand.compromisso)
-                            }
-                            canEdit={can(user?.role, 'writeFinance')}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })
-            )}
-          </div>
-        </section>
+                      {displayOcorrencias.length === 0 ? (
+                        <div className="p-8 text-center text-xs text-muted-foreground">
+                          {isHist
+                            ? 'Nenhuma compra realizada com este cartão de crédito.'
+                            : `Nenhuma compra ou parcela neste cartão para ${formatCompetenciaDisplay(
+                                currentCompetencia,
+                              )}. Clique em "Todas as compras" para ver o histórico geral.`}
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-border">
+                          {displayOcorrencias.map((oc) => (
+                            <OcorrenciaRow
+                              key={oc.id}
+                              ocorrencia={oc}
+                              onBaixar={() => handleOpenBaixa(oc)}
+                              onEstornar={() => setEstornando(oc)}
+                              onEditarCompromisso={() =>
+                                oc.expand?.compromisso &&
+                                handleOpenEditarCompromisso(oc.expand.compromisso)
+                              }
+                              onExcluirCompromisso={() =>
+                                oc.expand?.compromisso &&
+                                setDeletandoCompromisso(oc.expand.compromisso)
+                              }
+                              canEdit={can(user?.role, 'writeFinance')}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </section>
+        )}
       </div>
 
       {/* MODAIS */}
@@ -1086,6 +1253,7 @@ export default function Despesas() {
  */
 interface OcorrenciaRowProps {
   ocorrencia: DespesaOcorrencia
+  isAtrasada?: boolean
   onBaixar: () => void
   onEstornar: () => void
   onEditarCompromisso: () => void
@@ -1095,6 +1263,7 @@ interface OcorrenciaRowProps {
 
 function OcorrenciaRow({
   ocorrencia,
+  isAtrasada = false,
   onBaixar,
   onEstornar,
   onEditarCompromisso,
@@ -1129,14 +1298,22 @@ function OcorrenciaRow({
   const isValorVariavel = comp?.tipo_valor === 'variavel'
 
   return (
-    <div className="group flex flex-col gap-3 p-3.5 transition hover:bg-secondary/40 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+    <div
+      className={`group flex flex-col gap-3 p-3.5 transition hover:bg-secondary/40 sm:flex-row sm:items-center sm:justify-between sm:p-4 ${
+        isAtrasada ? 'bg-destructive/[0.03]' : ''
+      }`}
+    >
       <div className="flex min-w-0 flex-1 items-start gap-3">
         {/* Marcador de cor ou status */}
         <span
           className={`mt-1 h-3 w-3 shrink-0 rounded-full ${
-            isPaga ? 'bg-success ring-4 ring-success/15' : 'bg-primary ring-4 ring-primary/15'
+            isPaga
+              ? 'bg-success ring-4 ring-success/15'
+              : isAtrasada
+                ? 'bg-destructive ring-4 ring-destructive/20 animate-pulse'
+                : 'bg-primary ring-4 ring-primary/15'
           }`}
-          title={isPaga ? 'Paga' : 'Prevista'}
+          title={isPaga ? 'Paga' : isAtrasada ? 'Prevista (Atrasada)' : 'Prevista'}
         />
 
         <div className="min-w-0 flex-1">
@@ -1176,6 +1353,15 @@ function OcorrenciaRow({
               <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 {categoria.nome}
               </span>
+            )}
+
+            {isAtrasada && (
+              <Badge
+                variant="destructive"
+                className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1"
+              >
+                <Clock className="h-3 w-3" /> Atrasada
+              </Badge>
             )}
 
             {parcelaLabel && (

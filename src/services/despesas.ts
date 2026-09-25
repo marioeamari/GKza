@@ -356,8 +356,41 @@ export const despesasService = {
 
     // 3. Pagamento Anual
     if (isAnual) {
-      const startDate = new Date(compromisso.data_inicio)
-      const compStr = `${startDate.getUTCFullYear()}-${(startDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
+      const now = new Date()
+      const hoje = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0),
+      )
+      const rawStart = new Date(compromisso.data_inicio)
+      const dayDesejado = compromisso.dia_vencimento || rawStart.getUTCDate() || 10
+      const mesOriginal = rawStart.getUTCMonth()
+
+      // Se a data de início (ou vencimento no ano de início) já passou em relação a hoje,
+      // avança para o próximo ano em que a data seja >= hoje (ou data futura correspondente).
+      let targetYear = rawStart.getUTCFullYear()
+      let dueDate = despesasService.calcularDataVencimentoNoMes(
+        targetYear,
+        mesOriginal,
+        dayDesejado,
+      )
+
+      // Se targetCompetencias foram passadas explicitamente, use a primeira compatível
+      if (targetCompetencias && targetCompetencias.length > 0) {
+        const [yStr, mStr] = targetCompetencias[0].split('-')
+        targetYear = parseInt(yStr, 10)
+        const targetMes = parseInt(mStr, 10) - 1
+        dueDate = despesasService.calcularDataVencimentoNoMes(targetYear, targetMes, dayDesejado)
+      } else {
+        while (dueDate.getTime() < hoje.getTime()) {
+          targetYear += 1
+          dueDate = despesasService.calcularDataVencimentoNoMes(
+            targetYear,
+            mesOriginal,
+            dayDesejado,
+          )
+        }
+      }
+
+      const compStr = `${dueDate.getUTCFullYear()}-${(dueDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
       const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
         filter: `compromisso = '${compromisso.id}' && competencia = '${compStr}'`,
       })
@@ -369,7 +402,7 @@ export const despesasService = {
           secao: compromisso.secao,
           conta: compromisso.conta_padrao || null,
           competencia: compStr,
-          data_vencimento: startDate.toISOString(),
+          data_vencimento: dueDate.toISOString(),
           valor_previsto: compromisso.valor_estimado,
           valor_estimado_original: compromisso.valor_estimado,
           valor_ajustado_manualmente: false,
@@ -402,7 +435,15 @@ export const despesasService = {
           })()
 
     const day = compromisso.dia_vencimento || 10
+    const rawStart = new Date(compromisso.data_inicio)
+    const startCompStr = `${rawStart.getUTCFullYear()}-${(rawStart.getUTCMonth() + 1).toString().padStart(2, '0')}`
+
     for (const compStr of meses) {
+      // Se a competência for anterior ao mês de início do compromisso, pula
+      if (compStr < startCompStr) {
+        continue
+      }
+
       const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
         filter: `compromisso = '${compromisso.id}' && competencia = '${compStr}'`,
       })
