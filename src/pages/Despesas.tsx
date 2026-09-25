@@ -435,6 +435,8 @@ export default function Despesas() {
         if (pId && activeContext.pessoaIds.includes(pId)) return true
         if (eId && activeContext.empresaIds.includes(eId)) return true
         if (cId && activeContext.contaIds.includes(cId)) return true
+        // Rede de segurança: conta padrão órfã (sem nenhum grupo) não fica invisível
+        if (cId && !activeContext.linkedContaIds.includes(cId)) return true
 
         if (activeContext.hasEmpresas && !activeContext.hasPessoas) {
           return !!eId && activeContext.empresaIds.includes(eId)
@@ -459,6 +461,8 @@ export default function Despesas() {
         if (pId && activeContext.pessoaIds.includes(pId)) return true
         if (eId && activeContext.empresaIds.includes(eId)) return true
         if (cId && activeContext.contaIds.includes(cId)) return true
+        // Rede de segurança: conta órfã (sem nenhum grupo) não fica invisível
+        if (cId && !activeContext.linkedContaIds.includes(cId)) return true
 
         if (activeContext.hasEmpresas && !activeContext.hasPessoas) {
           return !!eId && activeContext.empresaIds.includes(eId)

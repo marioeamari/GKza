@@ -80,8 +80,15 @@ export default function Lancamentos() {
     if (categoria) filters.push(`categoria = '${categoria}'`)
 
     if (activeContext.contaIds.length > 0) {
-      const contaClauses = activeContext.contaIds.map((id) => `conta = '${id}'`).join(' || ')
-      filters.push(`(${contaClauses})`)
+      const contaClauses = activeContext.contaIds.map((id) => `conta = '${id}'`)
+      // Rede de segurança: contas sem nenhum grupo vinculado não podem ficar invisíveis
+      if (activeContext.linkedContaIds.length > 0) {
+        const linkedClauses = activeContext.linkedContaIds
+          .map((id) => `conta != '${id}'`)
+          .join(' && ')
+        contaClauses.push(`(${linkedClauses})`)
+      }
+      filters.push(`(${contaClauses.join(' || ')})`)
     }
 
     return filters.join(' && ')

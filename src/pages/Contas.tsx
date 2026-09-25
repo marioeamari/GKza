@@ -173,17 +173,15 @@ export default function Contas() {
         setLoadingAccountGroups(false)
       }
     } else {
-      // Nova conta: pré-seleciona o grupo ativo caso não seja "Todos"
+      // Nova conta: se estiver em um contexto específico, pré-seleciona ele;
+      // se estiver em "Todos", pré-seleciona o grupo Casa por padrão
+      const grupoCasa = grupos.find((g) => g.nome.toLowerCase() === 'casa')
       if (!activeContext.isAll && activeContext.groupId) {
         setSelectedGrupoIds([activeContext.groupId])
+      } else if (grupoCasa) {
+        setSelectedGrupoIds([grupoCasa.id])
       } else {
-        // Pré-seleciona os grupos familiares/pessoais mais comuns (ex: Casa e Pessoal) ou o primeiro
-        const defaultGroups = grupos
-          .filter((g) => g.nome === 'Casa' || g.nome === 'Pessoal (CPF)')
-          .map((g) => g.id)
-        setSelectedGrupoIds(
-          defaultGroups.length > 0 ? defaultGroups : grupos.slice(0, 1).map((g) => g.id),
-        )
+        setSelectedGrupoIds(grupos.slice(0, 1).map((g) => g.id))
       }
       setLoadingAccountGroups(false)
     }
@@ -206,7 +204,15 @@ export default function Contas() {
       // Sincroniza vínculos de grupos de contexto para a conta
       if (targetContaId) {
         try {
-          await contextoService.syncContaGrupos(targetContaId, selectedGrupoIds)
+          // Se for nova conta e o usuário desmarcou tudo, aplica por padrão o grupo "Casa" para nunca nascer órfã
+          let gruposToSync = selectedGrupoIds
+          if (!editing && gruposToSync.length === 0) {
+            const grupoCasa = grupos.find((g) => g.nome.toLowerCase() === 'casa')
+            if (grupoCasa) {
+              gruposToSync = [grupoCasa.id]
+            }
+          }
+          await contextoService.syncContaGrupos(targetContaId, gruposToSync)
           await refreshGrupos()
         } catch (err) {
           console.warn('Erro ao sincronizar grupos da conta:', err)

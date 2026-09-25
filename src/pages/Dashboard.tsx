@@ -92,16 +92,14 @@ export default function Dashboard() {
   // Filtragem dos dados financeiros de acordo com o contexto ativo
   const filteredContas = useMemo(() => {
     if (activeContext.isAll) return contas
-    if (activeContext.contaIds.length > 0) {
-      return contas.filter((c) => activeContext.contaIds.includes(c.id))
-    }
-    // Se o contexto não tem contas específicas (ex.: grupo de Filhas ou só empresas),
-    // mantém as contas que pertencem aos membros ou retorna vazio se não houver
     return contas.filter((c) => {
-      if (activeContext.empresaIds.length > 0) {
-        return false // PJ isolado sem contas adicionadas
-      }
-      return true
+      // Se a conta está no grupo ativo
+      if (activeContext.contaIds.includes(c.id)) return true
+      // Rede de segurança: contas sem nenhum grupo vinculado não podem ficar invisíveis
+      if (!activeContext.linkedContaIds.includes(c.id)) return true
+      // Se o contexto não tem contas específicas e não tem empresas (ex.: grupo de Filhas)
+      if (activeContext.contaIds.length === 0 && activeContext.empresaIds.length === 0) return true
+      return false
     })
   }, [contas, activeContext])
 
@@ -110,6 +108,8 @@ export default function Dashboard() {
     return lancamentos.filter((item) => {
       // Se lançamento aponta para uma conta do grupo
       if (item.conta && activeContext.contaIds.includes(item.conta)) return true
+      // Rede de segurança: se a conta é órfã (não pertence a nenhum grupo), não esconde o lançamento
+      if (item.conta && !activeContext.linkedContaIds.includes(item.conta)) return true
       // Se não há filtro estrito de contas no grupo, não exclui arbitrariamente
       if (activeContext.contaIds.length === 0 && activeContext.hasPessoas) return true
       return false

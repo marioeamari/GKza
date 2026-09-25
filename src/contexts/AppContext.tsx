@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
 import { contextoService } from '@/services/contexto'
 import { cadastrosService } from '@/services/cadastros'
 import type { Conta, ContextoGrupo, ContextoGrupoComMembros, Empresa, Pessoa } from '@/types/domain'
@@ -15,6 +23,8 @@ export interface ActiveContextValue {
   pessoaIds: string[]
   empresaIds: string[]
   contaIds: string[]
+  // IDs de todas as contas vinculadas a pelo menos um grupo de contexto (para identificar órfãs)
+  linkedContaIds: string[]
   // Flags para compatibilidade com código existente
   isAll: boolean
   /** Se o grupo tiver vínculo com pessoa ou for modo pessoal legado */
@@ -144,41 +154,55 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
   const empresaIds = currentGroup?.empresas.map((e) => e.id) || []
   const contaIds = currentGroup?.contas.map((c) => c.id) || []
 
-  // Constrói objeto de contexto ativo
-  let activeContext: ActiveContextValue
-  if (isGroupActive && currentGroup) {
-    const totalMembros =
-      currentGroup.pessoas.length + currentGroup.empresas.length + currentGroup.contas.length
-    const resumoPartes: string[] = []
-    if (currentGroup.pessoas.length > 0)
-      resumoPartes.push(`${currentGroup.pessoas.length} pessoa(s)`)
-    if (currentGroup.empresas.length > 0)
-      resumoPartes.push(`${currentGroup.empresas.length} empresa(s)`)
-    if (currentGroup.contas.length > 0) resumoPartes.push(`${currentGroup.contas.length} conta(s)`)
-
-    const sublabel =
-      resumoPartes.length > 0
-        ? resumoPartes.join(' · ')
-        : currentGroup.observacoes || 'Grupo de visualização'
-
-    activeContext = {
-      mode: 'group',
-      groupId: currentGroup.id,
-      group: currentGroup,
-      label: currentGroup.nome,
-      sublabel,
-      color: currentGroup.cor || '#DF5830',
-      pessoaIds,
-      empresaIds,
-      contaIds,
-      isAll: false,
-      hasPessoas: pessoaIds.length > 0,
-      hasEmpresas: empresaIds.length > 0,
-      type: empresaIds.length > 0 && pessoaIds.length === 0 ? 'empresa' : 'pessoal',
-      empresaId: empresaIds[0],
+  // Conjunto e lista de todos os IDs de conta vinculados a pelo menos um grupo
+  const linkedContaIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const g of grupos) {
+      for (const c of g.contas) {
+        set.add(c.id)
+      }
     }
-  } else {
-    activeContext = {
+    return Array.from(set)
+  }, [grupos])
+
+  const linkedContaIdsSet = useMemo(() => new Set(linkedContaIds), [linkedContaIds])
+
+  // Constrói objeto de contexto ativo
+  const activeContext: ActiveContextValue = useMemo(() => {
+    if (isGroupActive && currentGroup) {
+      const resumoPartes: string[] = []
+      if (currentGroup.pessoas.length > 0)
+        resumoPartes.push(`${currentGroup.pessoas.length} pessoa(s)`)
+      if (currentGroup.empresas.length > 0)
+        resumoPartes.push(`${currentGroup.empresas.length} empresa(s)`)
+      if (currentGroup.contas.length > 0)
+        resumoPartes.push(`${currentGroup.contas.length} conta(s)`)
+
+      const sublabel =
+        resumoPartes.length > 0
+          ? resumoPartes.join(' · ')
+          : currentGroup.observacoes || 'Grupo de visualização'
+
+      return {
+        mode: 'group',
+        groupId: currentGroup.id,
+        group: currentGroup,
+        label: currentGroup.nome,
+        sublabel,
+        color: currentGroup.cor || '#DF5830',
+        pessoaIds,
+        empresaIds,
+        contaIds,
+        linkedContaIds,
+        isAll: false,
+        hasPessoas: pessoaIds.length > 0,
+        hasEmpresas: empresaIds.length > 0,
+        type: empresaIds.length > 0 && pessoaIds.length === 0 ? 'empresa' : 'pessoal',
+        empresaId: empresaIds[0],
+      }
+    }
+
+    return {
       mode: 'all',
       label: 'Todos os cadastros',
       sublabel: 'Visão global consolidada (sem filtros)',
@@ -186,12 +210,13 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
       pessoaIds: [],
       empresaIds: [],
       contaIds: [],
+      linkedContaIds,
       isAll: true,
       hasPessoas: true,
       hasEmpresas: true,
       type: 'all',
     }
-  }
+  }, [isGroupActive, currentGroup, pessoaIds, empresaIds, contaIds, linkedContaIds])
 
   /**
    * Helper unificado de correspondência de contexto:
@@ -230,8 +255,15 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
       if (item.empresa && activeContext.empresaIds.includes(item.empresa)) {
         return true
       }
-      if (item.conta && activeContext.contaIds.includes(item.conta)) {
-        return true
+      // Se a conta do item está explicitamente no grupo ativo -> true
+      // Rede de segurança: se a conta NÃO pertence a NENHUM grupo (órfã), não fica invisível
+      if (item.conta) {
+        if (activeContext.contaIds.includes(item.conta)) {
+          return true
+        }
+        if (!linkedContaIdsSet.has(item.conta)) {
+          return true
+        }
       }
 
       // Se for contexto pessoal:
@@ -265,7 +297,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
 
       return matched
     },
-    [activeContext],
+    [activeContext, linkedContaIdsSet],
   )
 
   return (
