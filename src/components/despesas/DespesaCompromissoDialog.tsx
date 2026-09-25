@@ -42,6 +42,7 @@ import { apiMessage } from '@/lib/api-error'
 import { calcularFaturaCartao, getAvisoFaturaCartao } from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { despesasService } from '@/services/despesas'
+import { ContaContextoWarning } from '@/components/ContaContextoWarning'
 import type {
   Categoria,
   Conta,
@@ -1309,6 +1310,13 @@ export function DespesaCompromissoDialog({
                     ))}
                   </SelectContent>
                 </Select>
+                {form.conta_padrao && (
+                  <ContaContextoWarning
+                    contaId={form.conta_padrao}
+                    contas={contas}
+                    className="mt-1"
+                  />
+                )}
                 <p className="text-[11px] text-muted-foreground">
                   A conta não deduz nem substitui o titular da obrigação.
                 </p>

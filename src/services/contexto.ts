@@ -124,4 +124,23 @@ export const contextoService = {
       await contextoService.addMembro(gid, 'conta', contaId)
     }
   },
+
+  /**
+   * Vincula uma conta a um grupo específico caso ainda não esteja vinculada (idempotente).
+   */
+  linkContaToGrupo: async (
+    contaId: string,
+    grupoId: string,
+  ): Promise<ContextoGrupoMembro | null> => {
+    if (!contaId || !grupoId) return null
+    const existing = await pb
+      .collection<ContextoGrupoMembro>('contexto_grupo_membros')
+      .getFullList({
+        filter: `grupo = '${grupoId}' && tipo = 'conta' && conta = '${contaId}'`,
+      })
+    if (existing.length > 0) {
+      return existing[0]
+    }
+    return contextoService.addMembro(grupoId, 'conta', contaId)
+  },
 }

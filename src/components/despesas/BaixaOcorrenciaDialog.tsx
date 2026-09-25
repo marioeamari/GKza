@@ -27,6 +27,7 @@ import { apiMessage } from '@/lib/api-error'
 import { calcularFaturaCartao, getAvisoFaturaCartao } from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { despesasService } from '@/services/despesas'
+import { ContaContextoWarning } from '@/components/ContaContextoWarning'
 import type { Conta, DespesaCompromisso, DespesaOcorrencia } from '@/types/domain'
 
 interface BaixaOcorrenciaDialogProps {
@@ -295,6 +296,10 @@ export function BaixaOcorrenciaDialog({
                   </p>
                 )}
               </div>
+            )}
+
+            {contaId && (
+              <ContaContextoWarning contaId={contaId} contas={contas} className="mt-1.5" />
             )}
           </div>
 

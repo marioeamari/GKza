@@ -27,6 +27,7 @@ import { apiFieldErrors, apiMessage } from '@/lib/api-error'
 import { getAvisoFaturaCartao, calcularFaturaCartao } from '@/lib/cartao-fatura'
 import { dateOnly, toPocketBaseDate } from '@/lib/format'
 import { financeService } from '@/services/finance'
+import { ContaContextoWarning } from '@/components/ContaContextoWarning'
 import type {
   Categoria,
   Conta,
@@ -244,6 +245,9 @@ export function LancamentoDialog({
                 </SelectContent>
               </Select>
               {errors.conta && <p className="field-error">{errors.conta}</p>}
+              {form.conta && (
+                <ContaContextoWarning contaId={form.conta} contas={contas} className="mt-1" />
+              )}
             </div>
             <div className="space-y-2">
               <Label>Categoria</Label>

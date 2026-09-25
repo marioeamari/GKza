@@ -24,6 +24,7 @@ import { MoneyInput } from '@/components/MoneyInput'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ContaContextoWarning } from '@/components/ContaContextoWarning'
 import {
   Dialog,
   DialogContent,
@@ -1781,6 +1782,13 @@ export function TriagemPendenteDialog({
                         ))}
                       </SelectContent>
                     </Select>
+                    {despForm.conta_padrao && (
+                      <ContaContextoWarning
+                        contaId={despForm.conta_padrao}
+                        contas={contas}
+                        className="mt-1"
+                      />
+                    )}
                   </div>
 
                   <div className="space-y-1">

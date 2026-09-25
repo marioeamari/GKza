@@ -44,6 +44,7 @@ import { useToast } from '@/hooks/use-toast'
 import { apiFieldErrors, apiMessage } from '@/lib/api-error'
 import { formatCurrency, toPocketBaseDate } from '@/lib/format'
 import { can } from '@/lib/permissions'
+import { ContaContextoWarning } from '@/components/ContaContextoWarning'
 import { contextoService } from '@/services/contexto'
 import { financeService } from '@/services/finance'
 import type { Categoria, Conta, Lancamento, TransactionType } from '@/types/domain'
@@ -693,6 +694,7 @@ export default function Contas() {
           </DialogHeader>
 
           <form onSubmit={saveMovement} className="space-y-4">
+            {movementAccount && <ContaContextoWarning conta={movementAccount} className="mb-2" />}
             {/* Seletor Tipo: Entrada (receita) ou Saída (despesa) */}
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold">Tipo de movimentação</Label>

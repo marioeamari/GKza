@@ -25,6 +25,7 @@ import { apiMessage } from '@/lib/api-error'
 import type { FaturaCartaoGroup } from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { financeService } from '@/services/finance'
+import { ContaContextoWarning } from '@/components/ContaContextoWarning'
 import type { Categoria, Conta } from '@/types/domain'
 
 interface PagarFaturaDialogProps {
@@ -218,6 +219,9 @@ export function PagarFaturaDialog({
                   ))}
               </SelectContent>
             </Select>
+            {contaPagadoraId && (
+              <ContaContextoWarning contaId={contaPagadoraId} contas={contas} className="mt-1.5" />
+            )}
           </div>
 
           <div className="space-y-2">
