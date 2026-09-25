@@ -307,19 +307,51 @@ export function DespesaCompromissoDialog({
   }, [form.titular_tipo, form.titular_empresa, form.titular_pessoa, empresas, pessoas])
 
   // Opções de contas para o select "Conta de pagamento prevista / Cartão":
-  // Apenas cartões de crédito cadastrados (tipo="cartao") e ativos (ativa=true).
-  // Preserva a conta já vinculada no compromisso em edição mesmo que não seja cartão ou esteja inativa.
-  const contasCartaoOptions = useMemo(() => {
-    return contas.filter((c) => {
-      if (c.tipo === 'cartao' && c.ativa) return true
+  // Lista TODAS as contas ativas cadastradas (bancaria, caixa, cartao, marketplace) ordenadas por nome,
+  // preservando a conta já vinculada no compromisso em edição mesmo se inativa.
+  const contasOptions = useMemo(() => {
+    const list = contas.filter((c) => {
+      if (c.ativa) return true
       if (form.conta_padrao && c.id === form.conta_padrao) return true
       return false
     })
+    return list
+      .slice()
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }))
   }, [contas, form.conta_padrao])
 
   // Conta de pagamento selecionada
   const selectedConta = contas.find((c) => c.id === form.conta_padrao)
   const isSelectedContaCartao = selectedConta?.tipo === 'cartao' || form.secao === 'cartoes_credito'
+
+  // Método de pagamento selecionado
+  const selectedMetodoPagamento = useMemo(() => {
+    if (!form.metodo_pagamento) return null
+    return metodosPagamento.find((m) => m.id === form.metodo_pagamento) || null
+  }, [form.metodo_pagamento, metodosPagamento])
+
+  // Identifica se o método de pagamento não depende de vencimento fixo
+  // (Pix, débito, transferência, dinheiro ou conta do tipo caixa — métodos pagos na hora pelo saldo atual).
+  const isMetodoIsentoDeVencimento = useMemo(() => {
+    if (selectedConta?.tipo === 'caixa') return true
+
+    if (selectedMetodoPagamento) {
+      const tipo = selectedMetodoPagamento.tipo
+      if (tipo === 'pix' || tipo === 'dinheiro' || tipo === 'transferencia') return true
+      const nomeLower = (selectedMetodoPagamento.nome || '').toLowerCase()
+      if (
+        nomeLower.includes('pix') ||
+        nomeLower.includes('dinheiro') ||
+        nomeLower.includes('transferência') ||
+        nomeLower.includes('transferencia') ||
+        nomeLower.includes('débito') ||
+        nomeLower.includes('debito')
+      ) {
+        return true
+      }
+    }
+    return false
+  }, [selectedConta, selectedMetodoPagamento])
 
   // Alerta informativo: conta de cartão de crédito com método Pix/Boleto (fatura vs pagamento direto)
   const avisoCartaoMetodoNaoCartao = useMemo(() => {
@@ -394,8 +426,10 @@ export function DespesaCompromissoDialog({
   ])
 
   // Verificação de compatibilidade entre dia de vencimento e data de início
+  // Isenta pagamentos imediatos (Pix, débito, transferência, dinheiro ou caixa), onde o vencimento não se aplica.
   const avisoIncompatibilidadeData = useMemo(() => {
     if (form.regra_repeticao === 'avulso') return null
+    if (isMetodoIsentoDeVencimento) return null
     if (!form.data_inicio) return null
     const day = parseInt(form.data_inicio.slice(8, 10), 10)
     const diaVenc = Number(form.dia_vencimento)
@@ -405,7 +439,7 @@ export function DespesaCompromissoDialog({
       )}) está marcada para o dia ${day}, enquanto o dia de vencimento fixado é ${diaVenc}. Ajuste um dos campos para manter a consistência dos vencimentos.`
     }
     return null
-  }, [form.data_inicio, form.dia_vencimento, form.regra_repeticao])
+  }, [form.data_inicio, form.dia_vencimento, form.regra_repeticao, isMetodoIsentoDeVencimento])
 
   // Rótulo dinâmico do campo de valor (Item 9)
   const labelValor = useMemo(() => {
@@ -487,7 +521,8 @@ export function DespesaCompromissoDialog({
     }
 
     // Regra de validação estrita da data de primeira cobrança vs dia de vencimento (Item 10)
-    if (form.regra_repeticao !== 'avulso' && form.data_inicio) {
+    // Não se aplica a pagamentos sem dependência de vencimento (Pix, débito, transferência, dinheiro, caixa)
+    if (form.regra_repeticao !== 'avulso' && !isMetodoIsentoDeVencimento && form.data_inicio) {
       const day = parseInt(form.data_inicio.slice(8, 10), 10)
       const diaVenc = Number(form.dia_vencimento)
       if (diaVenc && day !== diaVenc) {
@@ -1138,11 +1173,13 @@ export function DespesaCompromissoDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Nenhuma</SelectItem>
-                    {contasCartaoOptions.map((c) => (
+                    {contasOptions.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
                         {c.nome}
-                        {c.bandeira ? ` (${c.bandeira})` : ''}
-                        {c.tipo !== 'cartao' ? ` · [${c.tipo}]` : ''}
+                        {c.tipo === 'cartao' && c.bandeira ? ` (${c.bandeira})` : ''}
+                        {c.tipo !== 'cartao'
+                          ? ` · [${c.tipo === 'caixa' ? 'Caixa' : c.tipo === 'bancaria' ? 'Banco' : 'Marketplace'}]`
+                          : ' · [Cartão]'}
                         {!c.ativa ? ' · (Inativa)' : ''}
                       </SelectItem>
                     ))}

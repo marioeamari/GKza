@@ -241,17 +241,18 @@ export function TriagemPendenteDialog({
   )
 
   // Opções de contas para o select "Conta padrão / Cartão" da despesa:
-  // Se a seção for 'cartoes_credito', restringe para apenas cartões ativos (preservando o selecionado).
-  // Se for outra seção, permite cartões ativos ou a conta selecionada, mantendo consistência com /despesas.
+  // Restaura listagem de TODAS as contas ativas cadastradas (bancaria, caixa, cartao, marketplace) ordenadas por nome,
+  // preservando a conta já vinculada mesmo se inativa, consistente com /despesas.
   const despContaOptions = useMemo(() => {
-    return contas.filter((c) => {
-      if (c.tipo === 'cartao' && c.ativa) return true
+    const list = contas.filter((c) => {
+      if (c.ativa) return true
       if (despForm.conta_padrao && c.id === despForm.conta_padrao) return true
-      // Se a seção não for estritamente cartões, permite todas as contas ativas
-      if (despForm.secao !== 'cartoes_credito' && c.ativa) return true
       return false
     })
-  }, [contas, despForm.conta_padrao, despForm.secao])
+    return list
+      .slice()
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }))
+  }, [contas, despForm.conta_padrao])
 
   // Conta selecionada na Despesa (identificar se é cartão)
   const selectedDespConta = contas.find((c) => c.id === despForm.conta_padrao)
