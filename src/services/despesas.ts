@@ -126,16 +126,93 @@ export const despesasService = {
       .getOne(params.ocorrenciaId)
     const diferencaValor = params.valorPago !== ocorrAtual.valor_previsto
 
-    const ocorr = await pb.collection<DespesaOcorrencia>('despesas_ocorrencias').update(
-      params.ocorrenciaId,
+    // Se a ocorrência foi paga com data retroativa diferente de sua competência original,
+    // atualizamos a competência se for uma assinatura ou ajuste manual correspondente
+    const compDataPag = params.dataPagamento.slice(0, 7)
+    const updatesOcorr: Partial<DespesaOcorrencia> = {
+      status: 'paga',
+      valor_pago: params.valorPago,
+      valor_previsto: params.valorPago, // valor real da ocorrência atualizado sem mudar as demais
+      valor_ajustado_manualmente: diferencaValor,
+      data_pagamento: `${params.dataPagamento} 12:00:00`,
+      conta: params.contaId,
+      lancamento: lancamento.id,
+    }
+
+    // Se a ocorrência era de competência diferente e for assinatura anual ou sem parcelamento rígido
+    if (
+      ocorrAtual.secao === 'assinaturas_anuais' &&
+      compDataPag &&
+      compDataPag !== ocorrAtual.competencia
+    ) {
+      updatesOcorr.competencia = compDataPag
+    }
+
+    const ocorr = await pb
+      .collection<DespesaOcorrencia>('despesas_ocorrencias')
+      .update(params.ocorrenciaId, updatesOcorr, {
+        expand:
+          'compromisso,compromisso.tag,compromisso.categoria,compromisso.tipo_despesa,compromisso.metodo_pagamento,conta,tipo_dizimo,lancamento',
+      })
+
+    return { lancamento, ocorrencia: ocorr }
+  },
+
+  /**
+   * Registra um pagamento (retroativo ou pontual) para um compromisso (especialmente anual),
+   * criando diretamente a ocorrência com status 'paga' e o respectivo lançamento financeiro.
+   */
+  registrarPagamentoCompromisso: async (params: {
+    compromissoId: string
+    valorPago: number
+    dataPagamento: string // 'YYYY-MM-DD'
+    contaId: string
+    categoriaId?: string
+    empresaId?: string
+    pessoaId?: string
+    observacoes?: string
+    descricao: string
+    secao?: SecaoDespesa
+    contextoTipo?: ContextoTipo
+    dizimo?: boolean
+    tipoDizimoId?: string
+  }) => {
+    const compStr = params.dataPagamento.slice(0, 7) // 'YYYY-MM'
+
+    // 1. Criar lançamento financeiro
+    const lancamento = await pb.collection('lancamentos').create({
+      descricao: params.descricao,
+      valor: params.valorPago,
+      tipo: 'despesa',
+      data: `${params.dataPagamento} 12:00:00`,
+      status: 'pago',
+      conta: params.contaId,
+      categoria: params.categoriaId || null,
+      empresa: params.empresaId || null,
+      pessoa: params.pessoaId || null,
+      observacoes: params.observacoes || 'Pagamento registrado diretamente de compromisso',
+    })
+
+    // 2. Criar ocorrência já como 'paga'
+    const ocorrencia = await pb.collection<DespesaOcorrencia>('despesas_ocorrencias').create(
       {
-        status: 'paga',
-        valor_pago: params.valorPago,
-        valor_previsto: params.valorPago, // valor real da ocorrência atualizado sem mudar as demais
-        valor_ajustado_manualmente: diferencaValor,
-        data_pagamento: `${params.dataPagamento} 12:00:00`,
+        compromisso: params.compromissoId,
+        contexto_tipo: params.contextoTipo || 'pessoal',
+        empresa: params.empresaId || null,
+        secao: params.secao || 'assinaturas_anuais',
         conta: params.contaId,
+        competencia: compStr,
+        data_vencimento: `${params.dataPagamento} 12:00:00.000Z`,
+        data_pagamento: `${params.dataPagamento} 12:00:00`,
+        valor_previsto: params.valorPago,
+        valor_pago: params.valorPago,
+        valor_estimado_original: params.valorPago,
+        valor_ajustado_manualmente: false,
+        status: 'paga',
         lancamento: lancamento.id,
+        dizimo: params.dizimo || false,
+        tipo_dizimo: params.tipoDizimoId || null,
+        observacoes: params.observacoes || null,
       },
       {
         expand:
@@ -143,7 +220,7 @@ export const despesasService = {
       },
     )
 
-    return { lancamento, ocorrencia: ocorr }
+    return { lancamento, ocorrencia }
   },
 
   /**

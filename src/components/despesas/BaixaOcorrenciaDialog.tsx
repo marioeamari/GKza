@@ -30,7 +30,8 @@ import type { Conta, DespesaOcorrencia } from '@/types/domain'
 interface BaixaOcorrenciaDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  ocorrencia: DespesaOcorrencia | null
+  ocorrencia?: DespesaOcorrencia | null
+  compromisso?: DespesaCompromisso | null
   contas: Conta[]
   onSuccess?: () => void
 }
@@ -39,6 +40,7 @@ export function BaixaOcorrenciaDialog({
   open,
   onOpenChange,
   ocorrencia,
+  compromisso,
   contas,
   onSuccess,
 }: BaixaOcorrenciaDialogProps) {
@@ -49,30 +51,42 @@ export function BaixaOcorrenciaDialog({
   const [contaId, setContaId] = useState<string>('')
   const [observacoes, setObservacoes] = useState<string>('')
 
+  // Pode receber ocorrencia existente OU compromisso direto (para registrar pagamento retroativo)
+  const comp = ocorrencia?.expand?.compromisso || compromisso
+  const title = comp?.descricao || ocorrencia?.observacoes || 'Despesa'
+
   useEffect(() => {
-    if (ocorrencia) {
-      setValorPago(ocorrencia.valor_pago || ocorrencia.valor_previsto || 0)
-      setDataPagamento(
-        ocorrencia.data_pagamento
-          ? ocorrencia.data_pagamento.slice(0, 10)
-          : new Date().toISOString().slice(0, 10),
-      )
-      // Se a ocorrência já tiver conta, usa ela; senão tenta pegar da conta padrão do compromisso ou primeiro banco ativo
-      const defaultConta =
-        ocorrencia.conta ||
-        ocorrencia.expand?.compromisso?.conta_padrao ||
-        contas.find((c) => c.ativa && c.tipo !== 'cartao')?.id ||
-        contas[0]?.id ||
-        ''
-      setContaId(defaultConta)
-      setObservacoes(ocorrencia.observacoes || '')
+    if (open) {
+      if (ocorrencia) {
+        setValorPago(ocorrencia.valor_pago || ocorrencia.valor_previsto || 0)
+        setDataPagamento(
+          ocorrencia.data_pagamento
+            ? ocorrencia.data_pagamento.slice(0, 10)
+            : new Date().toISOString().slice(0, 10),
+        )
+        const defaultConta =
+          ocorrencia.conta ||
+          ocorrencia.expand?.compromisso?.conta_padrao ||
+          contas.find((c) => c.ativa && c.tipo !== 'cartao')?.id ||
+          contas[0]?.id ||
+          ''
+        setContaId(defaultConta)
+        setObservacoes(ocorrencia.observacoes || '')
+      } else if (compromisso) {
+        setValorPago(compromisso.valor_estimado || compromisso.valor_parcela || 0)
+        setDataPagamento(new Date().toISOString().slice(0, 10))
+        const defaultConta =
+          compromisso.conta_padrao ||
+          contas.find((c) => c.ativa && c.tipo !== 'cartao')?.id ||
+          contas[0]?.id ||
+          ''
+        setContaId(defaultConta)
+        setObservacoes(compromisso.observacoes || '')
+      }
     }
-  }, [ocorrencia, contas, open])
+  }, [ocorrencia, compromisso, contas, open])
 
-  if (!ocorrencia) return null
-
-  const comp = ocorrencia.expand?.compromisso
-  const title = comp?.descricao || 'Despesa'
+  if (!ocorrencia && !compromisso) return null
 
   const handleBaixar = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -103,25 +117,43 @@ export function BaixaOcorrenciaDialog({
 
     setSubmitting(true)
     try {
-      await despesasService.baixarOcorrencia({
-        ocorrenciaId: ocorrencia.id,
-        valorPago,
-        dataPagamento,
-        contaId,
-        categoriaId: comp?.categoria,
-        empresaId: ocorrencia.empresa,
-        pessoaId: comp?.pessoa,
-        observacoes,
-        descricao: `${comp?.descricao || 'Despesa'}${
-          ocorrencia.numero_parcela
-            ? ` (${ocorrencia.numero_parcela}/${ocorrencia.total_parcelas})`
-            : ''
-        }`,
-      })
+      if (ocorrencia) {
+        await despesasService.baixarOcorrencia({
+          ocorrenciaId: ocorrencia.id,
+          valorPago,
+          dataPagamento,
+          contaId,
+          categoriaId: comp?.categoria,
+          empresaId: ocorrencia.empresa,
+          pessoaId: comp?.pessoa,
+          observacoes,
+          descricao: `${comp?.descricao || 'Despesa'}${
+            ocorrencia.numero_parcela
+              ? ` (${ocorrencia.numero_parcela}/${ocorrencia.total_parcelas})`
+              : ''
+          }`,
+        })
+      } else if (compromisso) {
+        await despesasService.registrarPagamentoCompromisso({
+          compromissoId: compromisso.id,
+          valorPago,
+          dataPagamento,
+          contaId,
+          categoriaId: compromisso.categoria,
+          empresaId: compromisso.empresa,
+          pessoaId: compromisso.pessoa,
+          observacoes,
+          descricao: compromisso.descricao || 'Despesa',
+          secao: compromisso.secao,
+          contextoTipo: compromisso.contexto_tipo,
+          dizimo: compromisso.dizimo,
+          tipoDizimoId: compromisso.tipo_dizimo,
+        })
+      }
 
       toast({
-        title: 'Despesa baixada com sucesso!',
-        description: `Lançamento de ${formatCurrency(valorPago)} gerado no fluxo de caixa.`,
+        title: 'Pagamento registrado com sucesso!',
+        description: `Lançamento de ${formatCurrency(valorPago)} gerado no fluxo de caixa na data informada.`,
       })
       onOpenChange(false)
       onSuccess?.()
@@ -153,17 +185,32 @@ export function BaixaOcorrenciaDialog({
         <form onSubmit={handleBaixar} className="space-y-4">
           <div className="rounded-xl border border-border bg-secondary/30 p-3.5 text-xs space-y-1">
             <div className="flex justify-between font-bold text-foreground">
-              <span>{title}</span>
-              <span>Previsto: {formatCurrency(ocorrencia.valor_previsto)}</span>
+              <span className="font-bold">{title}</span>
+              <span>
+                Previsto:{' '}
+                {formatCurrency(
+                  ocorrencia?.valor_previsto ??
+                    compromisso?.valor_estimado ??
+                    compromisso?.valor_parcela ??
+                    0,
+                )}
+              </span>
             </div>
             {comp?.fornecedor && (
               <p className="text-muted-foreground">Fornecedor: {comp.fornecedor}</p>
             )}
-            <p className="text-muted-foreground">
-              Vencimento original: {formatDate(ocorrencia.data_vencimento)}
-              {ocorrencia.numero_parcela &&
-                ` · Parcela ${ocorrencia.numero_parcela}/${ocorrencia.total_parcelas}`}
-            </p>
+            {ocorrencia && (
+              <p className="text-muted-foreground">
+                Vencimento original: {formatDate(ocorrencia.data_vencimento)}
+                {ocorrencia.numero_parcela &&
+                  ` · Parcela ${ocorrencia.numero_parcela}/${ocorrencia.total_parcelas}`}
+              </p>
+            )}
+            {compromisso && !ocorrencia && (
+              <p className="text-muted-foreground text-[11px]">
+                Registrando pagamento retroativo/avulso para este compromisso anual.
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">

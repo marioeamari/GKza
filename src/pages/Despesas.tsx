@@ -120,6 +120,9 @@ export default function Despesas() {
   // Modais de ação
   const [baixaModal, setBaixaModal] = useState(false)
   const [ocorrenciaParaBaixar, setOcorrenciaParaBaixar] = useState<DespesaOcorrencia | null>(null)
+  const [compromissoParaBaixar, setCompromissoParaBaixar] = useState<DespesaCompromisso | null>(
+    null,
+  )
 
   const [compromissoModal, setCompromissoModal] = useState(false)
   const [compromissoEditando, setCompromissoEditando] = useState<DespesaCompromisso | null>(null)
@@ -552,7 +555,14 @@ export default function Despesas() {
 
   // Abertura de Modais
   const handleOpenBaixa = (oc: DespesaOcorrencia) => {
+    setCompromissoParaBaixar(null)
     setOcorrenciaParaBaixar(oc)
+    setBaixaModal(true)
+  }
+
+  const handleOpenBaixaCompromisso = (comp: DespesaCompromisso) => {
+    setOcorrenciaParaBaixar(null)
+    setCompromissoParaBaixar(comp)
     setBaixaModal(true)
   }
 
@@ -1216,6 +1226,7 @@ export default function Despesas() {
         open={baixaModal}
         onOpenChange={setBaixaModal}
         ocorrencia={ocorrenciaParaBaixar}
+        compromisso={compromissoParaBaixar}
         contas={contas}
         onSuccess={loadData}
       />

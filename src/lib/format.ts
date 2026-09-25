@@ -24,6 +24,21 @@ export const currencyInput = (value: number | string) => {
 }
 
 export const getLocalDateStr = (date = new Date()): string => {
+  // Converte confiavelmente para o fuso America/Sao_Paulo (horário oficial de Brasília)
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date)
+    const y = parts.find((p) => p.type === 'year')?.value
+    const m = parts.find((p) => p.type === 'month')?.value
+    const d = parts.find((p) => p.type === 'day')?.value
+    if (y && m && d) return `${y}-${m}-${d}`
+  } catch {
+    // Fallback padrão se fuso horário não suportado pelo ambiente
+  }
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
