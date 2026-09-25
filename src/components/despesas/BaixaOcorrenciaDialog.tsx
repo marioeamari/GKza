@@ -25,7 +25,7 @@ import { useToast } from '@/hooks/use-toast'
 import { apiMessage } from '@/lib/api-error'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { despesasService } from '@/services/despesas'
-import type { Conta, DespesaOcorrencia } from '@/types/domain'
+import type { Conta, DespesaCompromisso, DespesaOcorrencia } from '@/types/domain'
 
 interface BaixaOcorrenciaDialogProps {
   open: boolean

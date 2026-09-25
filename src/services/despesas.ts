@@ -1,9 +1,11 @@
 import type { RecordListOptions, RecordOptions } from 'pocketbase'
 import pb from '@/lib/pocketbase/client'
 import type {
+  ContextoTipo,
   DespesaCompromisso,
   DespesaOcorrencia,
   MetodoPagamento,
+  SecaoDespesa,
   TagItem,
   TipoDespesa,
   TipoDizimo,

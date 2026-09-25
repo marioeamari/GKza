@@ -56,7 +56,7 @@ import { useAppContext } from '@/contexts/AppContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
 import { apiMessage } from '@/lib/api-error'
-import { formatCurrency, formatDate } from '@/lib/format'
+import { formatCurrency, formatDate, getLocalDateStr } from '@/lib/format'
 import { can } from '@/lib/permissions'
 import { cadastrosService } from '@/services/cadastros'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -77,8 +77,7 @@ import type {
 } from '@/types/domain'
 
 function getInitialCompetencia() {
-  const d = new Date()
-  return `${d.getUTCFullYear()}-${(d.getUTCMonth() + 1).toString().padStart(2, '0')}`
+  return getLocalDateStr().slice(0, 7)
 }
 
 function formatCompetenciaDisplay(comp: string) {
@@ -86,6 +85,245 @@ function formatCompetenciaDisplay(comp: string) {
   const [y, m] = comp.split('-')
   const date = new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1)
   return date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+}
+
+interface CompromissoAnualRowProps {
+  compromisso: DespesaCompromisso
+  ocorrenciaMes?: DespesaOcorrencia
+  competencia: string
+  onBaixarOcorrencia: (oc: DespesaOcorrencia) => void
+  onRegistrarPagamentoRetroativo: () => void
+  onEstornarOcorrencia: (oc: DespesaOcorrencia) => void
+  onEditarCompromisso: () => void
+  onExcluirCompromisso: () => void
+  onExcluirOcorrencia: (oc: DespesaOcorrencia) => void
+  canEdit: boolean
+}
+
+function CompromissoAnualRow({
+  compromisso,
+  ocorrenciaMes,
+  competencia,
+  onBaixarOcorrencia,
+  onRegistrarPagamentoRetroativo,
+  onEstornarOcorrencia,
+  onEditarCompromisso,
+  onExcluirCompromisso,
+  onExcluirOcorrencia,
+  canEdit,
+}: CompromissoAnualRowProps) {
+  const isPagaNoMes = ocorrenciaMes?.status === 'paga'
+  const tag = compromisso.expand?.tag
+  const categoria = compromisso.expand?.categoria
+  const contaPadrao = ocorrenciaMes?.expand?.conta || compromisso.expand?.conta_padrao
+
+  const titularTipo = compromisso.titular_tipo || (compromisso.empresa ? 'cnpj' : 'cpf')
+  const titularNome =
+    titularTipo === 'cnpj'
+      ? compromisso.expand?.titular_empresa?.nome_fantasia ||
+        compromisso.expand?.empresa?.nome_fantasia ||
+        'Empresa (CNPJ)'
+      : compromisso.expand?.titular_pessoa?.nome ||
+        compromisso.expand?.pessoa?.nome ||
+        'Pessoal (CPF)'
+
+  const valor =
+    ocorrenciaMes?.valor_pago ||
+    ocorrenciaMes?.valor_previsto ||
+    compromisso.valor_estimado ||
+    compromisso.valor_parcela ||
+    0
+
+  // Cálculo da data do vencimento no ano correspondente
+  const startDate = compromisso.data_inicio ? new Date(compromisso.data_inicio) : new Date()
+  const diaVenc = compromisso.dia_vencimento || startDate.getUTCDate() || 10
+  const mesVenc = !isNaN(startDate.getTime()) ? startDate.getUTCMonth() + 1 : 1
+
+  return (
+    <div className="group flex flex-col gap-3 p-3.5 transition hover:bg-secondary/40 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        <span
+          className={`mt-1 h-3 w-3 shrink-0 rounded-full ${
+            isPagaNoMes ? 'bg-success ring-4 ring-success/15' : 'bg-primary ring-4 ring-primary/15'
+          }`}
+          title={isPagaNoMes ? 'Paga nesta competência' : 'Assinatura ativa'}
+        />
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-extrabold text-foreground text-sm">{compromisso.descricao}</span>
+
+            {/* Badge Titular */}
+            <Badge
+              variant="outline"
+              className="text-[10px] font-semibold flex items-center gap-1 border-primary/30 bg-primary/5 text-primary"
+            >
+              {titularTipo === 'cnpj' ? (
+                <Building2 className="h-3 w-3" />
+              ) : (
+                <UserRound className="h-3 w-3" />
+              )}
+              {titularNome}
+            </Badge>
+
+            {/* Destino / Centro de Custo */}
+            {tag && (
+              <Badge
+                variant="secondary"
+                className="text-[10px] font-medium"
+                style={{ borderColor: tag.cor, color: tag.cor }}
+              >
+                Destino: {tag.nome}
+              </Badge>
+            )}
+
+            {/* Categoria */}
+            {categoria && (
+              <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {categoria.nome}
+              </span>
+            )}
+
+            {/* Status no ciclo atual */}
+            {isPagaNoMes ? (
+              <Badge className="bg-success/15 text-success border-success/30 text-[10px] font-bold">
+                <CheckCircle2 className="mr-1 h-3 w-3" /> Paga no ciclo ({competencia})
+              </Badge>
+            ) : ocorrenciaMes ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-semibold border-amber-400 bg-amber-50 text-amber-700"
+              >
+                Pendente neste mês
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-[10px] font-medium text-muted-foreground">
+                Ciclo Anual (Renova todo dia {diaVenc}/{String(mesVenc).padStart(2, '0')})
+              </Badge>
+            )}
+          </div>
+
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {compromisso.fornecedor && (
+              <span>
+                Para: <strong>{compromisso.fornecedor}</strong>
+              </span>
+            )}
+
+            {contaPadrao && (
+              <span>
+                Sai de: <strong>{contaPadrao.nome}</strong>
+              </span>
+            )}
+
+            <span>
+              Cobrança anual:{' '}
+              <strong>
+                Dia {diaVenc}/{String(mesVenc).padStart(2, '0')}
+              </strong>
+            </span>
+
+            {isPagaNoMes && ocorrenciaMes?.data_pagamento && (
+              <span className="text-success font-medium">
+                Pago em: {formatDate(ocorrenciaMes.data_pagamento)}
+              </span>
+            )}
+
+            {compromisso.link_pagamento && (
+              <a
+                href={compromisso.link_pagamento}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-semibold text-primary underline hover:text-primary/80"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Painel / Link
+              </a>
+            )}
+          </div>
+
+          {compromisso.observacoes && (
+            <p className="mt-1 text-[11px] text-muted-foreground line-clamp-1 italic">
+              {compromisso.observacoes}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-4 border-t border-border pt-2 sm:border-0 sm:pt-0 sm:justify-end">
+        <div className="text-left sm:text-right">
+          <p className="text-[10px] uppercase font-bold text-muted-foreground">
+            {isPagaNoMes ? 'Valor Pago' : 'Valor Anual'}
+          </p>
+          <p
+            className={`text-sm font-extrabold tabular-nums sm:text-base ${
+              isPagaNoMes ? 'text-success' : 'text-primary'
+            }`}
+          >
+            {formatCurrency(valor)}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          {canEdit && (
+            <>
+              {isPagaNoMes ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => ocorrenciaMes && onEstornarOcorrencia(ocorrenciaMes)}
+                  title="Desfazer baixa"
+                >
+                  <Undo2 className="mr-1 h-3.5 w-3.5" /> Estornar
+                </Button>
+              ) : ocorrenciaMes ? (
+                <Button
+                  size="sm"
+                  className="h-8 bg-success hover:bg-success/90 text-xs font-bold"
+                  onClick={() => onBaixarOcorrencia(ocorrenciaMes)}
+                >
+                  <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Baixar
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 border-success/40 text-success hover:bg-success/10 text-xs font-bold"
+                  onClick={onRegistrarPagamentoRetroativo}
+                  title="Registrar pagamento deste ciclo anual com data específica"
+                >
+                  <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Registrar pagamento
+                </Button>
+              )}
+
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground sm:opacity-0 sm:group-hover:opacity-100"
+                onClick={onEditarCompromisso}
+                title="Editar compromisso anual"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-destructive sm:opacity-0 sm:group-hover:opacity-100"
+                onClick={
+                  ocorrenciaMes ? () => onExcluirOcorrencia(ocorrenciaMes) : onExcluirCompromisso
+                }
+                title={ocorrenciaMes ? 'Excluir ocorrência deste mês' : 'Excluir compromisso'}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function Despesas() {
@@ -166,7 +404,11 @@ export default function Despesas() {
       setEmpresas(emps)
       setPessoas(pess)
 
-      // Carregar compromissos, ocorrências da competência, cartões e ocorrências atrasadas
+      // Data REAL de hoje no fuso oficial America/Sao_Paulo (independente da competência que o usuário estiver navegando)
+      const realTodayStr = getLocalDateStr() // 'YYYY-MM-DD'
+      const realCurrentComp = realTodayStr.slice(0, 7) // 'YYYY-MM'
+
+      // Carregar compromissos, ocorrências da competência visualizada, cartões e ocorrências atrasadas reais
       const [allComps, allOcs, allOcsCartao, allOcsAtrasadas] = await Promise.all([
         despesasService.listCompromissos(),
         despesasService.listOcorrencias({
@@ -177,7 +419,7 @@ export default function Despesas() {
           sort: '-data_vencimento',
         }),
         despesasService.listOcorrencias({
-          filter: `status = 'prevista' && competencia < '${currentCompetencia}'`,
+          filter: `status = 'prevista' && (competencia < '${realCurrentComp}' || (competencia = '${realCurrentComp}' && data_vencimento < '${realTodayStr} 23:59:59'))`,
           sort: 'data_vencimento',
         }),
       ])
@@ -337,7 +579,10 @@ export default function Despesas() {
     })
   }, [ocorrencias, search, filterTag, filterCategoria, filterTitular, filterSecao, filterStatus])
 
-  // Filtragem das ocorrências atrasadas de competências passadas
+  // Data real de hoje em America/Sao_Paulo para cálculo de vencimento/atraso
+  const realTodayStr = getLocalDateStr() // 'YYYY-MM-DD'
+
+  // Filtragem das ocorrências atrasadas com base na DATA REAL de hoje
   // Defesa extra: NUNCA listar como atrasada ocorrência com competência anterior à data_inicio do compromisso
   const filteredOcorrenciasAtrasadas = useMemo(() => {
     return ocorrenciasAtrasadas.filter((oc) => {
@@ -345,12 +590,18 @@ export default function Despesas() {
       const desc = comp?.descricao || ''
       const forn = comp?.fornecedor || ''
 
-      // Validação de consistência: ignorar fantasmas retroativos
+      // Validação de consistência: ignorar fantasmas retroativos à data_inicio do compromisso
       if (comp?.data_inicio && oc.competencia) {
         const compStartStr = String(comp.data_inicio).slice(0, 7)
         if (oc.competencia < compStartStr) {
           return false
         }
+      }
+
+      // Validação estrita: para ser considerada atrasada, a data de vencimento DEVE ser estritamente anterior à data real de hoje
+      const dueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
+      if (dueStr && dueStr >= realTodayStr) {
+        return false
       }
 
       const matchesSearch =
@@ -402,8 +653,39 @@ export default function Despesas() {
     [filteredOcorrencias],
   )
 
-  // Seção 2: Assinaturas Anuais
-  const secaoAssinaturas = useMemo(
+  // Seção 2: Compromissos anuais ativos (visíveis em qualquer competência) + ocorrências do mês
+  const compromissosAnuais = useMemo(() => {
+    return compromissos.filter((c) => {
+      const isAnual = c.secao === 'assinaturas_anuais' || c.regra_repeticao === 'anual'
+      if (!isAnual || c.ativo === false) return false
+
+      const desc = c.descricao || ''
+      const forn = c.fornecedor || ''
+      const matchesSearch =
+        !search ||
+        desc.toLowerCase().includes(search.toLowerCase()) ||
+        forn.toLowerCase().includes(search.toLowerCase())
+
+      const matchesTag = filterTag === 'all' || c.tag === filterTag
+      const matchesCategoria = filterCategoria === 'all' || c.categoria === filterCategoria
+      const matchesTitular =
+        filterTitular === 'all' ||
+        (filterTitular === 'cpf' && (c.titular_tipo === 'cpf' || c.contexto_tipo === 'pessoal')) ||
+        (filterTitular === 'cnpj' && (c.titular_tipo === 'cnpj' || c.contexto_tipo === 'empresa'))
+
+      // Se filtro de status foi selecionado, verifica compatibilidade com o status deste ciclo
+      if (filterStatus !== 'all') {
+        const oc = ocorrencias.find((o) => o.compromisso === c.id)
+        const st = oc?.status || 'prevista'
+        if (st !== filterStatus) return false
+      }
+
+      return matchesSearch && matchesTag && matchesCategoria && matchesTitular
+    })
+  }, [compromissos, search, filterTag, filterCategoria, filterTitular, filterStatus, ocorrencias])
+
+  // Ocorrências da seção de assinaturas anuais na competência atual
+  const secaoAssinaturasOcorrencias = useMemo(
     () => filteredOcorrencias.filter((oc) => oc.secao === 'assinaturas_anuais'),
     [filteredOcorrencias],
   )
@@ -972,15 +1254,13 @@ export default function Despesas() {
                   Assinaturas anuais
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Domínios, ferramentas, softwares e renovações de ciclo anual.
+                  Domínios, ferramentas, softwares e renovações de ciclo anual ativos em qualquer
+                  competência.
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-muted-foreground">
-                  Total:{' '}
-                  {formatCurrency(
-                    secaoAssinaturas.reduce((acc, curr) => acc + (curr.valor_previsto || 0), 0),
-                  )}
+                  Ativas: {compromissosAnuais.length}
                 </span>
                 <PermissionButton
                   size="sm"
@@ -994,28 +1274,34 @@ export default function Despesas() {
             </div>
 
             <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft">
-              {secaoAssinaturas.length === 0 ? (
+              {compromissosAnuais.length === 0 ? (
                 <div className="p-8 text-center text-sm text-muted-foreground">
-                  Nenhuma assinatura anual com vencimento neste mês.
+                  Nenhuma assinatura anual cadastrada.
                 </div>
               ) : (
                 <div className="divide-y divide-border">
-                  {secaoAssinaturas.map((oc) => (
-                    <OcorrenciaRow
-                      key={oc.id}
-                      ocorrencia={oc}
-                      onBaixar={() => handleOpenBaixa(oc)}
-                      onEstornar={() => setEstornando(oc)}
-                      onEditarCompromisso={() =>
-                        oc.expand?.compromisso && handleOpenEditarCompromisso(oc.expand.compromisso)
-                      }
-                      onExcluirCompromisso={() =>
-                        oc.expand?.compromisso && setDeletandoCompromisso(oc.expand.compromisso)
-                      }
-                      onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
-                      canEdit={can(user?.role, 'writeFinance')}
-                    />
-                  ))}
+                  {compromissosAnuais.map((comp) => {
+                    // Verifica se existe ocorrência deste compromisso na competência visualizada
+                    const ocorrenciaDoMes = secaoAssinaturasOcorrencias.find(
+                      (o) => o.compromisso === comp.id,
+                    )
+
+                    return (
+                      <CompromissoAnualRow
+                        key={comp.id}
+                        compromisso={comp}
+                        ocorrenciaMes={ocorrenciaDoMes}
+                        competencia={currentCompetencia}
+                        onBaixarOcorrencia={(oc) => handleOpenBaixa(oc)}
+                        onRegistrarPagamentoRetroativo={() => handleOpenBaixaCompromisso(comp)}
+                        onEstornarOcorrencia={(oc) => setEstornando(oc)}
+                        onEditarCompromisso={() => handleOpenEditarCompromisso(comp)}
+                        onExcluirCompromisso={() => setDeletandoCompromisso(comp)}
+                        onExcluirOcorrencia={(oc) => setDeletandoOcorrencia(oc)}
+                        canEdit={can(user?.role, 'writeFinance')}
+                      />
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -1361,6 +1647,10 @@ function OcorrenciaRow({
   const comp = ocorrencia.expand?.compromisso
   const isPaga = ocorrencia.status === 'paga'
 
+  // Ocorrência só é considerada em atraso se NÃO estiver paga e a data de vencimento for anterior à data REAL de hoje
+  const todayStr = getLocalDateStr()
+  const dueStr = ocorrencia.data_vencimento ? ocorrencia.data_vencimento.slice(0, 10) : ''
+  const isRealmenteAtrasada = !isPaga && dueStr !== '' && dueStr < todayStr
   const tag = comp?.expand?.tag // Destino da despesa / Centro de custo
   const categoria = comp?.expand?.categoria // Finalidade
   const metodoPag = comp?.expand?.metodo_pagamento
@@ -1397,11 +1687,11 @@ function OcorrenciaRow({
           className={`mt-1 h-3 w-3 shrink-0 rounded-full ${
             isPaga
               ? 'bg-success ring-4 ring-success/15'
-              : isAtrasada
+              : isRealmenteAtrasada
                 ? 'bg-destructive ring-4 ring-destructive/20 animate-pulse'
                 : 'bg-primary ring-4 ring-primary/15'
           }`}
-          title={isPaga ? 'Paga' : isAtrasada ? 'Prevista (Atrasada)' : 'Prevista'}
+          title={isPaga ? 'Paga' : isRealmenteAtrasada ? 'Prevista (Atrasada)' : 'Prevista'}
         />
 
         <div className="min-w-0 flex-1">
@@ -1443,7 +1733,7 @@ function OcorrenciaRow({
               </span>
             )}
 
-            {isAtrasada && (
+            {isRealmenteAtrasada && (
               <Badge
                 variant="destructive"
                 className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1"
