@@ -12,6 +12,7 @@ import {
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { TitularBadge } from '@/components/TitularBadge'
 import { calcularFaturaCartao, type FaturaCartaoGroup } from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
 import type { Lancamento } from '@/types/domain'
@@ -183,8 +184,9 @@ export function FaturaCardGroupRow({
                     >
                       {cicloBadgeText}
                     </Badge>
+                    <TitularBadge lancamento={item} />
                   </div>
-                  <span className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                  <span className="text-[11px] text-muted-foreground flex flex-wrap items-center gap-2 mt-0.5">
                     <span>Data da compra: {formatDate(item.data)}</span>
                     {item.expand?.categoria?.nome && (
                       <>

@@ -7,6 +7,7 @@ import { EmptyState, LoadingState } from '@/components/LoadingState'
 import { PageHeader } from '@/components/PageHeader'
 import { PermissionButton } from '@/components/PermissionButton'
 import { StatusBadge } from '@/components/StatusBadge'
+import { TitularBadge } from '@/components/TitularBadge'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -496,6 +497,7 @@ export default function Lancamentos() {
                           {item.expand?.conta?.nome || 'Conta'}
                           <span>•</span>
                           {item.expand?.categoria?.nome || 'Categoria'}
+                          <TitularBadge lancamento={item} />
                           <span className="sm:hidden">
                             <StatusBadge status={item.status} />
                           </span>
