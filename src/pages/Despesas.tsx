@@ -1822,10 +1822,12 @@ function OcorrenciaRow({
               </span>
             )}
 
-            <span>
-              Venc: <strong>{formatDate(ocorrencia.data_vencimento)}</strong>
-              {comp?.regra_vencimento_texto && ` (${comp.regra_vencimento_texto})`}
-            </span>
+            {!isCartao && (
+              <span>
+                Venc: <strong>{formatDate(ocorrencia.data_vencimento)}</strong>
+                {comp?.regra_vencimento_texto && ` (${comp.regra_vencimento_texto})`}
+              </span>
+            )}
             {ocorrencia.competencia && (
               <span className="font-mono text-[11px] text-muted-foreground/80">
                 Comp: {ocorrencia.competencia}
