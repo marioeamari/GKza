@@ -57,6 +57,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
 import { apiMessage } from '@/lib/api-error'
 import { formatCurrency, formatDate, getLocalDateStr } from '@/lib/format'
+import { calcularFaturaCartao } from '@/lib/cartao-fatura'
 import { can } from '@/lib/permissions'
 import { cadastrosService } from '@/services/cadastros'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -1658,6 +1659,22 @@ function OcorrenciaRow({
   const isRealmenteAtrasada = !isPaga && dueStr !== '' && dueStr < todayStr
   const isCartao = contaPag?.tipo === 'cartao' || ocorrencia.secao === 'cartoes_credito'
 
+  // Badge do ciclo da fatura do cartão
+  const faturaCicloBadge = useMemo(() => {
+    if (!contaPag || contaPag.tipo !== 'cartao') return null
+    const dataRef =
+      ocorrencia.data_pagamento?.slice(0, 10) ||
+      ocorrencia.data_vencimento?.slice(0, 10) ||
+      comp?.data_inicio?.slice(0, 10) ||
+      getLocalDateStr()
+    const ciclo = calcularFaturaCartao(contaPag, dataRef)
+    const dateObj = new Date(ciclo.dataFechamento + 'T12:00:00')
+    const mesAno = dateObj.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+    const mesCap = mesAno.charAt(0).toUpperCase() + mesAno.slice(1)
+    const [vy, vm, vd] = ciclo.dataVencimento.split('-')
+    return `Fatura de ${mesCap} · vence ${vd}/${vm}`
+  }, [contaPag, ocorrencia.data_pagamento, ocorrencia.data_vencimento, comp?.data_inicio])
+
   // Titular da obrigação
   const titularTipo = comp?.titular_tipo || (comp?.empresa ? 'cnpj' : 'cpf')
   const titularNome =
@@ -1701,6 +1718,17 @@ function OcorrenciaRow({
             <span className="font-extrabold text-foreground text-sm">
               {comp?.descricao || ocorrencia.observacoes || 'Despesa'}
             </span>
+
+            {/* Badge do Ciclo da Fatura do Cartão */}
+            {faturaCicloBadge && (
+              <Badge
+                variant="outline"
+                className="border-primary/40 bg-primary/10 text-primary font-bold text-[10px] px-2 py-0.5"
+                title="Ciclo da fatura correspondente a esta compra"
+              >
+                {faturaCicloBadge}
+              </Badge>
+            )}
 
             {/* Badge Titular da Despesa */}
             <Badge

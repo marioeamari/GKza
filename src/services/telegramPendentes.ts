@@ -174,7 +174,8 @@ export const telegramPendentesService = {
         (titularTipo === 'cpf' ? input.titular_pessoa : null) ||
         (null as unknown as string),
 
-      regra_repeticao: isParcelado ? 'parcelado' : input.regra_repeticao,
+      // Se parcelado, regra_repeticao no PB é 'mensal'
+      regra_repeticao: isParcelado ? 'mensal' : input.regra_repeticao,
       tipo_valor: input.tipo_valor || 'fixo',
       modalidade_parcelamento:
         input.modalidade_parcelamento || (isParcelado ? 'parcelado' : 'a_vista'),
@@ -267,7 +268,8 @@ export const telegramPendentesService = {
         (titularTipo === 'cpf' ? despesaInput.titular_pessoa : null) ||
         (null as unknown as string),
 
-      regra_repeticao: isParcelado ? 'parcelado' : despesaInput.regra_repeticao,
+      // Se parcelado, regra_repeticao no PB é 'mensal'
+      regra_repeticao: isParcelado ? 'mensal' : despesaInput.regra_repeticao,
       tipo_valor: despesaInput.tipo_valor || 'fixo',
       modalidade_parcelamento:
         despesaInput.modalidade_parcelamento || (isParcelado ? 'parcelado' : 'a_vista'),

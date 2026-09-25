@@ -615,7 +615,8 @@ export function DespesaCompromissoDialog({
           (null as unknown as string),
 
         // Cobrança e valores independentes
-        regra_repeticao: isParcelado ? 'parcelado' : form.regra_repeticao,
+        // Se parcelado, regra_repeticao no banco deve ser 'mensal' (enum PB: 'mensal' | 'anual' | 'avulso')
+        regra_repeticao: isParcelado ? 'mensal' : form.regra_repeticao,
         tipo_valor: form.tipo_valor,
         modalidade_parcelamento: form.modalidade_parcelamento,
         total_parcelas: totalParcelasNum,
@@ -669,6 +670,7 @@ export function DespesaCompromissoDialog({
       onOpenChange(false)
       onSuccess?.()
     } catch (err) {
+      console.error('Erro ao salvar compromisso:', err)
       toast({
         variant: 'destructive',
         title: 'Erro ao salvar compromisso',

@@ -659,7 +659,7 @@ export function TriagemPendenteDialog({
           (despForm.titular_tipo === 'cpf' ? despForm.titular_pessoa : undefined) ||
           undefined,
 
-        regra_repeticao: isParcelado ? 'parcelado' : despForm.regra_repeticao,
+        regra_repeticao: isParcelado ? 'mensal' : despForm.regra_repeticao,
         tipo_valor: despForm.tipo_valor,
         modalidade_parcelamento: despForm.modalidade_parcelamento,
         total_parcelas: totalParcelasNum,

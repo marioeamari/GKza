@@ -57,10 +57,21 @@ export const despesasService = {
         'empresa,pessoa,titular_pessoa,titular_empresa,categoria,tag,tipo_despesa,metodo_pagamento,conta_padrao,tipo_dizimo',
       ...options,
     }),
-  saveCompromisso: (data: Partial<DespesaCompromisso>, id?: string, options?: RecordOptions) =>
-    id
-      ? pb.collection<DespesaCompromisso>('despesas_compromisso').update(id, data, options)
-      : pb.collection<DespesaCompromisso>('despesas_compromisso').create(data, options),
+  saveCompromisso: (data: Partial<DespesaCompromisso>, id?: string, options?: RecordOptions) => {
+    // Sanitização de segurança: a collection despesas_compromisso só aceita 'mensal' | 'anual' | 'avulso'
+    // no campo regra_repeticao. Se vier 'parcelado' ou se modalidade_parcelamento for 'parcelado',
+    // regra_repeticao deve ser 'mensal'.
+    const sanitizedData = { ...data }
+    if (
+      sanitizedData.regra_repeticao === ('parcelado' as any) ||
+      sanitizedData.modalidade_parcelamento === 'parcelado'
+    ) {
+      sanitizedData.regra_repeticao = 'mensal'
+    }
+    return id
+      ? pb.collection<DespesaCompromisso>('despesas_compromisso').update(id, sanitizedData, options)
+      : pb.collection<DespesaCompromisso>('despesas_compromisso').create(sanitizedData, options)
+  },
   deleteCompromisso: (id: string) => pb.collection('despesas_compromisso').delete(id),
 
   // Ocorrências

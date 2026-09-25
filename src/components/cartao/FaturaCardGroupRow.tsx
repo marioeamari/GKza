@@ -12,7 +12,7 @@ import {
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import type { FaturaCartaoGroup } from '@/lib/cartao-fatura'
+import { calcularFaturaCartao, type FaturaCartaoGroup } from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
 import type { Lancamento } from '@/types/domain'
 
@@ -158,63 +158,83 @@ export function FaturaCardGroupRow({
             <span>Total: {formatCurrency(fatura.totalFatura)}</span>
           </div>
 
-          {fatura.itens.map((item) => (
-            <div
-              key={item.id}
-              className="flex items-center justify-between gap-3 p-3 pl-12 text-xs transition hover:bg-secondary/40"
-            >
-              <div className="min-w-0 flex-1">
-                <span className="font-bold text-foreground block truncate">{item.descricao}</span>
-                <span className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
-                  <span>Data da compra: {formatDate(item.data)}</span>
-                  {item.expand?.categoria?.nome && (
-                    <>
-                      <span>•</span>
-                      <span className="font-medium text-foreground">
-                        {item.expand.categoria.nome}
-                      </span>
-                    </>
+          {fatura.itens.map((item) => {
+            const ciclo = calcularFaturaCartao(fatura.conta, item.data)
+            const cicloDateObj = new Date(ciclo.dataFechamento + 'T12:00:00')
+            const cicloMesAno = cicloDateObj.toLocaleDateString('pt-BR', {
+              month: 'long',
+              year: 'numeric',
+            })
+            const cicloMesCap = cicloMesAno.charAt(0).toUpperCase() + cicloMesAno.slice(1)
+            const [vy, vm, vd] = ciclo.dataVencimento.split('-')
+            const cicloBadgeText = `Fatura de ${cicloMesCap} · vence ${vd}/${vm}`
+
+            return (
+              <div
+                key={item.id}
+                className="flex items-center justify-between gap-3 p-3 pl-12 text-xs transition hover:bg-secondary/40"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold text-foreground truncate">{item.descricao}</span>
+                    <Badge
+                      variant="outline"
+                      className="border-primary/40 bg-primary/10 text-primary font-bold text-[10px] px-2 py-0.5"
+                    >
+                      {cicloBadgeText}
+                    </Badge>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                    <span>Data da compra: {formatDate(item.data)}</span>
+                    {item.expand?.categoria?.nome && (
+                      <>
+                        <span>•</span>
+                        <span className="font-medium text-foreground">
+                          {item.expand.categoria.nome}
+                        </span>
+                      </>
+                    )}
+                    {item.observacoes && (
+                      <>
+                        <span>•</span>
+                        <span className="italic truncate max-w-[200px]">{item.observacoes}</span>
+                      </>
+                    )}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="font-extrabold tabular-nums text-foreground">
+                    − {formatCurrency(item.valor)}
+                  </span>
+
+                  {canWrite && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                      onClick={() => onEditItem(item)}
+                      title="Editar compra"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
                   )}
-                  {item.observacoes && (
-                    <>
-                      <span>•</span>
-                      <span className="italic truncate max-w-[200px]">{item.observacoes}</span>
-                    </>
+
+                  {canDelete && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-destructive"
+                      onClick={() => onDeleteItem(item)}
+                      title="Excluir compra"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   )}
-                </span>
+                </div>
               </div>
-
-              <div className="flex items-center gap-3 shrink-0">
-                <span className="font-extrabold tabular-nums text-foreground">
-                  − {formatCurrency(item.valor)}
-                </span>
-
-                {canWrite && (
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                    onClick={() => onEditItem(item)}
-                    title="Editar compra"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-
-                {canDelete && (
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7 text-destructive"
-                    onClick={() => onDeleteItem(item)}
-                    title="Excluir compra"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
