@@ -72,7 +72,22 @@ export const despesasService = {
     id
       ? pb.collection<DespesaOcorrencia>('despesas_ocorrencias').update(id, data, options)
       : pb.collection<DespesaOcorrencia>('despesas_ocorrencias').create(data, options),
-  deleteOcorrencia: (id: string) => pb.collection('despesas_ocorrencias').delete(id),
+  deleteOcorrencia: async (id: string) => {
+    // Busca a ocorrência para verificar se há lançamento financeiro vinculado
+    try {
+      const oc = await pb.collection<DespesaOcorrencia>('despesas_ocorrencias').getOne(id)
+      if (oc.lancamento) {
+        try {
+          await pb.collection('lancamentos').delete(oc.lancamento)
+        } catch (e) {
+          console.warn('Lançamento vinculado já havia sido removido ou não encontrado:', e)
+        }
+      }
+    } catch (e) {
+      console.warn('Ocorrência não encontrada antes de excluir:', e)
+    }
+    return pb.collection('despesas_ocorrencias').delete(id)
+  },
 
   /**
    * Baixa uma ocorrência:
@@ -417,6 +432,23 @@ export const despesasService = {
     }
 
     // 4. Regra Mensal Recorrente (contínua até ser encerrada)
+    // Extrai o mês e ano de início de forma robusta e independente de fuso
+    const startCompStr = (() => {
+      if (compromisso.data_inicio) {
+        // Se vier como 'YYYY-MM-DD...' ou ISO
+        const str = String(compromisso.data_inicio).trim()
+        if (str.length >= 7 && str[4] === '-') {
+          return str.slice(0, 7)
+        }
+        const d = new Date(str)
+        if (!isNaN(d.getTime())) {
+          return `${d.getUTCFullYear()}-${(d.getUTCMonth() + 1).toString().padStart(2, '0')}`
+        }
+      }
+      const now = new Date()
+      return `${now.getUTCFullYear()}-${(now.getUTCMonth() + 1).toString().padStart(2, '0')}`
+    })()
+
     const meses =
       targetCompetencias && targetCompetencias.length > 0
         ? targetCompetencias
@@ -425,7 +457,8 @@ export const despesasService = {
             const y = now.getUTCFullYear()
             const m = now.getUTCMonth()
             const list: string[] = []
-            for (let i = -1; i <= 3; i++) {
+            // Gera a partir do mês atual até 3 meses à frente (nunca retroativo com i = -1)
+            for (let i = 0; i <= 3; i++) {
               const d = new Date(Date.UTC(y, m + i, 1))
               list.push(
                 `${d.getUTCFullYear()}-${(d.getUTCMonth() + 1).toString().padStart(2, '0')}`,
@@ -435,11 +468,9 @@ export const despesasService = {
           })()
 
     const day = compromisso.dia_vencimento || 10
-    const rawStart = new Date(compromisso.data_inicio)
-    const startCompStr = `${rawStart.getUTCFullYear()}-${(rawStart.getUTCMonth() + 1).toString().padStart(2, '0')}`
 
     for (const compStr of meses) {
-      // Se a competência for anterior ao mês de início do compromisso, pula
+      // NUNCA gerar ocorrência anterior ao mês/competência de data_inicio do compromisso
       if (compStr < startCompStr) {
         continue
       }

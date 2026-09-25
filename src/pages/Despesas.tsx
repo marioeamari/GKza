@@ -129,6 +129,7 @@ export default function Despesas() {
 
   const [estornando, setEstornando] = useState<DespesaOcorrencia | null>(null)
   const [deletandoCompromisso, setDeletandoCompromisso] = useState<DespesaCompromisso | null>(null)
+  const [deletandoOcorrencia, setDeletandoOcorrencia] = useState<DespesaOcorrencia | null>(null)
 
   // Filtros locais de busca
   const [search, setSearch] = useState('')
@@ -334,11 +335,21 @@ export default function Despesas() {
   }, [ocorrencias, search, filterTag, filterCategoria, filterTitular, filterSecao, filterStatus])
 
   // Filtragem das ocorrências atrasadas de competências passadas
+  // Defesa extra: NUNCA listar como atrasada ocorrência com competência anterior à data_inicio do compromisso
   const filteredOcorrenciasAtrasadas = useMemo(() => {
     return ocorrenciasAtrasadas.filter((oc) => {
       const comp = oc.expand?.compromisso
       const desc = comp?.descricao || ''
       const forn = comp?.fornecedor || ''
+
+      // Validação de consistência: ignorar fantasmas retroativos
+      if (comp?.data_inicio && oc.competencia) {
+        const compStartStr = String(comp.data_inicio).slice(0, 7)
+        if (oc.competencia < compStartStr) {
+          return false
+        }
+      }
+
       const matchesSearch =
         !search ||
         desc.toLowerCase().includes(search.toLowerCase()) ||
@@ -597,6 +608,26 @@ export default function Despesas() {
     }
   }
 
+  const handleDeleteOcorrencia = async () => {
+    if (!deletandoOcorrencia) return
+    try {
+      await despesasService.deleteOcorrencia(deletandoOcorrencia.id)
+      toast({
+        title: 'Ocorrência excluída',
+        description: 'Apenas a ocorrência selecionada foi removida com sucesso.',
+      })
+      await loadData()
+    } catch (e) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao excluir ocorrência',
+        description: apiMessage(e),
+      })
+    } finally {
+      setDeletandoOcorrencia(null)
+    }
+  }
+
   if (loading) return <LoadingState label="Carregando módulo de despesas e compromissos..." />
 
   return (
@@ -849,6 +880,7 @@ export default function Despesas() {
                   onExcluirCompromisso={() =>
                     oc.expand?.compromisso && setDeletandoCompromisso(oc.expand.compromisso)
                   }
+                  onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
                   canEdit={can(user?.role, 'writeFinance')}
                 />
               ))}
@@ -911,6 +943,7 @@ export default function Despesas() {
                       onExcluirCompromisso={() =>
                         oc.expand?.compromisso && setDeletandoCompromisso(oc.expand.compromisso)
                       }
+                      onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
                       canEdit={can(user?.role, 'writeFinance')}
                     />
                   ))}
@@ -969,6 +1002,7 @@ export default function Despesas() {
                       onExcluirCompromisso={() =>
                         oc.expand?.compromisso && setDeletandoCompromisso(oc.expand.compromisso)
                       }
+                      onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
                       canEdit={can(user?.role, 'writeFinance')}
                     />
                   ))}
@@ -1162,6 +1196,7 @@ export default function Despesas() {
                                 oc.expand?.compromisso &&
                                 setDeletandoCompromisso(oc.expand.compromisso)
                               }
+                              onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
                               canEdit={can(user?.role, 'writeFinance')}
                             />
                           ))}
@@ -1220,7 +1255,47 @@ export default function Despesas() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Confirmar Exclusão do Compromisso */}
+      {/* Confirmar Exclusão da Ocorrência Individual */}
+      <AlertDialog
+        open={!!deletandoOcorrencia}
+        onOpenChange={(o) => !o && setDeletandoOcorrencia(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deletandoOcorrencia?.isAtrasada ||
+              deletandoOcorrencia?.competencia < currentCompetencia
+                ? 'Excluir pendência atrasada?'
+                : 'Excluir ocorrência desta competência?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir esta ocorrência de{' '}
+              <strong>{deletandoOcorrencia?.competencia}</strong> do compromisso "
+              {deletandoOcorrencia?.expand?.compromisso?.descricao ||
+                deletandoOcorrencia?.observacoes ||
+                'Despesa'}
+              "?
+              <br />
+              <br />
+              <span className="text-foreground font-medium">
+                O compromisso continuará ativo e nenhuma outra ocorrência (nem as pagas, nem as
+                futuras) será afetada.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              onClick={handleDeleteOcorrencia}
+            >
+              Excluir ocorrência
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmar Exclusão do Compromisso Todo */}
       <AlertDialog
         open={!!deletandoCompromisso}
         onOpenChange={(o) => !o && setDeletandoCompromisso(null)}
@@ -1229,8 +1304,8 @@ export default function Despesas() {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir compromisso recorrente?</AlertDialogTitle>
             <AlertDialogDescription>
-              Isso excluirá o compromisso "{deletandoCompromisso?.descricao}" e todas as suas
-              ocorrências futuras e previstas.
+              Isso excluirá o compromisso inteiro "{deletandoCompromisso?.descricao}" e suas
+              ocorrências vinculadas.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1239,7 +1314,7 @@ export default function Despesas() {
               className="bg-destructive hover:bg-destructive/90"
               onClick={handleDeleteCompromisso}
             >
-              Excluir
+              Excluir compromisso
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1258,6 +1333,7 @@ interface OcorrenciaRowProps {
   onEstornar: () => void
   onEditarCompromisso: () => void
   onExcluirCompromisso: () => void
+  onExcluirOcorrencia?: () => void
   canEdit: boolean
 }
 
@@ -1268,6 +1344,7 @@ function OcorrenciaRow({
   onEstornar,
   onEditarCompromisso,
   onExcluirCompromisso,
+  onExcluirOcorrencia,
   canEdit,
 }: OcorrenciaRowProps) {
   const comp = ocorrencia.expand?.compromisso
@@ -1505,8 +1582,14 @@ function OcorrenciaRow({
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8 text-destructive sm:opacity-0 sm:group-hover:opacity-100"
-                onClick={onExcluirCompromisso}
-                title="Excluir compromisso"
+                onClick={onExcluirOcorrencia || onExcluirCompromisso}
+                title={
+                  onExcluirOcorrencia
+                    ? isAtrasada
+                      ? 'Excluir pendência atrasada'
+                      : 'Excluir ocorrência'
+                    : 'Excluir compromisso'
+                }
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
