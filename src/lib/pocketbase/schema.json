@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-25T11:42:01.611Z",
+  "generatedAt": "2026-09-25T15:27:21.124Z",
   "collections": [
     {
       "name": "users",
@@ -519,6 +519,37 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "competencia",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "fatura_paga",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "fatura_pagamento_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "is_pagamento_fatura",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "cartao_fatura_conta",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "contas"
         }
       ],
       "indexes": [

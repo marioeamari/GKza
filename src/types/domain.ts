@@ -187,11 +187,17 @@ export interface Lancamento extends RecordModel {
   empresa: string
   pessoa: string
   observacoes: string
+  competencia?: string // 'YYYY-MM' (competência da fatura para cartão ou do mês)
+  fatura_paga?: boolean // indica se a compra no cartão já foi quitada pelo pagamento da fatura
+  fatura_pagamento_id?: string // id do lançamento de pagamento de fatura que quitou esta compra
+  is_pagamento_fatura?: boolean // true se este lançamento é a saída de caixa referente ao pagamento de fatura
+  cartao_fatura_conta?: string // conta do cartão cuja fatura foi paga por este lançamento
   expand?: {
     conta?: Conta
     categoria?: Categoria
     empresa?: Empresa
     pessoa?: Pessoa
+    cartao_fatura_conta?: Conta
   }
 }
 

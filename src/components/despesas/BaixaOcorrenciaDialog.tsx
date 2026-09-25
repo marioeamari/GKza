@@ -23,6 +23,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { apiMessage } from '@/lib/api-error'
+import { getAvisoFaturaCartao } from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { despesasService } from '@/services/despesas'
 import type { Conta, DespesaCompromisso, DespesaOcorrencia } from '@/types/domain'
@@ -54,6 +55,10 @@ export function BaixaOcorrenciaDialog({
   // Pode receber ocorrencia existente OU compromisso direto (para registrar pagamento retroativo)
   const comp = ocorrencia?.expand?.compromisso || compromisso
   const title = comp?.descricao || ocorrencia?.observacoes || 'Despesa'
+
+  const selectedContaObj = contas.find((c) => c.id === contaId)
+  const isContaCartao = selectedContaObj?.tipo === 'cartao'
+  const avisoCartao = isContaCartao ? getAvisoFaturaCartao(selectedContaObj, dataPagamento) : null
 
   useEffect(() => {
     if (open) {
@@ -151,10 +156,17 @@ export function BaixaOcorrenciaDialog({
         })
       }
 
-      toast({
-        title: 'Pagamento registrado com sucesso!',
-        description: `Lançamento de ${formatCurrency(valorPago)} gerado no fluxo de caixa na data informada.`,
-      })
+      if (isContaCartao) {
+        toast({
+          title: 'Compra registrada no cartão!',
+          description: `Valor de ${formatCurrency(valorPago)} integrado à fatura do cartão. A saída real do caixa ocorrerá no pagamento da fatura.`,
+        })
+      } else {
+        toast({
+          title: 'Pagamento registrado com sucesso!',
+          description: `Lançamento de ${formatCurrency(valorPago)} gerado no fluxo de caixa na data informada.`,
+        })
+      }
       onOpenChange(false)
       onSuccess?.()
     } catch (err) {
@@ -244,6 +256,11 @@ export function BaixaOcorrenciaDialog({
                   ))}
               </SelectContent>
             </Select>
+            {avisoCartao && (
+              <p className="rounded-lg bg-primary/10 p-2 text-xs font-semibold text-primary">
+                {avisoCartao}
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">

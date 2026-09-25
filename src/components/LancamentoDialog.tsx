@@ -24,6 +24,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useToast } from '@/hooks/use-toast'
 import { apiFieldErrors, apiMessage } from '@/lib/api-error'
+import { getAvisoFaturaCartao, calcularFaturaCartao } from '@/lib/cartao-fatura'
 import { dateOnly, toPocketBaseDate } from '@/lib/format'
 import { financeService } from '@/services/finance'
 import type {
@@ -113,6 +114,26 @@ export function LancamentoDialog({
     if (Object.keys(next).length) return
     setSaving(true)
     try {
+      const selectedConta = contas.find((c) => c.id === form.conta)
+      const isCartao = selectedConta?.tipo === 'cartao'
+
+      // Se for conta tipo 'cartao', calcular a competência da fatura e o status inicial
+      let extraData: Partial<Lancamento> = {}
+      if (isCartao) {
+        const faturaCiclo = calcularFaturaCartao(selectedConta, form.data)
+        extraData = {
+          competencia: faturaCiclo.competencia,
+          // Compras em cartão ficam como pendentes até a baixa da fatura (ou mantém fatura_paga caso já estivesse paga)
+          status: lancamento?.fatura_paga ? 'pago' : 'pendente',
+          fatura_paga: lancamento?.fatura_paga || false,
+        }
+      } else {
+        const compStr = form.data.slice(0, 7)
+        extraData = {
+          competencia: compStr,
+        }
+      }
+
       const record = await financeService.saveLancamento(
         {
           ...form,
@@ -120,6 +141,7 @@ export function LancamentoDialog({
           data: toPocketBaseDate(form.data),
           empresa: form.empresa || null,
           pessoa: form.pessoa || null,
+          ...extraData,
         } as Partial<Lancamento>,
         lancamento?.id,
         { expand: 'conta,categoria,empresa,pessoa' },
@@ -140,6 +162,12 @@ export function LancamentoDialog({
   const updateType = (tipo: string) => {
     if (tipo) setForm((current) => ({ ...current, tipo: tipo as TransactionType, categoria: '' }))
   }
+
+  const selectedContaObj = contas.find((c) => c.id === form.conta)
+  const avisoFatura = useMemo(() => {
+    return getAvisoFaturaCartao(selectedContaObj, form.data)
+  }, [selectedContaObj, form.data])
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
@@ -186,13 +214,18 @@ export function LancamentoDialog({
               {errors.valor && <p className="field-error">{errors.valor}</p>}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="data">Data</Label>
+              <Label htmlFor="data">Data da compra / transação</Label>
               <Input
                 id="data"
                 type="date"
                 value={form.data}
                 onChange={(e) => setForm({ ...form, data: e.target.value })}
               />
+              {avisoFatura && (
+                <p className="rounded-lg bg-primary/10 p-2 text-xs font-semibold text-primary">
+                  {avisoFatura}
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Conta</Label>
@@ -233,20 +266,28 @@ export function LancamentoDialog({
             </div>
             <div className="space-y-2">
               <Label>Status</Label>
-              <Select
-                value={form.status}
-                onValueChange={(status) =>
-                  setForm({ ...form, status: status as TransactionStatus })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pago">Pago</SelectItem>
-                  <SelectItem value="pendente">Pendente</SelectItem>
-                </SelectContent>
-              </Select>
+              {selectedContaObj?.tipo === 'cartao' ? (
+                <div className="rounded-md border border-border bg-secondary/50 px-3 py-2 text-xs text-muted-foreground">
+                  {lancamento?.fatura_paga
+                    ? 'Quitado (Fatura paga)'
+                    : 'Pendente (Aguardando fechamento e pagamento da fatura)'}
+                </div>
+              ) : (
+                <Select
+                  value={form.status}
+                  onValueChange={(status) =>
+                    setForm({ ...form, status: status as TransactionStatus })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pago">Pago</SelectItem>
+                    <SelectItem value="pendente">Pendente</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Empresa (opcional)</Label>

@@ -1647,14 +1647,16 @@ function OcorrenciaRow({
   const comp = ocorrencia.expand?.compromisso
   const isPaga = ocorrencia.status === 'paga'
 
-  // Ocorrência só é considerada em atraso se NÃO estiver paga e a data de vencimento for anterior à data REAL de hoje
-  const todayStr = getLocalDateStr()
-  const dueStr = ocorrencia.data_vencimento ? ocorrencia.data_vencimento.slice(0, 10) : ''
-  const isRealmenteAtrasada = !isPaga && dueStr !== '' && dueStr < todayStr
   const tag = comp?.expand?.tag // Destino da despesa / Centro de custo
   const categoria = comp?.expand?.categoria // Finalidade
   const metodoPag = comp?.expand?.metodo_pagamento
   const contaPag = ocorrencia.expand?.conta || comp?.expand?.conta_padrao
+
+  // Ocorrência só é considerada em atraso se NÃO estiver paga e a data de vencimento for anterior à data REAL de hoje
+  const todayStr = getLocalDateStr()
+  const dueStr = ocorrencia.data_vencimento ? ocorrencia.data_vencimento.slice(0, 10) : ''
+  const isRealmenteAtrasada = !isPaga && dueStr !== '' && dueStr < todayStr
+  const isCartao = contaPag?.tipo === 'cartao' || ocorrencia.secao === 'cartoes_credito'
 
   // Titular da obrigação
   const titularTipo = comp?.titular_tipo || (comp?.empresa ? 'cnpj' : 'cpf')
@@ -1858,6 +1860,16 @@ function OcorrenciaRow({
                   title="Desfazer baixa"
                 >
                   <Undo2 className="mr-1 h-3.5 w-3.5" /> Estornar
+                </Button>
+              ) : isCartao ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 border-primary/30 text-primary hover:bg-primary/10 text-xs font-semibold"
+                  onClick={onBaixar}
+                  title="Lançar compra no ciclo da fatura do cartão"
+                >
+                  <CreditCard className="mr-1 h-3.5 w-3.5" /> Lançar na fatura
                 </Button>
               ) : (
                 <Button

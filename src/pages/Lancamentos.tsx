@@ -29,7 +29,10 @@ import {
 import { useAppContext } from '@/contexts/AppContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
+import { FaturaCardGroupRow } from '@/components/cartao/FaturaCardGroupRow'
+import { PagarFaturaDialog } from '@/components/cartao/PagarFaturaDialog'
 import { apiMessage } from '@/lib/api-error'
+import { calcularFaturaCartao, type FaturaCartaoGroup } from '@/lib/cartao-fatura'
 import { escapeFilter, formatCurrency, formatDate, monthParam } from '@/lib/format'
 import { can } from '@/lib/permissions'
 import { cadastrosService } from '@/services/cadastros'
@@ -57,6 +60,8 @@ export default function Lancamentos() {
   const [editing, setEditing] = useState<Lancamento | null>(null)
   const [deleting, setDeleting] = useState<Lancamento | null>(null)
   const [mobileFilters, setMobileFilters] = useState(false)
+  const [faturaToPay, setFaturaToPay] = useState<FaturaCartaoGroup | null>(null)
+  const [payFaturaOpen, setPayFaturaOpen] = useState(false)
   const loaderRef = useRef<HTMLDivElement>(null)
 
   const filter = useMemo(() => {
@@ -74,15 +79,13 @@ export default function Lancamentos() {
     if (conta) filters.push(`conta = '${conta}'`)
     if (categoria) filters.push(`categoria = '${categoria}'`)
 
-    // Filtro pelo contexto ativo (se não for "Todos")
-    if (!activeContext.isAll && activeContext.contaIds.length > 0) {
+    if (activeContext.contaIds.length > 0) {
       const contaClauses = activeContext.contaIds.map((id) => `conta = '${id}'`).join(' || ')
       filters.push(`(${contaClauses})`)
     }
 
     return filters.join(' && ')
   }, [params, activeContext])
-
   const loadLancamentos = useCallback(
     async (targetPage = 1, append = false) => {
       if (append) setLoadingMore(true)
@@ -169,8 +172,18 @@ export default function Lancamentos() {
   const deleteRecord = async () => {
     if (!deleting) return
     try {
-      await financeService.deleteLancamento(deleting.id)
+      // Se for pagamento de fatura, estornar o vínculo com as compras do cartão
+      if (deleting.is_pagamento_fatura && deleting.cartao_fatura_conta && deleting.competencia) {
+        await financeService.estornarPagamentoFaturaCartao({
+          pagamentoLancamentoId: deleting.id,
+          cartaoContaId: deleting.cartao_fatura_conta,
+          competencia: deleting.competencia,
+        })
+      } else {
+        await financeService.deleteLancamento(deleting.id)
+      }
       setRecords((current) => current.filter((item) => item.id !== deleting.id))
+      loadLancamentos(1)
       toast({ title: 'Lançamento excluído' })
     } catch (error) {
       toast({
@@ -183,14 +196,91 @@ export default function Lancamentos() {
     }
   }
 
-  const groups = useMemo(
-    () =>
-      records.reduce<Record<string, Lancamento[]>>((result, item) => {
-        ;(result[dateKey(item.data)] ||= []).push(item)
-        return result
-      }, {}),
-    [records],
-  )
+  const handlePagarFatura = (fatura: FaturaCartaoGroup) => {
+    setFaturaToPay(fatura)
+    setPayFaturaOpen(true)
+  }
+
+  const handleEstornarFatura = async (fatura: FaturaCartaoGroup) => {
+    try {
+      await financeService.estornarPagamentoFaturaCartao({
+        pagamentoLancamentoId: fatura.pagamentoLancamentoId || '',
+        cartaoContaId: fatura.conta.id,
+        competencia: fatura.competencia,
+      })
+      toast({
+        title: 'Baixa desfeita com sucesso',
+        description: `A fatura voltou para o status pendente e o estorno foi aplicado.`,
+      })
+      loadLancamentos(1)
+    } catch (err) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao desfazer baixa',
+        description: apiMessage(err),
+      })
+    }
+  }
+
+  // Mapa de contas por ID para consulta rápida
+  const contasMap = useMemo(() => new Map(contas.map((c) => [c.id, c])), [contas])
+
+  /**
+   * Separação de Lançamentos:
+   * 1. Compras em contas do tipo "cartao" são agrupadas por Fatura (conta + competência da fatura)
+   * 2. Demais lançamentos (bancários, caixa, pagamentos de fatura) são agrupados pela data do evento
+   */
+  const { faturasGrouped, regularGroups } = useMemo(() => {
+    const faturasMap = new Map<string, FaturaCartaoGroup>()
+    const regularMap: Record<string, Lancamento[]> = {}
+
+    for (const item of records) {
+      const contaObj = item.expand?.conta || contasMap.get(item.conta)
+      const isCartao = contaObj?.tipo === 'cartao'
+
+      if (isCartao) {
+        // Compra no cartão -> calcula ciclo e agrupa por fatura
+        const ciclo = calcularFaturaCartao(contaObj, item.data)
+        const comp = item.competencia || ciclo.competencia
+        const groupKey = `${item.conta}_${comp}`
+
+        if (!faturasMap.has(groupKey)) {
+          faturasMap.set(groupKey, {
+            id: groupKey,
+            conta: contaObj,
+            competencia: comp,
+            dataFechamento: ciclo.dataFechamento,
+            dataVencimento: ciclo.dataVencimento,
+            totalFatura: 0,
+            paga: true,
+            pagamentoLancamentoId: item.fatura_pagamento_id,
+            itens: [],
+          })
+        }
+
+        const fatura = faturasMap.get(groupKey)!
+        fatura.itens.push(item)
+        fatura.totalFatura += item.valor
+        if (!item.fatura_paga && item.status !== 'pago') {
+          fatura.paga = false
+        }
+        if (item.fatura_pagamento_id) {
+          fatura.pagamentoLancamentoId = item.fatura_pagamento_id
+        }
+      } else {
+        // Lançamento normal de caixa / banco
+        const k = dateKey(item.data)
+        ;(regularMap[k] ||= []).push(item)
+      }
+    }
+
+    return {
+      faturasGrouped: Array.from(faturasMap.values()).sort((a, b) =>
+        b.dataFechamento.localeCompare(a.dataFechamento),
+      ),
+      regularGroups: regularMap,
+    }
+  }, [records, contasMap])
 
   const filterControls = (
     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
@@ -316,7 +406,39 @@ export default function Lancamentos() {
         />
       ) : (
         <div className="space-y-6">
-          {Object.entries(groups).map(([date, items], groupIndex) => {
+          {/* Se houver Faturas de Cartão de Crédito agrupadas, exibi-las em destaque no topo */}
+          {faturasGrouped.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Faturas de Cartão de Crédito ({faturasGrouped.length})
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  Baixa consolidada por ciclo de fechamento
+                </span>
+              </div>
+              <div className="space-y-3">
+                {faturasGrouped.map((fatura) => (
+                  <FaturaCardGroupRow
+                    key={fatura.id}
+                    fatura={fatura}
+                    canWrite={can(user?.role, 'writeFinance')}
+                    canDelete={can(user?.role, 'deleteFinance')}
+                    onPagarFatura={handlePagarFatura}
+                    onEstornarFatura={handleEstornarFatura}
+                    onEditItem={(item) => {
+                      setEditing(item)
+                      setDialog(true)
+                    }}
+                    onDeleteItem={(item) => setDeleting(item)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Lançamentos do dia a dia (Caixa, Bancos e Pagamentos de Faturas) */}
+          {Object.entries(regularGroups).map(([date, items], groupIndex) => {
             const total = items.reduce(
               (sum, item) => sum + (item.tipo === 'receita' ? item.valor : -item.valor),
               0,
@@ -355,7 +477,14 @@ export default function Lancamentos() {
                         style={{ background: item.expand?.categoria?.cor || '#8A8078' }}
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-bold">{item.descricao}</span>
+                        <span className="block truncate text-sm font-bold flex items-center gap-1.5">
+                          {item.descricao}
+                          {item.is_pagamento_fatura && (
+                            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">
+                              Pagamento de Fatura
+                            </span>
+                          )}
+                        </span>
                         <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                           {item.expand?.conta?.nome || 'Conta'}
                           <span>•</span>
@@ -406,6 +535,7 @@ export default function Lancamentos() {
               </section>
             )
           })}
+
           <div ref={loaderRef} className="flex justify-center py-4">
             {page < totalPages && (
               <Button
@@ -423,6 +553,18 @@ export default function Lancamentos() {
           </div>
         </div>
       )}
+
+      {/* Diálogo de Baixa de Fatura Inteira */}
+      <PagarFaturaDialog
+        open={payFaturaOpen}
+        onOpenChange={setPayFaturaOpen}
+        fatura={faturaToPay}
+        contas={contas}
+        categorias={categorias}
+        onSuccess={() => {
+          loadLancamentos(1)
+        }}
+      />
 
       {/* Diálogo de criação/edição padrão de lançamentos */}
       <LancamentoDialog

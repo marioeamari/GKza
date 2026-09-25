@@ -11,6 +11,8 @@ import {
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 
+import { DashboardFaturasCard } from '@/components/cartao/DashboardFaturasCard'
+import { PagarFaturaDialog } from '@/components/cartao/PagarFaturaDialog'
 import { CashFlowChart } from '@/components/charts/CashFlowChart'
 import { MarketplaceChart } from '@/components/charts/MarketplaceChart'
 import { LancamentoDialog } from '@/components/LancamentoDialog'
@@ -28,6 +30,7 @@ import { useCountUp } from '@/hooks/use-count-up'
 import { useFinanceData } from '@/hooks/use-finance-data'
 import { useRealtime } from '@/hooks/use-realtime'
 import { apiMessage } from '@/lib/api-error'
+import { calcularFaturaCartao, type FaturaCartaoGroup } from '@/lib/cartao-fatura'
 import {
   addDays,
   formatCurrency,
@@ -60,6 +63,8 @@ export default function Dashboard() {
   const [repasses, setRepasses] = useState<Repasse[]>([])
   const [dialog, setDialog] = useState(false)
   const [marketLoading, setMarketLoading] = useState(true)
+  const [faturaToPay, setFaturaToPay] = useState<FaturaCartaoGroup | null>(null)
+  const [payFaturaOpen, setPayFaturaOpen] = useState(false)
 
   const loadMarketplace = useCallback(async () => {
     try {
@@ -129,17 +134,31 @@ export default function Dashboard() {
     return []
   }, [repasses, activeContext])
 
-  const paid = filteredLancamentos.filter((item) => item.status === 'pago')
+  const contasMap = useMemo(() => new Map(contas.map((c) => [c.id, c])), [contas])
+
+  // Lançamentos efetivos de caixa (não inclui compras individuais em cartão de crédito,
+  // pois a saída de caixa só ocorre no pagamento da fatura)
+  const effectiveCashLancamentos = useMemo(() => {
+    return filteredLancamentos.filter((item) => {
+      const contaObj = item.expand?.conta || contasMap.get(item.conta)
+      if (contaObj?.tipo === 'cartao') {
+        return false // A compra no cartão não movimenta caixa até a fatura ser paga
+      }
+      return true
+    })
+  }, [filteredLancamentos, contasMap])
+
+  const paid = effectiveCashLancamentos.filter((item) => item.status === 'pago')
   const consolidated =
     filteredContas
-      .filter((item) => item.ativa)
+      .filter((item) => item.ativa && item.tipo !== 'cartao')
       .reduce((sum, account) => sum + account.saldo_inicial, 0) +
     paid.reduce((sum, item) => sum + (item.tipo === 'receita' ? item.valor : -item.valor), 0)
   const animatedBalance = useCountUp(consolidated)
-  const inPeriod = filteredLancamentos.filter((item) =>
+  const inPeriod = effectiveCashLancamentos.filter((item) =>
     isWithin(item.data, period.start, period.end),
   )
-  const previous = filteredLancamentos.filter((item) =>
+  const previous = effectiveCashLancamentos.filter((item) =>
     isWithin(item.data, period.previousStart, period.previousEnd),
   )
   const revenues = inPeriod
@@ -156,7 +175,7 @@ export default function Dashboard() {
     .reduce((sum, item) => sum + item.valor, 0)
   const beforePeriod =
     filteredContas
-      .filter((item) => item.ativa)
+      .filter((item) => item.ativa && item.tipo !== 'cartao')
       .reduce((sum, account) => sum + account.saldo_inicial, 0) +
     paid
       .filter((item) => parseDate(item.data) < period.start)
@@ -167,6 +186,45 @@ export default function Dashboard() {
     .sort((a, b) => a.data_prevista.localeCompare(b.data_prevista))
     .slice(0, 4)
   const latest = filteredLancamentos.slice(0, 5)
+
+  // Agrupamento de faturas de cartão no dashboard
+  const faturasCartao = useMemo(() => {
+    const faturasMap = new Map<string, FaturaCartaoGroup>()
+
+    for (const item of filteredLancamentos) {
+      const contaObj = item.expand?.conta || contasMap.get(item.conta)
+      if (contaObj?.tipo === 'cartao') {
+        const ciclo = calcularFaturaCartao(contaObj, item.data)
+        const comp = item.competencia || ciclo.competencia
+        const groupKey = `${item.conta}_${comp}`
+
+        if (!faturasMap.has(groupKey)) {
+          faturasMap.set(groupKey, {
+            id: groupKey,
+            conta: contaObj,
+            competencia: comp,
+            dataFechamento: ciclo.dataFechamento,
+            dataVencimento: ciclo.dataVencimento,
+            totalFatura: 0,
+            paga: true,
+            pagamentoLancamentoId: item.fatura_pagamento_id,
+            itens: [],
+          })
+        }
+
+        const fatura = faturasMap.get(groupKey)!
+        fatura.itens.push(item)
+        fatura.totalFatura += item.valor
+        if (!item.fatura_paga && item.status !== 'pago') {
+          fatura.paga = false
+        }
+      }
+    }
+
+    return Array.from(faturasMap.values()).sort((a, b) =>
+      b.dataFechamento.localeCompare(a.dataFechamento),
+    )
+  }, [filteredLancamentos, contasMap])
 
   if (loading || marketLoading) return <LoadingState label="Montando seu panorama financeiro..." />
   if (error)
@@ -224,6 +282,18 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
+        {/* Cartão de Faturas de Cartão de Crédito */}
+        {faturasCartao.length > 0 && (
+          <DashboardFaturasCard
+            faturas={faturasCartao}
+            canWrite={can(user?.role, 'writeFinance')}
+            onPagarFatura={(fat) => {
+              setFaturaToPay(fat)
+              setPayFaturaOpen(true)
+            }}
+          />
+        )}
+
         <div className="grid grid-cols-2 gap-4 lg:col-span-4 lg:grid-cols-1">
           <Card className="rise-in rise-delay-1">
             <CardContent className="p-4 sm:p-5">
@@ -283,7 +353,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <CashFlowChart
-              data={filteredLancamentos}
+              data={effectiveCashLancamentos}
               start={period.start}
               end={period.end}
               openingBalance={beforePeriod}
@@ -426,6 +496,15 @@ export default function Dashboard() {
         contas={contas}
         categorias={categorias}
         onSaved={refresh}
+      />
+
+      <PagarFaturaDialog
+        open={payFaturaOpen}
+        onOpenChange={setPayFaturaOpen}
+        fatura={faturaToPay}
+        contas={contas}
+        categorias={categorias}
+        onSuccess={refresh}
       />
     </>
   )

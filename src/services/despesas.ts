@@ -1,6 +1,7 @@
 import type { RecordListOptions, RecordOptions } from 'pocketbase'
 import pb from '@/lib/pocketbase/client'
 import type {
+  Conta,
   ContextoTipo,
   DespesaCompromisso,
   DespesaOcorrencia,
@@ -108,19 +109,60 @@ export const despesasService = {
     observacoes?: string
     descricao: string
   }) => {
-    // 1. Criar lançamento de despesa
-    const lancamento = await pb.collection('lancamentos').create({
-      descricao: params.descricao,
-      valor: params.valorPago,
-      tipo: 'despesa',
-      data: `${params.dataPagamento} 12:00:00`,
-      status: 'pago',
-      conta: params.contaId,
-      categoria: params.categoriaId || null,
-      empresa: params.empresaId || null,
-      pessoa: params.pessoaId || null,
-      observacoes: params.observacoes || 'Baixa automática de despesa recorrente',
-    })
+    // Verifica se a conta escolhida para baixa é do tipo 'cartao'
+    let isCartao = false
+    let contaObj: Conta | null = null
+    try {
+      contaObj = await pb.collection<Conta>('contas').getOne(params.contaId)
+      isCartao = contaObj.tipo === 'cartao'
+    } catch {
+      /* intentionally ignored */
+    }
+
+    let lancamentoId: string | null = null
+    let lancamento: any = null
+
+    if (isCartao && contaObj) {
+      // Para cartão de crédito: a despesa entra na fatura do cartão referente ao ciclo.
+      // O lançamento financeiro é criado como pendente de fatura (sem saída imediata de caixa)
+      // até que a fatura inteira seja baixada/paga.
+      const { calcularFaturaCartao } = await import('@/lib/cartao-fatura')
+      const ciclo = calcularFaturaCartao(contaObj, params.dataPagamento)
+
+      lancamento = await pb.collection('lancamentos').create({
+        descricao: params.descricao,
+        valor: params.valorPago,
+        tipo: 'despesa',
+        data: `${params.dataPagamento} 12:00:00`,
+        status: 'pendente',
+        conta: params.contaId,
+        categoria: params.categoriaId || null,
+        empresa: params.empresaId || null,
+        pessoa: params.pessoaId || null,
+        competencia: ciclo.competencia,
+        fatura_paga: false,
+        observacoes:
+          params.observacoes ||
+          `Despesa no cartão ${contaObj.nome} (integrada à fatura de ${ciclo.competencia})`,
+      })
+      lancamentoId = lancamento.id
+    } else {
+      // 1. Criar lançamento de despesa convencional com saída de caixa
+      lancamento = await pb.collection('lancamentos').create({
+        descricao: params.descricao,
+        valor: params.valorPago,
+        tipo: 'despesa',
+        data: `${params.dataPagamento} 12:00:00`,
+        status: 'pago',
+        conta: params.contaId,
+        categoria: params.categoriaId || null,
+        empresa: params.empresaId || null,
+        pessoa: params.pessoaId || null,
+        competencia: params.dataPagamento.slice(0, 7),
+        observacoes: params.observacoes || 'Baixa automática de despesa recorrente',
+      })
+      lancamentoId = lancamento.id
+    }
 
     // 2. Atualizar ocorrência (permitindo ajustar valor real da ocorrência sem afetar as demais)
     const ocorrAtual = await pb
@@ -138,7 +180,7 @@ export const despesasService = {
       valor_ajustado_manualmente: diferencaValor,
       data_pagamento: `${params.dataPagamento} 12:00:00`,
       conta: params.contaId,
-      lancamento: lancamento.id,
+      lancamento: lancamentoId,
     }
 
     // Se a ocorrência era de competência diferente e for assinatura anual ou sem parcelamento rígido
