@@ -174,6 +174,99 @@ export const despesasService = {
   /**
    * Gerador automático de ocorrências para um compromisso recém-criado ou para uma competência específica
    */
+  /**
+   * Atualiza as ocorrências pendentes (status 'prevista') de um compromisso quando ele é editado.
+   * Regras:
+   * 1. Apenas ocorrências com status 'prevista' são atualizadas. Ocorrências já pagas (status 'paga')
+   *    não são alteradas retroativamente (histórico preservado).
+   * 2. Ocorrências onde o usuário ajustou o valor manualmente (valor_ajustado_manualmente === true)
+   *    NÃO são sobrescritas, preservando ajustes pontuais (ex: contas de luz/gás/valor variável).
+   * 3. Sincroniza valor_previsto e valor_estimado_original para o novo valor unitário:
+   *    - Para parcelados: compromisso.valor_parcela se definido e > 0, senão compromisso.valor_estimado.
+   *    - Para não parcelados: compromisso.valor_estimado.
+   * 4. Sincroniza metadados gerais em aberto (conta_padrao, secao, empresa, contexto_tipo, dizimo,
+   *    tipo_dizimo, link_pagamento) e, se o dia de vencimento mudou, recalcula as datas de vencimento
+   *    das ocorrências previstas.
+   */
+  sincronizarOcorrenciasCompromisso: async (compromisso: DespesaCompromisso) => {
+    const isParcelado =
+      compromisso.modalidade_parcelamento === 'parcelado' ||
+      compromisso.regra_repeticao === 'parcelado'
+
+    const novoValorUnitario =
+      isParcelado && compromisso.valor_parcela && compromisso.valor_parcela > 0
+        ? compromisso.valor_parcela
+        : compromisso.valor_estimado
+
+    // Busca todas as ocorrências deste compromisso que ainda estão previstas
+    const ocorrenciasPrevistas = await listAll<DespesaOcorrencia>('despesas_ocorrencias', {
+      filter: `compromisso = '${compromisso.id}' && status = 'prevista'`,
+    })
+
+    const diaVencimentoCompromisso = compromisso.dia_vencimento
+
+    for (const oc of ocorrenciasPrevistas) {
+      const updates: Partial<DespesaOcorrencia> = {}
+
+      // Só atualiza o valor se a ocorrência não tiver sido ajustada manualmente
+      if (!oc.valor_ajustado_manualmente) {
+        updates.valor_previsto = novoValorUnitario
+        updates.valor_estimado_original = novoValorUnitario
+      }
+
+      // Sincroniza dados estruturais com o compromisso atualizado
+      if (compromisso.conta_padrao && oc.conta !== compromisso.conta_padrao) {
+        updates.conta = compromisso.conta_padrao
+      }
+      if (compromisso.secao && oc.secao !== compromisso.secao) {
+        updates.secao = compromisso.secao
+      }
+      if (oc.contexto_tipo !== compromisso.contexto_tipo) {
+        updates.contexto_tipo = compromisso.contexto_tipo
+      }
+      if (compromisso.empresa && oc.empresa !== compromisso.empresa) {
+        updates.empresa = compromisso.empresa
+      }
+      if (oc.dizimo !== compromisso.dizimo) {
+        updates.dizimo = compromisso.dizimo || false
+      }
+      if (oc.tipo_dizimo !== (compromisso.tipo_dizimo || null)) {
+        updates.tipo_dizimo = compromisso.tipo_dizimo || null
+      }
+      if (
+        compromisso.link_pagamento !== undefined &&
+        oc.link_pagamento !== compromisso.link_pagamento
+      ) {
+        updates.link_pagamento = compromisso.link_pagamento || null
+      }
+
+      // Se houver dia_vencimento e a ocorrência tiver competência, verifica se a data de vencimento precisa alinhar
+      if (diaVencimentoCompromisso && oc.competencia && oc.competencia.includes('-')) {
+        const [yStr, mStr] = oc.competencia.split('-')
+        const y = parseInt(yStr, 10)
+        const m = parseInt(mStr, 10) - 1
+        if (!isNaN(y) && !isNaN(m)) {
+          const expectedDate = despesasService.calcularDataVencimentoNoMes(
+            y,
+            m,
+            diaVencimentoCompromisso,
+          )
+          const expectedIso = expectedDate.toISOString()
+          // Compara apenas YYYY-MM-DD
+          const currentDueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
+          const expectedDueStr = expectedIso.slice(0, 10)
+          if (currentDueStr !== expectedDueStr) {
+            updates.data_vencimento = expectedIso
+          }
+        }
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await pb.collection('despesas_ocorrencias').update(oc.id, updates)
+      }
+    }
+  },
+
   gerarOcorrenciasParaCompromisso: async (
     compromisso: DespesaCompromisso,
     targetCompetencias?: string[],

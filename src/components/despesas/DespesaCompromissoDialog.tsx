@@ -618,14 +618,19 @@ export function DespesaCompromissoDialog({
 
       const saved = await despesasService.saveCompromisso(payload, compromisso?.id)
 
-      // Se for novo compromisso, gera as primeiras ocorrências automaticamente
+      // Se for novo compromisso, gera as primeiras ocorrências automaticamente.
+      // Se for edição, sincroniza as ocorrências pendentes (status 'prevista') que não foram ajustadas manualmente.
       if (!compromisso) {
         await despesasService.gerarOcorrenciasParaCompromisso(saved)
+      } else {
+        await despesasService.sincronizarOcorrenciasCompromisso(saved)
       }
 
       toast({
         title: compromisso ? 'Compromisso atualizado' : 'Compromisso cadastrado!',
-        description: 'Os dados da despesa e as ocorrências foram organizados com sucesso.',
+        description: compromisso
+          ? 'Compromisso atualizado e ocorrências pendentes sincronizadas com sucesso.'
+          : 'Os dados da despesa e as ocorrências foram organizados com sucesso.',
       })
 
       onOpenChange(false)

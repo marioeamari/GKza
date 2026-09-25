@@ -59,6 +59,7 @@ import { apiMessage } from '@/lib/api-error'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { can } from '@/lib/permissions'
 import { cadastrosService } from '@/services/cadastros'
+import { useRealtime } from '@/hooks/use-realtime'
 import { despesasService } from '@/services/despesas'
 import { financeService } from '@/services/finance'
 import type {
@@ -240,6 +241,14 @@ export default function Despesas() {
   useEffect(() => {
     loadData()
   }, [loadData])
+
+  // Subscrições em tempo real para refletir edições de compromissos e ocorrências instantaneamente
+  useRealtime('despesas_compromisso', () => {
+    loadData()
+  })
+  useRealtime('despesas_ocorrencias', () => {
+    loadData()
+  })
 
   // Navegação de mês
   const changeMonth = (delta: number) => {
