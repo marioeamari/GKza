@@ -37,12 +37,14 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useAppContext } from '@/contexts/AppContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
 import { apiFieldErrors, apiMessage } from '@/lib/api-error'
 import { formatCurrency, toPocketBaseDate } from '@/lib/format'
 import { can } from '@/lib/permissions'
+import { contextoService } from '@/services/contexto'
 import { financeService } from '@/services/finance'
 import type { Categoria, Conta, Lancamento, TransactionType } from '@/types/domain'
 
@@ -84,13 +86,15 @@ const initialMovement: MovementForm = {
 export default function Contas() {
   const { user } = useAuth()
   const { toast } = useToast()
-  const { activeContext } = useAppContext()
+  const { activeContext, grupos, refreshGrupos } = useAppContext()
   const [contas, setContas] = useState<Conta[]>([])
   const [categorias, setCategorias] = useState<Categoria[]>([])
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
   const [loading, setLoading] = useState(true)
   const [dialog, setDialog] = useState(false)
   const [editing, setEditing] = useState<Conta | null>(null)
+  const [selectedGrupoIds, setSelectedGrupoIds] = useState<string[]>([])
+  const [loadingAccountGroups, setLoadingAccountGroups] = useState(false)
   const [form, setForm] = useState(initial)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
@@ -138,7 +142,7 @@ export default function Contas() {
       ),
     [contas, lancamentos],
   )
-  const open = (account?: Conta) => {
+  const open = async (account?: Conta) => {
     setEditing(account || null)
     setForm(
       account
@@ -156,6 +160,39 @@ export default function Contas() {
     )
     setErrors({})
     setDialog(true)
+
+    if (account) {
+      setLoadingAccountGroups(true)
+      try {
+        const membros = await contextoService.listMembrosByConta(account.id)
+        setSelectedGrupoIds(membros.map((m) => m.grupo))
+      } catch (err) {
+        console.warn('Erro ao carregar grupos da conta:', err)
+        setSelectedGrupoIds([])
+      } finally {
+        setLoadingAccountGroups(false)
+      }
+    } else {
+      // Nova conta: pré-seleciona o grupo ativo caso não seja "Todos"
+      if (!activeContext.isAll && activeContext.groupId) {
+        setSelectedGrupoIds([activeContext.groupId])
+      } else {
+        // Pré-seleciona os grupos familiares/pessoais mais comuns (ex: Casa e Pessoal) ou o primeiro
+        const defaultGroups = grupos
+          .filter((g) => g.nome === 'Casa' || g.nome === 'Pessoal (CPF)')
+          .map((g) => g.id)
+        setSelectedGrupoIds(
+          defaultGroups.length > 0 ? defaultGroups : grupos.slice(0, 1).map((g) => g.id),
+        )
+      }
+      setLoadingAccountGroups(false)
+    }
+  }
+
+  const toggleGrupoSelection = (grupoId: string) => {
+    setSelectedGrupoIds((prev) =>
+      prev.includes(grupoId) ? prev.filter((id) => id !== grupoId) : [...prev, grupoId],
+    )
   }
 
   const save = async (e: React.FormEvent) => {
@@ -163,8 +200,23 @@ export default function Contas() {
     if (!form.nome.trim()) return setErrors({ nome: 'Informe o nome da conta.' })
     setSaving(true)
     try {
-      await financeService.saveConta(form, editing?.id)
-      toast({ title: 'Conta salva', description: 'As informações da conta foram atualizadas.' })
+      const savedConta = await financeService.saveConta(form, editing?.id)
+      const targetContaId = editing?.id || savedConta.id
+
+      // Sincroniza vínculos de grupos de contexto para a conta
+      if (targetContaId) {
+        try {
+          await contextoService.syncContaGrupos(targetContaId, selectedGrupoIds)
+          await refreshGrupos()
+        } catch (err) {
+          console.warn('Erro ao sincronizar grupos da conta:', err)
+        }
+      }
+
+      toast({
+        title: 'Conta salva',
+        description: 'As informações e os vínculos da conta foram atualizados.',
+      })
       setDialog(false)
       await load()
     } catch (error) {
@@ -251,6 +303,10 @@ export default function Contas() {
   const AccountCard = ({ account, index }: { account: Conta; index: number }) => {
     const Icon = icons[account.tipo]
     const isInActiveGroup = !activeContext.isAll && activeContext.contaIds.includes(account.id)
+    const accountGroups = useMemo(
+      () => grupos.filter((g) => g.contas.some((c) => c.id === account.id)),
+      [account.id],
+    )
 
     return (
       <article
@@ -305,7 +361,34 @@ export default function Contas() {
                 </span>
               )}
             </div>
-            <p className="micro-label mt-5">Saldo atual</p>
+
+            {/* Grupos de contexto vinculados */}
+            <div className="mt-3 flex flex-wrap items-center gap-1">
+              {accountGroups.length > 0 ? (
+                accountGroups.map((g) => (
+                  <span
+                    key={g.id}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium"
+                    style={{
+                      backgroundColor: `${g.cor || '#DF5830'}15`,
+                      color: g.cor || '#DF5830',
+                    }}
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: g.cor || '#DF5830' }}
+                    />
+                    {g.nome}
+                  </span>
+                ))
+              ) : (
+                <span className="text-[11px] italic text-muted-foreground">
+                  Sem grupo vinculado (invisível nos filtros de contexto)
+                </span>
+              )}
+            </div>
+
+            <p className="micro-label mt-4">Saldo atual</p>
             <p
               className={`mt-1 text-2xl font-extrabold tabular-nums ${(balances[account.id] || 0) < 0 ? 'text-destructive' : 'text-foreground'}`}
             >
@@ -493,6 +576,69 @@ export default function Contas() {
                 checked={form.ativa}
                 onCheckedChange={(ativa) => setForm({ ...form, ativa })}
               />
+            </div>
+
+            {/* Grupos de Contexto (para evitar contas órfãs invisíveis em /lancamentos) */}
+            <div className="space-y-2 rounded-xl border border-border bg-secondary/20 p-3.5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-xs font-bold text-foreground">Grupos de Contexto</Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Selecione onde os lançamentos desta conta devem aparecer.
+                  </p>
+                </div>
+                {selectedGrupoIds.length === 0 && (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] text-amber-600 border-amber-300 bg-amber-50"
+                  >
+                    Sem grupo
+                  </Badge>
+                )}
+              </div>
+
+              {loadingAccountGroups ? (
+                <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                  Carregando grupos...
+                </div>
+              ) : grupos.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Nenhum grupo de contexto configurado.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-2">
+                  {grupos.map((g) => {
+                    const checked = selectedGrupoIds.includes(g.id)
+                    return (
+                      <label
+                        key={g.id}
+                        className={`flex cursor-pointer items-center gap-2.5 rounded-lg border p-2 text-xs transition select-none ${
+                          checked
+                            ? 'border-primary bg-primary/5 text-foreground font-medium'
+                            : 'border-border bg-white text-muted-foreground hover:bg-secondary/40'
+                        }`}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => toggleGrupoSelection(g.id)}
+                        />
+                        <span
+                          className="h-2 w-2 rounded-full shrink-0"
+                          style={{ backgroundColor: g.cor || '#DF5830' }}
+                        />
+                        <span className="truncate">{g.nome}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+              {selectedGrupoIds.length === 0 && (
+                <p className="text-[11px] text-amber-600">
+                  Aviso: se nenhum grupo for selecionado, os lançamentos desta conta só aparecerão
+                  quando a visão for "Todos".
+                </p>
+              )}
             </div>
             {errors.form && <p className="field-error">{errors.form}</p>}
             <DialogFooter>

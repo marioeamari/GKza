@@ -100,4 +100,28 @@ export const contextoService = {
       throw err
     }
   },
+
+  listMembrosByConta: async (contaId: string): Promise<ContextoGrupoMembro[]> => {
+    return pb.collection<ContextoGrupoMembro>('contexto_grupo_membros').getFullList({
+      filter: `tipo = 'conta' && conta = '${contaId}'`,
+    })
+  },
+
+  syncContaGrupos: async (contaId: string, targetGrupoIds: string[]): Promise<void> => {
+    const existing = await contextoService.listMembrosByConta(contaId)
+    const existingGrupoIds = new Set(existing.map((m) => m.grupo))
+    const targetSet = new Set(targetGrupoIds)
+
+    // Remove do grupo se não estiver nos alvos
+    const toRemove = existing.filter((m) => !targetSet.has(m.grupo))
+    for (const m of toRemove) {
+      await contextoService.removeMembro(m.id)
+    }
+
+    // Adiciona nos novos grupos
+    const toAdd = targetGrupoIds.filter((gid) => !existingGrupoIds.has(gid))
+    for (const gid of toAdd) {
+      await contextoService.addMembro(gid, 'conta', contaId)
+    }
+  },
 }
