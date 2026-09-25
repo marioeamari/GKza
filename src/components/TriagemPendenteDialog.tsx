@@ -48,6 +48,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useAppContext } from '@/contexts/AppContext'
 import { useToast } from '@/hooks/use-toast'
 import { apiMessage } from '@/lib/api-error'
+import { calcularFaturaCartao } from '@/lib/cartao-fatura'
 import { dateOnly, formatCurrency, formatDate, toPocketBaseDate } from '@/lib/format'
 import pb from '@/lib/pocketbase/client'
 import { despesasService } from '@/services/despesas'
@@ -324,8 +325,22 @@ export function TriagemPendenteDialog({
 
   // Conta selecionada na Despesa
   const selectedDespConta = contas.find((c) => c.id === despForm.conta_padrao)
-  const isSelectedDespContaCartao =
-    selectedDespConta?.tipo === 'cartao' || despForm.secao === 'cartoes_credito'
+  const isContaCartao = selectedDespConta?.tipo === 'cartao'
+  const isSelectedDespContaCartao = isContaCartao || despForm.secao === 'cartoes_credito'
+
+  // Ciclo da fatura para compras no cartão (calculado em tempo real com base na conta e data_inicio)
+  const faturaCicloCartao = useMemo(() => {
+    if (!selectedDespConta || selectedDespConta.tipo !== 'cartao' || !despForm.data_inicio) {
+      return null
+    }
+    return calcularFaturaCartao(selectedDespConta, despForm.data_inicio)
+  }, [selectedDespConta, despForm.data_inicio])
+
+  // Data de vencimento formatada derivada do ciclo do cartão
+  const dataVencimentoCicloCartaoFormatada = useMemo(() => {
+    if (!faturaCicloCartao) return null
+    return formatDate(faturaCicloCartao.dataVencimento)
+  }, [faturaCicloCartao])
 
   // Método selecionado
   const selectedMetodoPagamento = useMemo(() => {
@@ -430,10 +445,11 @@ export function TriagemPendenteDialog({
   ])
 
   // Verificação de compatibilidade entre dia de vencimento e data de início
-  // Isenta pagamentos imediatos (Pix, débito, transferência, dinheiro ou caixa)
+  // Isenta pagamentos imediatos (Pix, débito, transferência, dinheiro ou caixa) e compras no cartão de crédito
   const avisoIncompatibilidadeData = useMemo(() => {
     if (despForm.regra_repeticao === 'avulso') return null
     if (isMetodoIsentoDeVencimento) return null
+    if (isSelectedDespContaCartao) return null
     if (!despForm.data_inicio) return null
     const day = parseInt(despForm.data_inicio.slice(8, 10), 10)
     const diaVenc = Number(despForm.dia_vencimento)
@@ -448,6 +464,7 @@ export function TriagemPendenteDialog({
     despForm.dia_vencimento,
     despForm.regra_repeticao,
     isMetodoIsentoDeVencimento,
+    isSelectedDespContaCartao,
   ])
 
   // Rótulo dinâmico do campo de valor
@@ -560,10 +577,11 @@ export function TriagemPendenteDialog({
       }
 
       // Consistência de dia de vencimento vs data da 1ª cobrança
-      // Não bloqueia para métodos imediatos (Pix, débito, dinheiro, transferência ou caixa)
+      // Não bloqueia para métodos imediatos nem para compras com conta tipo cartão
       if (
         despForm.regra_repeticao !== 'avulso' &&
         !isMetodoIsentoDeVencimento &&
+        !isSelectedDespContaCartao &&
         despForm.data_inicio
       ) {
         const day = parseInt(despForm.data_inicio.slice(8, 10), 10)
@@ -1279,13 +1297,16 @@ export function TriagemPendenteDialog({
                   <div className="space-y-1">
                     <Label className="text-xs font-semibold">Seção do painel /despesas</Label>
                     <Select
-                      value={despForm.secao}
+                      value={isSelectedDespContaCartao ? 'cartoes_credito' : despForm.secao}
+                      disabled={isSelectedDespContaCartao}
                       onValueChange={(v) => {
                         const s = v as SecaoDespesa
                         setDespForm((prev) => ({ ...prev, secao: s }))
                       }}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger
+                        className={isSelectedDespContaCartao ? 'bg-secondary/40 font-medium' : ''}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -1298,9 +1319,15 @@ export function TriagemPendenteDialog({
                         </SelectItem>
                       </SelectContent>
                     </Select>
-                    <p className="text-[10px] text-muted-foreground">
-                      Visualização na interface de Despesas.
-                    </p>
+                    {isSelectedDespContaCartao ? (
+                      <p className="text-[10px] font-medium text-primary">
+                        Bloqueado em Cartões de Crédito para compras no cartão.
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-muted-foreground">
+                        Visualização na interface de Despesas.
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1568,9 +1595,11 @@ export function TriagemPendenteDialog({
 
                   <div className="space-y-1">
                     <Label className="text-xs font-semibold">
-                      {despForm.regra_repeticao === 'avulso'
-                        ? 'Data de vencimento *'
-                        : '1ª cobrança / Início *'}
+                      {isSelectedDespContaCartao
+                        ? 'Data da compra *'
+                        : despForm.regra_repeticao === 'avulso'
+                          ? 'Data de vencimento *'
+                          : '1ª cobrança / Início *'}
                     </Label>
                     <Input
                       type="date"
@@ -1578,7 +1607,7 @@ export function TriagemPendenteDialog({
                       onChange={(e) => {
                         const newDate = e.target.value
                         let newDay = despForm.dia_vencimento
-                        if (newDate) {
+                        if (newDate && !isSelectedDespContaCartao) {
                           newDay = parseInt(newDate.slice(8, 10), 10) || despForm.dia_vencimento
                         }
                         setDespForm((prev) => ({
@@ -1589,30 +1618,100 @@ export function TriagemPendenteDialog({
                       }}
                       required
                     />
+                    {isSelectedDespContaCartao && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Data em que a compra no cartão foi/será realizada.
+                      </p>
+                    )}
                   </div>
 
-                  {despForm.regra_repeticao !== 'avulso' && (
+                  {isSelectedDespContaCartao ? (
                     <div className="space-y-1">
-                      <Label className="text-xs font-semibold">Dia de vencimento (1 a 31)</Label>
+                      <Label className="text-xs font-semibold text-muted-foreground">
+                        Data de vencimento
+                      </Label>
                       <Input
-                        type="number"
-                        min={1}
-                        max={31}
-                        value={despForm.dia_vencimento}
-                        onChange={(e) => {
-                          const day = parseInt(e.target.value, 10) || 10
-                          setDespForm((prev) => ({
-                            ...prev,
-                            dia_vencimento: day,
-                          }))
-                        }}
+                        type="text"
+                        disabled
+                        value={
+                          dataVencimentoCicloCartaoFormatada
+                            ? `Vencimento: ${dataVencimentoCicloCartaoFormatada} (definido pelo ciclo do cartão)`
+                            : selectedDespConta?.dia_vencimento
+                              ? `Vencimento: todo dia ${selectedDespConta.dia_vencimento} (definido pelo ciclo do cartão)`
+                              : 'Vencimento: definido pelo ciclo do cartão'
+                        }
+                        className="bg-secondary/40 font-medium text-xs cursor-not-allowed text-foreground"
                       />
-                      <p className="text-[10px] text-muted-foreground">
-                        Dias 29 a 31 ajustados em meses curtos.
+                      <p className="text-[10px] font-medium text-primary">
+                        Vencimento: definido pelo ciclo do cartão
+                        {dataVencimentoCicloCartaoFormatada
+                          ? ` (${dataVencimentoCicloCartaoFormatada})`
+                          : ''}
                       </p>
                     </div>
+                  ) : (
+                    despForm.regra_repeticao !== 'avulso' && (
+                      <div className="space-y-1">
+                        <Label className="text-xs font-semibold">Dia de vencimento (1 a 31)</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={31}
+                          value={despForm.dia_vencimento}
+                          onChange={(e) => {
+                            const day = parseInt(e.target.value, 10) || 10
+                            setDespForm((prev) => ({
+                              ...prev,
+                              dia_vencimento: day,
+                            }))
+                          }}
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          Dias 29 a 31 ajustados em meses curtos.
+                        </p>
+                      </div>
+                    )
                   )}
                 </div>
+
+                {/* Badge dinâmica do ciclo do cartão em tempo real */}
+                {isSelectedDespContaCartao && (
+                  <div className="rounded-xl border border-primary/20 bg-primary/5 p-2.5 space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {faturaCicloCartao ? (
+                        <Badge
+                          variant="outline"
+                          className="border-primary/40 bg-primary/10 text-primary font-bold text-xs px-2 py-0.5"
+                        >
+                          Fatura de{' '}
+                          {(() => {
+                            const dateObj = new Date(faturaCicloCartao.dataFechamento + 'T12:00:00')
+                            const mesAno = dateObj.toLocaleDateString('pt-BR', {
+                              month: 'short',
+                              year: 'numeric',
+                            })
+                            const [vy, vm, vd] = faturaCicloCartao.dataVencimento.split('-')
+                            return `${mesAno.charAt(0).toUpperCase() + mesAno.slice(1)} · vence ${vd}/${vm}`
+                          })()}
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="border-primary/40 bg-primary/10 text-primary text-xs"
+                        >
+                          Fatura do cartão: informe a data da compra
+                        </Badge>
+                      )}
+                    </div>
+                    {faturaCicloCartao && (
+                      <p className="text-[10px] text-muted-foreground leading-relaxed">
+                        Compra em {formatDate(despForm.data_inicio)}. Ciclo fecha em{' '}
+                        {formatDate(faturaCicloCartao.dataFechamento)} e fatura vence em{' '}
+                        {formatDate(faturaCicloCartao.dataVencimento)}.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {avisoIncompatibilidadeData && (
                   <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive">
@@ -1620,7 +1719,7 @@ export function TriagemPendenteDialog({
                     <p>{avisoIncompatibilidadeData}</p>
                   </div>
                 )}
-                {errors.despVencimento && (
+                {errors.despVencimento && !isSelectedDespContaCartao && (
                   <p className="text-xs text-destructive font-medium">{errors.despVencimento}</p>
                 )}
               </div>
@@ -1650,6 +1749,7 @@ export function TriagemPendenteDialog({
                         const c = contas.find((item) => item.id === contaId)
                         let updated = { ...despForm, conta_padrao: contaId }
                         if (c && c.tipo === 'cartao') {
+                          updated.secao = 'cartoes_credito'
                           if (c.dia_vencimento) {
                             updated.dia_vencimento = c.dia_vencimento
                           }

@@ -452,11 +452,10 @@ export const despesasService = {
       let dueDateIso: string
 
       if (contaCartaoObj) {
-        // Alinhado ao ciclo da fatura do cartão
-        const { calcularFaturaCartao } = await import('@/lib/cartao-fatura')
-        const ciclo = calcularFaturaCartao(contaCartaoObj, dataCompraStr)
-        compStr = ciclo.competencia
-        dueDateIso = `${ciclo.dataVencimento}T12:00:00.000Z`
+        // Para cartão: competência no mês da compra e vencimento na data da compra.
+        // A vinculação à fatura é calculada em tempo real na exibição e consolidada na baixa.
+        compStr = dataCompraStr.slice(0, 7)
+        dueDateIso = `${dataCompraStr}T12:00:00.000Z`
       } else {
         const startDate = new Date(compromisso.data_inicio)
         compStr = `${startDate.getUTCFullYear()}-${(startDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
@@ -497,38 +496,25 @@ export const despesasService = {
         : new Date().toISOString().slice(0, 10)
 
       if (contaCartaoObj) {
-        // Regra para cartão de crédito parcelado:
-        // A parcela 1 entra na fatura do ciclo da compra (data_inicio).
-        // Cada parcela subsequente avança 1 ciclo de fatura (mês subsequente).
-        const { calcularFaturaCartao } = await import('@/lib/cartao-fatura')
-        const cicloBase = calcularFaturaCartao(contaCartaoObj, dataCompraStr)
-        const [cBaseAnoStr, cBaseMesStr] = cicloBase.competencia.split('-')
-        const cBaseAno = parseInt(cBaseAnoStr, 10)
-        const cBaseMesZero = parseInt(cBaseMesStr, 10) - 1
-
-        const diaFechamento = contaCartaoObj.dia_fechamento || 10
-        const diaVencimento = contaCartaoObj.dia_vencimento || 20
+        // Parcela 1 com competência no mês da compra e vencimento na data da compra;
+        // parcelas seguintes mensais sequenciais na mesma data do mês.
+        const [anoStr, mesStr, diaStr] = dataCompraStr.split('-')
+        const cAno = parseInt(anoStr, 10)
+        const cMesZero = parseInt(mesStr, 10) - 1
+        const cDia = parseInt(diaStr, 10)
 
         for (let p = inicial; p <= total; p++) {
           const offset = p - inicial
-          // Mês de fechamento desta parcela
-          const fMonthDate = new Date(Date.UTC(cBaseAno, cBaseMesZero + offset, 1))
-          const fYear = fMonthDate.getUTCFullYear()
-          const fMonth = fMonthDate.getUTCMonth() // 0-based
-          const compStr = `${fYear}-${String(fMonth + 1).padStart(2, '0')}`
-
-          // Vencimento da fatura correspondente a este fechamento
-          let vYear = fYear
-          let vMonth = fMonth
-          if (diaVencimento < diaFechamento) {
-            vMonth += 1
-          }
-          const vMonthDate = new Date(Date.UTC(vYear, vMonth, 1))
-          const realVYear = vMonthDate.getUTCFullYear()
-          const realVMonth = vMonthDate.getUTCMonth()
-          const maxDiasVenc = new Date(Date.UTC(realVYear, realVMonth + 1, 0)).getUTCDate()
-          const realDiaVenc = Math.min(diaVencimento, maxDiasVenc)
-          const dueDateIso = `${realVYear}-${String(realVMonth + 1).padStart(2, '0')}-${String(realDiaVenc).padStart(2, '0')}T12:00:00.000Z`
+          const parcelaDate = despesasService.calcularDataVencimentoNoMes(
+            cAno,
+            cMesZero + offset,
+            cDia,
+          )
+          const pYear = parcelaDate.getUTCFullYear()
+          const pMonth = parcelaDate.getUTCMonth()
+          const pDay = parcelaDate.getUTCDate()
+          const compStr = `${pYear}-${String(pMonth + 1).padStart(2, '0')}`
+          const dueDateIso = `${pYear}-${String(pMonth + 1).padStart(2, '0')}-${String(pDay).padStart(2, '0')}T12:00:00.000Z`
 
           const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
             filter: `compromisso = '${compromisso.id}' && numero_parcela = ${p}`,
