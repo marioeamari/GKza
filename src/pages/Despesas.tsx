@@ -131,8 +131,9 @@ export default function Despesas() {
 
   // Filtros locais de busca
   const [search, setSearch] = useState('')
-  const [filterTag, setFilterTag] = useState('all')
-  const [filterTipo, setFilterTipo] = useState('all')
+  const [filterTag, setFilterTag] = useState('all') // Destino da despesa / Centro de custo
+  const [filterTitular, setFilterTitular] = useState('all') // Titular da despesa (CPF ou CNPJ)
+  const [filterCategoria, setFilterCategoria] = useState('all') // Categoria financeira (finalidade)
   const [filterStatus, setFilterStatus] = useState('all')
 
   const loadData = useCallback(async () => {
@@ -285,15 +286,24 @@ export default function Despesas() {
 
       const matchesTag =
         filterTag === 'all' || comp?.tag === filterTag || oc.expand?.compromisso?.tag === filterTag
-      const matchesTipo =
-        filterTipo === 'all' ||
-        comp?.tipo_despesa === filterTipo ||
-        oc.expand?.compromisso?.tipo_despesa === filterTipo
+
+      const matchesCategoria =
+        filterCategoria === 'all' ||
+        comp?.categoria === filterCategoria ||
+        oc.expand?.compromisso?.categoria === filterCategoria
+
+      const matchesTitular =
+        filterTitular === 'all' ||
+        (filterTitular === 'cpf' &&
+          (comp?.titular_tipo === 'cpf' || comp?.contexto_tipo === 'pessoal')) ||
+        (filterTitular === 'cnpj' &&
+          (comp?.titular_tipo === 'cnpj' || comp?.contexto_tipo === 'empresa'))
+
       const matchesStatus = filterStatus === 'all' || oc.status === filterStatus
 
-      return matchesSearch && matchesTag && matchesTipo && matchesStatus
+      return matchesSearch && matchesTag && matchesCategoria && matchesTitular && matchesStatus
     })
-  }, [ocorrencias, search, filterTag, filterTipo, filterStatus])
+  }, [ocorrencias, search, filterTag, filterCategoria, filterTitular, filterStatus])
 
   // Seção 1: Boletos & Contas Mensais Pix
   const secaoBoletosPix = useMemo(
@@ -323,15 +333,24 @@ export default function Despesas() {
 
       const matchesTag =
         filterTag === 'all' || comp?.tag === filterTag || oc.expand?.compromisso?.tag === filterTag
-      const matchesTipo =
-        filterTipo === 'all' ||
-        comp?.tipo_despesa === filterTipo ||
-        oc.expand?.compromisso?.tipo_despesa === filterTipo
+
+      const matchesCategoria =
+        filterCategoria === 'all' ||
+        comp?.categoria === filterCategoria ||
+        oc.expand?.compromisso?.categoria === filterCategoria
+
+      const matchesTitular =
+        filterTitular === 'all' ||
+        (filterTitular === 'cpf' &&
+          (comp?.titular_tipo === 'cpf' || comp?.contexto_tipo === 'pessoal')) ||
+        (filterTitular === 'cnpj' &&
+          (comp?.titular_tipo === 'cnpj' || comp?.contexto_tipo === 'empresa'))
+
       const matchesStatus = filterStatus === 'all' || oc.status === filterStatus
 
-      return matchesSearch && matchesTag && matchesTipo && matchesStatus
+      return matchesSearch && matchesTag && matchesCategoria && matchesTitular && matchesStatus
     })
-  }, [cartaoOcorrenciasAll, search, filterTag, filterTipo, filterStatus])
+  }, [cartaoOcorrenciasAll, search, filterTag, filterCategoria, filterTitular, filterStatus])
 
   const cartoesGrouped = useMemo(() => {
     const map = new Map<
@@ -592,12 +611,13 @@ export default function Despesas() {
             />
           </div>
 
+          {/* Destino da despesa / Centro de Custo */}
           <Select value={filterTag} onValueChange={setFilterTag}>
-            <SelectTrigger className="h-9 w-36 text-xs">
-              <SelectValue placeholder="Tag" />
+            <SelectTrigger className="h-9 w-40 text-xs">
+              <SelectValue placeholder="Destino / Centro de Custo" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Todas as Tags</SelectItem>
+              <SelectItem value="all">Todos os Destinos</SelectItem>
               {tags.map((t) => (
                 <SelectItem key={t.id} value={t.id}>
                   {t.nome}
@@ -606,20 +626,36 @@ export default function Despesas() {
             </SelectContent>
           </Select>
 
-          <Select value={filterTipo} onValueChange={setFilterTipo}>
-            <SelectTrigger className="h-9 w-36 text-xs">
-              <SelectValue placeholder="Tipo" />
+          {/* Categoria Financeira / Finalidade */}
+          <Select value={filterCategoria} onValueChange={setFilterCategoria}>
+            <SelectTrigger className="h-9 w-40 text-xs">
+              <SelectValue placeholder="Categoria (Finalidade)" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Todos os Tipos</SelectItem>
-              {tiposDespesa.map((tp) => (
-                <SelectItem key={tp.id} value={tp.id}>
-                  {tp.nome}
-                </SelectItem>
-              ))}
+              <SelectItem value="all">Todas as Categorias</SelectItem>
+              {categorias
+                .filter((c) => c.tipo === 'despesa')
+                .map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.nome}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
 
+          {/* Titular da despesa (CPF ou CNPJ) */}
+          <Select value={filterTitular} onValueChange={setFilterTitular}>
+            <SelectTrigger className="h-9 w-36 text-xs">
+              <SelectValue placeholder="Titular" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os Titulares</SelectItem>
+              <SelectItem value="cpf">Pessoal / CPF</SelectItem>
+              <SelectItem value="cnpj">Empresas / CNPJ</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Status */}
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="h-9 w-32 text-xs">
               <SelectValue placeholder="Status" />
@@ -631,14 +667,19 @@ export default function Despesas() {
             </SelectContent>
           </Select>
 
-          {(search || filterTag !== 'all' || filterTipo !== 'all' || filterStatus !== 'all') && (
+          {(search ||
+            filterTag !== 'all' ||
+            filterCategoria !== 'all' ||
+            filterTitular !== 'all' ||
+            filterStatus !== 'all') && (
             <Button
               variant="ghost"
               size="sm"
               onClick={() => {
                 setSearch('')
                 setFilterTag('all')
-                setFilterTipo('all')
+                setFilterCategoria('all')
+                setFilterTitular('all')
                 setFilterStatus('all')
               }}
               className="h-9 text-xs text-primary"
@@ -1054,9 +1095,19 @@ function OcorrenciaRow({
   const comp = ocorrencia.expand?.compromisso
   const isPaga = ocorrencia.status === 'paga'
 
-  const tag = comp?.expand?.tag
-  const tipoDespesa = comp?.expand?.tipo_despesa
+  const tag = comp?.expand?.tag // Destino da despesa / Centro de custo
+  const categoria = comp?.expand?.categoria // Finalidade
   const metodoPag = comp?.expand?.metodo_pagamento
+  const contaPag = ocorrencia.expand?.conta || comp?.expand?.conta_padrao
+
+  // Titular da obrigação
+  const titularTipo = comp?.titular_tipo || (comp?.empresa ? 'cnpj' : 'cpf')
+  const titularNome =
+    titularTipo === 'cnpj'
+      ? comp?.expand?.titular_empresa?.nome_fantasia ||
+        comp?.expand?.empresa?.nome_fantasia ||
+        'Empresa (CNPJ)'
+      : comp?.expand?.titular_pessoa?.nome || comp?.expand?.pessoa?.nome || 'Pessoal (CPF)'
 
   const isDizimo = ocorrencia.dizimo || comp?.dizimo
   const linkPag = ocorrencia.link_pagamento || comp?.link_pagamento
@@ -1065,6 +1116,8 @@ function OcorrenciaRow({
     ocorrencia.numero_parcela && ocorrencia.total_parcelas
       ? `${ocorrencia.numero_parcela}/${ocorrencia.total_parcelas}`
       : null
+
+  const isValorVariavel = comp?.tipo_valor === 'variavel'
 
   return (
     <div className="group flex flex-col gap-3 p-3.5 transition hover:bg-secondary/40 sm:flex-row sm:items-center sm:justify-between sm:p-4">
@@ -1083,25 +1136,48 @@ function OcorrenciaRow({
               {comp?.descricao || ocorrencia.observacoes || 'Despesa'}
             </span>
 
+            {/* Badge Titular da Despesa */}
+            <Badge
+              variant="outline"
+              className="text-[10px] font-semibold flex items-center gap-1 border-primary/30 bg-primary/5 text-primary"
+              title="Titular da obrigação"
+            >
+              {titularTipo === 'cnpj' ? (
+                <Building2 className="h-3 w-3" />
+              ) : (
+                <UserRound className="h-3 w-3" />
+              )}
+              {titularNome}
+            </Badge>
+
+            {/* Badge Destino da Despesa / Centro de Custo */}
+            {tag && (
+              <Badge
+                variant="secondary"
+                className="text-[10px] font-medium"
+                style={{ borderColor: tag.cor, color: tag.cor }}
+                title="Destino da despesa / Centro de custo"
+              >
+                Destino: {tag.nome}
+              </Badge>
+            )}
+
+            {/* Badge Categoria Financeira (Finalidade) */}
+            {categoria && (
+              <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {categoria.nome}
+              </span>
+            )}
+
             {parcelaLabel && (
               <Badge variant="outline" className="font-mono text-[10px] font-bold">
                 Parc. {parcelaLabel}
               </Badge>
             )}
 
-            {tag && (
-              <Badge
-                variant="secondary"
-                className="text-[10px]"
-                style={{ borderColor: tag.cor, color: tag.cor }}
-              >
-                {tag.nome}
-              </Badge>
-            )}
-
-            {tipoDespesa && (
-              <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                {tipoDespesa.nome}
+            {isValorVariavel && (
+              <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                Variável
               </span>
             )}
 
@@ -1119,14 +1195,30 @@ function OcorrenciaRow({
                   'Dízimo: Sim'}
               </Badge>
             )}
+
+            {comp?.precisa_revisao && (
+              <Badge
+                variant="outline"
+                className="text-[9px] border-amber-400 bg-amber-50 text-amber-700"
+              >
+                Revisão necessária
+              </Badge>
+            )}
           </div>
 
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {comp?.fornecedor && (
               <span>
-                Fornecedor: <strong>{comp.fornecedor}</strong>
+                Para: <strong>{comp.fornecedor}</strong>
               </span>
             )}
+
+            {contaPag && (
+              <span>
+                Sai de: <strong>{contaPag.nome}</strong>
+              </span>
+            )}
+
             <span>
               Venc: <strong>{formatDate(ocorrencia.data_vencimento)}</strong>
               {comp?.regra_vencimento_texto && ` (${comp.regra_vencimento_texto})`}

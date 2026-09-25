@@ -50,7 +50,8 @@ export const despesasService = {
   listCompromissos: (options?: RecordListOptions) =>
     listAll<DespesaCompromisso>('despesas_compromisso', {
       sort: '-ativo,descricao',
-      expand: 'empresa,pessoa,categoria,tag,tipo_despesa,metodo_pagamento,conta_padrao,tipo_dizimo',
+      expand:
+        'empresa,pessoa,titular_pessoa,titular_empresa,categoria,tag,tipo_despesa,metodo_pagamento,conta_padrao,tipo_dizimo',
       ...options,
     }),
   saveCompromisso: (data: Partial<DespesaCompromisso>, id?: string, options?: RecordOptions) =>
@@ -64,7 +65,7 @@ export const despesasService = {
     listAll<DespesaOcorrencia>('despesas_ocorrencias', {
       sort: 'data_vencimento',
       expand:
-        'compromisso,compromisso.tag,compromisso.categoria,compromisso.tipo_despesa,compromisso.metodo_pagamento,conta,tipo_dizimo,lancamento',
+        'compromisso,compromisso.tag,compromisso.categoria,compromisso.tipo_despesa,compromisso.metodo_pagamento,compromisso.titular_pessoa,compromisso.titular_empresa,compromisso.conta_padrao,conta,tipo_dizimo,lancamento',
       ...options,
     }),
   saveOcorrencia: (data: Partial<DespesaOcorrencia>, id?: string, options?: RecordOptions) =>
@@ -104,12 +105,19 @@ export const despesasService = {
       observacoes: params.observacoes || 'Baixa automática de despesa recorrente',
     })
 
-    // 2. Atualizar ocorrência
+    // 2. Atualizar ocorrência (permitindo ajustar valor real da ocorrência sem afetar as demais)
+    const ocorrAtual = await pb
+      .collection<DespesaOcorrencia>('despesas_ocorrencias')
+      .getOne(params.ocorrenciaId)
+    const diferencaValor = params.valorPago !== ocorrAtual.valor_previsto
+
     const ocorr = await pb.collection<DespesaOcorrencia>('despesas_ocorrencias').update(
       params.ocorrenciaId,
       {
         status: 'paga',
         valor_pago: params.valorPago,
+        valor_previsto: params.valorPago, // valor real da ocorrência atualizado sem mudar as demais
+        valor_ajustado_manualmente: diferencaValor,
         data_pagamento: `${params.dataPagamento} 12:00:00`,
         conta: params.contaId,
         lancamento: lancamento.id,
@@ -153,12 +161,136 @@ export const despesasService = {
   },
 
   /**
+   * Helper para calcular a data de vencimento tratando explicitamente meses mais curtos (dias 29, 30 e 31).
+   * Ex: dia 31 em fevereiro cai no último dia de fevereiro (28 ou 29).
+   */
+  calcularDataVencimentoNoMes: (ano: number, mesZeroIndex: number, diaDesejado: number): Date => {
+    // Último dia do mês alvo: new Date(Date.UTC(ano, mesZeroIndex + 1, 0)).getUTCDate()
+    const ultimoDiaDoMes = new Date(Date.UTC(ano, mesZeroIndex + 1, 0)).getUTCDate()
+    const diaReal = Math.min(diaDesejado, ultimoDiaDoMes)
+    return new Date(Date.UTC(ano, mesZeroIndex, diaReal, 12, 0, 0))
+  },
+
+  /**
    * Gerador automático de ocorrências para um compromisso recém-criado ou para uma competência específica
    */
   gerarOcorrenciasParaCompromisso: async (
     compromisso: DespesaCompromisso,
     targetCompetencias?: string[],
   ) => {
+    const isParcelado =
+      compromisso.modalidade_parcelamento === 'parcelado' ||
+      compromisso.regra_repeticao === 'parcelado'
+    const isAvulso = compromisso.regra_repeticao === 'avulso'
+    const isAnual = compromisso.regra_repeticao === 'anual'
+
+    const valorUnitario =
+      compromisso.valor_parcela && compromisso.valor_parcela > 0
+        ? compromisso.valor_parcela
+        : compromisso.valor_estimado
+
+    // 1. Pagamento Avulso / Pontual (à vista, uma única ocorrência na data de início)
+    if (isAvulso) {
+      const startDate = new Date(compromisso.data_inicio)
+      const compStr = `${startDate.getUTCFullYear()}-${(startDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
+      const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
+        filter: `compromisso = '${compromisso.id}'`,
+      })
+      if (existing.totalItems === 0) {
+        await pb.collection('despesas_ocorrencias').create({
+          compromisso: compromisso.id,
+          contexto_tipo: compromisso.contexto_tipo,
+          empresa: compromisso.empresa || null,
+          secao: compromisso.secao,
+          conta: compromisso.conta_padrao || null,
+          competencia: compStr,
+          data_vencimento: startDate.toISOString(),
+          valor_previsto: compromisso.valor_estimado,
+          valor_estimado_original: compromisso.valor_estimado,
+          valor_ajustado_manualmente: false,
+          status: 'prevista',
+          dizimo: compromisso.dizimo || false,
+          tipo_dizimo: compromisso.tipo_dizimo || null,
+          link_pagamento: compromisso.link_pagamento || null,
+          observacoes: compromisso.observacoes || 'Pagamento único / avulso',
+        })
+      }
+      return
+    }
+
+    // 2. Pagamento Parcelado em N vezes (com fim definido)
+    if (isParcelado) {
+      const total = compromisso.total_parcelas || 1
+      const inicial = compromisso.parcela_inicial || 1
+      const startDate = new Date(compromisso.data_inicio)
+      const day = compromisso.dia_vencimento || startDate.getUTCDate() || 10
+
+      for (let p = inicial; p <= total; p++) {
+        const offset = p - inicial
+        const ano = startDate.getUTCFullYear()
+        const mes = startDate.getUTCMonth() + offset
+        const dueDate = despesasService.calcularDataVencimentoNoMes(ano, mes, day)
+        const compStr = `${dueDate.getUTCFullYear()}-${(dueDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
+
+        const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
+          filter: `compromisso = '${compromisso.id}' && numero_parcela = ${p}`,
+        })
+
+        if (existing.totalItems === 0) {
+          await pb.collection('despesas_ocorrencias').create({
+            compromisso: compromisso.id,
+            contexto_tipo: compromisso.contexto_tipo,
+            empresa: compromisso.empresa || null,
+            secao: compromisso.secao,
+            conta: compromisso.conta_padrao || null,
+            competencia: compStr,
+            numero_parcela: p,
+            total_parcelas: total,
+            data_vencimento: dueDate.toISOString(),
+            valor_previsto: valorUnitario,
+            valor_estimado_original: valorUnitario,
+            valor_ajustado_manualmente: false,
+            status: 'prevista',
+            dizimo: compromisso.dizimo || false,
+            tipo_dizimo: compromisso.tipo_dizimo || null,
+            link_pagamento: compromisso.link_pagamento || null,
+            observacoes: `Parcela ${p}/${total}`,
+          })
+        }
+      }
+      return
+    }
+
+    // 3. Pagamento Anual
+    if (isAnual) {
+      const startDate = new Date(compromisso.data_inicio)
+      const compStr = `${startDate.getUTCFullYear()}-${(startDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
+      const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
+        filter: `compromisso = '${compromisso.id}' && competencia = '${compStr}'`,
+      })
+      if (existing.totalItems === 0) {
+        await pb.collection('despesas_ocorrencias').create({
+          compromisso: compromisso.id,
+          contexto_tipo: compromisso.contexto_tipo,
+          empresa: compromisso.empresa || null,
+          secao: compromisso.secao,
+          conta: compromisso.conta_padrao || null,
+          competencia: compStr,
+          data_vencimento: startDate.toISOString(),
+          valor_previsto: compromisso.valor_estimado,
+          valor_estimado_original: compromisso.valor_estimado,
+          valor_ajustado_manualmente: false,
+          status: 'prevista',
+          dizimo: compromisso.dizimo || false,
+          tipo_dizimo: compromisso.tipo_dizimo || null,
+          link_pagamento: compromisso.link_pagamento || null,
+          observacoes: compromisso.observacoes || 'Assinatura anual',
+        })
+      }
+      return
+    }
+
+    // 4. Regra Mensal Recorrente (contínua até ser encerrada)
     const meses =
       targetCompetencias && targetCompetencias.length > 0
         ? targetCompetencias
@@ -176,74 +308,6 @@ export const despesasService = {
             return list
           })()
 
-    if (compromisso.regra_repeticao === 'parcelado') {
-      const total = compromisso.total_parcelas || 1
-      const inicial = compromisso.parcela_inicial || 1
-      const startDate = new Date(compromisso.data_inicio)
-      const day = compromisso.dia_vencimento || startDate.getUTCDate() || 10
-
-      for (let p = inicial; p <= total; p++) {
-        const offset = p - inicial
-        const d = new Date(
-          Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth() + offset, 1),
-        )
-        const compStr = `${d.getUTCFullYear()}-${(d.getUTCMonth() + 1).toString().padStart(2, '0')}`
-        const dueDate = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), day, 12, 0, 0))
-
-        const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-          filter: `compromisso = '${compromisso.id}' && numero_parcela = ${p}`,
-        })
-
-        if (existing.totalItems === 0) {
-          await pb.collection('despesas_ocorrencias').create({
-            compromisso: compromisso.id,
-            contexto_tipo: compromisso.contexto_tipo,
-            empresa: compromisso.empresa || null,
-            secao: compromisso.secao,
-            conta: compromisso.conta_padrao || null,
-            competencia: compStr,
-            numero_parcela: p,
-            total_parcelas: total,
-            data_vencimento: dueDate.toISOString(),
-            valor_previsto: compromisso.valor_estimado,
-            status: 'prevista',
-            dizimo: compromisso.dizimo || false,
-            tipo_dizimo: compromisso.tipo_dizimo || null,
-            link_pagamento: compromisso.link_pagamento || null,
-            observacoes: `Parcela ${p}/${total}`,
-          })
-        }
-      }
-      return
-    }
-
-    if (compromisso.regra_repeticao === 'anual') {
-      const startDate = new Date(compromisso.data_inicio)
-      const compStr = `${startDate.getUTCFullYear()}-${(startDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
-      const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-        filter: `compromisso = '${compromisso.id}' && competencia = '${compStr}'`,
-      })
-      if (existing.totalItems === 0) {
-        await pb.collection('despesas_ocorrencias').create({
-          compromisso: compromisso.id,
-          contexto_tipo: compromisso.contexto_tipo,
-          empresa: compromisso.empresa || null,
-          secao: compromisso.secao,
-          conta: compromisso.conta_padrao || null,
-          competencia: compStr,
-          data_vencimento: startDate.toISOString(),
-          valor_previsto: compromisso.valor_estimado,
-          status: 'prevista',
-          dizimo: compromisso.dizimo || false,
-          tipo_dizimo: compromisso.tipo_dizimo || null,
-          link_pagamento: compromisso.link_pagamento || null,
-          observacoes: compromisso.observacoes || 'Assinatura anual',
-        })
-      }
-      return
-    }
-
-    // Regra mensal: criar para cada mês da lista
     const day = compromisso.dia_vencimento || 10
     for (const compStr of meses) {
       const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
@@ -253,7 +317,7 @@ export const despesasService = {
         const [yStr, mStr] = compStr.split('-')
         const y = parseInt(yStr, 10)
         const m = parseInt(mStr, 10) - 1
-        const dueDate = new Date(Date.UTC(y, m, day, 12, 0, 0))
+        const dueDate = despesasService.calcularDataVencimentoNoMes(y, m, day)
 
         await pb.collection('despesas_ocorrencias').create({
           compromisso: compromisso.id,
@@ -264,6 +328,8 @@ export const despesasService = {
           competencia: compStr,
           data_vencimento: dueDate.toISOString(),
           valor_previsto: compromisso.valor_estimado,
+          valor_estimado_original: compromisso.valor_estimado,
+          valor_ajustado_manualmente: false,
           status: 'prevista',
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || null,

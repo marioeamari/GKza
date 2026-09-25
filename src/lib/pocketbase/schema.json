@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-25T00:39:57.836Z",
+  "generatedAt": "2026-09-25T00:47:43.145Z",
   "collections": [
     {
       "name": "users",
@@ -1073,6 +1073,65 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "titular_tipo",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["cpf", "cnpj"]
+        },
+        {
+          "name": "titular_pessoa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "pessoas"
+        },
+        {
+          "name": "titular_empresa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "empresas"
+        },
+        {
+          "name": "tipo_valor",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["fixo", "variavel"]
+        },
+        {
+          "name": "modalidade_parcelamento",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["a_vista", "parcelado"]
+        },
+        {
+          "name": "valor_parcela",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "data_fim_calculada",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "precisa_revisao",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "motivo_revisao",
+          "type": "text",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [
@@ -1221,6 +1280,18 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "valor_estimado_original",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "valor_ajustado_manualmente",
+          "type": "bool",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [

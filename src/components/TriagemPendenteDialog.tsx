@@ -1146,7 +1146,7 @@ export function TriagemPendenteDialog({
                 </div>
 
                 <div className="space-y-1">
-                  <Label className="text-xs font-bold">Tag (Classificação)</Label>
+                  <Label className="text-xs font-bold">Destino da despesa / Centro de custo</Label>
                   <Select
                     value={despForm.tag || 'none'}
                     onValueChange={(v) =>
@@ -1154,10 +1154,10 @@ export function TriagemPendenteDialog({
                     }
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecione tag" />
+                      <SelectValue placeholder="Selecione destino" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">Nenhuma</SelectItem>
+                      <SelectItem value="none">Nenhum</SelectItem>
                       {tags.map((t) => (
                         <SelectItem key={t.id} value={t.id}>
                           {t.nome}

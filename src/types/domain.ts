@@ -86,33 +86,51 @@ export type RegraRepeticao = 'mensal' | 'anual' | 'parcelado' | 'avulso'
 export type ContextoTipo = 'pessoal' | 'empresa'
 export type OcorrenciaStatus = 'prevista' | 'paga' | 'cancelada'
 
+export type TitularTipo = 'cpf' | 'cnpj'
+export type TipoValorDespesa = 'fixo' | 'variavel'
+export type ModalidadeParcelamento = 'a_vista' | 'parcelado'
+
 export interface DespesaCompromisso extends RecordModel {
   contexto_tipo: ContextoTipo
   empresa?: string
   pessoa?: string
-  descricao: string
-  fornecedor?: string
-  categoria?: string
-  tag?: string
-  tipo_despesa?: string
-  metodo_pagamento?: string
-  conta_padrao?: string
-  secao: SecaoDespesa
-  regra_repeticao: RegraRepeticao
+  // Titular da despesa (a quem a obrigação pertence: CPF ou CNPJ)
+  titular_tipo?: TitularTipo
+  titular_pessoa?: string
+  titular_empresa?: string
+  // Dados descritivos
+  descricao: string // Descrição da despesa
+  fornecedor?: string // Fornecedor / favorecido
+  categoria?: string // Categoria financeira (finalidade)
+  tag?: string // Destino da despesa / Centro de custo
+  tipo_despesa?: string // Histórico (preservado)
+  metodo_pagamento?: string // Método de pagamento (Pix, boleto, etc.)
+  conta_padrao?: string // Conta de pagamento prevista / Cartão
+  secao: SecaoDespesa // Seção do painel (visualização)
+  // Cobrança e valores independentes
+  regra_repeticao: RegraRepeticao // Repetição: única ('avulso') ou recorrente ('mensal'/'anual'/'parcelado')
+  tipo_valor?: TipoValorDespesa // Valor previsto: fixo ou variavel
+  modalidade_parcelamento?: ModalidadeParcelamento // Parcelamento: a_vista ou parcelado
   total_parcelas?: number
   parcela_inicial?: number
+  valor_parcela?: number
   dia_vencimento?: number
   regra_vencimento_texto?: string
   data_inicio: string
+  data_fim_calculada?: string
   valor_estimado: number
   link_pagamento?: string
   dizimo?: boolean
   tipo_dizimo?: string
   ativo: boolean
   observacoes?: string
+  precisa_revisao?: boolean
+  motivo_revisao?: string
   expand?: {
     empresa?: Empresa
     pessoa?: Pessoa
+    titular_pessoa?: Pessoa
+    titular_empresa?: Empresa
     categoria?: Categoria
     tag?: TagItem
     tipo_despesa?: TipoDespesa
@@ -133,6 +151,8 @@ export interface DespesaOcorrencia extends RecordModel {
   total_parcelas?: number
   data_vencimento: string
   valor_previsto: number
+  valor_estimado_original?: number
+  valor_ajustado_manualmente?: boolean
   status: OcorrenciaStatus
   data_pagamento?: string
   valor_pago?: number
