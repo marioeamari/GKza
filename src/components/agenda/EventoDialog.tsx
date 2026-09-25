@@ -22,6 +22,7 @@ import { useAppContext } from '@/contexts/AppContext'
 import { agendaService } from '@/services/agenda'
 import { cadastrosService } from '@/services/cadastros'
 import { useToast } from '@/hooks/use-toast'
+import { getLocalDateStr } from '@/lib/format'
 import type { AgendaEvento, Pessoa, Empresa, AgendaEventoRecorrencia } from '@/types/domain'
 
 interface EventoDialogProps {
@@ -50,9 +51,9 @@ export function EventoDialog({
   const [pessoaId, setPessoaId] = useState<string>('')
   const [empresaId, setEmpresaId] = useState<string>('')
 
-  const [dataInicio, setDataInicio] = useState(new Date().toISOString().split('T')[0])
+  const [dataInicio, setDataInicio] = useState(getLocalDateStr())
   const [horaInicio, setHoraInicio] = useState('09:00')
-  const [dataFim, setDataFim] = useState(new Date().toISOString().split('T')[0])
+  const [dataFim, setDataFim] = useState(getLocalDateStr())
   const [horaFim, setHoraFim] = useState('10:00')
   const [diaInteiro, setDiaInteiro] = useState(false)
 
@@ -88,14 +89,14 @@ export function EventoDialog({
 
         if (evento.data_inicio) {
           const dIni = new Date(evento.data_inicio)
-          setDataInicio(dIni.toISOString().split('T')[0])
+          setDataInicio(getLocalDateStr(dIni))
           setHoraInicio(
             `${String(dIni.getHours()).padStart(2, '0')}:${String(dIni.getMinutes()).padStart(2, '0')}`,
           )
         }
         if (evento.data_fim) {
           const dFim = new Date(evento.data_fim)
-          setDataFim(dFim.toISOString().split('T')[0])
+          setDataFim(getLocalDateStr(dFim))
           setHoraFim(
             `${String(dFim.getHours()).padStart(2, '0')}:${String(dFim.getMinutes()).padStart(2, '0')}`,
           )
@@ -113,7 +114,7 @@ export function EventoDialog({
         setDiaInteiro(false)
         setCor('#DF5830')
 
-        const baseDate = initialDate || new Date().toISOString().split('T')[0]
+        const baseDate = initialDate || getLocalDateStr()
         setDataInicio(baseDate)
         setDataFim(baseDate)
         setHoraInicio('09:00')

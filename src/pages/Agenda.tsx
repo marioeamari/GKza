@@ -26,6 +26,7 @@ import { useAppContext } from '@/contexts/AppContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { useToast } from '@/hooks/use-toast'
+import { getLocalDateStr } from '@/lib/format'
 import type { AgendaEvento } from '@/types/domain'
 
 type ViewMode = 'mes' | 'semana' | 'dia' | 'lista'
@@ -231,7 +232,7 @@ export default function Agenda() {
       d.setDate(start.getDate() + i)
       return {
         date: d,
-        dateStr: d.toISOString().split('T')[0],
+        dateStr: getLocalDateStr(d),
         dayNumber: d.getDate(),
         dayName: ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][d.getDay()],
       }
@@ -251,7 +252,7 @@ export default function Agenda() {
     return map
   }, [filteredEventos])
 
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = getLocalDateStr()
 
   return (
     <div className="space-y-6">
@@ -502,7 +503,7 @@ export default function Agenda() {
                 </div>
 
                 {(() => {
-                  const dStr = currentDate.toISOString().split('T')[0]
+                  const dStr = getLocalDateStr(currentDate)
                   const list = eventosPorDia.get(dStr) || []
                   if (list.length === 0) {
                     return (

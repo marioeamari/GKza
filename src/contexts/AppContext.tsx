@@ -230,21 +230,33 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
         return true
       }
 
-      // Se o item não tem vínculo explícito por ID direto, verifica pelo contexto_tipo:
-      // Se for contexto pessoal e o grupo contém membros pessoa ou contas pessoais
+      // Se for contexto pessoal:
+      // - Match se o grupo contém a pessoa do item (verificado acima caso tenha pessoa)
+      // - Se o grupo tem pessoas e o item tem pessoa, só dá match se essa pessoa estiver no grupo
+      // - OU se o grupo NÃO possui membros do tipo empresa (grupo de contexto pessoal/familiar)
       if (item.contexto_tipo === 'pessoal') {
         if (activeContext.pessoaIds.length > 0) {
-          // Se o item tem pessoa especificada e ela NÃO está no grupo, não dá match
-          if (item.pessoa && !activeContext.pessoaIds.includes(item.pessoa)) {
-            return false
+          if (item.pessoa) {
+            return activeContext.pessoaIds.includes(item.pessoa)
           }
+          return true
+        }
+        // Se o grupo não tem membros empresa, considera-se grupo pessoal/familiar
+        if (activeContext.empresaIds.length === 0) {
           return true
         }
       }
 
-      // Se for despesa de empresa e o grupo contém empresas
-      if (item.contexto_tipo === 'empresa' && item.empresa) {
-        return activeContext.empresaIds.includes(item.empresa)
+      // Se for contexto empresa:
+      // - Match se o grupo contém essa empresa
+      if (item.contexto_tipo === 'empresa') {
+        if (item.empresa) {
+          return activeContext.empresaIds.includes(item.empresa)
+        }
+        // Se não tem empresa específica definida no item, dá match se o grupo tem empresas
+        if (activeContext.empresaIds.length > 0) {
+          return true
+        }
       }
 
       return matched

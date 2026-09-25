@@ -23,6 +23,7 @@ import { useAppContext } from '@/contexts/AppContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { useToast } from '@/hooks/use-toast'
+import { getLocalDateStr } from '@/lib/format'
 import type { MetaHabito, MetaHabitoRegistro, HabitoStatusRegistro } from '@/types/domain'
 
 export default function HabitosRotinas() {
@@ -40,7 +41,7 @@ export default function HabitosRotinas() {
   // Mês de navegação (visualização mensal)
   const [currentDate, setCurrentDate] = useState(() => new Date())
 
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], [])
+  const todayStr = useMemo(() => getLocalDateStr(), [])
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -88,7 +89,7 @@ export default function HabitosRotinas() {
   const habitosDeHoje = useMemo(() => {
     return filteredHabitos.filter((h) => {
       if (!h.ativo) return false
-      // Verifica se a data de início é <= hoje
+      // Verifica se a data de início é <= hoje no fuso local
       const dtIni = h.data_inicio ? h.data_inicio.split('T')[0] : ''
       if (dtIni && dtIni > todayStr) return false
       // Verifica se o dia da semana atual está programado

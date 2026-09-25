@@ -24,6 +24,7 @@ import { habitosService } from '@/services/habitos'
 import { agendaService } from '@/services/agenda'
 import { projetosTarefasService } from '@/services/projetosTarefas'
 import { useAppContext } from '@/contexts/AppContext'
+import { getLocalDateStr } from '@/lib/format'
 import type {
   MetaHabito,
   MetaHabitoRegistro,
@@ -44,7 +45,7 @@ export default function MetasAgendaHub() {
   const [metas, setMetas] = useState<MetaMeta[]>([])
   const [loading, setLoading] = useState(true)
 
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], [])
+  const todayStr = useMemo(() => getLocalDateStr(), [])
   const hojeDayOfWeek = new Date().getDay()
 
   const loadData = useCallback(async () => {

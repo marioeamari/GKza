@@ -21,6 +21,7 @@ import { useAppContext } from '@/contexts/AppContext'
 import { habitosService } from '@/services/habitos'
 import { cadastrosService } from '@/services/cadastros'
 import { useToast } from '@/hooks/use-toast'
+import { getLocalDateStr } from '@/lib/format'
 import type { MetaHabito, Pessoa, Empresa } from '@/types/domain'
 
 interface HabitoDialogProps {
@@ -51,7 +52,7 @@ export function HabitoDialog({ open, onOpenChange, habito, onSuccess }: HabitoDi
   const [empresaId, setEmpresaId] = useState<string>('')
   const [diasSemana, setDiasSemana] = useState<number[]>([1, 2, 3, 4, 5])
   const [horario, setHorario] = useState('')
-  const [dataInicio, setDataInicio] = useState(new Date().toISOString().split('T')[0])
+  const [dataInicio, setDataInicio] = useState(getLocalDateStr())
   const [cor, setCor] = useState('#DF5830')
   const [loading, setLoading] = useState(false)
 
@@ -77,11 +78,7 @@ export function HabitoDialog({ open, onOpenChange, habito, onSuccess }: HabitoDi
         setEmpresaId(habito.empresa || '')
         setDiasSemana(habito.dias_semana || [1, 2, 3, 4, 5])
         setHorario(habito.horario || '')
-        setDataInicio(
-          habito.data_inicio
-            ? habito.data_inicio.split('T')[0]
-            : new Date().toISOString().split('T')[0],
-        )
+        setDataInicio(habito.data_inicio ? habito.data_inicio.split('T')[0] : getLocalDateStr())
         setCor(habito.cor || '#DF5830')
       } else {
         setNome('')
@@ -93,7 +90,7 @@ export function HabitoDialog({ open, onOpenChange, habito, onSuccess }: HabitoDi
         setEmpresaId(activeContext.empresaIds[0] || '')
         setDiasSemana([1, 2, 3, 4, 5])
         setHorario('')
-        setDataInicio(new Date().toISOString().split('T')[0])
+        setDataInicio(getLocalDateStr())
         setCor('#DF5830')
       }
     }

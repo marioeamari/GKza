@@ -29,6 +29,7 @@ import { useAppContext } from '@/contexts/AppContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { useToast } from '@/hooks/use-toast'
+import { getLocalDateStr } from '@/lib/format'
 import type { Projeto, Tarefa, MetaMeta, TarefaEtapa } from '@/types/domain'
 
 export default function ProjetosTarefas() {
@@ -219,9 +220,7 @@ export default function ProjetosTarefas() {
   // Agendar tarefa na agenda
   const handleAgendarTarefa = (tarefa: Tarefa) => {
     setAgendandoTitulo(`Executar: ${tarefa.titulo}`)
-    setAgendandoData(
-      tarefa.prazo ? tarefa.prazo.split('T')[0] : new Date().toISOString().split('T')[0],
-    )
+    setAgendandoData(tarefa.prazo ? tarefa.prazo.split('T')[0] : getLocalDateStr())
     setAgendaDialogOpen(true)
   }
 
