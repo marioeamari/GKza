@@ -310,6 +310,16 @@ export function DespesaCompromissoDialog({
   const selectedConta = contas.find((c) => c.id === form.conta_padrao)
   const isSelectedContaCartao = selectedConta?.tipo === 'cartao' || form.secao === 'cartoes_credito'
 
+  // Alerta informativo: conta de cartão de crédito com método Pix/Boleto (fatura vs pagamento direto)
+  const avisoCartaoMetodoNaoCartao = useMemo(() => {
+    if (!isSelectedContaCartao || !selectedConta || !form.metodo_pagamento) return null
+    const selectedMetodo = metodosPagamento.find((m) => m.id === form.metodo_pagamento)
+    if (!selectedMetodo || selectedMetodo.tipo === 'cartao') return null
+
+    const metodoNome = selectedMetodo.nome || 'Pix/Boleto'
+    return `A conta "${selectedConta.nome}" é um cartão de crédito e o método selecionado é ${metodoNome} — se a intenção é pagar a fatura do cartão, tudo bem; se a intenção é pagamento direto, considere escolher uma conta bancária.`
+  }, [isSelectedContaCartao, selectedConta, form.metodo_pagamento, metodosPagamento])
+
   // Alerta de diferença de titular: a conta pertence a um titular diferente da obrigação da despesa?
   const titularidadeContaDiferente = useMemo(() => {
     if (!selectedConta) return null
@@ -481,18 +491,8 @@ export function DespesaCompromissoDialog({
       }
     }
 
-    // Validação de compatibilidade de Cartão de Crédito com método de pagamento
-    if (isSelectedContaCartao && selectedConta && form.metodo_pagamento) {
-      const selectedMetodo = metodosPagamento.find((m) => m.id === form.metodo_pagamento)
-      if (selectedMetodo && selectedMetodo.tipo !== 'cartao') {
-        toast({
-          variant: 'destructive',
-          title: 'Método de pagamento incompatível',
-          description: `A conta "${selectedConta.nome}" é um cartão de crédito. Não selecione métodos do tipo "${selectedMetodo.nome}" (ex: Pix/Boleto).`,
-        })
-        return
-      }
-    }
+    // Nota: A combinação de conta de cartão de crédito com método Pix/Boleto é permitida
+    // (fluxo de pagamento de fatura via Pix/Boleto). O aviso é apenas visual e não bloqueia o salvamento.
 
     setSubmitting(true)
     try {
@@ -1162,6 +1162,12 @@ export function DespesaCompromissoDialog({
                 <p className="text-[11px] text-muted-foreground">
                   Mantido separado da conta bancária/cartão.
                 </p>
+                {avisoCartaoMetodoNaoCartao && (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-500/10 p-2.5 text-xs text-amber-900">
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                    <p className="leading-relaxed">{avisoCartaoMetodoNaoCartao}</p>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1.5">

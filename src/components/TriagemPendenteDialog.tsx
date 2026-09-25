@@ -322,12 +322,7 @@ export function TriagemPendenteDialog({
       if (despForm.valor_estimado <= 0)
         nextErrors.despValor = 'Informe um valor maior que zero para a despesa.'
 
-      if (isSelectedDespContaCartao && selectedDespConta && despForm.metodo_pagamento) {
-        const selectedMetodo = metodosPagamento.find((m) => m.id === despForm.metodo_pagamento)
-        if (selectedMetodo && selectedMetodo.tipo !== 'cartao') {
-          nextErrors.despMetodo = `A conta "${selectedDespConta.nome}" é cartão de crédito. Não selecione método "${selectedMetodo.nome}".`
-        }
-      }
+      // Nota: Permitido combinar conta de cartão de crédito com método Pix/Boleto (fatura paga via Pix)
     }
 
     setErrors(nextErrors)
