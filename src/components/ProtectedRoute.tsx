@@ -17,9 +17,18 @@ export function ProtectedRoute() {
 }
 
 export function PublicOnlyRoute() {
-  const { user } = useAuth()
-  // As rotas públicas (/login, /cadastro, etc.) devem renderizar o formulário imediatamente.
-  // Nenhum estado de loading de inicialização deve bloquear a tela com spinner infinito.
+  const { user, loading } = useAuth()
+  // Enquanto verifica o token persistido inicial no authStore (authRefresh),
+  // se houver usuário/token válido guardando sessão, aguarda o loading breve
+  // em vez de piscar formulário ou redirecionar prematuramente.
+  // Contudo, se NÃO há token salvo no authStore, renderiza a tela de login imediatamente.
+  if (loading && user) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background">
+        <LoaderCircle className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
   if (user) return <Navigate to="/" replace />
   return <Outlet />
 }

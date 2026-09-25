@@ -109,13 +109,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } catch (err) {
             lastError = err
 
-            // Não tenta novamente se for erro de credenciais inválidas (400) ou usuário desativado
-            const isClientError =
+            // Identifica se é erro definitivo (ex: 400 credenciais inválidas, 403, 404, 429) ou usuário desativado
+            const isUnauthorized =
               err instanceof Error &&
               (err.message.includes('Este acesso está desativado') ||
-                err.message.includes('Failed to authenticate'))
+                err.message.includes('Failed to authenticate') ||
+                err.message.includes('400') ||
+                err.message.includes('403') ||
+                err.message.includes('429'))
 
-            if (isClientError || attempt === maxRetries) {
+            if (isUnauthorized || attempt === maxRetries) {
               throw err
             }
 

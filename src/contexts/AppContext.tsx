@@ -78,8 +78,12 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    loadGrupos()
-    loadEmpresas()
+    // Carrega grupos e empresas em segundo plano e nunca lança erro não capturado
+    let active = true
+    Promise.allSettled([loadGrupos(), loadEmpresas()]).catch(() => {})
+    return () => {
+      active = false
+    }
   }, [loadGrupos, loadEmpresas])
 
   // Recupera escolha persistida (localStorage)

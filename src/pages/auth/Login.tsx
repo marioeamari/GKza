@@ -22,21 +22,36 @@ export default function Login() {
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     setError('')
+    if (!email.trim()) {
+      setError('Informe seu e-mail.')
+      return
+    }
+    if (!password) {
+      setError('Informe sua senha.')
+      return
+    }
+
     setLoading(true)
     try {
-      // Permite tempo adequado considerando retry automático em caso de instabilidade
-      const loginPromise = login(email, password)
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(
+      // Timeout seguro de 12 segundos: se o servidor não responder ou a conexão falhar,
+      // interrompe a espera e exibe mensagem de erro clara, garantindo que o spinner pare.
+      let timeoutId: ReturnType<typeof setTimeout> | undefined
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
           () =>
             reject(
               new Error(
-                'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.',
+                'O servidor demorou para responder. Verifique sua conexão à internet e tente novamente.',
               ),
             ),
-          15000,
-        ),
-      )
+          12000,
+        )
+      })
+
+      const loginPromise = login(email, password).finally(() => {
+        if (timeoutId) clearTimeout(timeoutId)
+      })
+
       await Promise.race([loginPromise, timeoutPromise])
       const destination =
         (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/'

@@ -10,6 +10,9 @@ const messages: Record<string, string> = {
   'The value is invalid.': 'Valor inválido.',
   'The value is already in use.': 'Este valor já está cadastrado.',
   'Must be a valid email address.': 'Informe um e-mail válido.',
+  'Too Many Requests': 'Muitas tentativas em sequência. Aguarde alguns segundos e tente novamente.',
+  'Too many requests. Please try again later.':
+    'Muitas tentativas em sequência. Aguarde alguns segundos e tente novamente.',
 }
 
 export function isNetworkOrServerUnavailable(error: unknown): boolean {
@@ -47,8 +50,20 @@ export function apiMessage(
     return 'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.'
   }
 
-  if (!(error instanceof ClientResponseError))
-    return error instanceof Error ? error.message : fallback
+  if (!(error instanceof ClientResponseError)) {
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase()
+      if (msg.includes('too many requests') || msg.includes('429')) {
+        return 'Muitas tentativas consecutivas. Aguarde alguns instantes e tente novamente.'
+      }
+      return error.message
+    }
+    return fallback
+  }
+
+  if (error.status === 429) {
+    return 'Muitas tentativas consecutivas. Aguarde alguns instantes e tente novamente.'
+  }
 
   const responseMessage = typeof error.response?.message === 'string' ? error.response.message : ''
   if (messages[responseMessage]) return messages[responseMessage]
