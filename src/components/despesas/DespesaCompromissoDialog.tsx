@@ -309,18 +309,18 @@ export function DespesaCompromissoDialog({
   }, [form.titular_tipo, form.titular_empresa, form.titular_pessoa, empresas, pessoas])
 
   // Opções de contas para o select "Conta de pagamento prevista / Cartão":
-  // Lista TODAS as contas ativas cadastradas (bancaria, caixa, cartao, marketplace) ordenadas por nome,
-  // preservando a conta já vinculada no compromisso em edição mesmo se inativa.
+  // Lista contas ativas cadastradas (bancaria, caixa, cartao, marketplace) ordenadas por nome.
+  // Preserva a conta já vinculada no compromisso em edição apenas se houver compromisso existente sendo editado.
   const contasOptions = useMemo(() => {
     const list = contas.filter((c) => {
       if (c.ativa) return true
-      if (form.conta_padrao && c.id === form.conta_padrao) return true
+      if (compromisso && form.conta_padrao && c.id === form.conta_padrao) return true
       return false
     })
     return list
       .slice()
       .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }))
-  }, [contas, form.conta_padrao])
+  }, [contas, form.conta_padrao, compromisso])
 
   // Conta de pagamento selecionada
   const selectedConta = contas.find((c) => c.id === form.conta_padrao)

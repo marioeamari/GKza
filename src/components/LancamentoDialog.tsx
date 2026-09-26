@@ -236,10 +236,11 @@ export function LancamentoDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {contas
-                    .filter((item) => item.ativa || item.id === form.conta)
+                    .filter((item) => item.ativa || (lancamento && item.id === form.conta))
                     .map((item) => (
                       <SelectItem key={item.id} value={item.id}>
                         {item.nome}
+                        {!item.ativa ? ' (Inativa)' : ''}
                       </SelectItem>
                     ))}
                 </SelectContent>

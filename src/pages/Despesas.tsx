@@ -695,8 +695,8 @@ export default function Despesas() {
     [filteredOcorrencias],
   )
 
-  // Seção 3: Cartões de Crédito (Agrupados por Cartão)
-  const cartaoContas = useMemo(() => contas.filter((c) => c.tipo === 'cartao'), [contas])
+  // Seção 3: Cartões de Crédito (Agrupados por Cartão) — somente cartões ativos
+  const cartaoContas = useMemo(() => contas.filter((c) => c.tipo === 'cartao' && c.ativa), [contas])
 
   // Filtragem de todas as ocorrências de cartões (para histórico completo)
   const filteredCartaoOcorrenciasAll = useMemo(() => {
@@ -757,18 +757,20 @@ export default function Despesas() {
       }
     >()
 
-    // Inicializa todos os cartões cadastrados
+    // Inicializa todos os cartões cadastrados ativos
     cartaoContas.forEach((conta) => {
       map.set(conta.id, { conta, ocorrenciasMes: [], ocorrenciasTodas: [] })
     })
 
     // Ocorrências do mês
+    // Preserva o histórico: se houver ocorrência já gravada em conta de cartão inativa, exibe o cartão para não ocultar a despesa
     filteredOcorrencias
       .filter((oc) => oc.secao === 'cartoes_credito')
       .forEach((oc) => {
         const contaId =
           oc.conta || oc.expand?.compromisso?.conta_padrao || cartaoContas[0]?.id || 'unknown'
         if (!map.has(contaId)) {
+          // Se for uma conta conhecida (mesmo que inativa, pois há ocorrência vinculada) ou placeholder
           const found =
             contas.find((c) => c.id === contaId) ||
             ({
@@ -785,6 +787,7 @@ export default function Despesas() {
       })
 
     // Todas as ocorrências do cartão (histórico geral)
+    // Preserva o histórico: ocorrências já vinculadas continuam visíveis
     filteredCartaoOcorrenciasAll.forEach((oc) => {
       const contaId =
         oc.conta || oc.expand?.compromisso?.conta_padrao || cartaoContas[0]?.id || 'unknown'

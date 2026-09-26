@@ -1154,11 +1154,14 @@ export default function Categorias() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Nenhuma</SelectItem>
-                  {contas.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.nome} ({c.tipo})
-                    </SelectItem>
-                  ))}
+                  {contas
+                    .filter((c) => c.ativa || c.id === metodoForm.conta_padrao)
+                    .map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.nome}
+                        {!c.ativa ? ' (Inativa)' : ''}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>

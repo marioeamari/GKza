@@ -146,7 +146,7 @@ export function PagarFaturaDialog({
     }
   }
 
-  const contasPagadoras = contas.filter((c) => c.tipo !== 'cartao')
+  const contasPagadoras = contas.filter((c) => c.tipo !== 'cartao' && c.ativa)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

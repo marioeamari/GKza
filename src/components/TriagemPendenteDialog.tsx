@@ -291,17 +291,13 @@ export function TriagemPendenteDialog({
   )
 
   // Opções de contas para o select "Conta de pagamento prevista / Cartão" da despesa:
-  // Lista TODAS as contas ativas cadastradas ordenadas por nome, preservando a vinculada se inativa.
+  // Lista contas ativas cadastradas ordenadas por nome.
   const despContaOptions = useMemo(() => {
-    const list = contas.filter((c) => {
-      if (c.ativa) return true
-      if (despForm.conta_padrao && c.id === despForm.conta_padrao) return true
-      return false
-    })
+    const list = contas.filter((c) => c.ativa)
     return list
       .slice()
       .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }))
-  }, [contas, despForm.conta_padrao])
+  }, [contas])
 
   // Identificação do Titular da Despesa selecionado
   const titularSelecionado = useMemo(() => {
@@ -1058,11 +1054,13 @@ export function TriagemPendenteDialog({
                       <SelectValue placeholder="Selecione a conta" />
                     </SelectTrigger>
                     <SelectContent>
-                      {contas.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.nome} {c.bandeira ? `(${c.bandeira})` : ''}
-                        </SelectItem>
-                      ))}
+                      {contas
+                        .filter((c) => c.ativa)
+                        .map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.nome} {c.bandeira ? `(${c.bandeira})` : ''}
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                   {errors.lancConta && (

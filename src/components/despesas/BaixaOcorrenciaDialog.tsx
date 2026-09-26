@@ -75,21 +75,22 @@ export function BaixaOcorrenciaDialog({
             ? ocorrencia.data_pagamento.slice(0, 10)
             : new Date().toISOString().slice(0, 10),
         )
+        const linkedConta = ocorrencia.conta || ocorrencia.expand?.compromisso?.conta_padrao
         const defaultConta =
-          ocorrencia.conta ||
-          ocorrencia.expand?.compromisso?.conta_padrao ||
+          linkedConta ||
           contas.find((c) => c.ativa && c.tipo !== 'cartao')?.id ||
-          contas[0]?.id ||
+          contas.find((c) => c.ativa)?.id ||
           ''
         setContaId(defaultConta)
         setObservacoes(ocorrencia.observacoes || '')
       } else if (compromisso) {
         setValorPago(compromisso.valor_estimado || compromisso.valor_parcela || 0)
         setDataPagamento(new Date().toISOString().slice(0, 10))
+        const linkedConta = compromisso.conta_padrao
         const defaultConta =
-          compromisso.conta_padrao ||
+          linkedConta ||
           contas.find((c) => c.ativa && c.tipo !== 'cartao')?.id ||
-          contas[0]?.id ||
+          contas.find((c) => c.ativa)?.id ||
           ''
         setContaId(defaultConta)
         setObservacoes(compromisso.observacoes || '')
