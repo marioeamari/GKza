@@ -25,6 +25,49 @@ export interface Empresa extends RecordModel {
   observacoes: string
 }
 
+export interface Fornecedor extends RecordModel {
+  razao_social: string
+  nome_fantasia: string
+  cnpj?: string
+  cpf?: string
+  inscricao_estadual?: string
+  email?: string
+  telefone?: string
+  contato_nome?: string
+  endereco?: string
+  cep?: string
+  cidade?: string
+  uf?: string
+  site?: string
+  prazo_entrega_dias?: number
+  condicao_pagamento?: string
+  observacoes?: string
+}
+
+export interface FornecedorProduto extends RecordModel {
+  fornecedor: string
+  descricao: string
+  sku_fornecedor?: string
+  codigo_barras?: string
+  marca?: string
+  categoria?: string
+  unidade?: string
+  preco_custo_unitario: number
+  preco_ultima_compra?: number
+  embalagem?: string
+  peso_g?: number
+  comprimento_cm?: number
+  largura_cm?: number
+  altura_cm?: number
+  moeda?: string
+  ncm?: string
+  observacoes?: string
+  ativo?: boolean
+  expand?: {
+    fornecedor?: Fornecedor
+  }
+}
+
 export interface Pessoa extends RecordModel {
   nome: string
   cpf: string

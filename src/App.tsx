@@ -10,6 +10,7 @@ import Contas from '@/pages/Contas'
 import Dashboard from '@/pages/Dashboard'
 import Despesas from '@/pages/Despesas'
 import Empresas from '@/pages/Empresas'
+import Fornecedores from '@/pages/Fornecedores'
 import Lancamentos from '@/pages/Lancamentos'
 import Marketplaces from '@/pages/Marketplaces'
 import NotFound from '@/pages/NotFound'
@@ -55,8 +56,10 @@ export default function App() {
           <Route path="/cadastros" element={<Cadastros />} />
           <Route path="/cadastros/pessoas" element={<Pessoas />} />
           <Route path="/cadastros/empresas" element={<Empresas />} />
+          <Route path="/cadastros/fornecedores" element={<Fornecedores />} />
           <Route path="/empresas" element={<Empresas />} />
           <Route path="/pessoas" element={<Pessoas />} />
+          <Route path="/fornecedores" element={<Fornecedores />} />
           <Route path="/precificacao" element={<PrecificacaoHub />} />
           <Route path="/precificacao/dashboard" element={<PrecificacaoDashboard />} />
           <Route path="/precificacao/comparar" element={<PrecificacaoComparar />} />

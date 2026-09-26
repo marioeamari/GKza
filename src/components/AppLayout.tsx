@@ -25,6 +25,7 @@ import {
   ListTodo,
   HeartHandshake,
   Calculator,
+  Truck,
 } from 'lucide-react'
 import { ContextSelector } from '@/components/ContextSelector'
 
@@ -130,6 +131,7 @@ export function AppLayout() {
     { to: '/marketplaces', label: 'Marketplaces', icon: Store },
     { to: '/empresas', label: 'Empresas', icon: Building2 },
     { to: '/pessoas', label: 'Pessoas', icon: CircleUserRound },
+    { to: '/fornecedores', label: 'Fornecedores', icon: Truck },
     { to: '/configuracoes', label: 'Configurações', icon: Settings },
   ]
 
@@ -309,6 +311,7 @@ export function AppLayout() {
                 ['/contas', 'Contas financeiras & Cartões', WalletCards],
                 ['/categorias', 'Hub de Classificações', Tags],
                 ['/empresas', 'Empresas (CNPJ)', Building2],
+                ['/fornecedores', 'Fornecedores (PJ/PF)', Truck],
                 ['/pessoas', 'Pessoas (CPF)', CircleUserRound],
                 ['/cadastros', 'Central de Cadastros', Building2],
                 ['/configuracoes', 'Configurações', SlidersHorizontal],

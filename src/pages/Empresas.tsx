@@ -8,6 +8,7 @@ import {
   Plus,
   Search,
   Trash2,
+  Truck,
   UserRound,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -114,7 +115,13 @@ export default function Empresas() {
             <Button variant="outline" asChild className="hidden sm:inline-flex">
               <Link to="/pessoas">
                 <UserRound className="mr-2 h-4 w-4" />
-                Ver pessoas
+                Pessoas
+              </Link>
+            </Button>
+            <Button variant="outline" asChild className="hidden sm:inline-flex">
+              <Link to="/fornecedores">
+                <Truck className="mr-2 h-4 w-4" />
+                Fornecedores
               </Link>
             </Button>
             <PermissionButton allowed={writable} onClick={create}>

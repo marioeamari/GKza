@@ -7,6 +7,7 @@ import {
   Store,
   PackageCheck,
   ChevronRight,
+  Truck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -25,6 +26,7 @@ export function PrecHeader({ titulo, subtitulo, acoes }: PrecHeaderProps) {
     { to: '/precificacao/dashboard', label: 'Dashboard de Margens', icon: LayoutDashboard },
     { to: '/precificacao/produtos', label: 'Produtos & Custos', icon: PackageCheck },
     { to: '/precificacao/canais', label: 'Canais & Taxas', icon: Store },
+    { to: '/fornecedores', label: 'Fornecedores & Insumos', icon: Truck },
   ]
 
   return (

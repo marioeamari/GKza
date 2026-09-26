@@ -15,7 +15,7 @@ export const precificacaoService = {
     return pb.collection('prec_produtos').getFullList<PrecProdutoRecord>({
       filter: filter || '',
       sort: '-created',
-      expand: 'empresa',
+      expand: 'empresa,fornecedor,fornecedor_produto',
     })
   },
 

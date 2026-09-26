@@ -24,6 +24,10 @@ export interface PrecProdutoRecord {
   dimensao_largura_cm?: number
   dimensao_altura_cm?: number
   empresa?: string
+  fornecedor?: string
+  fornecedor_produto?: string
+  codigo_barras?: string
+  embalagem?: string
   sku_por_canal?: Array<{ canal: string; sku_externo: string }>
   composicao?: ItemComposicaoCusto[]
   custo_aquisicao_unitario?: number
@@ -38,6 +42,18 @@ export interface PrecProdutoRecord {
       id: string
       nome_fantasia: string
       razao_social: string
+    }
+    fornecedor?: {
+      id: string
+      nome_fantasia: string
+      razao_social: string
+      cnpj?: string
+    }
+    fornecedor_produto?: {
+      id: string
+      descricao: string
+      sku_fornecedor?: string
+      preco_custo_unitario: number
     }
   }
 }

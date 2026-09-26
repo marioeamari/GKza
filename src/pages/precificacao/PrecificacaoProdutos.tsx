@@ -6,9 +6,10 @@ import {
   Layers,
   Plus,
   Calculator,
-  Building2,
-  ArrowRight,
-  Boxes,
+  Truck,
+  Check,
+  Search,
+  Sparkles,
 } from 'lucide-react'
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -33,8 +34,9 @@ import {
 } from '@/components/ui/select'
 import { precificacaoService } from '@/services/precificacao'
 import { cadastrosService } from '@/services/cadastros'
-import { PrecKitRecord, PrecProdutoRecord } from '@/types/precificacao'
-import { Empresa } from '@/types/domain'
+import { fornecedoresService } from '@/services/fornecedores'
+import { PrecProdutoRecord } from '@/types/precificacao'
+import { Empresa, Fornecedor, FornecedorProduto } from '@/types/domain'
 import {
   calcularCustoBaseProduto,
   ItemComposicaoCusto,
@@ -50,26 +52,41 @@ export default function PrecificacaoProdutos() {
   const [loading, setLoading] = useState(true)
   const [produtos, setProdutos] = useState<PrecProdutoRecord[]>([])
   const [empresas, setEmpresas] = useState<Empresa[]>([])
+  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([])
 
   // Modal de Criação / Edição de Produto
   const [openDialog, setOpenDialog] = useState(false)
   const [produtoEditando, setProdutoEditando] = useState<Partial<PrecProdutoRecord> | null>(null)
   const [composicaoTemp, setComposicaoTemp] = useState<ItemComposicaoCusto[]>([])
 
-  // Modal de Gestão de Kit
-  const [openKitDialog, setOpenKitDialog] = useState(false)
-  const [kitPai, setKitPai] = useState<PrecProdutoRecord | null>(null)
-  const [kitRecord, setKitRecord] = useState<PrecKitRecord | null>(null)
+  // Controle de Fornecedor & Produto Vinculado para Revenda
+  const [fornecedorSelecionadoId, setFornecedorSelecionadoId] = useState<string>('')
+  const [produtosDoFornecedor, setProdutosDoFornecedor] = useState<FornecedorProduto[]>([])
+  const [loadingProdsForn, setLoadingProdsForn] = useState(false)
+  const [produtoFornSelecionadoId, setProdutoFornSelecionadoId] = useState<string>('')
+  const [buscaFornText, setBuscaFornText] = useState('')
+  const [buscaProdFornText, setBuscaProdFornText] = useState('')
+
+  // Rastreamento de quais campos foram preenchidos via fornecedor e se foram sobrescritos
+  const [origemValores, setOrigemValores] = useState<{
+    [campo: string]: {
+      herdado: boolean
+      valorOriginal?: string | number
+      sobrescrito?: boolean
+    }
+  }>({})
 
   async function carregar() {
     try {
       setLoading(true)
-      const [prods, emps] = await Promise.all([
+      const [prods, emps, forns] = await Promise.all([
         precificacaoService.listProdutos(),
         cadastrosService.listEmpresas(),
+        fornecedoresService.listFornecedores(),
       ])
       setProdutos(prods)
       setEmpresas(emps)
+      setFornecedores(forns)
     } catch (err) {
       console.error('Erro ao carregar produtos:', err)
     } finally {
@@ -81,6 +98,27 @@ export default function PrecificacaoProdutos() {
     carregar()
   }, [])
 
+  // Carrega produtos do fornecedor quando o fornecedor selecionado mudar
+  useEffect(() => {
+    if (fornecedorSelecionadoId) {
+      setLoadingProdsForn(true)
+      fornecedoresService
+        .listProdutosPorFornecedor(fornecedorSelecionadoId)
+        .then((items) => {
+          setProdutosDoFornecedor(items)
+        })
+        .catch(() => {
+          setProdutosDoFornecedor([])
+        })
+        .finally(() => {
+          setLoadingProdsForn(false)
+        })
+    } else {
+      setProdutosDoFornecedor([])
+      setProdutoFornSelecionadoId('')
+    }
+  }, [fornecedorSelecionadoId])
+
   function abrirNovoProduto() {
     setProdutoEditando({
       sku: '',
@@ -88,7 +126,15 @@ export default function PrecificacaoProdutos() {
       tipo: 'fabricacao_propria',
       status: 'ativo',
       unidade: 'un',
+      marca: '',
+      categoria: '',
+      codigo_barras: '',
+      embalagem: '',
       peso_g: 280,
+      dimensao_comprimento_cm: undefined,
+      dimensao_largura_cm: undefined,
+      dimensao_altura_cm: undefined,
+      custo_aquisicao_unitario: 0,
       custo_adicional_embalagem: 0.1,
       custo_etiqueta: 0.05,
       perda_pct: 10,
@@ -102,13 +148,116 @@ export default function PrecificacaoProdutos() {
         categoria_custo: 'material',
       },
     ])
+    setFornecedorSelecionadoId('')
+    setProdutoFornSelecionadoId('')
+    setBuscaFornText('')
+    setBuscaProdFornText('')
+    setOrigemValores({})
     setOpenDialog(true)
   }
 
   function abrirEditarProduto(p: PrecProdutoRecord) {
     setProdutoEditando(p)
     setComposicaoTemp(p.composicao || [])
+
+    // Inicializa seleção de fornecedor e produto vinculado se houver
+    const fornId = p.fornecedor || ''
+    const prodFornId = p.fornecedor_produto || ''
+    setFornecedorSelecionadoId(fornId)
+    setProdutoFornSelecionadoId(prodFornId)
+    setBuscaFornText('')
+    setBuscaProdFornText('')
+
+    // Se já havia vínculo salvo, marcar campos que casam como herdados
+    if (prodFornId) {
+      setOrigemValores({
+        sku: { herdado: true },
+        nome: { herdado: true },
+        custo_aquisicao_unitario: { herdado: true },
+        peso_g: { herdado: true },
+        dimensoes: { herdado: true },
+        marca: { herdado: true },
+        categoria: { herdado: true },
+        unidade: { herdado: true },
+        codigo_barras: { herdado: true },
+        embalagem: { herdado: true },
+      })
+    } else {
+      setOrigemValores({})
+    }
+
     setOpenDialog(true)
+  }
+
+  // Ao selecionar um produto do fornecedor, preenche automaticamente os campos que casam
+  function handleSelecionarProdutoFornecedor(fp: FornecedorProduto) {
+    setProdutoFornSelecionadoId(fp.id)
+
+    setProdutoEditando((prev) => {
+      const atual = prev || {}
+      return {
+        ...atual,
+        fornecedor: fornecedorSelecionadoId,
+        fornecedor_produto: fp.id,
+        // (a) Descrição / Nome
+        nome: fp.descricao || atual.nome || '',
+        // (b) SKU (sugerir sku_fornecedor se preenchido)
+        sku: fp.sku_fornecedor || atual.sku || '',
+        // (c) Custo de Aquisição Unitário
+        custo_aquisicao_unitario: fp.preco_custo_unitario ?? atual.custo_aquisicao_unitario ?? 0,
+        // (d) Peso (g)
+        peso_g: fp.peso_g ?? atual.peso_g ?? 0,
+        // (e) Dimensões (comprimento / largura / altura em cm)
+        dimensao_comprimento_cm: fp.comprimento_cm ?? atual.dimensao_comprimento_cm,
+        dimensao_largura_cm: fp.largura_cm ?? atual.dimensao_largura_cm,
+        dimensao_altura_cm: fp.altura_cm ?? atual.dimensao_altura_cm,
+        // (f) Marca e Categoria
+        marca: fp.marca || atual.marca || '',
+        categoria: fp.categoria || atual.categoria || '',
+        // (g) Unidade
+        unidade: fp.unidade || atual.unidade || 'un',
+        // (h) Código de barras e Embalagem
+        codigo_barras: fp.codigo_barras || atual.codigo_barras || '',
+        embalagem: fp.embalagem || atual.embalagem || '',
+      }
+    })
+
+    // Rastreia campos como herdados do cadastro do fornecedor
+    setOrigemValores({
+      sku: { herdado: true, valorOriginal: fp.sku_fornecedor || '' },
+      nome: { herdado: true, valorOriginal: fp.descricao || '' },
+      custo_aquisicao_unitario: { herdado: true, valorOriginal: fp.preco_custo_unitario },
+      peso_g: { herdado: true, valorOriginal: fp.peso_g ?? 0 },
+      dimensoes: {
+        herdado: true,
+        valorOriginal: `${fp.comprimento_cm || 0}x${fp.largura_cm || 0}x${fp.altura_cm || 0}`,
+      },
+      marca: { herdado: true, valorOriginal: fp.marca || '' },
+      categoria: { herdado: true, valorOriginal: fp.categoria || '' },
+      unidade: { herdado: true, valorOriginal: fp.unidade || 'un' },
+      codigo_barras: { herdado: true, valorOriginal: fp.codigo_barras || '' },
+      embalagem: { herdado: true, valorOriginal: fp.embalagem || '' },
+    })
+
+    toast({
+      title: 'Dados do produto carregados!',
+      description:
+        'Custo, peso, dimensões, SKU, marca e categoria foram preenchidos a partir do cadastro do fornecedor.',
+    })
+  }
+
+  // Registra sobrescrita manual pelo usuário caso ele altere um valor herdado
+  function marcarSobrescrita(campo: string) {
+    setOrigemValores((prev) => {
+      if (!prev[campo]?.herdado) return prev
+      return {
+        ...prev,
+        [campo]: {
+          ...prev[campo],
+          sobrescrito: true,
+        },
+      }
+    })
   }
 
   async function handleSalvarProduto(e: React.FormEvent) {
@@ -118,6 +267,10 @@ export default function PrecificacaoProdutos() {
     try {
       const payload: Partial<PrecProdutoRecord> = {
         ...produtoEditando,
+        fornecedor:
+          produtoEditando.tipo === 'revenda' ? fornecedorSelecionadoId || undefined : undefined,
+        fornecedor_produto:
+          produtoEditando.tipo === 'revenda' ? produtoFornSelecionadoId || undefined : undefined,
         composicao: composicaoTemp,
       }
 
@@ -134,7 +287,7 @@ export default function PrecificacaoProdutos() {
       }
       setOpenDialog(false)
       carregar()
-    } catch (err) {
+    } catch {
       toast({ variant: 'destructive', title: 'Erro ao salvar produto' })
     }
   }
@@ -145,16 +298,37 @@ export default function PrecificacaoProdutos() {
       await precificacaoService.deleteProduto(id)
       toast({ title: 'Produto removido com sucesso' })
       carregar()
-    } catch (err) {
+    } catch {
       toast({ variant: 'destructive', title: 'Erro ao excluir produto' })
     }
   }
+
+  // Filtragem de fornecedores e produtos vinculados na busca
+  const fornecedoresFiltrados = fornecedores.filter((f) => {
+    if (!buscaFornText.trim()) return true
+    const term = buscaFornText.toLocaleLowerCase('pt-BR')
+    return (
+      f.nome_fantasia.toLocaleLowerCase('pt-BR').includes(term) ||
+      f.razao_social.toLocaleLowerCase('pt-BR').includes(term) ||
+      (f.cnpj && f.cnpj.includes(term))
+    )
+  })
+
+  const produtosFornFiltrados = produtosDoFornecedor.filter((p) => {
+    if (!buscaProdFornText.trim()) return true
+    const term = buscaProdFornText.toLocaleLowerCase('pt-BR')
+    return (
+      p.descricao.toLocaleLowerCase('pt-BR').includes(term) ||
+      (p.sku_fornecedor && p.sku_fornecedor.toLocaleLowerCase('pt-BR').includes(term)) ||
+      (p.marca && p.marca.toLocaleLowerCase('pt-BR').includes(term))
+    )
+  })
 
   return (
     <div className="space-y-6">
       <PrecHeader
         titulo="Cadastro de Produtos, Custos & Kits"
-        subtitulo="Gestão das composições analíticas (C0..C12), perdas, despesas de compra e itens de kit"
+        subtitulo="Gestão das composições analíticas (C0..C12), produtos de revenda com fornecedor e kits"
         acoes={
           <Button className="bg-primary text-white font-bold" onClick={abrirNovoProduto}>
             <PackagePlus className="mr-1.5 h-4 w-4" />
@@ -199,7 +373,7 @@ export default function PrecificacaoProdutos() {
                 <tr className="border-y border-border bg-secondary/30 text-muted-foreground uppercase text-[10px] tracking-wider">
                   <th className="py-2.5 px-4 font-bold">Produto / SKU</th>
                   <th className="py-2.5 px-3 font-bold">Tipo</th>
-                  <th className="py-2.5 px-3 font-bold">Empresa</th>
+                  <th className="py-2.5 px-3 font-bold">Origem / Fornecedor</th>
                   <th className="py-2.5 px-3 font-bold">Peso / Medidas</th>
                   <th className="py-2.5 px-3 font-bold text-right">Custo Direto</th>
                   <th className="py-2.5 px-3 font-bold text-right">Custo Total</th>
@@ -221,6 +395,10 @@ export default function PrecificacaoProdutos() {
                     custo_adicional_embalagem: p.custo_adicional_embalagem,
                   })
 
+                  const nomeFornecedor =
+                    p.expand?.fornecedor?.nome_fantasia ||
+                    fornecedores.find((f) => f.id === p.fornecedor)?.nome_fantasia
+
                   return (
                     <tr key={p.id} className="hover:bg-secondary/20 transition-colors">
                       <td className="py-3 px-4">
@@ -238,9 +416,16 @@ export default function PrecificacaoProdutos() {
                           </div>
                           <div>
                             <span className="font-bold text-foreground block">{p.nome}</span>
-                            <span className="text-[10px] font-mono text-primary font-bold">
-                              SKU: {p.sku}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-mono text-primary font-bold">
+                                SKU: {p.sku}
+                              </span>
+                              {p.marca && (
+                                <span className="text-[10px] text-muted-foreground">
+                                  • {p.marca}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -252,11 +437,26 @@ export default function PrecificacaoProdutos() {
                       </td>
 
                       <td className="py-3 px-3 text-muted-foreground">
-                        {p.expand?.empresa?.nome_fantasia || 'Sem empresa'}
+                        {p.tipo === 'revenda' && nomeFornecedor ? (
+                          <div className="flex items-center gap-1.5">
+                            <Truck className="h-3.5 w-3.5 text-primary shrink-0" />
+                            <span className="font-medium text-foreground">{nomeFornecedor}</span>
+                          </div>
+                        ) : (
+                          <span>{p.expand?.empresa?.nome_fantasia || 'Sem empresa'}</span>
+                        )}
                       </td>
 
                       <td className="py-3 px-3 text-muted-foreground font-mono">
                         {p.peso_g ? `${p.peso_g}g` : '-'}
+                        {(p.dimensao_comprimento_cm ||
+                          p.dimensao_largura_cm ||
+                          p.dimensao_altura_cm) && (
+                          <span className="block text-[10px] text-muted-foreground/70">
+                            {p.dimensao_comprimento_cm || 0}x{p.dimensao_largura_cm || 0}x
+                            {p.dimensao_altura_cm || 0}cm
+                          </span>
+                        )}
                       </td>
 
                       <td className="py-3 px-3 text-right font-mono text-muted-foreground">
@@ -309,7 +509,7 @@ export default function PrecificacaoProdutos() {
 
       {/* DIALOG DE CRIAÇÃO / EDIÇÃO DE PRODUTO */}
       <Dialog open={openDialog} onOpenChange={setOpenDialog}>
-        <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
           <form onSubmit={handleSalvarProduto}>
             <DialogHeader>
               <DialogTitle>
@@ -322,33 +522,7 @@ export default function PrecificacaoProdutos() {
             </DialogHeader>
 
             <div className="space-y-4 py-3 text-xs">
-              {/* Identificação Geral */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label>SKU Único *</Label>
-                  <Input
-                    required
-                    placeholder="Ex: BLeve?, PA-03..."
-                    value={produtoEditando?.sku || ''}
-                    onChange={(e) =>
-                      setProdutoEditando((prev) => ({ ...prev, sku: e.target.value }))
-                    }
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label>Nome do Produto *</Label>
-                  <Input
-                    required
-                    placeholder="Ex: Toalhas (leve) Banho Infantil"
-                    value={produtoEditando?.nome || ''}
-                    onChange={(e) =>
-                      setProdutoEditando((prev) => ({ ...prev, nome: e.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-
+              {/* Seleção do Tipo de Custo */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1">
                   <Label>Tipo de Custo *</Label>
@@ -369,8 +543,8 @@ export default function PrecificacaoProdutos() {
                   </Select>
                 </div>
 
-                <div className="space-y-1">
-                  <Label>Empresa Responsável</Label>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label>Empresa Própria Responsável</Label>
                   <Select
                     value={produtoEditando?.empresa || 'nenhuma'}
                     onValueChange={(v) =>
@@ -393,20 +567,452 @@ export default function PrecificacaoProdutos() {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+
+              {/* SEÇÃO ESPECÍFICA: BUSCADOR DE FORNECEDOR E PRODUTO FORNECIDO (APENAS PARA REVENDA) */}
+              {produtoEditando?.tipo === 'revenda' && (
+                <div className="rounded-2xl border-2 border-primary/20 bg-primary/5 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Truck className="h-4 w-4 text-primary" />
+                      <span className="font-bold text-xs uppercase tracking-wider text-primary">
+                        Auto-Preenchimento via Fornecedor
+                      </span>
+                    </div>
+                    {produtoFornSelecionadoId && (
+                      <Badge className="bg-primary text-white text-[10px] font-bold">
+                        Vínculo ativo
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Selecione o fornecedor e o produto cadastrado para herdar automaticamente: custo
+                    de aquisição, dimensões, peso, descrição, SKU e embalagem.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    {/* (a) Busca de Fornecedor */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold flex items-center justify-between">
+                        <span>(a) Fornecedor Parceiro</span>
+                        <Link
+                          to="/fornecedores"
+                          target="_blank"
+                          className="text-[10px] text-primary hover:underline font-normal"
+                        >
+                          + Gerenciar fornecedores
+                        </Link>
+                      </Label>
+
+                      <Select
+                        value={fornecedorSelecionadoId || 'nenhum'}
+                        onValueChange={(v) => {
+                          const val = v === 'nenhum' ? '' : v
+                          setFornecedorSelecionadoId(val)
+                          setProdutoFornSelecionadoId('')
+                          setBuscaProdFornText('')
+                        }}
+                      >
+                        <SelectTrigger className="bg-white">
+                          <SelectValue placeholder="Escolha um fornecedor..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <div className="p-1 border-b border-border">
+                            <div className="relative">
+                              <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                              <Input
+                                placeholder="Filtrar fornecedor..."
+                                value={buscaFornText}
+                                onChange={(e) => setBuscaFornText(e.target.value)}
+                                className="h-8 pl-8 text-xs"
+                                onKeyDown={(e) => e.stopPropagation()}
+                              />
+                            </div>
+                          </div>
+                          <SelectItem value="nenhum">Nenhum / Entrada Manual</SelectItem>
+                          {fornecedoresFiltrados.map((f) => (
+                            <SelectItem key={f.id} value={f.id}>
+                              {f.nome_fantasia} {f.cnpj ? `(${f.cnpj})` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* (b) Busca de Produtos Vinculados ao Fornecedor */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold">
+                        (b) Produto do Fornecedor
+                        {loadingProdsForn && ' (carregando...)'}
+                      </Label>
+
+                      <Select
+                        disabled={!fornecedorSelecionadoId || loadingProdsForn}
+                        value={produtoFornSelecionadoId || 'nenhum'}
+                        onValueChange={(v) => {
+                          if (v === 'nenhum') {
+                            setProdutoFornSelecionadoId('')
+                            return
+                          }
+                          const prodForn = produtosDoFornecedor.find((item) => item.id === v)
+                          if (prodForn) handleSelecionarProdutoFornecedor(prodForn)
+                        }}
+                      >
+                        <SelectTrigger className="bg-white">
+                          <SelectValue
+                            placeholder={
+                              !fornecedorSelecionadoId
+                                ? 'Selecione primeiro o fornecedor...'
+                                : produtosDoFornecedor.length === 0
+                                  ? 'Fornecedor sem produtos'
+                                  : 'Escolha o produto para herdar...'
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <div className="p-1 border-b border-border">
+                            <div className="relative">
+                              <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                              <Input
+                                placeholder="Filtrar por nome ou SKU..."
+                                value={buscaProdFornText}
+                                onChange={(e) => setBuscaProdFornText(e.target.value)}
+                                className="h-8 pl-8 text-xs"
+                                onKeyDown={(e) => e.stopPropagation()}
+                              />
+                            </div>
+                          </div>
+                          <SelectItem value="nenhum">Selecione para auto-preencher</SelectItem>
+                          {produtosFornFiltrados.map((fp) => (
+                            <SelectItem key={fp.id} value={fp.id}>
+                              {fp.descricao} — {formatCurrency(fp.preco_custo_unitario)}
+                              {fp.sku_fornecedor ? ` [SKU: ${fp.sku_fornecedor}]` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {fornecedorSelecionadoId &&
+                    produtosDoFornecedor.length === 0 &&
+                    !loadingProdsForn && (
+                      <div className="p-2.5 rounded-xl border border-dashed border-primary/30 bg-white/60 text-center">
+                        <p className="text-[11px] text-muted-foreground">
+                          Este fornecedor ainda não tem produtos cadastrados.
+                        </p>
+                        <Button
+                          asChild
+                          size="sm"
+                          variant="link"
+                          className="h-6 text-xs text-primary p-0 mt-1"
+                        >
+                          <Link to="/fornecedores" target="_blank">
+                            Abrir /fornecedores e cadastrar produtos deste parceiro
+                          </Link>
+                        </Button>
+                      </div>
+                    )}
+                </div>
+              )}
+
+              {/* Identificação Geral do Produto */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <Label>SKU Único *</Label>
+                    {origemValores.sku?.herdado && (
+                      <span className="text-[10px] text-primary flex items-center gap-1 font-semibold">
+                        <Sparkles className="h-3 w-3" />
+                        {origemValores.sku.sobrescrito ? 'Sobrescrito' : 'Herdado do fornecedor'}
+                      </span>
+                    )}
+                  </div>
+                  <Input
+                    required
+                    placeholder="Ex: BLeve?, PA-03..."
+                    className={
+                      origemValores.sku?.herdado
+                        ? origemValores.sku.sobrescrito
+                          ? 'border-amber-400 bg-amber-50/30'
+                          : 'border-primary/40 bg-primary/5'
+                        : ''
+                    }
+                    value={produtoEditando?.sku || ''}
+                    onChange={(e) => {
+                      marcarSobrescrita('sku')
+                      setProdutoEditando((prev) => ({ ...prev, sku: e.target.value }))
+                    }}
+                  />
+                </div>
 
                 <div className="space-y-1">
-                  <Label>Peso do Produto (g)</Label>
+                  <div className="flex items-center justify-between">
+                    <Label>Nome do Produto *</Label>
+                    {origemValores.nome?.herdado && (
+                      <span className="text-[10px] text-primary flex items-center gap-1 font-semibold">
+                        <Sparkles className="h-3 w-3" />
+                        {origemValores.nome.sobrescrito ? 'Sobrescrito' : 'Herdado do fornecedor'}
+                      </span>
+                    )}
+                  </div>
+                  <Input
+                    required
+                    placeholder="Ex: Toalhas (leve) Banho Infantil"
+                    className={
+                      origemValores.nome?.herdado
+                        ? origemValores.nome.sobrescrito
+                          ? 'border-amber-400 bg-amber-50/30'
+                          : 'border-primary/40 bg-primary/5'
+                        : ''
+                    }
+                    value={produtoEditando?.nome || ''}
+                    onChange={(e) => {
+                      marcarSobrescrita('nome')
+                      setProdutoEditando((prev) => ({ ...prev, nome: e.target.value }))
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Marca, Categoria e Unidade */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <Label>Marca</Label>
+                    {origemValores.marca?.herdado && (
+                      <span className="text-[9px] text-primary font-semibold">
+                        {origemValores.marca.sobrescrito ? 'Editado' : 'Herdado'}
+                      </span>
+                    )}
+                  </div>
+                  <Input
+                    placeholder="Ex: Karsten"
+                    className={
+                      origemValores.marca?.herdado
+                        ? origemValores.marca.sobrescrito
+                          ? 'border-amber-400 bg-amber-50/30'
+                          : 'border-primary/40 bg-primary/5'
+                        : ''
+                    }
+                    value={produtoEditando?.marca || ''}
+                    onChange={(e) => {
+                      marcarSobrescrita('marca')
+                      setProdutoEditando((prev) => ({ ...prev, marca: e.target.value }))
+                    }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <Label>Categoria</Label>
+                    {origemValores.categoria?.herdado && (
+                      <span className="text-[9px] text-primary font-semibold">
+                        {origemValores.categoria.sobrescrito ? 'Editado' : 'Herdado'}
+                      </span>
+                    )}
+                  </div>
+                  <Input
+                    placeholder="Ex: Cama e Banho"
+                    className={
+                      origemValores.categoria?.herdado
+                        ? origemValores.categoria.sobrescrito
+                          ? 'border-amber-400 bg-amber-50/30'
+                          : 'border-primary/40 bg-primary/5'
+                        : ''
+                    }
+                    value={produtoEditando?.categoria || ''}
+                    onChange={(e) => {
+                      marcarSobrescrita('categoria')
+                      setProdutoEditando((prev) => ({ ...prev, categoria: e.target.value }))
+                    }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <Label>Unidade de Medida</Label>
+                    {origemValores.unidade?.herdado && (
+                      <span className="text-[9px] text-primary font-semibold">
+                        {origemValores.unidade.sobrescrito ? 'Editado' : 'Herdado'}
+                      </span>
+                    )}
+                  </div>
+                  <Input
+                    placeholder="un, cx, kg..."
+                    className={
+                      origemValores.unidade?.herdado
+                        ? origemValores.unidade.sobrescrito
+                          ? 'border-amber-400 bg-amber-50/30'
+                          : 'border-primary/40 bg-primary/5'
+                        : ''
+                    }
+                    value={produtoEditando?.unidade || 'un'}
+                    onChange={(e) => {
+                      marcarSobrescrita('unidade')
+                      setProdutoEditando((prev) => ({ ...prev, unidade: e.target.value }))
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Código de barras e Embalagem */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <Label>Código de Barras (EAN)</Label>
+                    {origemValores.codigo_barras?.herdado && (
+                      <span className="text-[9px] text-primary font-semibold">
+                        {origemValores.codigo_barras.sobrescrito ? 'Editado' : 'Herdado'}
+                      </span>
+                    )}
+                  </div>
+                  <Input
+                    placeholder="789..."
+                    className={
+                      origemValores.codigo_barras?.herdado
+                        ? origemValores.codigo_barras.sobrescrito
+                          ? 'border-amber-400 bg-amber-50/30'
+                          : 'border-primary/40 bg-primary/5'
+                        : ''
+                    }
+                    value={produtoEditando?.codigo_barras || ''}
+                    onChange={(e) => {
+                      marcarSobrescrita('codigo_barras')
+                      setProdutoEditando((prev) => ({ ...prev, codigo_barras: e.target.value }))
+                    }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <Label>Embalagem Padrão</Label>
+                    {origemValores.embalagem?.herdado && (
+                      <span className="text-[9px] text-primary font-semibold">
+                        {origemValores.embalagem.sobrescrito ? 'Editado' : 'Herdado'}
+                      </span>
+                    )}
+                  </div>
+                  <Input
+                    placeholder="Caixa, saco plástico..."
+                    className={
+                      origemValores.embalagem?.herdado
+                        ? origemValores.embalagem.sobrescrito
+                          ? 'border-amber-400 bg-amber-50/30'
+                          : 'border-primary/40 bg-primary/5'
+                        : ''
+                    }
+                    value={produtoEditando?.embalagem || ''}
+                    onChange={(e) => {
+                      marcarSobrescrita('embalagem')
+                      setProdutoEditando((prev) => ({ ...prev, embalagem: e.target.value }))
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Peso e Dimensões */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <Label>Peso (gramas)</Label>
+                    {origemValores.peso_g?.herdado && (
+                      <span className="text-[9px] text-primary font-semibold">
+                        {origemValores.peso_g.sobrescrito ? 'Editado' : 'Herdado'}
+                      </span>
+                    )}
+                  </div>
                   <Input
                     type="number"
                     min="0"
                     placeholder="Ex: 280"
+                    className={
+                      origemValores.peso_g?.herdado
+                        ? origemValores.peso_g.sobrescrito
+                          ? 'border-amber-400 bg-amber-50/30'
+                          : 'border-primary/40 bg-primary/5'
+                        : ''
+                    }
                     value={produtoEditando?.peso_g ?? ''}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      marcarSobrescrita('peso_g')
                       setProdutoEditando((prev) => ({
                         ...prev,
                         peso_g: parseFloat(e.target.value) || 0,
                       }))
+                    }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label>Comprimento (cm)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="Ex: 20"
+                    className={
+                      origemValores.dimensoes?.herdado
+                        ? origemValores.dimensoes.sobrescrito
+                          ? 'border-amber-400 bg-amber-50/30'
+                          : 'border-primary/40 bg-primary/5'
+                        : ''
                     }
+                    value={produtoEditando?.dimensao_comprimento_cm ?? ''}
+                    onChange={(e) => {
+                      marcarSobrescrita('dimensoes')
+                      setProdutoEditando((prev) => ({
+                        ...prev,
+                        dimensao_comprimento_cm: parseFloat(e.target.value) || 0,
+                      }))
+                    }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label>Largura (cm)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="Ex: 15"
+                    className={
+                      origemValores.dimensoes?.herdado
+                        ? origemValores.dimensoes.sobrescrito
+                          ? 'border-amber-400 bg-amber-50/30'
+                          : 'border-primary/40 bg-primary/5'
+                        : ''
+                    }
+                    value={produtoEditando?.dimensao_largura_cm ?? ''}
+                    onChange={(e) => {
+                      marcarSobrescrita('dimensoes')
+                      setProdutoEditando((prev) => ({
+                        ...prev,
+                        dimensao_largura_cm: parseFloat(e.target.value) || 0,
+                      }))
+                    }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label>Altura (cm)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="Ex: 8"
+                    className={
+                      origemValores.dimensoes?.herdado
+                        ? origemValores.dimensoes.sobrescrito
+                          ? 'border-amber-400 bg-amber-50/30'
+                          : 'border-primary/40 bg-primary/5'
+                        : ''
+                    }
+                    value={produtoEditando?.dimensao_altura_cm ?? ''}
+                    onChange={(e) => {
+                      marcarSobrescrita('dimensoes')
+                      setProdutoEditando((prev) => ({
+                        ...prev,
+                        dimensao_altura_cm: parseFloat(e.target.value) || 0,
+                      }))
+                    }}
                   />
                 </div>
               </div>
@@ -510,23 +1116,42 @@ export default function PrecificacaoProdutos() {
                 </div>
               )}
 
-              {/* Seção Específica: Revenda */}
+              {/* Seção Específica: Revenda (Custo de Aquisição) */}
               {produtoEditando?.tipo === 'revenda' && (
                 <div className="rounded-xl border border-border p-3 space-y-3 bg-secondary/10">
                   <div className="space-y-1">
-                    <Label>Custo de Aquisição Unitário (R$)</Label>
+                    <div className="flex items-center justify-between">
+                      <Label className="font-bold">Custo de Aquisição Unitário (R$) *</Label>
+                      {origemValores.custo_aquisicao_unitario?.herdado && (
+                        <span className="text-[10px] text-primary flex items-center gap-1 font-semibold">
+                          <Sparkles className="h-3 w-3" />
+                          {origemValores.custo_aquisicao_unitario.sobrescrito
+                            ? 'Valor sobrescrito pelo usuário'
+                            : 'Herdado do cadastro do fornecedor'}
+                        </span>
+                      )}
+                    </div>
                     <Input
                       type="number"
                       step="0.01"
+                      min="0"
                       required
                       placeholder="0.00"
+                      className={
+                        origemValores.custo_aquisicao_unitario?.herdado
+                          ? origemValores.custo_aquisicao_unitario.sobrescrito
+                            ? 'border-amber-400 bg-amber-50/30'
+                            : 'border-primary/40 bg-primary/5 font-bold'
+                          : ''
+                      }
                       value={produtoEditando?.custo_aquisicao_unitario ?? 0}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        marcarSobrescrita('custo_aquisicao_unitario')
                         setProdutoEditando((prev) => ({
                           ...prev,
                           custo_aquisicao_unitario: parseFloat(e.target.value) || 0,
                         }))
-                      }
+                      }}
                     />
                   </div>
                 </div>
@@ -535,7 +1160,7 @@ export default function PrecificacaoProdutos() {
               {/* Custos Adicionais Globais: Embalagem, Etiqueta e Perda */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-t border-border pt-3">
                 <div className="space-y-1">
-                  <Label>Embalagem (R$)</Label>
+                  <Label>Embalagem Adicional (R$)</Label>
                   <Input
                     type="number"
                     step="0.01"
@@ -589,6 +1214,7 @@ export default function PrecificacaoProdutos() {
                 Cancelar
               </Button>
               <Button type="submit" className="bg-primary text-white font-bold">
+                <Check className="mr-1.5 h-4 w-4" />
                 Salvar Produto
               </Button>
             </DialogFooter>
