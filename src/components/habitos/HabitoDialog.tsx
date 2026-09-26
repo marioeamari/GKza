@@ -20,6 +20,7 @@ import {
 import { useAppContext } from '@/contexts/AppContext'
 import { habitosService } from '@/services/habitos'
 import { cadastrosService } from '@/services/cadastros'
+import { EntidadeContextoWarning } from '@/components/EntidadeContextoWarning'
 import { useToast } from '@/hooks/use-toast'
 import { getLocalDateStr } from '@/lib/format'
 import type { MetaHabito, Pessoa, Empresa } from '@/types/domain'
@@ -83,11 +84,18 @@ export function HabitoDialog({ open, onOpenChange, habito, onSuccess }: HabitoDi
       } else {
         setNome('')
         setDescricao('')
-        const defaultTipo =
-          activeContext.hasEmpresas && !activeContext.hasPessoas ? 'empresa' : 'pessoal'
+        // Define o contexto padrão baseado na visão ativa do usuário
+        let defaultTipo: 'pessoal' | 'empresa' = 'pessoal'
+        if (activeContext.isAll) {
+          defaultTipo = 'pessoal'
+        } else if (activeContext.hasEmpresas && !activeContext.hasPessoas) {
+          defaultTipo = 'empresa'
+        } else {
+          defaultTipo = 'pessoal'
+        }
         setContextoTipo(defaultTipo)
-        setPessoaId(activeContext.pessoaIds[0] || '')
-        setEmpresaId(activeContext.empresaIds[0] || '')
+        setPessoaId(defaultTipo === 'pessoal' ? activeContext.pessoaIds[0] || '' : '')
+        setEmpresaId(defaultTipo === 'empresa' ? activeContext.empresaIds[0] || '' : '')
         setDiasSemana([1, 2, 3, 4, 5])
         setHorario('')
         setDataInicio(getLocalDateStr())
@@ -215,6 +223,24 @@ export function HabitoDialog({ open, onOpenChange, habito, onSuccess }: HabitoDi
               )}
             </div>
           </div>
+
+          {contextoTipo === 'empresa' && empresaId && empresaId !== 'nenhuma' && (
+            <EntidadeContextoWarning
+              tipo="empresa"
+              entidadeId={empresaId}
+              empresas={empresas}
+              className="mt-1"
+            />
+          )}
+
+          {contextoTipo === 'pessoal' && pessoaId && pessoaId !== 'nenhuma' && (
+            <EntidadeContextoWarning
+              tipo="pessoa"
+              entidadeId={pessoaId}
+              pessoas={pessoas}
+              className="mt-1"
+            />
+          )}
 
           <div className="space-y-2">
             <Label>Dias de Execução na Semana *</Label>

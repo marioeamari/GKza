@@ -25,6 +25,9 @@ export interface ActiveContextValue {
   contaIds: string[]
   // IDs de todas as contas vinculadas a pelo menos um grupo de contexto (para identificar órfãs)
   linkedContaIds: string[]
+  // IDs de todas as empresas e pessoas vinculadas a pelo menos um grupo de contexto
+  linkedEmpresaIds: string[]
+  linkedPessoaIds: string[]
   // Flags para compatibilidade com código existente
   isAll: boolean
   /** Se o grupo tiver vínculo com pessoa ou for modo pessoal legado */
@@ -154,7 +157,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
   const empresaIds = currentGroup?.empresas.map((e) => e.id) || []
   const contaIds = currentGroup?.contas.map((c) => c.id) || []
 
-  // Conjunto e lista de todos os IDs de conta vinculados a pelo menos um grupo
+  // Conjunto e lista de todos os IDs de conta, empresa e pessoa vinculados a pelo menos um grupo
   const linkedContaIds = useMemo(() => {
     const set = new Set<string>()
     for (const g of grupos) {
@@ -166,6 +169,30 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
   }, [grupos])
 
   const linkedContaIdsSet = useMemo(() => new Set(linkedContaIds), [linkedContaIds])
+
+  const linkedEmpresaIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const g of grupos) {
+      for (const e of g.empresas) {
+        set.add(e.id)
+      }
+    }
+    return Array.from(set)
+  }, [grupos])
+
+  const linkedEmpresaIdsSet = useMemo(() => new Set(linkedEmpresaIds), [linkedEmpresaIds])
+
+  const linkedPessoaIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const g of grupos) {
+      for (const p of g.pessoas) {
+        set.add(p.id)
+      }
+    }
+    return Array.from(set)
+  }, [grupos])
+
+  const linkedPessoaIdsSet = useMemo(() => new Set(linkedPessoaIds), [linkedPessoaIds])
 
   // Constrói objeto de contexto ativo
   const activeContext: ActiveContextValue = useMemo(() => {
@@ -194,6 +221,8 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
         empresaIds,
         contaIds,
         linkedContaIds,
+        linkedEmpresaIds,
+        linkedPessoaIds,
         isAll: false,
         hasPessoas: pessoaIds.length > 0,
         hasEmpresas: empresaIds.length > 0,
@@ -211,12 +240,23 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
       empresaIds: [],
       contaIds: [],
       linkedContaIds,
+      linkedEmpresaIds,
+      linkedPessoaIds,
       isAll: true,
       hasPessoas: true,
       hasEmpresas: true,
       type: 'all',
     }
-  }, [isGroupActive, currentGroup, pessoaIds, empresaIds, contaIds, linkedContaIds])
+  }, [
+    isGroupActive,
+    currentGroup,
+    pessoaIds,
+    empresaIds,
+    contaIds,
+    linkedContaIds,
+    linkedEmpresaIds,
+    linkedPessoaIds,
+  ])
 
   /**
    * Helper unificado de correspondência de contexto:
@@ -266,6 +306,23 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      // Rede de segurança para Empresa: se o item está vinculado a uma empresa que NÃO pertence
+      // a NENHUM grupo de contexto (órfã), não pode sumir em todas as visões de grupo.
+      if (item.empresa && !linkedEmpresaIdsSet.has(item.empresa)) {
+        // Se o grupo ativo for empresarial ou misto, ou se nenhum grupo tem a empresa,
+        // exibe para não deixar o registro órfão invisível.
+        if (activeContext.hasEmpresas || activeContext.empresaIds.length === 0) {
+          return true
+        }
+      }
+
+      // Rede de segurança para Pessoa: se a pessoa não pertence a nenhum grupo de contexto (órfã)
+      if (item.pessoa && !linkedPessoaIdsSet.has(item.pessoa)) {
+        if (activeContext.hasPessoas || activeContext.pessoaIds.length === 0) {
+          return true
+        }
+      }
+
       // Se for contexto pessoal:
       // - Match se o grupo contém a pessoa do item (verificado acima caso tenha pessoa)
       // - Se o grupo tem pessoas e o item tem pessoa, só dá match se essa pessoa estiver no grupo
@@ -297,7 +354,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
 
       return matched
     },
-    [activeContext, linkedContaIdsSet],
+    [activeContext, linkedContaIdsSet, linkedEmpresaIdsSet, linkedPessoaIdsSet],
   )
 
   return (

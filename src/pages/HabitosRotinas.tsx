@@ -27,13 +27,16 @@ import { getLocalDateStr } from '@/lib/format'
 import type { MetaHabito, MetaHabitoRegistro, HabitoStatusRegistro } from '@/types/domain'
 
 export default function HabitosRotinas() {
-  const { matchesContext } = useAppContext()
+  const { matchesContext, activeContext, setContextAll } = useAppContext()
   const { user } = useAuth()
   const { toast } = useToast()
 
   const [habitos, setHabitos] = useState<MetaHabito[]>([])
   const [registros, setRegistros] = useState<MetaHabitoRegistro[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Filtro de segmento na visualização: 'all' | 'pessoal' | 'empresa'
+  const [segmentFilter, setSegmentFilter] = useState<'all' | 'pessoal' | 'empresa'>('all')
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingHabito, setEditingHabito] = useState<MetaHabito | null>(null)
@@ -64,16 +67,37 @@ export default function HabitosRotinas() {
     loadData()
   }, [loadData])
 
-  // Filtra hábitos pelo contexto ativo
+  // Filtra hábitos pelo contexto ativo e pelo segmento selecionado
   const filteredHabitos = useMemo(() => {
-    return habitos.filter((h) =>
+    return habitos.filter((h) => {
+      // Filtro de segmento local (Todos / Pessoal / Empresa)
+      if (segmentFilter !== 'all' && h.contexto_tipo !== segmentFilter) {
+        return false
+      }
+
+      // Se o usuário está navegando em uma visão com contexto específico,
+      // aplica matchesContext
+      return matchesContext({
+        contexto_tipo: h.contexto_tipo,
+        pessoa: h.pessoa,
+        empresa: h.empresa,
+      })
+    })
+  }, [habitos, matchesContext, segmentFilter])
+
+  // Identifica hábitos que existem mas estão ocultos devido ao filtro do contexto ativo
+  const totalHabitosNoSistema = habitos.length
+  const habitosOcultosPeloContexto = useMemo(() => {
+    if (activeContext.isAll) return 0
+    const visiveisSemSegmento = habitos.filter((h) =>
       matchesContext({
         contexto_tipo: h.contexto_tipo,
         pessoa: h.pessoa,
         empresa: h.empresa,
       }),
-    )
-  }, [habitos, matchesContext])
+    ).length
+    return totalHabitosNoSistema - visiveisSemSegmento
+  }, [habitos, matchesContext, activeContext.isAll, totalHabitosNoSistema])
 
   // Mapeia registros por chave `habitoId_data`
   const regMap = useMemo(() => {
@@ -225,19 +249,81 @@ export default function HabitosRotinas() {
         title="Hábitos & Rotinas"
         description="Acompanhe sua disciplina diária, registre execuções e visualize seu progresso mensal."
       >
-        {can(user?.role, 'writeFinance') && (
-          <Button
-            onClick={() => {
-              setEditingHabito(null)
-              setDialogOpen(true)
-            }}
-            className="bg-primary hover:bg-primary/90 text-white gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Novo Hábito
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Seletor rápido de segmento (Todos / Pessoal / PJ) */}
+          <div className="flex items-center bg-muted/60 p-0.5 rounded-lg border border-border text-xs">
+            <button
+              type="button"
+              onClick={() => setSegmentFilter('all')}
+              className={`px-2.5 py-1 rounded-md font-medium transition ${
+                segmentFilter === 'all'
+                  ? 'bg-white shadow-xs text-foreground font-bold'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Todos ({habitos.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSegmentFilter('pessoal')}
+              className={`px-2.5 py-1 rounded-md font-medium transition ${
+                segmentFilter === 'pessoal'
+                  ? 'bg-white shadow-xs text-blue-700 font-bold'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Pessoal (CPF)
+            </button>
+            <button
+              type="button"
+              onClick={() => setSegmentFilter('empresa')}
+              className={`px-2.5 py-1 rounded-md font-medium transition ${
+                segmentFilter === 'empresa'
+                  ? 'bg-white shadow-xs text-emerald-700 font-bold'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Empresa (CNPJ)
+            </button>
+          </div>
+
+          {can(user?.role, 'writeFinance') && (
+            <Button
+              onClick={() => {
+                setEditingHabito(null)
+                setDialogOpen(true)
+              }}
+              className="bg-primary hover:bg-primary/90 text-white gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              Novo Hábito
+            </Button>
+          )}
+        </div>
       </PageHeader>
+
+      {/* BANNER INFORMATIVO SE HOUVER HÁBITOS OCULTOS PELO CONTEXTO ATIVO */}
+      {habitosOcultosPeloContexto > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl border border-primary/20 bg-primary/5 text-xs text-foreground/80">
+          <div>
+            <span className="font-semibold text-foreground">
+              Visualizando contexto: {activeContext.label}
+            </span>
+            <span className="text-muted-foreground ml-1.5">
+              ({filteredHabitos.length} visíveis · {habitosOcultosPeloContexto} oculto(s) por
+              pertencerem a outros contextos ou empresas).
+            </span>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={setContextAll}
+            className="h-7 text-xs border-primary/30 text-primary hover:bg-primary/10 shrink-0"
+          >
+            Ver todos os hábitos
+          </Button>
+        </div>
+      )}
 
       {/* SEÇÃO 1: ITENS DE HOJE */}
       <Card className="border-border/60 shadow-xs">

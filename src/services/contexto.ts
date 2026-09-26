@@ -143,4 +143,42 @@ export const contextoService = {
     }
     return contextoService.addMembro(grupoId, 'conta', contaId)
   },
+
+  /**
+   * Vincula uma empresa a um grupo específico caso ainda não esteja vinculada (idempotente).
+   */
+  linkEmpresaToGrupo: async (
+    empresaId: string,
+    grupoId: string,
+  ): Promise<ContextoGrupoMembro | null> => {
+    if (!empresaId || !grupoId) return null
+    const existing = await pb
+      .collection<ContextoGrupoMembro>('contexto_grupo_membros')
+      .getFullList({
+        filter: `grupo = '${grupoId}' && tipo = 'empresa' && empresa = '${empresaId}'`,
+      })
+    if (existing.length > 0) {
+      return existing[0]
+    }
+    return contextoService.addMembro(grupoId, 'empresa', empresaId)
+  },
+
+  /**
+   * Vincula uma pessoa a um grupo específico caso ainda não esteja vinculada (idempotente).
+   */
+  linkPessoaToGrupo: async (
+    pessoaId: string,
+    grupoId: string,
+  ): Promise<ContextoGrupoMembro | null> => {
+    if (!pessoaId || !grupoId) return null
+    const existing = await pb
+      .collection<ContextoGrupoMembro>('contexto_grupo_membros')
+      .getFullList({
+        filter: `grupo = '${grupoId}' && tipo = 'pessoa' && pessoa = '${pessoaId}'`,
+      })
+    if (existing.length > 0) {
+      return existing[0]
+    }
+    return contextoService.addMembro(grupoId, 'pessoa', pessoaId)
+  },
 }
