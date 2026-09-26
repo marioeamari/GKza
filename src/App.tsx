@@ -19,6 +19,11 @@ import MetasAgendaHub from '@/pages/MetasAgendaHub'
 import HabitosRotinas from '@/pages/HabitosRotinas'
 import Agenda from '@/pages/Agenda'
 import ProjetosTarefas from '@/pages/ProjetosTarefas'
+import PrecificacaoHub from '@/pages/precificacao/PrecificacaoHub'
+import PrecificacaoDashboard from '@/pages/precificacao/PrecificacaoDashboard'
+import PrecificacaoComparar from '@/pages/precificacao/PrecificacaoComparar'
+import PrecificacaoCanais from '@/pages/precificacao/PrecificacaoCanais'
+import PrecificacaoProdutos from '@/pages/precificacao/PrecificacaoProdutos'
 import ConfirmEmail from '@/pages/auth/ConfirmEmail'
 import ForgotPassword from '@/pages/auth/ForgotPassword'
 import Login from '@/pages/auth/Login'
@@ -52,6 +57,11 @@ export default function App() {
           <Route path="/cadastros/empresas" element={<Empresas />} />
           <Route path="/empresas" element={<Empresas />} />
           <Route path="/pessoas" element={<Pessoas />} />
+          <Route path="/precificacao" element={<PrecificacaoHub />} />
+          <Route path="/precificacao/dashboard" element={<PrecificacaoDashboard />} />
+          <Route path="/precificacao/comparar" element={<PrecificacaoComparar />} />
+          <Route path="/precificacao/canais" element={<PrecificacaoCanais />} />
+          <Route path="/precificacao/produtos" element={<PrecificacaoProdutos />} />
           <Route path="/metas-agenda" element={<MetasAgendaHub />} />
           <Route path="/habitos" element={<HabitosRotinas />} />
           <Route path="/agenda" element={<Agenda />} />

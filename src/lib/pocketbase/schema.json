@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-26T17:16:45.503Z",
+  "generatedAt": "2026-09-26T17:44:03.344Z",
   "collections": [
     {
       "name": "users",
@@ -2741,6 +2741,697 @@
         "CREATE INDEX idx_caixa_ofertas_data ON caixa_ofertas (data)",
         "CREATE INDEX idx_caixa_ofertas_tipo ON caixa_ofertas (tipo)",
         "CREATE INDEX idx_caixa_ofertas_ref ON caixa_ofertas (referencia_oferta)"
+      ]
+    },
+    {
+      "name": "prec_produtos",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "sku",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "marca",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "categoria",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "tipo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["fabricacao_propria", "revenda", "kit"]
+        },
+        {
+          "name": "imagem",
+          "type": "file",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "unidade",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["ativo", "inativo", "rascunho"]
+        },
+        {
+          "name": "peso_g",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dimensao_comprimento_cm",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dimensao_largura_cm",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dimensao_altura_cm",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "empresa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "empresas"
+        },
+        {
+          "name": "sku_por_canal",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "composicao",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "custo_aquisicao_unitario",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "despesas_compra",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "custo_adicional_embalagem",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "custo_etiqueta",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "perda_pct",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "qtd_produzida",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "qtd_por_kit",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_prec_prod_sku ON prec_produtos (sku)",
+        "CREATE INDEX idx_prec_prod_empresa ON prec_produtos (empresa)",
+        "CREATE INDEX idx_prec_prod_status ON prec_produtos (status)"
+      ]
+    },
+    {
+      "name": "prec_kits",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "produto_pai",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "prec_produtos"
+        },
+        {
+          "name": "itens",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "custos_adicionais",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": ["CREATE UNIQUE INDEX idx_prec_kits_pai ON prec_kits (produto_pai)"]
+    },
+    {
+      "name": "prec_canais",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "tipo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["site_proprio", "marketplace"]
+        },
+        {
+          "name": "ativo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "programas_frete",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "formas_pagamento",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "vigencia",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "cor",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ordem",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_prec_canais_nome ON prec_canais (nome)",
+        "CREATE INDEX idx_prec_canais_ativo ON prec_canais (ativo)"
+      ]
+    },
+    {
+      "name": "prec_canal_modalidades",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "canal",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "prec_canais"
+        },
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "formas_pagamento",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "prazo_recebimento_dias",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ativo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": ["CREATE INDEX idx_prec_mod_canal ON prec_canal_modalidades (canal)"]
+    },
+    {
+      "name": "prec_taxas",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "canal",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "prec_canais"
+        },
+        {
+          "name": "modalidade",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "prec_canal_modalidades"
+        },
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "base_calculo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": [
+            "preco_anunciado",
+            "preco_pago_cliente",
+            "prestacao_fixa",
+            "peso",
+            "faixa_preco"
+          ]
+        },
+        {
+          "name": "tipo_valor",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["percentual", "fixo"]
+        },
+        {
+          "name": "valor",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "condicao",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "responsavel",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["vendedor", "marketplace"]
+        },
+        {
+          "name": "tipo_regra",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": [
+            "comissao",
+            "tarifa_fixa",
+            "transacao",
+            "frete",
+            "subsidio",
+            "servico",
+            "operacao",
+            "afiliado",
+            "campanha",
+            "pagamento",
+            "cupom",
+            "desconto_pix",
+            "cashback",
+            "anuncios",
+            "reserva_devolucao"
+          ]
+        },
+        {
+          "name": "financiado_por",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["vendedor", "marketplace"]
+        },
+        {
+          "name": "vigencia_inicio",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "vigencia_fim",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "status_conferencia",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["pendente_conferencia", "conferido"]
+        },
+        {
+          "name": "data_conferencia",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_prec_taxas_canal ON prec_taxas (canal)",
+        "CREATE INDEX idx_prec_taxas_mod ON prec_taxas (modalidade)",
+        "CREATE INDEX idx_prec_taxas_status ON prec_taxas (status_conferencia)"
+      ]
+    },
+    {
+      "name": "prec_perfis_tributarios",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "escopo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["empresa", "produto", "operacao"]
+        },
+        {
+          "name": "empresa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "empresas"
+        },
+        {
+          "name": "produto",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "prec_produtos"
+        },
+        {
+          "name": "aliquota_das_pct",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "aliquota_icms_pct",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "outros",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "vigencia",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_prec_trib_empresa ON prec_perfis_tributarios (empresa)",
+        "CREATE INDEX idx_prec_trib_prod ON prec_perfis_tributarios (produto)"
+      ]
+    },
+    {
+      "name": "prec_precificacoes",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "produto",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "prec_produtos"
+        },
+        {
+          "name": "empresa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "empresas"
+        },
+        {
+          "name": "canal",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "prec_canais"
+        },
+        {
+          "name": "modalidade",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "prec_canal_modalidades"
+        },
+        {
+          "name": "versao",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "premissas",
+          "type": "json",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "resultado",
+          "type": "json",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["rascunho", "aprovada", "desatualizada"]
+        },
+        {
+          "name": "custo_snapshot",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "taxas_snapshot",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "aprovado_por",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "aprovado_em",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "preco_aprovado",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_prec_sim_prod ON prec_precificacoes (produto)",
+        "CREATE INDEX idx_prec_sim_canal ON prec_precificacoes (canal)",
+        "CREATE INDEX idx_prec_sim_status ON prec_precificacoes (status)"
       ]
     }
   ]

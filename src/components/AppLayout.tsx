@@ -24,6 +24,7 @@ import {
   Target,
   ListTodo,
   HeartHandshake,
+  Calculator,
 } from 'lucide-react'
 import { ContextSelector } from '@/components/ContextSelector'
 
@@ -118,6 +119,7 @@ export function AppLayout() {
     },
     { to: '/despesas', label: 'Despesas', icon: Receipt },
     { to: '/lancamentos', label: 'Lançamentos', icon: BadgeDollarSign },
+    { to: '/precificacao', label: 'Precificação', icon: Calculator },
     { to: '/metas-agenda', label: 'Metas & Agenda', icon: Target },
     { to: '/habitos', label: 'Hábitos & Rotinas', icon: CalendarCheck2 },
     { to: '/agenda', label: 'Agenda', icon: CalendarDays },
@@ -297,6 +299,7 @@ export function AppLayout() {
             </SheetHeader>
             <div className="mt-6 grid gap-2">
               {[
+                ['/precificacao', 'Precificação & Margens', Calculator],
                 ['/metas-agenda', 'Painel Metas & Agenda', Target],
                 ['/habitos', 'Hábitos & Rotinas', CalendarCheck2],
                 ['/agenda', 'Agenda de Compromissos', CalendarDays],
