@@ -137,6 +137,8 @@ export function AppLayout() {
   // Contagem em tempo real de registros pendentes do Telegram
   useEffect(() => {
     let active = true
+    let unsubscribeFn: (() => Promise<void>) | undefined
+
     const fetchCount = () => {
       telegramPendentesService
         .countPendentes()
@@ -148,19 +150,23 @@ export function AppLayout() {
 
     fetchCount()
 
-    let unsubscribeFn: (() => Promise<void>) | undefined
-    pb.collection('telegram_registros_pendentes')
-      .subscribe('*', () => {
-        fetchCount()
-      })
-      .then((unsub) => {
-        if (!active) {
-          unsub().catch(() => {})
-        } else {
-          unsubscribeFn = unsub
-        }
-      })
-      .catch(() => {})
+    // Só assina se houver token válido no authStore para evitar requisições realtime rejeitadas
+    if (pb.authStore.isValid) {
+      pb.collection('telegram_registros_pendentes')
+        .subscribe('*', () => {
+          fetchCount()
+        })
+        .then((unsub) => {
+          if (!active) {
+            unsub().catch(() => {})
+          } else {
+            unsubscribeFn = unsub
+          }
+        })
+        .catch((err) => {
+          console.debug('Realtime telegram_registros_pendentes indisponível:', err)
+        })
+    }
 
     return () => {
       active = false

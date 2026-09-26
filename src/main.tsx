@@ -8,18 +8,21 @@ import { Toaster } from '@/components/ui/toaster'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { AppContextProvider } from '@/contexts/AppContext'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
-      <AuthProvider>
-        <AppContextProvider>
-          <TooltipProvider delayDuration={250}>
-            <App />
-            <Toaster />
-          </TooltipProvider>
-        </AppContextProvider>
-      </AuthProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <AppContextProvider>
+            <TooltipProvider delayDuration={250}>
+              <App />
+              <Toaster />
+            </TooltipProvider>
+          </AppContextProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   </StrictMode>,
 )

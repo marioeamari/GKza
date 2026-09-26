@@ -65,19 +65,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }, 4000)
 
-    refreshUser()
-      .catch(() => {
-        pb.authStore.clear()
+    // Tenta validar a sessão com até 2 tentativas rápidas.
+    // Em caso de erro de rede ou timeout, NÃO apaga o authStore caso ainda seja sintaticamente válido;
+    // mantém o usuário em modo local/degradado para permitir navegação sem travar em spinner infinito.
+    const initializeAuth = async () => {
+      if (!pb.authStore.isValid) {
         if (mounted) {
           setUser(null)
-        }
-      })
-      .finally(() => {
-        clearTimeout(safetyTimeout)
-        if (mounted) {
           setLoading(false)
         }
-      })
+        return
+      }
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await refreshUser()
+          break
+        } catch (err: unknown) {
+          const isNetworkError =
+            !navigator.onLine ||
+            (err instanceof Error &&
+              (err.message.includes('Failed to fetch') ||
+                err.message.includes('NetworkError') ||
+                err.message.includes('Tempo limite excedido') ||
+                err.name === 'AbortError'))
+
+          // Se for erro definitivo (401, 403, conta desativada), limpa a sessão
+          const isDefinitiveAuthError =
+            err instanceof Error &&
+            (err.message.includes('401') ||
+              err.message.includes('403') ||
+              err.message.includes('Este acesso está desativado'))
+
+          if (isDefinitiveAuthError) {
+            pb.authStore.clear()
+            if (mounted) setUser(null)
+            break
+          }
+
+          if (attempt === 0 && isNetworkError) {
+            // Pequeno intervalo antes de uma segunda tentativa rápida
+            await new Promise((r) => setTimeout(r, 600))
+            continue
+          }
+
+          // Se persistir erro transitório de rede/offline, mantém os dados gravados no authStore
+          console.warn('Não foi possível validar a sessão no servidor. Mantendo sessão local:', err)
+          if (mounted && pb.authStore.record) {
+            setUser(pb.authStore.record as UserRecord)
+          }
+          break
+        }
+      }
+
+      if (mounted) {
+        setLoading(false)
+      }
+    }
+
+    initializeAuth().finally(() => {
+      clearTimeout(safetyTimeout)
+      if (mounted) {
+        setLoading(false)
+      }
+    })
 
     return () => {
       mounted = false

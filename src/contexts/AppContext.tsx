@@ -72,10 +72,14 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
 
   const loadGrupos = useCallback(async () => {
     try {
-      const list = await contextoService.listGruposComMembros()
+      const listPromise = contextoService.listGruposComMembros()
+      const timeoutPromise = new Promise<ContextoGrupoComMembros[]>((_, reject) =>
+        setTimeout(() => reject(new Error('Timeout ao carregar grupos')), 6000),
+      )
+      const list = await Promise.race([listPromise, timeoutPromise])
       setGrupos(list)
     } catch (err) {
-      console.warn('Erro ao carregar grupos de contexto:', err)
+      console.warn('Erro ou timeout ao carregar grupos de contexto:', err)
     } finally {
       setLoadingGrupos(false)
     }
@@ -83,19 +87,33 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
 
   const loadEmpresas = useCallback(async () => {
     try {
-      const list = await cadastrosService.listEmpresas()
+      const listPromise = cadastrosService.listEmpresas()
+      const timeoutPromise = new Promise<Empresa[]>((_, reject) =>
+        setTimeout(() => reject(new Error('Timeout ao carregar empresas')), 6000),
+      )
+      const list = await Promise.race([listPromise, timeoutPromise])
       setEmpresas(list)
     } catch (err) {
-      console.warn('Erro ao carregar empresas:', err)
+      console.warn('Erro ou timeout ao carregar empresas:', err)
     }
   }, [])
 
   useEffect(() => {
-    // Carrega grupos e empresas em segundo plano e nunca lança erro não capturado
-    let active = true
-    Promise.allSettled([loadGrupos(), loadEmpresas()]).catch(() => {})
+    // Carrega grupos e empresas em segundo plano e nunca trava a inicialização
+    // Garante que loadingGrupos vá para false em no máximo 5 segundos
+    const fallbackTimer = setTimeout(() => {
+      setLoadingGrupos(false)
+    }, 5000)
+
+    Promise.allSettled([loadGrupos(), loadEmpresas()])
+      .catch(() => {})
+      .finally(() => {
+        clearTimeout(fallbackTimer)
+        setLoadingGrupos(false)
+      })
+
     return () => {
-      active = false
+      clearTimeout(fallbackTimer)
     }
   }, [loadGrupos, loadEmpresas])
 

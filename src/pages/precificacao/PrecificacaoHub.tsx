@@ -30,24 +30,40 @@ export default function PrecificacaoHub() {
   const [canais, setCanais] = useState<PrecCanalRecord[]>([])
 
   useEffect(() => {
+    let active = true
+
     async function loadData() {
       try {
         setLoading(true)
-        const [prods, precs, chans] = await Promise.all([
+        // Timeout de proteção para nunca deixar o skeleton ou loading travado indefinidamente
+        const dataPromise = Promise.all([
           precificacaoService.listProdutos(),
           precificacaoService.listPrecificacoes(),
           precificacaoService.listCanais(),
         ])
-        setProdutos(prods)
-        setPrecificacoes(precs)
-        setCanais(chans)
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout ao buscar dados de precificação')), 7000),
+        )
+
+        const [prods, precs, chans] = await Promise.race([dataPromise, timeoutPromise])
+        if (active) {
+          setProdutos(prods || [])
+          setPrecificacoes(precs || [])
+          setCanais(chans || [])
+        }
       } catch (err) {
-        console.error('Erro ao carregar dados do Hub:', err)
+        console.warn('Erro ou timeout ao carregar dados do Hub de precificação:', err)
       } finally {
-        setLoading(false)
+        if (active) {
+          setLoading(false)
+        }
       }
     }
     loadData()
+
+    return () => {
+      active = false
+    }
   }, [])
 
   const totalSKUs = produtos.length
