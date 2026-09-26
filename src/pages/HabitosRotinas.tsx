@@ -136,6 +136,15 @@ export default function HabitosRotinas() {
       return
     }
 
+    if (dataStr > todayStr) {
+      toast({
+        title: 'Ação não permitida',
+        description: 'Não é possível registrar hábitos em datas futuras.',
+        variant: 'destructive',
+      })
+      return
+    }
+
     try {
       // Otimistic update
       const key = `${habitoId}_${dataStr}`
@@ -599,35 +608,64 @@ export default function HabitosRotinas() {
                           const dayOfWeek = diaDate.getDay()
                           const isProgramado = diasProg.includes(dayOfWeek)
                           const isBeforeStart = dtIni ? diaStr < dtIni : false
+                          const isFuture = diaStr > todayStr
+                          const isDisabled = !isProgramado || isBeforeStart || isFuture
 
                           const reg = regMap.get(`${habito.id}_${diaStr}`)
                           const status = reg?.status
 
                           // Estilo da célula
-                          let bg = 'bg-muted/20 text-muted-foreground/30'
+                          let bg = 'bg-muted/15 text-muted-foreground/30'
                           let icon = null
 
                           if (isProgramado && !isBeforeStart) {
                             if (status === 'feito') {
-                              bg = 'bg-emerald-500 text-white font-bold'
+                              bg = isFuture
+                                ? 'bg-emerald-500/40 text-white/70 font-semibold'
+                                : 'bg-emerald-500 text-white font-bold'
                               icon = '✓'
                             } else if (status === 'nao_feito') {
-                              bg = 'bg-rose-500 text-white font-bold'
+                              bg = isFuture
+                                ? 'bg-rose-500/40 text-white/70 font-semibold'
+                                : 'bg-rose-500 text-white font-bold'
                               icon = '✕'
                             } else if (status === 'dispensado') {
-                              bg = 'bg-amber-400 text-white font-bold'
+                              bg = isFuture
+                                ? 'bg-amber-400/40 text-white/70 font-semibold'
+                                : 'bg-amber-400 text-white font-bold'
                               icon = '—'
+                            } else if (isFuture) {
+                              bg =
+                                'bg-muted/30 border border-dashed border-border/40 text-transparent'
                             } else {
                               bg =
                                 'bg-white border border-dashed border-border text-transparent hover:border-primary'
                             }
                           }
 
+                          let cellTitle = `${diaStr}: `
+                          if (isFuture) {
+                            cellTitle += 'Data futura (bloqueada para registro)'
+                          } else if (isBeforeStart) {
+                            cellTitle += 'Data anterior ao início do hábito'
+                          } else if (!isProgramado) {
+                            cellTitle += 'Dia não programado'
+                          } else if (status) {
+                            cellTitle +=
+                              status === 'feito'
+                                ? 'Cumprido (Feito)'
+                                : status === 'nao_feito'
+                                  ? 'Não realizado'
+                                  : 'Dispensado'
+                          } else {
+                            cellTitle += 'Pendente (clique para registrar)'
+                          }
+
                           return (
                             <td key={dia} className="p-1 text-center">
                               <button
                                 type="button"
-                                disabled={!isProgramado || isBeforeStart}
+                                disabled={isDisabled}
                                 onClick={() => {
                                   // Alterna status: pendente -> feito -> nao_feito -> dispensado -> pendente
                                   const nextStatus: HabitoStatusRegistro =
@@ -639,11 +677,13 @@ export default function HabitosRotinas() {
                                   handleSetStatus(habito.id, diaStr, nextStatus)
                                 }}
                                 className={`h-6 w-6 rounded flex items-center justify-center mx-auto text-[10px] transition-transform ${bg} ${
-                                  isProgramado && !isBeforeStart
-                                    ? 'cursor-pointer hover:scale-110'
-                                    : 'cursor-not-allowed opacity-40'
+                                  !isDisabled
+                                    ? 'cursor-pointer hover:scale-110 shadow-2xs'
+                                    : isFuture
+                                      ? 'cursor-not-allowed opacity-35 hover:opacity-35'
+                                      : 'cursor-not-allowed opacity-25 hover:opacity-25'
                                 }`}
-                                title={`${diaStr}: ${status || (isProgramado ? 'Pendente' : 'Não programado')}`}
+                                title={cellTitle}
                               >
                                 {icon}
                               </button>
