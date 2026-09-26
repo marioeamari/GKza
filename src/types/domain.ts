@@ -47,6 +47,7 @@ export interface Fornecedor extends RecordModel {
 export interface FornecedorProduto extends RecordModel {
   fornecedor: string
   descricao: string
+  imagem?: string
   sku_fornecedor?: string
   codigo_barras?: string
   marca?: string

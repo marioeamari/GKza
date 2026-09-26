@@ -1,5 +1,15 @@
-import { useEffect, useState } from 'react'
-import { LoaderCircle, PackagePlus, Pencil, Plus, Save, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import {
+  Camera,
+  Image as ImageIcon,
+  LoaderCircle,
+  PackagePlus,
+  Pencil,
+  Plus,
+  Save,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -98,6 +108,10 @@ export function FornecedorDialog({
   const [prodForm, setProdForm] = useState(initialProduto)
   const [prodErrors, setProdErrors] = useState<Record<string, string>>({})
   const [savingProd, setSavingProd] = useState(false)
+  const [imagemFile, setImagemFile] = useState<File | null>(null)
+  const [imagemPreview, setImagemPreview] = useState<string | null>(null)
+  const [removerImagem, setRemoverImagem] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Tipo de documento (CNPJ ou CPF)
   const [tipoDoc, setTipoDoc] = useState<'cnpj' | 'cpf'>('cnpj')
@@ -267,6 +281,10 @@ export function FornecedorDialog({
     setEditingProduto(null)
     setProdForm(initialProduto)
     setProdErrors({})
+    setImagemFile(null)
+    setImagemPreview(null)
+    setRemoverImagem(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
     setProdutoDialog(true)
   }
 
@@ -299,7 +317,52 @@ export function FornecedorDialog({
       ativo: p.ativo !== false,
     })
     setProdErrors({})
+    setImagemFile(null)
+    setRemoverImagem(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    if (p.imagem) {
+      setImagemPreview(fornecedoresService.getProdutoImageUrl(p, '200x200'))
+    } else {
+      setImagemPreview(null)
+    }
     setProdutoDialog(true)
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validar tipo
+    if (!file.type.startsWith('image/')) {
+      toast({
+        variant: 'destructive',
+        title: 'Arquivo inválido',
+        description: 'Selecione um arquivo de imagem (PNG, JPG, WEBP, etc.).',
+      })
+      return
+    }
+
+    // Validar tamanho (~5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        variant: 'destructive',
+        title: 'Imagem muito grande',
+        description: 'A imagem deve ter no máximo 5MB.',
+      })
+      return
+    }
+
+    setImagemFile(file)
+    setRemoverImagem(false)
+    const previewUrl = URL.createObjectURL(file)
+    setImagemPreview(previewUrl)
+  }
+
+  function handleRemoverImagem() {
+    setImagemFile(null)
+    setImagemPreview(null)
+    setRemoverImagem(true)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   async function handleSaveProduto(e: React.FormEvent) {
@@ -327,36 +390,54 @@ export function FornecedorDialog({
 
     setSavingProd(true)
     try {
-      const payload: Partial<FornecedorProduto> = {
-        fornecedor: record.id,
-        descricao: prodForm.descricao.trim(),
-        sku_fornecedor: prodForm.sku_fornecedor.trim() || undefined,
-        codigo_barras: prodForm.codigo_barras.trim() || undefined,
-        marca: prodForm.marca.trim() || undefined,
-        categoria: prodForm.categoria.trim() || undefined,
-        unidade: prodForm.unidade.trim() || 'un',
-        preco_custo_unitario: custo,
-        preco_ultima_compra: prodForm.preco_ultima_compra
-          ? parseFloat(prodForm.preco_ultima_compra.replace(',', '.'))
-          : undefined,
-        embalagem: prodForm.embalagem.trim() || undefined,
-        peso_g: prodForm.peso_g ? parseFloat(prodForm.peso_g.replace(',', '.')) : undefined,
-        comprimento_cm: prodForm.comprimento_cm
-          ? parseFloat(prodForm.comprimento_cm.replace(',', '.'))
-          : undefined,
-        largura_cm: prodForm.largura_cm
-          ? parseFloat(prodForm.largura_cm.replace(',', '.'))
-          : undefined,
-        altura_cm: prodForm.altura_cm
-          ? parseFloat(prodForm.altura_cm.replace(',', '.'))
-          : undefined,
-        moeda: prodForm.moeda.trim() || 'BRL',
-        ncm: prodForm.ncm.trim() || undefined,
-        observacoes: prodForm.observacoes.trim() || undefined,
-        ativo: prodForm.ativo,
+      // Montar FormData para suportar upload de arquivo ou limpeza do campo
+      const formData = new FormData()
+      formData.append('fornecedor', record.id)
+      formData.append('descricao', prodForm.descricao.trim())
+      if (prodForm.sku_fornecedor.trim())
+        formData.append('sku_fornecedor', prodForm.sku_fornecedor.trim())
+      if (prodForm.codigo_barras.trim())
+        formData.append('codigo_barras', prodForm.codigo_barras.trim())
+      if (prodForm.marca.trim()) formData.append('marca', prodForm.marca.trim())
+      if (prodForm.categoria.trim()) formData.append('categoria', prodForm.categoria.trim())
+      formData.append('unidade', prodForm.unidade.trim() || 'un')
+      formData.append('preco_custo_unitario', String(custo))
+
+      if (prodForm.preco_ultima_compra) {
+        formData.append(
+          'preco_ultima_compra',
+          String(parseFloat(prodForm.preco_ultima_compra.replace(',', '.'))),
+        )
+      }
+      if (prodForm.embalagem.trim()) formData.append('embalagem', prodForm.embalagem.trim())
+      if (prodForm.peso_g) {
+        formData.append('peso_g', String(parseFloat(prodForm.peso_g.replace(',', '.'))))
+      }
+      if (prodForm.comprimento_cm) {
+        formData.append(
+          'comprimento_cm',
+          String(parseFloat(prodForm.comprimento_cm.replace(',', '.'))),
+        )
+      }
+      if (prodForm.largura_cm) {
+        formData.append('largura_cm', String(parseFloat(prodForm.largura_cm.replace(',', '.'))))
+      }
+      if (prodForm.altura_cm) {
+        formData.append('altura_cm', String(parseFloat(prodForm.altura_cm.replace(',', '.'))))
+      }
+      formData.append('moeda', prodForm.moeda.trim() || 'BRL')
+      if (prodForm.ncm.trim()) formData.append('ncm', prodForm.ncm.trim())
+      if (prodForm.observacoes.trim()) formData.append('observacoes', prodForm.observacoes.trim())
+      formData.append('ativo', String(prodForm.ativo))
+
+      // Tratamento do campo imagem
+      if (imagemFile) {
+        formData.append('imagem', imagemFile)
+      } else if (removerImagem) {
+        formData.append('imagem', '')
       }
 
-      await fornecedoresService.saveProduto(payload, editingProduto?.id)
+      await fornecedoresService.saveProduto(formData, editingProduto?.id)
       toast({
         title: editingProduto ? 'Produto atualizado' : 'Produto adicionado com sucesso',
       })
@@ -688,14 +769,31 @@ export function FornecedorDialog({
                       {produtos.map((p) => (
                         <tr key={p.id} className="hover:bg-secondary/20">
                           <td className="py-2.5 px-3">
-                            <span className="font-bold text-foreground block">{p.descricao}</span>
-                            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
-                              {p.sku_fornecedor && <span>SKU: {p.sku_fornecedor}</span>}
-                              {p.codigo_barras && (
-                                <span className="text-muted-foreground/80">
-                                  • EAN: {p.codigo_barras}
+                            <div className="flex items-center gap-2.5">
+                              <div className="h-10 w-10 rounded-lg border border-border bg-secondary/50 flex items-center justify-center overflow-hidden shrink-0">
+                                {p.imagem ? (
+                                  <img
+                                    src={fornecedoresService.getProdutoImageUrl(p, '100x100')}
+                                    alt={p.descricao}
+                                    className="h-full w-full object-cover"
+                                  />
+                                ) : (
+                                  <ImageIcon className="h-4 w-4 text-muted-foreground/50" />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <span className="font-bold text-foreground block truncate">
+                                  {p.descricao}
                                 </span>
-                              )}
+                                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
+                                  {p.sku_fornecedor && <span>SKU: {p.sku_fornecedor}</span>}
+                                  {p.codigo_barras && (
+                                    <span className="text-muted-foreground/80">
+                                      • EAN: {p.codigo_barras}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
                           </td>
                           <td className="py-2.5 px-2 text-muted-foreground">
@@ -781,6 +879,59 @@ export function FornecedorDialog({
 
             <div className="space-y-3 py-3 text-xs">
               <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1 sm:col-span-2">
+                  <Label className="text-xs font-semibold">Imagem de Referência do Produto</Label>
+                  <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-secondary/20">
+                    <div className="relative h-16 w-16 rounded-lg border border-border bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
+                      {imagemPreview ? (
+                        <img
+                          src={imagemPreview}
+                          alt="Preview do produto"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <ImageIcon className="h-6 w-6 text-muted-foreground/40" />
+                      )}
+                    </div>
+                    <div className="flex-1 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs font-semibold"
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          <Camera className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                          {imagemPreview ? 'Alterar Imagem' : 'Anexar Imagem'}
+                        </Button>
+                        {imagemPreview && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-xs text-destructive hover:bg-destructive/10"
+                            onClick={handleRemoverImagem}
+                          >
+                            <X className="mr-1 h-3.5 w-3.5" />
+                            Remover
+                          </Button>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        PNG, JPG, WEBP até 5MB. Usada como referência visual do item do fornecedor.
+                      </p>
+                    </div>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleFileChange}
+                    />
+                  </div>
+                </div>
+
                 <div className="space-y-1 sm:col-span-2">
                   <Label className="text-xs font-semibold">Descrição do Produto *</Label>
                   <Input

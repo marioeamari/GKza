@@ -29,10 +29,17 @@ export const fornecedoresService = {
       expand: 'fornecedor',
     }),
 
-  saveProduto: (data: Partial<FornecedorProduto>, id?: string) =>
+  saveProduto: (data: Partial<FornecedorProduto> | FormData, id?: string) =>
     id
       ? pb.collection<FornecedorProduto>('fornecedores_produtos').update(id, data)
       : pb.collection<FornecedorProduto>('fornecedores_produtos').create(data),
 
   deleteProduto: (id: string) => pb.collection('fornecedores_produtos').delete(id),
+
+  getProdutoImageUrl: (record: { id: string; imagem?: string }, thumb?: string) => {
+    if (!record.imagem) return ''
+    const baseUrl = import.meta.env.VITE_POCKETBASE_URL || ''
+    const query = thumb ? `?thumb=${thumb}` : ''
+    return `${baseUrl}/api/files/fornecedores_produtos/${record.id}/${record.imagem}${query}`
+  },
 }

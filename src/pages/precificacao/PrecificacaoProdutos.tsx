@@ -219,6 +219,8 @@ export default function PrecificacaoProdutos() {
         // (h) Código de barras e Embalagem
         codigo_barras: fp.codigo_barras || atual.codigo_barras || '',
         embalagem: fp.embalagem || atual.embalagem || '',
+        // (i) Imagem sugerida do produto do fornecedor se não houver imagem
+        imagem: atual.imagem || fp.imagem || undefined,
       }
     })
 
