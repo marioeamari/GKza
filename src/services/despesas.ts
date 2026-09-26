@@ -10,6 +10,8 @@ import type {
   TagItem,
   TipoDespesa,
   TipoDizimo,
+  ConfigCalculo,
+  TipoCalculoDizimo,
 } from '@/types/domain'
 
 const listAll = <T>(collection: string, options?: RecordListOptions) =>
@@ -49,6 +51,29 @@ export const despesasService = {
       : pb.collection<TipoDizimo>('tipos_dizimo').create(data),
   deleteTipoDizimo: (id: string) => pb.collection('tipos_dizimo').delete(id),
 
+  // Configurações de Cálculos (Dízimo, Oferta, Primícias)
+  listConfigCalculos: () => listAll<ConfigCalculo>('config_calculos', { sort: 'tipo' }),
+  getConfigCalculo: async (tipo: TipoCalculoDizimo): Promise<ConfigCalculo | null> => {
+    try {
+      const records = await pb.collection<ConfigCalculo>('config_calculos').getList(1, 1, {
+        filter: `tipo = '${tipo}'`,
+      })
+      return records.items[0] || null
+    } catch {
+      return null
+    }
+  },
+  saveConfigCalculo: async (
+    tipo: TipoCalculoDizimo,
+    data: { percentual?: number; descricao?: string },
+  ) => {
+    const existing = await despesasService.getConfigCalculo(tipo)
+    if (existing) {
+      return pb.collection<ConfigCalculo>('config_calculos').update(existing.id, data)
+    }
+    return pb.collection<ConfigCalculo>('config_calculos').create({ tipo, ...data })
+  },
+
   // Compromissos
   listCompromissos: (options?: RecordListOptions) =>
     listAll<DespesaCompromisso>('despesas_compromisso', {
@@ -86,6 +111,8 @@ export const despesasService = {
     id
       ? pb.collection<DespesaOcorrencia>('despesas_ocorrencias').update(id, data, options)
       : pb.collection<DespesaOcorrencia>('despesas_ocorrencias').create(data, options),
+  atualizarOcorrencia: (id: string, data: Partial<DespesaOcorrencia>, options?: RecordOptions) =>
+    pb.collection<DespesaOcorrencia>('despesas_ocorrencias').update(id, data, options),
   deleteOcorrencia: async (id: string) => {
     // Busca a ocorrência para verificar se há lançamento financeiro vinculado
     try {
@@ -231,6 +258,7 @@ export const despesasService = {
     contextoTipo?: ContextoTipo
     dizimo?: boolean
     tipoDizimoId?: string
+    direcionamento?: string
   }) => {
     const compStr = params.dataPagamento.slice(0, 7) // 'YYYY-MM'
 
@@ -267,6 +295,7 @@ export const despesasService = {
         lancamento: lancamento.id,
         dizimo: params.dizimo || false,
         tipo_dizimo: params.tipoDizimoId || null,
+        direcionamento: params.direcionamento || null,
         observacoes: params.observacoes || null,
       },
       {
@@ -380,6 +409,9 @@ export const despesasService = {
       if (oc.tipo_dizimo !== (compromisso.tipo_dizimo || null)) {
         updates.tipo_dizimo = compromisso.tipo_dizimo || null
       }
+      if (oc.direcionamento !== (compromisso.direcionamento || null)) {
+        updates.direcionamento = compromisso.direcionamento || null
+      }
       if (
         compromisso.link_pagamento !== undefined &&
         oc.link_pagamento !== compromisso.link_pagamento
@@ -480,6 +512,7 @@ export const despesasService = {
           status: 'prevista',
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || null,
+          direcionamento: compromisso.direcionamento || null,
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || 'Pagamento único / avulso',
         })
@@ -537,6 +570,7 @@ export const despesasService = {
               status: 'prevista',
               dizimo: compromisso.dizimo || false,
               tipo_dizimo: compromisso.tipo_dizimo || null,
+              direcionamento: compromisso.direcionamento || null,
               link_pagamento: compromisso.link_pagamento || null,
               observacoes: `Parcela ${p}/${total}`,
             })
@@ -575,6 +609,7 @@ export const despesasService = {
               status: 'prevista',
               dizimo: compromisso.dizimo || false,
               tipo_dizimo: compromisso.tipo_dizimo || null,
+              direcionamento: compromisso.direcionamento || null,
               link_pagamento: compromisso.link_pagamento || null,
               observacoes: `Parcela ${p}/${total}`,
             })
@@ -639,6 +674,7 @@ export const despesasService = {
           status: 'prevista',
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || null,
+          direcionamento: compromisso.direcionamento || null,
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || 'Assinatura anual',
         })
@@ -713,6 +749,7 @@ export const despesasService = {
           status: 'prevista',
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || null,
+          direcionamento: compromisso.direcionamento || null,
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || null,
         })

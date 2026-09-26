@@ -23,6 +23,7 @@ import {
   CalendarDays,
   Target,
   ListTodo,
+  HeartHandshake,
 } from 'lucide-react'
 import { ContextSelector } from '@/components/ContextSelector'
 
@@ -122,6 +123,7 @@ export function AppLayout() {
     { to: '/agenda', label: 'Agenda', icon: CalendarDays },
     { to: '/projetos', label: 'Projetos & Tarefas', icon: ListTodo },
     { to: '/contas', label: 'Contas & Cartões', icon: WalletCards },
+    { to: '/dizimos', label: 'Dízimos & Ofertas', icon: HeartHandshake },
     { to: '/categorias', label: 'Classificações', icon: Tags },
     { to: '/marketplaces', label: 'Marketplaces', icon: Store },
     { to: '/empresas', label: 'Empresas', icon: Building2 },
@@ -299,6 +301,7 @@ export function AppLayout() {
                 ['/habitos', 'Hábitos & Rotinas', CalendarCheck2],
                 ['/agenda', 'Agenda de Compromissos', CalendarDays],
                 ['/projetos', 'Projetos & Tarefas', ListTodo],
+                ['/dizimos', 'Dízimos, Ofertas & Primícias', HeartHandshake],
                 ['/marketplaces', 'Marketplaces & Vendas', Store],
                 ['/contas', 'Contas financeiras & Cartões', WalletCards],
                 ['/categorias', 'Hub de Classificações', Tags],

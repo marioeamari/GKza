@@ -135,6 +135,7 @@ export function DespesaCompromissoDialog({
     link_pagamento: '',
     dizimo: false,
     tipo_dizimo: '',
+    direcionamento: '',
     ativo: true,
     observacoes: '',
 
@@ -216,6 +217,7 @@ export function DespesaCompromissoDialog({
           link_pagamento: compromisso.link_pagamento || '',
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || '',
+          direcionamento: compromisso.direcionamento || '',
           ativo: compromisso.ativo !== false,
           observacoes: compromisso.observacoes || '',
 
@@ -267,6 +269,7 @@ export function DespesaCompromissoDialog({
           link_pagamento: '',
           dizimo: false,
           tipo_dizimo: defaultDizimoTipo,
+          direcionamento: '',
           ativo: true,
           observacoes: '',
 
@@ -644,6 +647,7 @@ export function DespesaCompromissoDialog({
         dizimo: form.dizimo,
         tipo_dizimo:
           form.dizimo && form.tipo_dizimo ? form.tipo_dizimo : (null as unknown as string),
+        direcionamento: form.direcionamento?.trim() || (null as unknown as string),
         ativo: form.ativo,
         observacoes: form.observacoes || (null as unknown as string),
 
@@ -1416,24 +1420,39 @@ export function DespesaCompromissoDialog({
               </div>
 
               {form.dizimo && (
-                <div className="space-y-1.5 pt-1">
-                  <Label>Tipo de Dízimo / Oferta</Label>
-                  <Select
-                    value={form.tipo_dizimo || 'none'}
-                    onValueChange={(v) => setForm({ ...form, tipo_dizimo: v === 'none' ? '' : v })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione a classificação" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Padrão</SelectItem>
-                      {tiposDizimo.map((d) => (
-                        <SelectItem key={d.id} value={d.id}>
-                          {d.nome} {d.soma_resumo && '· (Soma no resumo)'}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="space-y-3 pt-1">
+                  <div className="space-y-1.5">
+                    <Label>Tipo de Dízimo / Oferta</Label>
+                    <Select
+                      value={form.tipo_dizimo || 'none'}
+                      onValueChange={(v) =>
+                        setForm({ ...form, tipo_dizimo: v === 'none' ? '' : v })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione a classificação" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Padrão</SelectItem>
+                        {tiposDizimo.map((d) => (
+                          <SelectItem key={d.id} value={d.id}>
+                            {d.nome} {d.soma_resumo && '· (Soma no resumo)'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Direcionamento (opcional)</Label>
+                    <Input
+                      value={form.direcionamento || ''}
+                      onChange={(e) => setForm({ ...form, direcionamento: e.target.value })}
+                      placeholder="Ex.: Igreja sede, Ministério de louvor, Bateria, Missões..."
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Indica para onde ou para quem a oferta/dízimo é direcionada.
+                    </p>
+                  </div>
                 </div>
               )}
             </div>

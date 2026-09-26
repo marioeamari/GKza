@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-26T03:42:23.137Z",
+  "generatedAt": "2026-09-26T04:33:47.019Z",
   "collections": [
     {
       "name": "users",
@@ -1163,6 +1163,12 @@
           "type": "text",
           "required": false,
           "system": false
+        },
+        {
+          "name": "direcionamento",
+          "type": "text",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [
@@ -1321,6 +1327,12 @@
         {
           "name": "valor_ajustado_manualmente",
           "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "direcionamento",
+          "type": "text",
           "required": false,
           "system": false
         }
@@ -2525,6 +2537,53 @@
         "CREATE UNIQUE INDEX idx_google_cal_user ON google_calendar_config (user)",
         "CREATE INDEX idx_google_cal_sync ON google_calendar_config (sync_ativo)"
       ]
+    },
+    {
+      "name": "config_calculos",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "tipo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["dizimo", "oferta", "primicias"]
+        },
+        {
+          "name": "percentual",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": ["CREATE UNIQUE INDEX idx_config_calculos_tipo ON config_calculos (tipo)"]
     }
   ]
 }

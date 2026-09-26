@@ -5,6 +5,7 @@ import { ProtectedRoute, PublicOnlyRoute } from '@/components/ProtectedRoute'
 import Cadastros from '@/pages/Cadastros'
 import Categorias from '@/pages/Categorias'
 import Configuracoes from '@/pages/Configuracoes'
+import Dizimos from '@/pages/Dizimos'
 import Contas from '@/pages/Contas'
 import Dashboard from '@/pages/Dashboard'
 import Despesas from '@/pages/Despesas'
@@ -43,6 +44,7 @@ export default function App() {
           <Route path="/despesas" element={<Despesas />} />
           <Route path="/lancamentos" element={<Lancamentos />} />
           <Route path="/contas" element={<Contas />} />
+          <Route path="/dizimos" element={<Dizimos />} />
           <Route path="/categorias" element={<Categorias />} />
           <Route path="/marketplaces" element={<Marketplaces />} />
           <Route path="/cadastros" element={<Cadastros />} />

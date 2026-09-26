@@ -81,6 +81,14 @@ export interface TipoDizimo extends RecordModel {
   cor?: string
 }
 
+export type TipoCalculoDizimo = 'dizimo' | 'oferta' | 'primicias'
+
+export interface ConfigCalculo extends RecordModel {
+  tipo: TipoCalculoDizimo
+  percentual: number
+  descricao?: string
+}
+
 export type SecaoDespesa = 'contas_mensais_pix_boleto' | 'assinaturas_anuais' | 'cartoes_credito'
 export type RegraRepeticao = 'mensal' | 'anual' | 'parcelado' | 'avulso'
 export type ContextoTipo = 'pessoal' | 'empresa'
@@ -122,6 +130,7 @@ export interface DespesaCompromisso extends RecordModel {
   link_pagamento?: string
   dizimo?: boolean
   tipo_dizimo?: string
+  direcionamento?: string
   ativo: boolean
   observacoes?: string
   precisa_revisao?: boolean
@@ -159,6 +168,7 @@ export interface DespesaOcorrencia extends RecordModel {
   lancamento?: string
   dizimo?: boolean
   tipo_dizimo?: string
+  direcionamento?: string
   link_pagamento?: string
   observacoes?: string
   expand?: {

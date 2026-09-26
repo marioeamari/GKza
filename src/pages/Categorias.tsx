@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   CreditCard,
   FolderTree,
-  HeartHandshake,
   Layers,
   LoaderCircle,
   Pencil,
@@ -67,7 +66,6 @@ import type {
   Pessoa,
   TagItem,
   TipoDespesa,
-  TipoDizimo,
   TransactionType,
 } from '@/types/domain'
 
@@ -94,7 +92,6 @@ export default function Categorias() {
   const [tags, setTags] = useState<TagItem[]>([])
   const [tiposDespesa, setTiposDespesa] = useState<TipoDespesa[]>([])
   const [metodosPagamento, setMetodosPagamento] = useState<MetodoPagamento[]>([])
-  const [tiposDizimo, setTiposDizimo] = useState<TipoDizimo[]>([])
   const [contas, setContas] = useState<Conta[]>([])
   const [pessoas, setPessoas] = useState<Pessoa[]>([])
   const [empresas, setEmpresas] = useState<Empresa[]>([])
@@ -148,28 +145,14 @@ export default function Categorias() {
   const [metodoSaving, setMetodoSaving] = useState(false)
   const [metodoDeleting, setMetodoDeleting] = useState<MetodoPagamento | null>(null)
 
-  // Modal Tipos Dízimo / Ofertas
-  const [dizimoDialog, setDizimoDialog] = useState(false)
-  const [dizimoEditing, setDizimoEditing] = useState<TipoDizimo | null>(null)
-  const [dizimoForm, setDizimoForm] = useState({
-    nome: '',
-    descricao: '',
-    soma_resumo: true,
-    cor: '#DF5830',
-  })
-  const [dizimoErrors, setDizimoErrors] = useState<Record<string, string>>({})
-  const [dizimoSaving, setDizimoSaving] = useState(false)
-  const [dizimoDeleting, setDizimoDeleting] = useState<TipoDizimo | null>(null)
-
   const loadAll = async () => {
     try {
-      const [cats, lcs, tgs, tps, mts, dzs, cts, pess, emps] = await Promise.all([
+      const [cats, lcs, tgs, tps, mts, cts, pess, emps] = await Promise.all([
         financeService.listCategorias(),
         financeService.listLancamentos(),
         despesasService.listTags(),
         despesasService.listTiposDespesa(),
         despesasService.listMetodosPagamento(),
-        despesasService.listTiposDizimo(),
         financeService.listContas(),
         cadastrosService.listPessoas(),
         cadastrosService.listEmpresas(),
@@ -179,7 +162,6 @@ export default function Categorias() {
       setTags(tgs)
       setTiposDespesa(tps)
       setMetodosPagamento(mts)
-      setTiposDizimo(dzs)
       setContas(cts)
       setPessoas(pess)
       setEmpresas(emps)
@@ -412,65 +394,17 @@ export default function Categorias() {
     }
   }
 
-  /* ----------------- DÍZIMO E OFERTAS ----------------- */
-  const openDizimo = (d?: TipoDizimo) => {
-    setDizimoEditing(d || null)
-    setDizimoForm(
-      d
-        ? {
-            nome: d.nome,
-            descricao: d.descricao || '',
-            soma_resumo: d.soma_resumo !== false,
-            cor: d.cor || '#DF5830',
-          }
-        : { nome: '', descricao: '', soma_resumo: true, cor: '#DF5830' },
-    )
-    setDizimoErrors({})
-    setDizimoDialog(true)
-  }
-
-  const saveDizimo = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!dizimoForm.nome.trim()) return setDizimoErrors({ nome: 'Informe o nome.' })
-    setDizimoSaving(true)
-    try {
-      await despesasService.saveTipoDizimo(dizimoForm, dizimoEditing?.id)
-      toast({ title: 'Classificação de dízimo/oferta salva' })
-      setDizimoDialog(false)
-      const fresh = await despesasService.listTiposDizimo()
-      setTiposDizimo(fresh)
-    } catch (error) {
-      setDizimoErrors({ ...apiFieldErrors(error), form: apiMessage(error) })
-    } finally {
-      setDizimoSaving(false)
-    }
-  }
-
-  const removeDizimo = async () => {
-    if (!dizimoDeleting) return
-    try {
-      await despesasService.deleteTipoDizimo(dizimoDeleting.id)
-      toast({ title: 'Excluído com sucesso' })
-      const fresh = await despesasService.listTiposDizimo()
-      setTiposDizimo(fresh)
-    } catch (e) {
-      toast({ variant: 'destructive', title: 'Erro ao excluir', description: apiMessage(e) })
-    } finally {
-      setDizimoDeleting(null)
-    }
-  }
-
   if (loading) return <LoadingState label="Carregando classificações e parâmetros..." />
 
   return (
     <>
       <PageHeader
         title="Hub de Classificações"
-        description="Gerencie categorias, tags da planilha, tipos de despesa, métodos de pagamento e dízimos/ofertas."
+        description="Gerencie categorias, tags da planilha, tipos de despesa e métodos de pagamento."
       />
 
       <Tabs value={currentTab} onValueChange={handleTabChange} className="space-y-6">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-xl bg-secondary/60 p-1 sm:grid-cols-6">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-xl bg-secondary/60 p-1 sm:grid-cols-5">
           <TabsTrigger
             value="contexto"
             className="flex items-center gap-1.5 py-2.5 text-xs font-bold sm:text-sm"
@@ -505,13 +439,6 @@ export default function Categorias() {
           >
             <CreditCard className="h-4 w-4" />
             <span>Métodos Pag.</span>
-          </TabsTrigger>
-          <TabsTrigger
-            value="dizimo"
-            className="flex items-center gap-1.5 py-2.5 text-xs font-bold sm:text-sm"
-          >
-            <HeartHandshake className="h-4 w-4" />
-            <span>Dízimo & Ofertas</span>
           </TabsTrigger>
         </TabsList>
 
@@ -851,75 +778,6 @@ export default function Categorias() {
             </div>
           </div>
         </TabsContent>
-
-        {/* ==================== TAB 5: DÍZIMO E OFERTAS ==================== */}
-        <TabsContent value="dizimo" className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold text-foreground">
-                Classificações de Dízimos e Ofertas
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Configuração dos tipos que compõem o somatório e resumo de dízimos/ofertas no
-                período (Dízimo, Oferta, Primícias/Prêmica).
-              </p>
-            </div>
-            <PermissionButton
-              allowed={can(user?.role, 'writeFinance')}
-              onClick={() => openDizimo()}
-            >
-              <Plus className="mr-1.5 h-4 w-4" />
-              Nova classificação
-            </PermissionButton>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {tiposDizimo.map((dz) => (
-              <div
-                key={dz.id}
-                className="flex flex-col justify-between rounded-2xl border border-border bg-white p-5 shadow-soft"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="h-3.5 w-3.5 rounded-full"
-                      style={{ background: dz.cor || '#DF5830' }}
-                    />
-                    <h4 className="font-bold text-foreground">{dz.nome}</h4>
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {dz.descricao || 'Sem descrição cadastrada.'}
-                  </p>
-                  <div className="mt-3">
-                    <Badge
-                      variant={dz.soma_resumo !== false ? 'default' : 'secondary'}
-                      className="text-[10px]"
-                    >
-                      {dz.soma_resumo !== false ? 'Soma no Resumo' : 'Não soma no Resumo'}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="mt-4 flex justify-end gap-1 border-t border-border pt-3">
-                  {can(user?.role, 'writeFinance') && (
-                    <Button variant="ghost" size="sm" onClick={() => openDizimo(dz)}>
-                      <Pencil className="mr-1 h-3.5 w-3.5" /> Editar
-                    </Button>
-                  )}
-                  {can(user?.role, 'deleteFinance') && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => setDizimoDeleting(dz)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </TabsContent>
       </Tabs>
 
       {/* DIALOG CATEGORIA */}
@@ -1194,78 +1052,6 @@ export default function Categorias() {
         </DialogContent>
       </Dialog>
 
-      {/* DIALOG DÍZIMO */}
-      <Dialog open={dizimoDialog} onOpenChange={setDizimoDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {dizimoEditing ? 'Editar dízimo/oferta' : 'Nova classificação'}
-            </DialogTitle>
-            <DialogDescription>
-              Defina o nome e se este valor compõe o somatório geral.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={saveDizimo} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Nome</Label>
-              <Input
-                value={dizimoForm.nome}
-                onChange={(e) => setDizimoForm({ ...dizimoForm, nome: e.target.value })}
-                placeholder="Ex.: Dízimo, Oferta de Missões, Primícia"
-              />
-              {dizimoErrors.nome && <p className="field-error">{dizimoErrors.nome}</p>}
-            </div>
-            <div className="space-y-2">
-              <Label>Descrição</Label>
-              <Textarea
-                value={dizimoForm.descricao}
-                onChange={(e) => setDizimoForm({ ...dizimoForm, descricao: e.target.value })}
-                placeholder="Notas explicativas..."
-              />
-            </div>
-            <div className="flex items-center justify-between rounded-xl border border-border p-3">
-              <div>
-                <Label>Somar no resumo da tela de despesas</Label>
-                <p className="text-xs text-muted-foreground">
-                  Exibe o total somado deste item no cabeçalho/card
-                </p>
-              </div>
-              <Switch
-                checked={dizimoForm.soma_resumo}
-                onCheckedChange={(v) => setDizimoForm({ ...dizimoForm, soma_resumo: v })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Cor de destaque</Label>
-              <div className="flex flex-wrap gap-2">
-                {defaultColors.map((c) => (
-                  <button
-                    type="button"
-                    key={c}
-                    className={`h-8 w-8 rounded-full border-4 ${dizimoForm.cor === c ? 'border-foreground scale-110' : 'border-white ring-1 ring-border'}`}
-                    style={{ background: c }}
-                    onClick={() => setDizimoForm({ ...dizimoForm, cor: c })}
-                  />
-                ))}
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setDizimoDialog(false)}>
-                Cancelar
-              </Button>
-              <Button disabled={dizimoSaving}>
-                {dizimoSaving ? (
-                  <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="mr-2 h-4 w-4" />
-                )}
-                Salvar classificação
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
       {/* ALERT DIALOG EXCLUSÕES */}
       <AlertDialog open={!!catDeleting} onOpenChange={(o) => !o && setCatDeleting(null)}>
         <AlertDialogContent>
@@ -1340,24 +1126,6 @@ export default function Categorias() {
             <AlertDialogAction
               className="bg-destructive hover:bg-destructive/90"
               onClick={removeMetodo}
-            >
-              Excluir
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={!!dizimoDeleting} onOpenChange={(o) => !o && setDizimoDeleting(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Excluir classificação?</AlertDialogTitle>
-            <AlertDialogDescription>“{dizimoDeleting?.nome}” será removida.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive hover:bg-destructive/90"
-              onClick={removeDizimo}
             >
               Excluir
             </AlertDialogAction>
