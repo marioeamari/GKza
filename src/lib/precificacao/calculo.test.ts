@@ -225,4 +225,41 @@ describe('Motor de Cálculo de Precificação - ERP GKza', () => {
     const linhaMaior = demMaior79.linhas_taxas.find((t) => t.taxa_id === 'ml_fixa')
     expect(linhaMaior?.aplicada).toBe(false)
   })
+
+  it('(6) calcularDemonstrativo calcula ponto_equilibrio sem estourar a pilha de recursão', () => {
+    const produto = {
+      sku: 'SKU-RECURSAO',
+      nome: 'Produto Teste Recursão',
+      tipo: 'fabricacao_propria' as const,
+      composicao: [{ descricao: 'Item', qtd: 1, custo_unitario: 10.0 }],
+    }
+
+    const cenario = {
+      produto,
+      preco_anunciado: 25.0,
+      taxas: [
+        {
+          id: 'comissao',
+          nome: 'Comissão',
+          base_calculo: 'preco_anunciado' as const,
+          tipo_valor: 'percentual' as const,
+          valor: 15.0,
+          responsavel: 'marketplace' as const,
+          tipo_regra: 'comissao' as const,
+          financiado_por: 'marketplace' as const,
+        },
+      ],
+    }
+
+    const dem = calcularDemonstrativo(cenario)
+    expect(dem.ponto_equilibrio).toBeGreaterThan(0)
+    expect(Number.isFinite(dem.ponto_equilibrio)).toBe(true)
+
+    // O ponto de equilíbrio calculado deve resultar em lucro aproximadamente 0
+    const demEq = calcularDemonstrativo({
+      ...cenario,
+      preco_anunciado: dem.ponto_equilibrio,
+    })
+    expect(Math.abs(demEq.lucro_liquido)).toBeLessThanOrEqual(0.05)
+  })
 })

@@ -140,6 +140,8 @@ export interface CalculoCenarioInput {
   frete_subsidio_marketplace?: number
   // Sobrescritas opcionais
   sobrescrita_custo_total?: number
+  /** Flag interna para evitar recursão infinita na resolução reversa de meta/equilíbrio */
+  skipReverseCalc?: boolean
 }
 
 export interface LinhaDemonstrativoTaxa {
@@ -517,7 +519,7 @@ export function calcularDemonstrativo(input: CalculoCenarioInput): Demonstrativo
       : 0
 
   // 9. Ponto de Equilíbrio (Lucro Zero)
-  const ponto_equilibrio = calcularPrecoEquilibrio(input)
+  const ponto_equilibrio = input.skipReverseCalc ? 0 : calcularPrecoEquilibrio(input)
 
   const incompleto =
     preco_anunciado <= 0 ||
@@ -600,6 +602,7 @@ export function resolverPrecoParaMeta(
     const dem = calcularDemonstrativo({
       ...inputBase,
       preco_anunciado: p,
+      skipReverseCalc: true,
     })
 
     if (tipoMeta === 'equilibrio') {
@@ -616,7 +619,11 @@ export function resolverPrecoParaMeta(
   let fMax = avaliarErro(maxPreco)
   if (fMax < 0 && tipoMeta !== 'equilibrio') {
     // Mesmo em 100k não bate meta (ex: margem inviável > 100% ou taxas > 100%)
-    const dem = calcularDemonstrativo({ ...inputBase, preco_anunciado: maxPreco })
+    const dem = calcularDemonstrativo({
+      ...inputBase,
+      preco_anunciado: maxPreco,
+      skipReverseCalc: true,
+    })
     return {
       preco_sugerido: maxPreco,
       preco_arredondado: maxPreco,
@@ -650,6 +657,7 @@ export function resolverPrecoParaMeta(
   const demonstrativo = calcularDemonstrativo({
     ...inputBase,
     preco_anunciado: precoFinal,
+    skipReverseCalc: true,
   })
 
   // Arredondamento comercial comum (.90, .99 ou centavos)
