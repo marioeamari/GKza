@@ -15,12 +15,16 @@ import {
   HelpCircle,
   Clock,
   Eye,
+  EyeOff,
   Sliders,
   Check,
   Building2,
   Package,
   ArrowRight,
   ChevronDown,
+  GripVertical,
+  Store,
+  Filter,
 } from 'lucide-react'
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -104,6 +108,43 @@ export default function PrecificacaoComparar() {
   // Canais/Modalidades ativas na visualização
   const [colunasAtivas, setColunasAtivas] = useState<Record<string, boolean>>({})
 
+  // Filtro de canais/marketplaces selecionados (por canal.id)
+  const [canaisSelecionados, setCanaisSelecionados] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('precificacao_comparar_canais_selecionados')
+      if (saved) return JSON.parse(saved)
+    } catch (e) {
+      console.warn('Erro ao ler canais selecionados do localStorage', e)
+    }
+    return []
+  })
+
+  // Ordem personalizada das modalidades/cards (persistido em localStorage)
+  const [ordemColunas, setOrdemColunas] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('precificacao_comparar_ordem_cards')
+      if (saved) return JSON.parse(saved)
+    } catch (e) {
+      console.warn('Erro ao ler ordem dos cards do localStorage', e)
+    }
+    return []
+  })
+
+  // Estado de arrasto DND nativo
+  const [draggedModId, setDraggedModId] = useState<string | null>(null)
+  const [dragOverModId, setDragOverModId] = useState<string | null>(null)
+
+  // Toggle para ocultar/mostrar o card de composição/custo do produto (coluna fixa à esquerda)
+  const [mostrarPainelProduto, setMostrarPainelProduto] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('precificacao_comparar_mostrar_painel_produto')
+      if (saved !== null) return JSON.parse(saved)
+    } catch (e) {
+      console.warn('Erro ao ler estado do painel de produto do localStorage', e)
+    }
+    return true
+  })
+
   // Diferença entre canais selecionados para comparação detalhada
   const [colunaDiffA, setColunaDiffA] = useState<string>('')
   const [colunaDiffB, setColunaDiffB] = useState<string>('')
@@ -150,6 +191,16 @@ export default function PrecificacaoComparar() {
           initialAtivas[m.id] = true
         }
         setColunasAtivas(initialAtivas)
+
+        // Inicializar canais selecionados se vazio ou inválido
+        setCanaisSelecionados((prev) => {
+          if (prev.length > 0) {
+            // Manter apenas ids válidos
+            const validos = prev.filter((id) => chans.some((c) => c.id === id))
+            if (validos.length > 0) return validos
+          }
+          return chans.map((c) => c.id)
+        })
       } catch (err) {
         console.error('Erro ao inicializar comparador:', err)
       } finally {
@@ -184,8 +235,39 @@ export default function PrecificacaoComparar() {
     })
   }, [produtoAtual])
 
-  // Lista de colunas (modalidades agrupadas por canal)
-  const colunasModalidade = useMemo(() => {
+  // Salvar preferências em localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'precificacao_comparar_canais_selecionados',
+        JSON.stringify(canaisSelecionados),
+      )
+    } catch (e) {
+      console.warn('Erro ao gravar canais selecionados no localStorage', e)
+    }
+  }, [canaisSelecionados])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('precificacao_comparar_ordem_cards', JSON.stringify(ordemColunas))
+    } catch (e) {
+      console.warn('Erro ao gravar ordem dos cards no localStorage', e)
+    }
+  }, [ordemColunas])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'precificacao_comparar_mostrar_painel_produto',
+        JSON.stringify(mostrarPainelProduto),
+      )
+    } catch (e) {
+      console.warn('Erro ao gravar estado do painel de produto no localStorage', e)
+    }
+  }, [mostrarPainelProduto])
+
+  // Lista base de todas as colunas (modalidades agrupadas por canal)
+  const todasColunasModalidade = useMemo(() => {
     const list: Array<{
       modalidade: PrecCanalModalidadeRecord
       canal: PrecCanalRecord
@@ -211,6 +293,105 @@ export default function PrecificacaoComparar() {
 
     return list
   }, [modalidades, canais, taxas])
+
+  // Ordenação e Filtragem por marketplace/canal selecionado
+  const colunasModalidade = useMemo(() => {
+    // 1. Filtrar pelos canais/marketplaces ativos no filtro
+    const filtradas = todasColunasModalidade.filter((item) => {
+      if (canaisSelecionados.length === 0) return true
+      return canaisSelecionados.includes(item.canal.id)
+    })
+
+    // 2. Aplicar ordem persistida
+    if (!ordemColunas || ordemColunas.length === 0) {
+      return filtradas
+    }
+
+    const mapa = new Map(filtradas.map((c) => [c.modalidade.id, c]))
+    const ordenadas: typeof filtradas = []
+
+    for (const id of ordemColunas) {
+      const item = mapa.get(id)
+      if (item) {
+        ordenadas.push(item)
+        mapa.delete(id)
+      }
+    }
+
+    // Acrescentar as que ainda não estavam no array de ordem
+    for (const item of mapa.values()) {
+      ordenadas.push(item)
+    }
+
+    return ordenadas
+  }, [todasColunasModalidade, canaisSelecionados, ordemColunas])
+
+  // Handlers para reordenação Drag and Drop nativo dos cards
+  const handleDragStart = (e: React.DragEvent, modId: string) => {
+    e.dataTransfer.setData('text/plain', modId)
+    e.dataTransfer.effectAllowed = 'move'
+    setDraggedModId(modId)
+  }
+
+  const handleDragOver = (e: React.DragEvent, modId: string) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragOverModId !== modId) {
+      setDragOverModId(modId)
+    }
+  }
+
+  const handleDragLeave = (_e: React.DragEvent, modId: string) => {
+    if (dragOverModId === modId) {
+      setDragOverModId(null)
+    }
+  }
+
+  const handleDrop = (e: React.DragEvent, targetModId: string) => {
+    e.preventDefault()
+    const sourceModId = e.dataTransfer.getData('text/plain') || draggedModId
+    setDraggedModId(null)
+    setDragOverModId(null)
+
+    if (!sourceModId || sourceModId === targetModId) return
+
+    // Obter lista atual de IDs visíveis/ordenados
+    const currentIds = colunasModalidade.map((c) => c.modalidade.id)
+    const sourceIndex = currentIds.indexOf(sourceModId)
+    const targetIndex = currentIds.indexOf(targetModId)
+
+    if (sourceIndex === -1 || targetIndex === -1) return
+
+    const newIds = [...currentIds]
+    newIds.splice(sourceIndex, 1)
+    newIds.splice(targetIndex, 0, sourceModId)
+
+    // Se existiam outros IDs no ordemColunas que não estão visíveis no momento, preservá-los
+    const allModIds = todasColunasModalidade.map((c) => c.modalidade.id)
+    const finalOrder = [
+      ...newIds,
+      ...ordemColunas.filter((id) => !newIds.includes(id) && allModIds.includes(id)),
+    ]
+
+    setOrdemColunas(finalOrder)
+    toast({
+      title: 'Sequência reordenada',
+      description: 'A nova ordem dos canais foi salva para suas próximas sessões.',
+    })
+  }
+
+  const handleResetOrdem = () => {
+    setOrdemColunas([])
+    try {
+      localStorage.removeItem('precificacao_comparar_ordem_cards')
+    } catch (e) {
+      console.warn(e)
+    }
+    toast({
+      title: 'Ordem redefinida',
+      description: 'A ordem original dos canais foi restaurada.',
+    })
+  }
 
   // Inicializar seleção de comparação A x B
   useEffect(() => {
@@ -458,10 +639,39 @@ export default function PrecificacaoComparar() {
         titulo="Comparador de Preços Lado a Lado"
         subtitulo="Simulação comparativa espelho da planilha de custos, com demonstrativo auditável por canal de venda"
         acoes={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button
               variant="outline"
               size="sm"
+              className={`h-8 text-xs gap-1.5 transition-colors ${
+                !mostrarPainelProduto
+                  ? 'border-primary/50 text-primary bg-primary/5 font-semibold'
+                  : 'bg-white'
+              }`}
+              onClick={() => setMostrarPainelProduto((prev) => !prev)}
+              title={
+                mostrarPainelProduto
+                  ? 'Ocultar card fixo de composição/custo do produto para ver mais canais'
+                  : 'Mostrar card fixo de composição/custo do produto'
+              }
+            >
+              {mostrarPainelProduto ? (
+                <>
+                  <EyeOff className="h-3.5 w-3.5" />
+                  <span>Ocultar Painel do Produto</span>
+                </>
+              ) : (
+                <>
+                  <Eye className="h-3.5 w-3.5" />
+                  <span>Exibir Painel do Produto</span>
+                </>
+              )}
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs bg-white"
               onClick={() => {
                 setPrecosPorColuna({})
                 setDescontosPorColuna({})
@@ -582,9 +792,9 @@ export default function PrecificacaoComparar() {
         </CardContent>
       </Card>
 
-      {/* Barra de Ações e Filtro de Colunas Visíveis */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      {/* Barra de Ações, Filtro de Marketplaces e Seletor de Colunas Visíveis */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
           <Layers className="h-4 w-4 text-primary" />
           <span className="text-sm font-bold text-foreground">
             Comparativo de Canais & Modalidades
@@ -592,24 +802,150 @@ export default function PrecificacaoComparar() {
           {produtoAtual && (
             <span className="text-xs text-muted-foreground hidden sm:inline">
               — {colunasModalidade.filter((c) => colunasAtivas[c.modalidade.id] !== false).length}{' '}
-              de {colunasModalidade.length} modalidades visíveis
+              de {todasColunasModalidade.length} modalidades visíveis
             </span>
+          )}
+          {!mostrarPainelProduto && (
+            <Badge
+              variant="outline"
+              className="text-[10px] bg-amber-50 text-amber-800 border-amber-200 gap-1 cursor-pointer hover:bg-amber-100"
+              onClick={() => setMostrarPainelProduto(true)}
+              title="Clique para reexibir o painel de custos do produto"
+            >
+              <Eye className="h-2.5 w-2.5" />
+              Painel do Produto Oculto
+            </Badge>
+          )}
+          {ordemColunas.length > 0 && (
+            <Badge
+              variant="outline"
+              className="text-[10px] bg-secondary text-muted-foreground border-border gap-1"
+            >
+              <GripVertical className="h-2.5 w-2.5" />
+              Ordem Personalizada
+              <button
+                type="button"
+                onClick={handleResetOrdem}
+                className="ml-1 text-xs hover:text-foreground font-bold"
+                title="Restaurar ordem padrão"
+              >
+                ×
+              </button>
+            </Badge>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Seletor de Colunas Visíveis (Dropdown com Checkboxes) */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* 1. Filtro de Seleção de Marketplaces (Múltipla Seleção) */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className={`h-8 text-xs gap-1.5 bg-white ${
+                  canaisSelecionados.length < canais.length && canaisSelecionados.length > 0
+                    ? 'border-primary/50 text-primary font-semibold'
+                    : ''
+                }`}
+              >
+                <Store className="h-3.5 w-3.5 text-primary" />
+                <span>
+                  Marketplaces{' '}
+                  {canaisSelecionados.length > 0 &&
+                    canaisSelecionados.length < canais.length &&
+                    `(${canaisSelecionados.length}/${canais.length})`}
+                </span>
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64 max-h-80 overflow-y-auto">
+              <DropdownMenuLabel className="text-xs font-bold flex items-center justify-between">
+                <span>Filtrar por Marketplace</span>
+                <span className="text-[10px] text-muted-foreground font-normal">
+                  {canaisSelecionados.length} de {canais.length}
+                </span>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {canais.map((canal) => {
+                const isSelected = canaisSelecionados.includes(canal.id)
+                const countModalidades = todasColunasModalidade.filter(
+                  (c) => c.canal.id === canal.id,
+                ).length
+
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={canal.id}
+                    checked={isSelected}
+                    onCheckedChange={(checked) => {
+                      setCanaisSelecionados((prev) => {
+                        if (checked) {
+                          return prev.includes(canal.id) ? prev : [...prev, canal.id]
+                        } else {
+                          // Impede desmarcar todos para não deixar a tela totalmente vazia acidentalmente, ou permite marcar
+                          return prev.filter((id) => id !== canal.id)
+                        }
+                      })
+                    }}
+                    className="text-xs cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between w-full gap-2">
+                      <div className="flex items-center gap-2 truncate">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: canal.cor || '#DF5830' }}
+                        />
+                        <span className="font-semibold truncate">{canal.nome}</span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground shrink-0 font-mono">
+                        {countModalidades} mod.
+                      </span>
+                    </div>
+                  </DropdownMenuCheckboxItem>
+                )
+              })}
+              <DropdownMenuSeparator />
+              <div className="p-1 flex items-center justify-between gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-[11px] px-2 w-full"
+                  onClick={() => {
+                    setCanaisSelecionados(canais.map((c) => c.id))
+                  }}
+                >
+                  Selecionar todos
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-[11px] px-2 w-full text-muted-foreground"
+                  onClick={() => {
+                    // Selecionar apenas o primeiro canal se preferir limpar
+                    if (canais.length > 0) {
+                      setCanaisSelecionados([canais[0].id])
+                    } else {
+                      setCanaisSelecionados([])
+                    }
+                  }}
+                >
+                  Apenas 1 canal
+                </Button>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* 2. Seletor de Colunas / Modalidades Visíveis */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 bg-white">
                 <Sliders className="h-3.5 w-3.5" />
-                <span>Colunas Visíveis</span>
+                <span>Colunas</span>
                 <ChevronDown className="h-3 w-3 opacity-60" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 max-h-80 overflow-y-auto">
+            <DropdownMenuContent align="end" className="w-60 max-h-80 overflow-y-auto">
               <DropdownMenuLabel className="text-xs font-bold">
-                Exibir Canais / Modalidades
+                Modalidades Específicas
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               {colunasModalidade.map((col) => {
@@ -647,11 +983,11 @@ export default function PrecificacaoComparar() {
                   className="h-7 text-[11px] px-2 w-full"
                   onClick={() => {
                     const allTrue: Record<string, boolean> = {}
-                    for (const m of colunasModalidade) allTrue[m.modalidade.id] = true
+                    for (const m of todasColunasModalidade) allTrue[m.modalidade.id] = true
                     setColunasAtivas(allTrue)
                   }}
                 >
-                  Marcar todos
+                  Marcar todas
                 </Button>
                 <Button
                   variant="ghost"
@@ -659,7 +995,7 @@ export default function PrecificacaoComparar() {
                   className="h-7 text-[11px] px-2 w-full text-muted-foreground"
                   onClick={() => {
                     const allFalse: Record<string, boolean> = {}
-                    for (const m of colunasModalidade) allFalse[m.modalidade.id] = false
+                    for (const m of todasColunasModalidade) allFalse[m.modalidade.id] = false
                     setColunasAtivas(allFalse)
                   }}
                 >
@@ -668,6 +1004,33 @@ export default function PrecificacaoComparar() {
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* 3. Botão Toggle Visibilidade do Painel do Produto */}
+          <Button
+            variant="outline"
+            size="sm"
+            className={`h-8 text-xs gap-1.5 bg-white ${
+              !mostrarPainelProduto ? 'border-primary/40 text-primary' : ''
+            }`}
+            onClick={() => setMostrarPainelProduto((prev) => !prev)}
+            title={
+              mostrarPainelProduto
+                ? 'Ocultar coluna fixa do produto'
+                : 'Exibir coluna fixa do produto'
+            }
+          >
+            {mostrarPainelProduto ? (
+              <>
+                <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="hidden sm:inline">Ocultar Produto</span>
+              </>
+            ) : (
+              <>
+                <Eye className="h-3.5 w-3.5 text-primary" />
+                <span className="font-semibold text-primary">Mostrar Produto</span>
+              </>
+            )}
+          </Button>
         </div>
       </div>
 
@@ -726,181 +1089,210 @@ export default function PrecificacaoComparar() {
         </Card>
       ) : null}
 
-      {/* Painel Horizontal com Coluna Fixa do Produto + Colunas Rolantes dos Canais */}
+      {/* Painel Horizontal com Coluna Fixa do Produto (opcional) + Colunas Rolantes dos Canais */}
       {produtoAtual && (
         <div className="relative border border-border rounded-xl bg-card shadow-xs overflow-x-auto">
           <div className="inline-flex min-w-full items-stretch divide-x divide-border">
-            {/* 1. Coluna Fixa do Produto (Sticky à esquerda) */}
-            <div className="sticky left-0 z-20 w-72 shrink-0 bg-[#fafafa] flex flex-col justify-between p-4 shadow-[4px_0_12px_-2px_rgba(0,0,0,0.06)] border-r border-border">
-              <div className="space-y-4">
-                {/* Header do Produto */}
-                <div className="flex items-start gap-3">
-                  <div className="h-14 w-14 rounded-xl bg-secondary/80 border border-border flex items-center justify-center shrink-0 overflow-hidden text-primary">
-                    {produtoAtual.imagem ? (
-                      <img
-                        src={produtoAtual.imagem}
-                        alt={produtoAtual.nome}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <Package className="h-7 w-7 text-primary/70" />
-                    )}
-                  </div>
-                  <div className="space-y-1 min-w-0 flex-1">
-                    <span className="font-mono text-xs font-black text-primary block truncate">
-                      [{produtoAtual.sku}]
-                    </span>
-                    <h3
-                      className="text-sm font-bold text-foreground leading-snug line-clamp-2"
-                      title={produtoAtual.nome}
-                    >
-                      {produtoAtual.nome}
-                    </h3>
-                    <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] h-5 px-1.5 font-semibold capitalize bg-white"
-                      >
-                        {produtoAtual.tipo.replace('_', ' ')}
-                      </Badge>
-                      {produtoAtual.categoria && (
-                        <Badge
-                          variant="secondary"
-                          className="text-[10px] h-5 px-1.5 text-muted-foreground truncate max-w-[120px]"
+            {/* 1. Coluna Fixa do Produto (Sticky à esquerda) - Ocultável pelo usuário */}
+            {mostrarPainelProduto && (
+              <div className="sticky left-0 z-20 w-72 shrink-0 bg-[#fafafa] flex flex-col justify-between p-4 shadow-[4px_0_12px_-2px_rgba(0,0,0,0.06)] border-r border-border">
+                <div className="space-y-4">
+                  {/* Header do Produto */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div className="h-14 w-14 rounded-xl bg-secondary/80 border border-border flex items-center justify-center shrink-0 overflow-hidden text-primary">
+                        {produtoAtual.imagem ? (
+                          <img
+                            src={produtoAtual.imagem}
+                            alt={produtoAtual.nome}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <Package className="h-7 w-7 text-primary/70" />
+                        )}
+                      </div>
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <span className="font-mono text-xs font-black text-primary block truncate">
+                          [{produtoAtual.sku}]
+                        </span>
+                        <h3
+                          className="text-sm font-bold text-foreground leading-snug line-clamp-2"
+                          title={produtoAtual.nome}
                         >
-                          {produtoAtual.categoria}
-                        </Badge>
+                          {produtoAtual.nome}
+                        </h3>
+                        <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] h-5 px-1.5 font-semibold capitalize bg-white"
+                          >
+                            {produtoAtual.tipo.replace('_', ' ')}
+                          </Badge>
+                          {produtoAtual.categoria && (
+                            <Badge
+                              variant="secondary"
+                              className="text-[10px] h-5 px-1.5 text-muted-foreground truncate max-w-[120px]"
+                            >
+                              {produtoAtual.categoria}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground hover:text-foreground shrink-0"
+                      onClick={() => setMostrarPainelProduto(false)}
+                      title="Ocultar coluna do produto"
+                    >
+                      <EyeOff className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+
+                  {/* Composição Resumida de Custos (C0..Cn) */}
+                  <div className="space-y-2 pt-1 border-t border-border/70">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-muted-foreground uppercase text-[10px] tracking-wider flex items-center gap-1">
+                        <Layers className="h-3 w-3" />
+                        Composição de Custo
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {produtoAtual.composicao?.length || 0} itens
+                      </span>
+                    </div>
+
+                    <div className="bg-white rounded-lg border border-border/80 p-2 space-y-1.5 text-xs max-h-48 overflow-y-auto">
+                      {produtoAtual.composicao && produtoAtual.composicao.length > 0 ? (
+                        produtoAtual.composicao.map((item, idx) => {
+                          const subtotal =
+                            (item.qtd || 0) *
+                            (item.custo_unitario || 0) *
+                            (1 + (item.perda_pct || 0) / 100)
+                          return (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between gap-1 text-[11px] leading-tight"
+                            >
+                              <span
+                                className="text-muted-foreground truncate flex-1"
+                                title={item.descricao}
+                              >
+                                <span className="font-mono font-semibold text-foreground/80 mr-1">
+                                  {item.codigo || `C${idx}`}
+                                </span>
+                                {item.descricao}
+                              </span>
+                              <span className="font-mono font-semibold text-foreground shrink-0">
+                                {formatCurrency(subtotal)}
+                              </span>
+                            </div>
+                          )
+                        })
+                      ) : produtoAtual.custo_aquisicao_unitario ? (
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-muted-foreground">Aquisição Unitária</span>
+                          <span className="font-mono font-semibold text-foreground">
+                            {formatCurrency(produtoAtual.custo_aquisicao_unitario)}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-muted-foreground italic py-1">
+                          Nenhum componente cadastrado.
+                        </div>
                       )}
+
+                      {/* Embalagem e etiqueta adicionais se existirem */}
+                      {((produtoAtual.custo_adicional_embalagem || 0) > 0 ||
+                        (produtoAtual.custo_etiqueta || 0) > 0) && (
+                        <div className="pt-1 border-t border-border/40 space-y-1">
+                          {(produtoAtual.custo_adicional_embalagem || 0) > 0 && (
+                            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                              <span>Embalagem</span>
+                              <span className="font-mono">
+                                {formatCurrency(produtoAtual.custo_adicional_embalagem || 0)}
+                              </span>
+                            </div>
+                          )}
+                          {(produtoAtual.custo_etiqueta || 0) > 0 && (
+                            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                              <span>Etiqueta</span>
+                              <span className="font-mono">
+                                {formatCurrency(produtoAtual.custo_etiqueta || 0)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Métricas Físicas do Produto */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="bg-white rounded-lg border border-border/70 p-2">
+                      <span className="text-[10px] text-muted-foreground block">Peso Total</span>
+                      <span className="font-mono font-bold text-foreground">
+                        {produtoAtual.peso_g ? `${produtoAtual.peso_g} g` : '—'}
+                      </span>
+                    </div>
+                    <div className="bg-white rounded-lg border border-border/70 p-2">
+                      <span className="text-[10px] text-muted-foreground block">
+                        Dimensões (CxLxA)
+                      </span>
+                      <span className="font-mono text-[11px] font-semibold text-foreground truncate block">
+                        {produtoAtual.dimensao_comprimento_cm || 0}x
+                        {produtoAtual.dimensao_largura_cm || 0}x
+                        {produtoAtual.dimensao_altura_cm || 0} cm
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Composição Resumida de Custos (C0..Cn) */}
-                <div className="space-y-2 pt-1 border-t border-border/70">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-muted-foreground uppercase text-[10px] tracking-wider flex items-center gap-1">
-                      <Layers className="h-3 w-3" />
-                      Composição de Custo
+                {/* Destaque do Custo Total Base */}
+                <div className="mt-4 pt-3 border-t border-border/80">
+                  <div className="bg-primary/5 rounded-xl border border-primary/20 p-3">
+                    <span className="text-[10px] font-bold text-primary uppercase tracking-wider block">
+                      Custo Total Base
                     </span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {produtoAtual.composicao?.length || 0} itens
-                    </span>
-                  </div>
-
-                  <div className="bg-white rounded-lg border border-border/80 p-2 space-y-1.5 text-xs max-h-48 overflow-y-auto">
-                    {produtoAtual.composicao && produtoAtual.composicao.length > 0 ? (
-                      produtoAtual.composicao.map((item, idx) => {
-                        const subtotal =
-                          (item.qtd || 0) *
-                          (item.custo_unitario || 0) *
-                          (1 + (item.perda_pct || 0) / 100)
-                        return (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between gap-1 text-[11px] leading-tight"
-                          >
-                            <span
-                              className="text-muted-foreground truncate flex-1"
-                              title={item.descricao}
-                            >
-                              <span className="font-mono font-semibold text-foreground/80 mr-1">
-                                {item.codigo || `C${idx}`}
-                              </span>
-                              {item.descricao}
-                            </span>
-                            <span className="font-mono font-semibold text-foreground shrink-0">
-                              {formatCurrency(subtotal)}
-                            </span>
-                          </div>
-                        )
-                      })
-                    ) : produtoAtual.custo_aquisicao_unitario ? (
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-muted-foreground">Aquisição Unitária</span>
-                        <span className="font-mono font-semibold text-foreground">
-                          {formatCurrency(produtoAtual.custo_aquisicao_unitario)}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="text-[11px] text-muted-foreground italic py-1">
-                        Nenhum componente cadastrado.
-                      </div>
-                    )}
-
-                    {/* Embalagem e etiqueta adicionais se existirem */}
-                    {((produtoAtual.custo_adicional_embalagem || 0) > 0 ||
-                      (produtoAtual.custo_etiqueta || 0) > 0) && (
-                      <div className="pt-1 border-t border-border/40 space-y-1">
-                        {(produtoAtual.custo_adicional_embalagem || 0) > 0 && (
-                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                            <span>Embalagem</span>
-                            <span className="font-mono">
-                              {formatCurrency(produtoAtual.custo_adicional_embalagem || 0)}
-                            </span>
-                          </div>
-                        )}
-                        {(produtoAtual.custo_etiqueta || 0) > 0 && (
-                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                            <span>Etiqueta</span>
-                            <span className="font-mono">
-                              {formatCurrency(produtoAtual.custo_etiqueta || 0)}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Métricas Físicas do Produto */}
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="bg-white rounded-lg border border-border/70 p-2">
-                    <span className="text-[10px] text-muted-foreground block">Peso Total</span>
-                    <span className="font-mono font-bold text-foreground">
-                      {produtoAtual.peso_g ? `${produtoAtual.peso_g} g` : '—'}
-                    </span>
-                  </div>
-                  <div className="bg-white rounded-lg border border-border/70 p-2">
-                    <span className="text-[10px] text-muted-foreground block">
-                      Dimensões (CxLxA)
-                    </span>
-                    <span className="font-mono text-[11px] font-semibold text-foreground truncate block">
-                      {produtoAtual.dimensao_comprimento_cm || 0}x
-                      {produtoAtual.dimensao_largura_cm || 0}x{produtoAtual.dimensao_altura_cm || 0}{' '}
-                      cm
-                    </span>
+                    <div className="flex items-baseline justify-between mt-1">
+                      <span className="text-xl font-black font-mono text-primary">
+                        {formatCurrency(custoBaseAtual?.custo_total || 0)}
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] bg-white border-primary/30 text-primary"
+                      >
+                        Fixo p/ Canais
+                      </Badge>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-1 leading-snug">
+                      Base para cálculo de markup e ponto de equilíbrio em todos os canais.
+                    </p>
                   </div>
                 </div>
               </div>
+            )}
 
-              {/* Destaque do Custo Total Base */}
-              <div className="mt-4 pt-3 border-t border-border/80">
-                <div className="bg-primary/5 rounded-xl border border-primary/20 p-3">
-                  <span className="text-[10px] font-bold text-primary uppercase tracking-wider block">
-                    Custo Total Base
-                  </span>
-                  <div className="flex items-baseline justify-between mt-1">
-                    <span className="text-xl font-black font-mono text-primary">
-                      {formatCurrency(custoBaseAtual?.custo_total || 0)}
-                    </span>
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] bg-white border-primary/30 text-primary"
-                    >
-                      Fixo p/ Canais
-                    </Badge>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground mt-1 leading-snug">
-                    Base para cálculo de markup e ponto de equilíbrio em todos os canais.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* 2. Colunas de Canais e Modalidades */}
+            {/* 2. Colunas de Canais e Modalidades Reordenáveis via DND */}
             {colunasModalidade.length === 0 ? (
-              <div className="p-8 text-center text-xs text-muted-foreground flex-1 flex items-center justify-center">
-                Nenhum canal ou modalidade ativa cadastrada.
+              <div className="p-12 text-center text-xs text-muted-foreground flex-1 flex flex-col items-center justify-center gap-2">
+                <Store className="h-8 w-8 text-muted-foreground/40 mb-1" />
+                <p className="font-bold text-sm text-foreground">
+                  Nenhum marketplace ou modalidade selecionada
+                </p>
+                <p className="text-muted-foreground max-w-sm">
+                  Utilize o filtro &ldquo;Marketplaces&rdquo; ou &ldquo;Colunas&rdquo; no topo para
+                  selecionar canais para comparar.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 text-xs"
+                  onClick={() => setCanaisSelecionados(canais.map((c) => c.id))}
+                >
+                  Exibir todos os marketplaces
+                </Button>
               </div>
             ) : (
               colunasModalidade
@@ -919,11 +1311,23 @@ export default function PrecificacaoComparar() {
                       ? (precosPorColuna[modId] ?? valorPrecoGlobal)
                       : cenario.precoAnunciado
 
+                  const isDraggingThis = draggedModId === modId
+                  const isDragOverThis = dragOverModId === modId
+
                   return (
                     <div
                       key={modId}
-                      className={`w-80 shrink-0 flex flex-col justify-between p-4 bg-white transition-colors relative ${
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, modId)}
+                      onDragOver={(e) => handleDragOver(e, modId)}
+                      onDragLeave={(e) => handleDragLeave(e, modId)}
+                      onDrop={(e) => handleDrop(e, modId)}
+                      className={`w-80 shrink-0 flex flex-col justify-between p-4 bg-white transition-all relative ${
                         isMelhor ? 'bg-emerald-50/20 ring-1 ring-emerald-500/30' : ''
+                      } ${isDraggingThis ? 'opacity-40 scale-[0.98]' : 'opacity-100'} ${
+                        isDragOverThis
+                          ? 'border-l-4 border-l-primary ring-2 ring-primary/20 bg-primary/[0.02]'
+                          : ''
                       }`}
                     >
                       {/* Selo "Melhor Cenário" no topo */}
@@ -937,9 +1341,16 @@ export default function PrecificacaoComparar() {
                       )}
 
                       <div className="space-y-4">
-                        {/* Header do Canal / Modalidade */}
+                        {/* Header do Canal / Modalidade com alça de arrasto DND */}
                         <div className="space-y-1.5 pr-20">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
+                            {/* Alça DND */}
+                            <div
+                              className="cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-foreground -ml-1 p-0.5 rounded"
+                              title="Arraste para reordenar esta coluna"
+                            >
+                              <GripVertical className="h-4 w-4" />
+                            </div>
                             <span
                               className="h-2.5 w-2.5 rounded-full shrink-0"
                               style={{ backgroundColor: col.canal.cor || '#DF5830' }}
@@ -948,7 +1359,7 @@ export default function PrecificacaoComparar() {
                               {col.canal.nome}
                             </h4>
                           </div>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 ml-4">
                             <Badge
                               variant="outline"
                               className="text-[10px] h-5 px-2 font-bold text-foreground border-border bg-secondary/30"
@@ -1374,91 +1785,93 @@ export default function PrecificacaoComparar() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
-              {colunasModalidade.map((col) => {
-                const modId = col.modalidade.id
-                const cenario = demonstrativosPorColuna[modId]
-                if (!cenario) return null
+              {colunasModalidade
+                .filter((col) => colunasAtivas[col.modalidade.id] !== false)
+                .map((col) => {
+                  const modId = col.modalidade.id
+                  const cenario = demonstrativosPorColuna[modId]
+                  if (!cenario) return null
 
-                const dem = cenario.demonstrativo
-                const isMelhor = melhorCenario === modId
-                const lucroNegativo = dem.lucro_liquido < 0
+                  const dem = cenario.demonstrativo
+                  const isMelhor = melhorCenario === modId
+                  const lucroNegativo = dem.lucro_liquido < 0
 
-                return (
-                  <tr
-                    key={modId}
-                    className={`hover:bg-secondary/20 transition-colors ${
-                      isMelhor ? 'bg-emerald-50/40 font-semibold' : ''
-                    }`}
-                  >
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-foreground">{col.canal.nome}</span>
-                        <span className="text-muted-foreground">({col.modalidade.nome})</span>
-                        {isMelhor && (
-                          <Badge className="bg-emerald-600 text-white text-[9px] h-4 px-1.5">
-                            Melhor
+                  return (
+                    <tr
+                      key={modId}
+                      className={`hover:bg-secondary/20 transition-colors ${
+                        isMelhor ? 'bg-emerald-50/40 font-semibold' : ''
+                      }`}
+                    >
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-foreground">{col.canal.nome}</span>
+                          <span className="text-muted-foreground">({col.modalidade.nome})</span>
+                          {isMelhor && (
+                            <Badge className="bg-emerald-600 text-white text-[9px] h-4 px-1.5">
+                              Melhor
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-bold">
+                        {formatCurrency(dem.preco_anunciado)}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono text-muted-foreground">
+                        {formatCurrency(dem.preco_pago_cliente)}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono text-red-600">
+                        -{formatCurrency(dem.total_taxas_retidas_canal)}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-bold text-blue-900">
+                        {formatCurrency(dem.valor_receber_canal)}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono text-muted-foreground">
+                        {formatCurrency(dem.custo_total_produto)}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono text-muted-foreground">
+                        {formatCurrency(dem.total_tributos)}
+                      </td>
+                      <td
+                        className={`py-3 px-3 text-right font-mono font-black ${
+                          lucroNegativo ? 'text-red-600' : 'text-emerald-700'
+                        }`}
+                      >
+                        {formatCurrency(dem.lucro_liquido)}
+                      </td>
+                      <td
+                        className={`py-3 px-3 text-right font-bold ${
+                          lucroNegativo ? 'text-red-600' : 'text-emerald-700'
+                        }`}
+                      >
+                        {dem.margem_liquida_pct.toFixed(1)}%
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono text-muted-foreground">
+                        {formatCurrency(cenario.precoSugeridoEquilibrio)}
+                      </td>
+                      <td className="py-3 px-3 text-center text-muted-foreground">
+                        {col.modalidade.prazo_recebimento_dias || 0}d
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        {dem.incompleto ? (
+                          <Badge
+                            variant="outline"
+                            className="text-amber-600 border-amber-300 text-[10px]"
+                          >
+                            Pendente
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="text-emerald-600 border-emerald-300 text-[10px]"
+                          >
+                            Auditado
                           </Badge>
                         )}
-                      </div>
-                    </td>
-                    <td className="py-3 px-3 text-right font-mono font-bold">
-                      {formatCurrency(dem.preco_anunciado)}
-                    </td>
-                    <td className="py-3 px-3 text-right font-mono text-muted-foreground">
-                      {formatCurrency(dem.preco_pago_cliente)}
-                    </td>
-                    <td className="py-3 px-3 text-right font-mono text-red-600">
-                      -{formatCurrency(dem.total_taxas_retidas_canal)}
-                    </td>
-                    <td className="py-3 px-3 text-right font-mono font-bold text-blue-900">
-                      {formatCurrency(dem.valor_receber_canal)}
-                    </td>
-                    <td className="py-3 px-3 text-right font-mono text-muted-foreground">
-                      {formatCurrency(dem.custo_total_produto)}
-                    </td>
-                    <td className="py-3 px-3 text-right font-mono text-muted-foreground">
-                      {formatCurrency(dem.total_tributos)}
-                    </td>
-                    <td
-                      className={`py-3 px-3 text-right font-mono font-black ${
-                        lucroNegativo ? 'text-red-600' : 'text-emerald-700'
-                      }`}
-                    >
-                      {formatCurrency(dem.lucro_liquido)}
-                    </td>
-                    <td
-                      className={`py-3 px-3 text-right font-bold ${
-                        lucroNegativo ? 'text-red-600' : 'text-emerald-700'
-                      }`}
-                    >
-                      {dem.margem_liquida_pct.toFixed(1)}%
-                    </td>
-                    <td className="py-3 px-3 text-right font-mono text-muted-foreground">
-                      {formatCurrency(cenario.precoSugeridoEquilibrio)}
-                    </td>
-                    <td className="py-3 px-3 text-center text-muted-foreground">
-                      {col.modalidade.prazo_recebimento_dias || 0}d
-                    </td>
-                    <td className="py-3 px-4 text-center">
-                      {dem.incompleto ? (
-                        <Badge
-                          variant="outline"
-                          className="text-amber-600 border-amber-300 text-[10px]"
-                        >
-                          Pendente
-                        </Badge>
-                      ) : (
-                        <Badge
-                          variant="outline"
-                          className="text-emerald-600 border-emerald-300 text-[10px]"
-                        >
-                          Auditado
-                        </Badge>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
+                      </td>
+                    </tr>
+                  )
+                })}
             </tbody>
           </table>
         </CardContent>
