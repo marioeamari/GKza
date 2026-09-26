@@ -53,7 +53,11 @@ export interface ProdutoCalculoInput {
   sku: string
   nome: string
   tipo: TipoProduto
+  categoria?: string
   peso_g?: number
+  dimensao_comprimento_cm?: number
+  dimensao_largura_cm?: number
+  dimensao_altura_cm?: number
   dimensoes?: {
     comprimento?: number
     largura?: number
@@ -76,19 +80,26 @@ export interface ProdutoCalculoInput {
   kit_custos_adicionais?: CustoAdicionalKit[]
 }
 
+export interface TaxaCondicaoInput {
+  faixa_preco_min?: number
+  faixa_preco_max?: number
+  peso_min_kg?: number
+  peso_max_kg?: number
+  peso_min_g?: number
+  peso_max_g?: number
+  volume_min_cm3?: number
+  volume_max_cm3?: number
+  dimensao_max_cm?: number
+  categoria?: string
+}
+
 export interface TaxaRegraInput {
   id: string
   nome: string
   base_calculo: 'preco_anunciado' | 'preco_pago_cliente' | 'prestacao_fixa' | 'peso' | 'faixa_preco'
   tipo_valor: 'percentual' | 'fixo'
   valor: number
-  condicao?: {
-    faixa_preco_min?: number
-    faixa_preco_max?: number
-    peso_min_g?: number
-    peso_max_g?: number
-    categoria?: string
-  }
+  condicao?: TaxaCondicaoInput
   responsavel: 'vendedor' | 'marketplace'
   tipo_regra:
     | 'comissao'
@@ -157,6 +168,7 @@ export interface LinhaDemonstrativoTaxa {
   valor_calculado: number
   aplicada: boolean
   motivo_nao_aplicada?: string
+  condicao_resumo?: string
   pendente_conferencia?: boolean
 }
 
@@ -223,6 +235,191 @@ export function round2(num: number): number {
 
 export function round4(num: number): number {
   return Math.round((num + Number.EPSILON) * 10000) / 10000
+}
+
+/**
+ * Retorna dimensões e volume em cm³ do produto
+ */
+export function extrairDimensoesEVolume(produto: ProdutoCalculoInput): {
+  comprimento_cm: number
+  largura_cm: number
+  altura_cm: number
+  volume_cm3: number
+  maior_dimensao_cm: number
+} {
+  const comprimento_cm = produto.dimensao_comprimento_cm ?? produto.dimensoes?.comprimento ?? 0
+  const largura_cm = produto.dimensao_largura_cm ?? produto.dimensoes?.largura ?? 0
+  const altura_cm = produto.dimensao_altura_cm ?? produto.dimensoes?.altura ?? 0
+
+  const volume_cm3 =
+    comprimento_cm > 0 && largura_cm > 0 && altura_cm > 0
+      ? round2(comprimento_cm * largura_cm * altura_cm)
+      : 0
+
+  const maior_dimensao_cm = Math.max(comprimento_cm, largura_cm, altura_cm)
+
+  return {
+    comprimento_cm,
+    largura_cm,
+    altura_cm,
+    volume_cm3,
+    maior_dimensao_cm,
+  }
+}
+
+/**
+ * Formata um resumo legível das condições de uma regra de taxa
+ */
+export function formatarResumoCondicao(cond?: TaxaCondicaoInput): string {
+  if (!cond) return ''
+
+  const partes: string[] = []
+
+  // Preço
+  if (cond.faixa_preco_min !== undefined && cond.faixa_preco_max !== undefined) {
+    partes.push(
+      `Preço: R$ ${cond.faixa_preco_min.toFixed(2)} a R$ ${cond.faixa_preco_max.toFixed(2)}`,
+    )
+  } else if (cond.faixa_preco_min !== undefined) {
+    partes.push(`Preço: ≥ R$ ${cond.faixa_preco_min.toFixed(2)}`)
+  } else if (cond.faixa_preco_max !== undefined) {
+    partes.push(`Preço: < R$ ${cond.faixa_preco_max.toFixed(2)}`)
+  }
+
+  // Peso (preferência por kg na exibição se informado ou se em g for múltiplo de 1000)
+  const pesoMinKg =
+    cond.peso_min_kg !== undefined
+      ? cond.peso_min_kg
+      : cond.peso_min_g !== undefined
+        ? cond.peso_min_g / 1000
+        : undefined
+
+  const pesoMaxKg =
+    cond.peso_max_kg !== undefined
+      ? cond.peso_max_kg
+      : cond.peso_max_g !== undefined
+        ? cond.peso_max_g / 1000
+        : undefined
+
+  if (pesoMinKg !== undefined && pesoMaxKg !== undefined) {
+    partes.push(`Peso: ${pesoMinKg}kg a ${pesoMaxKg}kg`)
+  } else if (pesoMinKg !== undefined) {
+    partes.push(`Peso: ≥ ${pesoMinKg}kg`)
+  } else if (pesoMaxKg !== undefined) {
+    partes.push(`Peso: ≤ ${pesoMaxKg}kg`)
+  }
+
+  // Volume
+  if (cond.volume_min_cm3 !== undefined && cond.volume_max_cm3 !== undefined) {
+    partes.push(`Volume: ${cond.volume_min_cm3} a ${cond.volume_max_cm3} cm³`)
+  } else if (cond.volume_min_cm3 !== undefined) {
+    partes.push(`Volume: ≥ ${cond.volume_min_cm3} cm³`)
+  } else if (cond.volume_max_cm3 !== undefined) {
+    partes.push(`Volume: ≤ ${cond.volume_max_cm3} cm³`)
+  }
+
+  // Dimensão máxima
+  if (cond.dimensao_max_cm !== undefined) {
+    partes.push(`Dimensão: ≤ ${cond.dimensao_max_cm} cm`)
+  }
+
+  // Categoria
+  if (cond.categoria && cond.categoria.trim() !== '') {
+    partes.push(`Categoria: ${cond.categoria}`)
+  }
+
+  return partes.join(' · ')
+}
+
+/**
+ * Avalia se as condições de uma regra de taxa são satisfeitas pelo produto e preço anunciado
+ */
+export function avaliarCondicaoTaxa(
+  condicao: TaxaCondicaoInput | undefined,
+  preco_anunciado: number,
+  produto: ProdutoCalculoInput,
+): { aplicavel: boolean; motivoNaoAplicavel?: string; condicaoSatisfeitaTexto?: string } {
+  if (!condicao) {
+    return { aplicavel: true }
+  }
+
+  const motivos: string[] = []
+
+  // 1. Faixa de preço
+  if (condicao.faixa_preco_min !== undefined && preco_anunciado < condicao.faixa_preco_min) {
+    motivos.push(`Preço menor que R$ ${condicao.faixa_preco_min.toFixed(2)}`)
+  }
+  if (condicao.faixa_preco_max !== undefined && preco_anunciado > condicao.faixa_preco_max) {
+    motivos.push(`Preço maior que R$ ${condicao.faixa_preco_max.toFixed(2)}`)
+  }
+
+  // 2. Peso (kg ou g)
+  const pesoKg = (produto.peso_g || 0) / 1000
+
+  // Se condicao definir peso_min_kg ou peso_min_g
+  const minKg =
+    condicao.peso_min_kg !== undefined
+      ? condicao.peso_min_kg
+      : condicao.peso_min_g !== undefined
+        ? condicao.peso_min_g / 1000
+        : undefined
+
+  if (minKg !== undefined && pesoKg < minKg) {
+    motivos.push(`Peso (${pesoKg} kg) menor que mínimo de ${minKg} kg`)
+  }
+
+  const maxKg =
+    condicao.peso_max_kg !== undefined
+      ? condicao.peso_max_kg
+      : condicao.peso_max_g !== undefined
+        ? condicao.peso_max_g / 1000
+        : undefined
+
+  if (maxKg !== undefined && pesoKg > maxKg) {
+    motivos.push(`Peso (${pesoKg} kg) maior que teto de ${maxKg} kg`)
+  }
+
+  // 3. Volume e Dimensão
+  const dim = extrairDimensoesEVolume(produto)
+  if (condicao.volume_min_cm3 !== undefined && dim.volume_cm3 < condicao.volume_min_cm3) {
+    motivos.push(
+      `Volume (${dim.volume_cm3} cm³) menor que mínimo de ${condicao.volume_min_cm3} cm³`,
+    )
+  }
+  if (condicao.volume_max_cm3 !== undefined && dim.volume_cm3 > condicao.volume_max_cm3) {
+    motivos.push(
+      `Volume (${dim.volume_cm3} cm³) maior que máximo de ${condicao.volume_max_cm3} cm³`,
+    )
+  }
+  if (condicao.dimensao_max_cm !== undefined && dim.maior_dimensao_cm > condicao.dimensao_max_cm) {
+    motivos.push(
+      `Maior dimensão (${dim.maior_dimensao_cm} cm) ultrapassa limite de ${condicao.dimensao_max_cm} cm`,
+    )
+  }
+
+  // 4. Categoria
+  if (condicao.categoria && condicao.categoria.trim() !== '') {
+    const catProd = (produto.categoria || '').trim().toLowerCase()
+    const catCond = condicao.categoria.trim().toLowerCase()
+    if (catProd !== catCond) {
+      motivos.push(
+        `Categoria do produto (${produto.categoria || 'não definida'}) diferente de ${condicao.categoria}`,
+      )
+    }
+  }
+
+  if (motivos.length > 0) {
+    return {
+      aplicavel: false,
+      motivoNaoAplicavel: motivos.join('; '),
+    }
+  }
+
+  const resumo = formatarResumoCondicao(condicao)
+  return {
+    aplicavel: true,
+    condicaoSatisfeitaTexto: resumo || undefined,
+  }
 }
 
 /**
@@ -351,40 +548,11 @@ export function calcularDemonstrativo(input: CalculoCenarioInput): Demonstrativo
   let total_taxas_retidas_canal = 0
 
   for (const t of input.taxas) {
-    // Avaliar condições de aplicação
-    let aplicavel = true
-    let motivoNaoAplicavel = ''
-
-    if (t.condicao) {
-      if (
-        t.condicao.faixa_preco_min !== undefined &&
-        preco_anunciado < t.condicao.faixa_preco_min
-      ) {
-        aplicavel = false
-        motivoNaoAplicavel = `Preço menor que o mínimo de R$ ${t.condicao.faixa_preco_min.toFixed(2)}`
-      }
-      if (
-        t.condicao.faixa_preco_max !== undefined &&
-        preco_anunciado > t.condicao.faixa_preco_max
-      ) {
-        aplicavel = false
-        motivoNaoAplicavel = `Preço maior que o teto da regra (R$ ${t.condicao.faixa_preco_max.toFixed(2)})`
-      }
-      if (t.condicao.peso_min_g !== undefined) {
-        const peso = input.produto.peso_g || 0
-        if (peso < t.condicao.peso_min_g) {
-          aplicavel = false
-          motivoNaoAplicavel = `Peso menor que ${t.condicao.peso_min_g}g`
-        }
-      }
-      if (t.condicao.peso_max_g !== undefined) {
-        const peso = input.produto.peso_g || 0
-        if (peso > t.condicao.peso_max_g) {
-          aplicavel = false
-          motivoNaoAplicavel = `Peso maior que ${t.condicao.peso_max_g}g`
-        }
-      }
-    }
+    // Avaliar condições de aplicação combináveis (preço, peso, volume, dimensões, categoria)
+    const avaliacao = avaliarCondicaoTaxa(t.condicao, preco_anunciado, input.produto)
+    const aplicavel = avaliacao.aplicavel
+    const motivoNaoAplicavel = avaliacao.motivoNaoAplicavel || ''
+    const condicao_resumo = avaliacao.condicaoSatisfeitaTexto
 
     let base_valor = 0
     let base_nome = ''
@@ -447,6 +615,7 @@ export function calcularDemonstrativo(input: CalculoCenarioInput): Demonstrativo
       valor_calculado: round2(valor_calculado),
       aplicada: aplicavel,
       motivo_nao_aplicada: motivoNaoAplicavel || undefined,
+      condicao_resumo,
       pendente_conferencia: t.status_conferencia === 'pendente_conferencia',
     })
   }

@@ -3,6 +3,7 @@ import {
   DespesaCompraRateio,
   ItemComposicaoCusto,
   ItemKitConfig,
+  TaxaCondicaoInput,
   TipoProduto,
 } from '@/lib/precificacao/calculo'
 
@@ -88,13 +89,7 @@ export interface PrecTaxaRecord {
   base_calculo: 'preco_anunciado' | 'preco_pago_cliente' | 'prestacao_fixa' | 'peso' | 'faixa_preco'
   tipo_valor: 'percentual' | 'fixo'
   valor: number
-  condicao?: {
-    faixa_preco_min?: number
-    faixa_preco_max?: number
-    peso_min_g?: number
-    peso_max_g?: number
-    categoria?: string
-  }
+  condicao?: TaxaCondicaoInput
   responsavel: 'vendedor' | 'marketplace'
   tipo_regra:
     | 'comissao'

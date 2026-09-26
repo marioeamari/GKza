@@ -36,6 +36,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { precificacaoService } from '@/services/precificacao'
 import { PrecCanalModalidadeRecord, PrecCanalRecord, PrecTaxaRecord } from '@/types/precificacao'
+import { formatarResumoCondicao } from '@/lib/precificacao/calculo'
 import { formatCurrency } from '@/lib/format'
 import { useToast } from '@/hooks/use-toast'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -143,13 +144,57 @@ export default function PrecificacaoCanais() {
   async function handleSalvarTaxa(e: React.FormEvent) {
     e.preventDefault()
     if (!taxaEditando?.nome || !canalAtivoId) return
+
+    // Limpar valores vazios da condição para não salvar chaves undefined/NaN
+    const cond = taxaEditando.condicao
+    let condicaoLimpa: typeof cond | undefined = undefined
+
+    if (cond) {
+      const c: Record<string, unknown> = {}
+      if (typeof cond.faixa_preco_min === 'number' && !isNaN(cond.faixa_preco_min)) {
+        c.faixa_preco_min = cond.faixa_preco_min
+      }
+      if (typeof cond.faixa_preco_max === 'number' && !isNaN(cond.faixa_preco_max)) {
+        c.faixa_preco_max = cond.faixa_preco_max
+      }
+      if (typeof cond.peso_min_kg === 'number' && !isNaN(cond.peso_min_kg)) {
+        c.peso_min_kg = cond.peso_min_kg
+        c.peso_min_g = cond.peso_min_kg * 1000
+      }
+      if (typeof cond.peso_max_kg === 'number' && !isNaN(cond.peso_max_kg)) {
+        c.peso_max_kg = cond.peso_max_kg
+        c.peso_max_g = cond.peso_max_kg * 1000
+      }
+      if (typeof cond.volume_min_cm3 === 'number' && !isNaN(cond.volume_min_cm3)) {
+        c.volume_min_cm3 = cond.volume_min_cm3
+      }
+      if (typeof cond.volume_max_cm3 === 'number' && !isNaN(cond.volume_max_cm3)) {
+        c.volume_max_cm3 = cond.volume_max_cm3
+      }
+      if (typeof cond.dimensao_max_cm === 'number' && !isNaN(cond.dimensao_max_cm)) {
+        c.dimensao_max_cm = cond.dimensao_max_cm
+      }
+      if (cond.categoria && cond.categoria.trim() !== '') {
+        c.categoria = cond.categoria.trim()
+      }
+
+      if (Object.keys(c).length > 0) {
+        condicaoLimpa = c as typeof cond
+      }
+    }
+
     try {
+      const payload: Partial<PrecTaxaRecord> = {
+        ...taxaEditando,
+        condicao: condicaoLimpa,
+      }
+
       if (taxaEditando.id) {
-        await precificacaoService.updateTaxa(taxaEditando.id, taxaEditando)
+        await precificacaoService.updateTaxa(taxaEditando.id, payload)
         toast({ title: 'Taxa atualizada' })
       } else {
         await precificacaoService.createTaxa({
-          ...taxaEditando,
+          ...payload,
           canal: canalAtivoId,
           base_calculo: taxaEditando.base_calculo || 'preco_anunciado',
           tipo_valor: taxaEditando.tipo_valor || 'percentual',
@@ -439,13 +484,30 @@ export default function PrecificacaoCanais() {
                         const mod = modalidades.find((m) => m.id === tx.modalidade)
                         const pendente = tx.status_conferencia === 'pendente_conferencia'
 
+                        const resumoCond = formatarResumoCondicao(tx.condicao)
+
                         return (
                           <tr key={tx.id} className="hover:bg-secondary/20 transition-colors">
                             <td className="py-3 px-4">
-                              <span className="font-bold text-foreground block">{tx.nome}</span>
-                              <span className="text-[10px] text-muted-foreground uppercase font-mono">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-bold text-foreground block">{tx.nome}</span>
+                                {resumoCond && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="text-[9px] bg-amber-500/10 text-amber-700 border-amber-300 font-normal px-1.5 py-0"
+                                  >
+                                    Condicional
+                                  </Badge>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-muted-foreground uppercase font-mono block">
                                 {tx.tipo_regra}
                               </span>
+                              {resumoCond && (
+                                <span className="text-[11px] text-amber-700 font-medium block mt-0.5">
+                                  {resumoCond}
+                                </span>
+                              )}
                             </td>
                             <td className="py-3 px-3">
                               {mod ? (
@@ -661,7 +723,7 @@ export default function PrecificacaoCanais() {
 
       {/* DIALOG DE TAXA */}
       <Dialog open={openTaxaDialog} onOpenChange={setOpenTaxaDialog}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
           <form onSubmit={handleSalvarTaxa}>
             <DialogHeader>
               <DialogTitle>
@@ -672,12 +734,12 @@ export default function PrecificacaoCanais() {
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-3 py-3 text-xs">
+            <div className="space-y-4 py-3 text-xs">
               <div className="space-y-1">
                 <Label>Nome da Taxa</Label>
                 <Input
                   required
-                  placeholder="Ex: Comissão Shopee, Tarifa Fixa Item..."
+                  placeholder="Ex: Comissão Shopee < R$ 80, Taxa Logística > 5kg..."
                   value={taxaEditando?.nome || ''}
                   onChange={(e) => setTaxaEditando((prev) => ({ ...prev, nome: e.target.value }))}
                 />
@@ -798,6 +860,231 @@ export default function PrecificacaoCanais() {
                     }))
                   }
                 />
+              </div>
+
+              {/* SEÇÃO DE CONDIÇÕES CONDICIONAIS */}
+              <div className="rounded-xl border border-border bg-secondary/30 p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-xs font-bold text-foreground">
+                      Condição de Aplicação (Opcional)
+                    </Label>
+                    <p className="text-[11px] text-muted-foreground">
+                      Em branco = sem restrição (aplica sempre em todas as vendas).
+                    </p>
+                  </div>
+                  {(taxaEditando?.condicao?.faixa_preco_min !== undefined ||
+                    taxaEditando?.condicao?.faixa_preco_max !== undefined ||
+                    taxaEditando?.condicao?.peso_min_kg !== undefined ||
+                    taxaEditando?.condicao?.peso_max_kg !== undefined ||
+                    taxaEditando?.condicao?.volume_min_cm3 !== undefined ||
+                    taxaEditando?.condicao?.volume_max_cm3 !== undefined ||
+                    taxaEditando?.condicao?.categoria) && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 text-[10px] text-muted-foreground hover:text-destructive"
+                      onClick={() =>
+                        setTaxaEditando((prev) => ({
+                          ...prev,
+                          condicao: undefined,
+                        }))
+                      }
+                    >
+                      Limpar condições
+                    </Button>
+                  )}
+                </div>
+
+                {/* Faixa de Preço */}
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-muted-foreground">
+                    Faixa de Preço do Produto (R$)
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        placeholder="Mínimo (ex: 80.00)"
+                        value={taxaEditando?.condicao?.faixa_preco_min ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
+                          setTaxaEditando((prev) => ({
+                            ...prev,
+                            condicao: {
+                              ...prev?.condicao,
+                              faixa_preco_min: val,
+                            },
+                          }))
+                        }}
+                      />
+                      <span className="text-[9px] text-muted-foreground mt-0.5 block">
+                        Aplica se preço ≥ mínimo
+                      </span>
+                    </div>
+                    <div>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        placeholder="Máximo (ex: 79.99)"
+                        value={taxaEditando?.condicao?.faixa_preco_max ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
+                          setTaxaEditando((prev) => ({
+                            ...prev,
+                            condicao: {
+                              ...prev?.condicao,
+                              faixa_preco_max: val,
+                            },
+                          }))
+                        }}
+                      />
+                      <span className="text-[9px] text-muted-foreground mt-0.5 block">
+                        Aplica se preço ≤ máximo
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Faixa de Peso */}
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-muted-foreground">
+                    Faixa de Peso do Produto (kg)
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        placeholder="Mínimo kg (ex: 5.0)"
+                        value={
+                          taxaEditando?.condicao?.peso_min_kg ??
+                          (taxaEditando?.condicao?.peso_min_g !== undefined
+                            ? taxaEditando.condicao.peso_min_g / 1000
+                            : '')
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
+                          setTaxaEditando((prev) => ({
+                            ...prev,
+                            condicao: {
+                              ...prev?.condicao,
+                              peso_min_kg: val,
+                              peso_min_g: val !== undefined ? val * 1000 : undefined,
+                            },
+                          }))
+                        }}
+                      />
+                      <span className="text-[9px] text-muted-foreground mt-0.5 block">
+                        Aplica se peso ≥ mínimo
+                      </span>
+                    </div>
+                    <div>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        placeholder="Máximo kg (ex: 5.0)"
+                        value={
+                          taxaEditando?.condicao?.peso_max_kg ??
+                          (taxaEditando?.condicao?.peso_max_g !== undefined
+                            ? taxaEditando.condicao.peso_max_g / 1000
+                            : '')
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
+                          setTaxaEditando((prev) => ({
+                            ...prev,
+                            condicao: {
+                              ...prev?.condicao,
+                              peso_max_kg: val,
+                              peso_max_g: val !== undefined ? val * 1000 : undefined,
+                            },
+                          }))
+                        }}
+                      />
+                      <span className="text-[9px] text-muted-foreground mt-0.5 block">
+                        Aplica se peso ≤ máximo
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Faixa de Volume ou Dimensão */}
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-muted-foreground">
+                    Faixa de Volume (cm³) ou Dimensão
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Input
+                        type="number"
+                        step="1"
+                        placeholder="Vol. Mínimo (cm³)"
+                        value={taxaEditando?.condicao?.volume_min_cm3 ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
+                          setTaxaEditando((prev) => ({
+                            ...prev,
+                            condicao: {
+                              ...prev?.condicao,
+                              volume_min_cm3: val,
+                            },
+                          }))
+                        }}
+                      />
+                      <span className="text-[9px] text-muted-foreground mt-0.5 block">
+                        Calculado de CxLxA
+                      </span>
+                    </div>
+                    <div>
+                      <Input
+                        type="number"
+                        step="1"
+                        placeholder="Vol. Máximo (cm³)"
+                        value={taxaEditando?.condicao?.volume_max_cm3 ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
+                          setTaxaEditando((prev) => ({
+                            ...prev,
+                            condicao: {
+                              ...prev?.condicao,
+                              volume_max_cm3: val,
+                            },
+                          }))
+                        }}
+                      />
+                      <span className="text-[9px] text-muted-foreground mt-0.5 block">
+                        Limite de volume
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Categoria do Produto */}
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-muted-foreground">
+                    Categoria Específica (Opcional)
+                  </span>
+                  <Input
+                    placeholder="Ex: Cama e Banho, Eletrônicos..."
+                    value={taxaEditando?.condicao?.categoria || ''}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setTaxaEditando((prev) => ({
+                        ...prev,
+                        condicao: {
+                          ...prev?.condicao,
+                          categoria: val || undefined,
+                        },
+                      }))
+                    }}
+                  />
+                  <span className="text-[9px] text-muted-foreground block">
+                    Aplica apenas a produtos com esta categoria no cadastro.
+                  </span>
+                </div>
               </div>
             </div>
 

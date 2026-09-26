@@ -159,7 +159,11 @@ export default function PrecificacaoComparar() {
       sku: produtoAtual.sku,
       nome: produtoAtual.nome,
       tipo: produtoAtual.tipo,
+      categoria: produtoAtual.categoria,
       peso_g: produtoAtual.peso_g,
+      dimensao_comprimento_cm: produtoAtual.dimensao_comprimento_cm,
+      dimensao_largura_cm: produtoAtual.dimensao_largura_cm,
+      dimensao_altura_cm: produtoAtual.dimensao_altura_cm,
       composicao: produtoAtual.composicao,
       perda_pct: produtoAtual.perda_pct,
       custo_aquisicao_unitario: produtoAtual.custo_aquisicao_unitario,
@@ -258,7 +262,11 @@ export default function PrecificacaoComparar() {
           sku: produtoAtual.sku,
           nome: produtoAtual.nome,
           tipo: produtoAtual.tipo,
+          categoria: produtoAtual.categoria,
           peso_g: produtoAtual.peso_g,
+          dimensao_comprimento_cm: produtoAtual.dimensao_comprimento_cm,
+          dimensao_largura_cm: produtoAtual.dimensao_largura_cm,
+          dimensao_altura_cm: produtoAtual.dimensao_altura_cm,
           composicao: produtoAtual.composicao,
           perda_pct: produtoAtual.perda_pct,
           custo_aquisicao_unitario: produtoAtual.custo_aquisicao_unitario,
@@ -688,7 +696,37 @@ export default function PrecificacaoComparar() {
                   {Boolean(produtoAtual.peso_g) && (
                     <div className="flex justify-between text-[11px]">
                       <span className="text-muted-foreground">Peso:</span>
-                      <span className="font-mono">{produtoAtual.peso_g}g</span>
+                      <span className="font-mono">
+                        {produtoAtual.peso_g}g ({(produtoAtual.peso_g / 1000).toFixed(2)}kg)
+                      </span>
+                    </div>
+                  )}
+                  {(Boolean(produtoAtual.dimensao_comprimento_cm) ||
+                    Boolean(produtoAtual.dimensao_largura_cm) ||
+                    Boolean(produtoAtual.dimensao_altura_cm)) && (
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-muted-foreground">Dimensões / Vol:</span>
+                      <span className="font-mono">
+                        {produtoAtual.dimensao_comprimento_cm || 0}x
+                        {produtoAtual.dimensao_largura_cm || 0}x
+                        {produtoAtual.dimensao_altura_cm || 0} cm
+                        {Boolean(
+                          (produtoAtual.dimensao_comprimento_cm || 0) *
+                          (produtoAtual.dimensao_largura_cm || 0) *
+                          (produtoAtual.dimensao_altura_cm || 0),
+                        ) &&
+                          ` (${(
+                            (produtoAtual.dimensao_comprimento_cm || 0) *
+                            (produtoAtual.dimensao_largura_cm || 0) *
+                            (produtoAtual.dimensao_altura_cm || 0)
+                          ).toLocaleString('pt-BR')} cm³)`}
+                      </span>
+                    </div>
+                  )}
+                  {Boolean(produtoAtual.categoria) && (
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-muted-foreground">Categoria:</span>
+                      <span className="font-mono">{produtoAtual.categoria}</span>
                     </div>
                   )}
                 </div>
@@ -819,28 +857,58 @@ export default function PrecificacaoComparar() {
                       {/* Taxas do Canal (Linha a Linha Auditável) */}
                       <div className="space-y-1 border-t border-border/80 pt-2">
                         <div className="flex justify-between items-center text-[10px] font-bold text-muted-foreground uppercase">
-                          <span>Taxas & Comissões</span>
+                          <span>
+                            Taxas & Comissões ({dem.linhas_taxas.filter((t) => t.aplicada).length}{' '}
+                            ativas)
+                          </span>
                           <span>Retenção</span>
                         </div>
 
-                        <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5 scrollbar-thin">
+                        {/* Aviso quando nenhuma taxa de comissão/obrigatória foi aplicada para as condições */}
+                        {col.taxasDoCanal.length > 0 &&
+                          dem.linhas_taxas.every((t) => !t.aplicada) && (
+                            <div className="rounded-lg bg-amber-50 border border-amber-300 p-2 text-[10px] text-amber-800 flex items-start gap-1.5 my-1">
+                              <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5" />
+                              <span>
+                                Nenhuma regra casou com o preço ou peso/volume atual (cenário
+                                incompleto).
+                              </span>
+                            </div>
+                          )}
+
+                        <div className="space-y-1 max-h-44 overflow-y-auto pr-0.5 scrollbar-thin">
                           {dem.linhas_taxas.map((tx, idx) => (
                             <div
                               key={idx}
-                              className="flex justify-between items-center text-[11px] py-0.5 border-b border-border/20"
+                              className={`flex justify-between items-center text-[11px] py-1 border-b border-border/20 ${
+                                !tx.aplicada ? 'opacity-40' : ''
+                              }`}
                             >
-                              <div className="truncate max-w-[160px]">
+                              <div className="truncate max-w-[170px]">
                                 <span className="font-medium text-foreground block truncate">
                                   {tx.nome}
+                                  {tx.condicao_resumo && tx.aplicada && (
+                                    <span className="text-[9px] text-primary font-bold ml-1">
+                                      ({tx.condicao_resumo})
+                                    </span>
+                                  )}
                                 </span>
-                                <span className="text-[9px] text-muted-foreground">
-                                  {tx.tipo_valor === 'percentual'
-                                    ? `${tx.aliquota_ou_fixo}% sobre ${tx.base_nome}`
-                                    : `R$ ${tx.aliquota_ou_fixo.toFixed(2)} fixo`}
+                                <span className="text-[9px] text-muted-foreground block truncate">
+                                  {tx.aplicada
+                                    ? tx.tipo_valor === 'percentual'
+                                      ? `${tx.aliquota_ou_fixo}% sobre ${tx.base_nome}`
+                                      : `R$ ${tx.aliquota_ou_fixo.toFixed(2)} fixo`
+                                    : `Não aplicada: ${tx.motivo_nao_aplicada || 'fora da condição'}`}
                                 </span>
                               </div>
-                              <span className="font-mono text-red-600 font-semibold">
-                                -{formatCurrency(tx.valor_calculado)}
+                              <span
+                                className={`font-mono font-semibold ${
+                                  tx.aplicada
+                                    ? 'text-red-600'
+                                    : 'text-muted-foreground line-through'
+                                }`}
+                              >
+                                {tx.aplicada ? `-${formatCurrency(tx.valor_calculado)}` : 'R$ 0,00'}
                               </span>
                             </div>
                           ))}
