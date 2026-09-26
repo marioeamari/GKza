@@ -63,6 +63,27 @@ export default function PrecificacaoCanais() {
   const [openTaxaDialog, setOpenTaxaDialog] = useState(false)
   const [taxaEditando, setTaxaEditando] = useState<Partial<PrecTaxaRecord> | null>(null)
 
+  // Diálogo de Exclusão de Canal
+  const [canalExcluindo, setCanalExcluindo] = useState<PrecCanalRecord | null>(null)
+  const [contagemVinculosCanal, setContagemVinculosCanal] = useState<{
+    taxas: number
+    modalidades: number
+    precificacoes: number
+  } | null>(null)
+  const [verificandoVinculosCanal, setVerificandoVinculosCanal] = useState(false)
+  const [executandoExclusaoCanal, setExecutandoExclusaoCanal] = useState(false)
+
+  // Diálogo de Exclusão de Modalidade
+  const [modalidadeExcluindo, setModalidadeExcluindo] = useState<PrecCanalModalidadeRecord | null>(
+    null,
+  )
+  const [contagemVinculosModalidade, setContagemVinculosModalidade] = useState<{
+    taxas: number
+    precificacoes: number
+  } | null>(null)
+  const [verificandoVinculosMod, setVerificandoVinculosMod] = useState(false)
+  const [executandoExclusaoMod, setExecutandoExclusaoMod] = useState(false)
+
   async function carregarDados() {
     try {
       setLoading(true)
@@ -232,10 +253,148 @@ export default function PrecificacaoCanais() {
     if (!confirm('Deseja realmente excluir esta regra de taxa?')) return
     try {
       await precificacaoService.deleteTaxa(taxaId)
-      toast({ title: 'Taxa removida' })
+      toast({ title: 'Taxa removida com sucesso' })
       carregarDados()
     } catch (err) {
       toast({ variant: 'destructive', title: 'Erro ao excluir taxa' })
+    }
+  }
+
+  // Abrir Exclusão de Canal com verificação de dependências
+  async function handleAbrirExclusaoCanal(canal: PrecCanalRecord) {
+    setCanalExcluindo(canal)
+    setVerificandoVinculosCanal(true)
+    setContagemVinculosCanal(null)
+    try {
+      const counts = await precificacaoService.countVinculosCanal(canal.id)
+      setContagemVinculosCanal(counts)
+    } catch (err) {
+      console.error('Erro ao verificar dependências do canal:', err)
+      // Fallback usando dados em memória
+      const txLocal = taxas.filter((t) => t.canal === canal.id).length
+      const modLocal = modalidades.filter((m) => m.canal === canal.id).length
+      setContagemVinculosCanal({ taxas: txLocal, modalidades: modLocal, precificacoes: 0 })
+    } finally {
+      setVerificandoVinculosCanal(false)
+    }
+  }
+
+  // Alternativa 1: Desativar Canal
+  async function handleDesativarCanal() {
+    if (!canalExcluindo) return
+    try {
+      setExecutandoExclusaoCanal(true)
+      await precificacaoService.updateCanal(canalExcluindo.id, { ativo: false })
+      toast({
+        title: 'Canal desativado',
+        description: `O canal "${canalExcluindo.nome}" agora está inativo e não aparecerá nas novas simulações ativas.`,
+      })
+      setCanalExcluindo(null)
+      carregarDados()
+    } catch (err) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao desativar canal',
+        description: 'Não foi possível alterar o status do canal.',
+      })
+    } finally {
+      setExecutandoExclusaoCanal(false)
+    }
+  }
+
+  // Exclusão definitiva do Canal (direta ou em cascata)
+  async function handleConfirmarExclusaoCanal(emCascata = false) {
+    if (!canalExcluindo) return
+    try {
+      setExecutandoExclusaoCanal(true)
+      const nomeCanal = canalExcluindo.nome
+      const canalId = canalExcluindo.id
+
+      if (emCascata) {
+        const res = await precificacaoService.deleteCanalComVinculos(canalId)
+        toast({
+          title: 'Canal excluído com sucesso',
+          description: `O canal "${nomeCanal}" foi removido com suas ${res.taxasRemovidas} taxas, ${res.modalidadesRemovidas} modalidades e ${res.precificacoesRemovidas} precificações.`,
+        })
+      } else {
+        await precificacaoService.deleteCanal(canalId)
+        toast({
+          title: 'Canal excluído com sucesso',
+          description: `O canal "${nomeCanal}" foi removido definitivamente.`,
+        })
+      }
+
+      // Se o canal excluído era o ativo, limpa ou escolhe outro
+      if (canalAtivoId === canalId) {
+        const outros = canais.filter((c) => c.id !== canalId)
+        setCanalAtivoId(outros.length > 0 ? outros[0].id : '')
+      }
+
+      setCanalExcluindo(null)
+      carregarDados()
+    } catch (err) {
+      console.error('Erro ao excluir canal:', err)
+      toast({
+        variant: 'destructive',
+        title: 'Não foi possível excluir o canal',
+        description:
+          'Verifique suas permissões ou se ainda há registros vinculados que impedem a remoção.',
+      })
+    } finally {
+      setExecutandoExclusaoCanal(false)
+    }
+  }
+
+  // Abrir Exclusão de Modalidade com verificação de vínculos
+  async function handleAbrirExclusaoModalidade(mod: PrecCanalModalidadeRecord) {
+    setModalidadeExcluindo(mod)
+    setVerificandoVinculosMod(true)
+    setContagemVinculosModalidade(null)
+    try {
+      const counts = await precificacaoService.countVinculosModalidade(mod.id)
+      setContagemVinculosModalidade(counts)
+    } catch (err) {
+      console.error('Erro ao verificar dependências da modalidade:', err)
+      const txLocal = taxas.filter((t) => t.modalidade === mod.id).length
+      setContagemVinculosModalidade({ taxas: txLocal, precificacoes: 0 })
+    } finally {
+      setVerificandoVinculosMod(false)
+    }
+  }
+
+  // Confirmar Exclusão de Modalidade
+  async function handleConfirmarExclusaoModalidade(emCascata = false) {
+    if (!modalidadeExcluindo) return
+    try {
+      setExecutandoExclusaoMod(true)
+      const nomeMod = modalidadeExcluindo.nome
+      const modId = modalidadeExcluindo.id
+
+      if (emCascata) {
+        const res = await precificacaoService.deleteModalidadeComVinculos(modId)
+        toast({
+          title: 'Modalidade excluída',
+          description: `A modalidade "${nomeMod}" foi removida junto com ${res.taxasAfetadas} taxa(s) vinculada(s).`,
+        })
+      } else {
+        await precificacaoService.deleteModalidade(modId)
+        toast({
+          title: 'Modalidade excluída com sucesso',
+          description: `A modalidade "${nomeMod}" foi removida.`,
+        })
+      }
+
+      setModalidadeExcluindo(null)
+      carregarDados()
+    } catch (err) {
+      console.error('Erro ao excluir modalidade:', err)
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao excluir modalidade',
+        description: 'Não foi possível remover a modalidade selecionada.',
+      })
+    } finally {
+      setExecutandoExclusaoMod(false)
     }
   }
 
@@ -287,37 +446,64 @@ export default function PrecificacaoCanais() {
                 ).length
 
                 return (
-                  <button
+                  <div
                     key={c.id}
-                    onClick={() => setCanalAtivoId(c.id)}
-                    className={`w-full text-left p-3 rounded-xl transition-all flex items-center justify-between border ${
+                    className={`group w-full p-2.5 rounded-xl transition-all flex items-center justify-between border ${
                       isSelected
                         ? 'border-primary bg-primary/10 text-primary font-bold shadow-xs'
                         : 'border-transparent hover:bg-secondary/60 text-foreground'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setCanalAtivoId(c.id)}
+                      className="flex-1 text-left flex items-center gap-2.5 min-w-0"
+                    >
                       <div
                         className="h-3 w-3 rounded-full shrink-0"
                         style={{ backgroundColor: c.cor || '#DF5830' }}
                       />
-                      <div>
-                        <span className="block text-xs font-semibold">{c.nome}</span>
+                      <div className="truncate">
+                        <div className="flex items-center gap-1.5">
+                          <span className="block text-xs font-semibold truncate">{c.nome}</span>
+                          {!c.ativo && (
+                            <Badge
+                              variant="outline"
+                              className="text-[9px] h-4 px-1 py-0 text-muted-foreground border-muted-foreground/30"
+                            >
+                              Inativo
+                            </Badge>
+                          )}
+                        </div>
                         <span className="text-[10px] text-muted-foreground block capitalize">
                           {c.tipo.replace('_', ' ')} • {countTaxas} taxas
                         </span>
                       </div>
-                    </div>
+                    </button>
 
-                    {pendentes > 0 && (
-                      <Badge
-                        variant="outline"
-                        className="text-amber-600 border-amber-300 text-[9px] h-5 px-1.5"
+                    <div className="flex items-center gap-1 shrink-0 ml-1">
+                      {pendentes > 0 && (
+                        <Badge
+                          variant="outline"
+                          className="text-amber-600 border-amber-300 text-[9px] h-5 px-1.5"
+                        >
+                          {pendentes} pend.
+                        </Badge>
+                      )}
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-70 group-hover:opacity-100 transition-opacity"
+                        title={`Excluir canal ${c.nome}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleAbrirExclusaoCanal(c)
+                        }}
                       >
-                        {pendentes} pend.
-                      </Badge>
-                    )}
-                  </button>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
                 )
               })
             )}
@@ -371,6 +557,15 @@ export default function PrecificacaoCanais() {
                     </Button>
                     <Button
                       size="sm"
+                      variant="outline"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+                      onClick={() => handleAbrirExclusaoCanal(canalSelecionado)}
+                    >
+                      <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                      Excluir Canal
+                    </Button>
+                    <Button
+                      size="sm"
                       className="bg-primary text-white font-bold"
                       onClick={() => {
                         setModEditando({
@@ -414,12 +609,22 @@ export default function PrecificacaoCanais() {
                             size="icon"
                             variant="ghost"
                             className="h-6 w-6"
+                            title="Editar modalidade"
                             onClick={() => {
                               setModEditando(m)
                               setOpenModDialog(true)
                             }}
                           >
                             <Edit2 className="h-3 w-3 text-muted-foreground" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            title="Excluir modalidade"
+                            onClick={() => handleAbrirExclusaoModalidade(m)}
+                          >
+                            <Trash2 className="h-3 w-3" />
                           </Button>
                         </div>
                       </div>
@@ -1097,6 +1302,290 @@ export default function PrecificacaoCanais() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIÁLOGO DE CONFIRMAÇÃO DE EXCLUSÃO DE CANAL */}
+      <Dialog
+        open={!!canalExcluindo}
+        onOpenChange={(open) => {
+          if (!open && !executandoExclusaoCanal) {
+            setCanalExcluindo(null)
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <div className="flex items-center gap-2.5 text-destructive mb-1">
+              <div className="h-9 w-9 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+              </div>
+              <DialogTitle className="text-base font-bold text-foreground">
+                Excluir Canal de Venda
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground pt-1">
+              Você está prestes a excluir o canal{' '}
+              <strong className="text-foreground font-semibold">
+                &ldquo;{canalExcluindo?.nome}&rdquo;
+              </strong>
+              . Esta ação não pode ser desfeita.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-2 text-xs space-y-3">
+            {verificandoVinculosCanal ? (
+              <div className="p-4 rounded-xl border border-border bg-secondary/20 flex items-center gap-3">
+                <Skeleton className="h-4 w-4 rounded-full" />
+                <span className="text-xs text-muted-foreground">
+                  Verificando taxas, modalidades e precificações vinculadas...
+                </span>
+              </div>
+            ) : (
+              (() => {
+                const txCount = contagemVinculosCanal?.taxas ?? 0
+                const modCount = contagemVinculosCanal?.modalidades ?? 0
+                const precCount = contagemVinculosCanal?.precificacoes ?? 0
+                const temVinculos = txCount > 0 || modCount > 0 || precCount > 0
+
+                if (temVinculos) {
+                  return (
+                    <div className="space-y-3">
+                      <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <span className="font-bold block text-xs">
+                              Existem dados vinculados a este canal
+                            </span>
+                            <p className="text-[11px] leading-relaxed opacity-90">
+                              Para proteger a integridade do seu catálogo e do histórico de
+                              cálculos, veja os registros dependentes:
+                            </p>
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {txCount > 0 && (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[10px] bg-background/80 font-mono"
+                                >
+                                  {txCount} {txCount === 1 ? 'taxa' : 'taxas'}
+                                </Badge>
+                              )}
+                              {modCount > 0 && (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[10px] bg-background/80 font-mono"
+                                >
+                                  {modCount} {modCount === 1 ? 'modalidade' : 'modalidades'}
+                                </Badge>
+                              )}
+                              {precCount > 0 && (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[10px] bg-background/80 font-mono"
+                                >
+                                  {precCount} {precCount === 1 ? 'precificação' : 'precificações'}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded-xl border border-border bg-secondary/20 space-y-2">
+                        <span className="text-[11px] font-bold text-foreground block">
+                          Recomendação de segurança:
+                        </span>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          Se você não vende mais por este canal,{' '}
+                          <strong className="text-foreground">desative-o</strong> em vez de excluir.
+                          Ele deixará de ser sugerido nas novas simulações mas o histórico de
+                          produtos e taxas permanecerá intacto.
+                        </p>
+                      </div>
+                    </div>
+                  )
+                }
+
+                return (
+                  <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200 flex items-start gap-2.5">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold block text-xs">
+                        Nenhum vínculo dependente detectado
+                      </span>
+                      <p className="text-[11px] opacity-90 mt-0.5">
+                        Este canal não possui taxas, modalidades ou precificações cadastradas. A
+                        remoção pode ser feita com total segurança.
+                      </p>
+                    </div>
+                  </div>
+                )
+              })()
+            )}
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={executandoExclusaoCanal}
+              onClick={() => setCanalExcluindo(null)}
+            >
+              Cancelar
+            </Button>
+
+            {(() => {
+              const txCount = contagemVinculosCanal?.taxas ?? 0
+              const modCount = contagemVinculosCanal?.modalidades ?? 0
+              const precCount = contagemVinculosCanal?.precificacoes ?? 0
+              const temVinculos = txCount > 0 || modCount > 0 || precCount > 0
+
+              if (temVinculos) {
+                return (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-primary/40 text-primary hover:bg-primary/10"
+                      disabled={executandoExclusaoCanal || verificandoVinculosCanal}
+                      onClick={handleDesativarCanal}
+                    >
+                      Apenas Desativar Canal
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      disabled={executandoExclusaoCanal || verificandoVinculosCanal}
+                      onClick={() => handleConfirmarExclusaoCanal(true)}
+                    >
+                      {executandoExclusaoCanal ? 'Excluindo...' : 'Excluir Canal e Vínculos'}
+                    </Button>
+                  </>
+                )
+              }
+
+              return (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={executandoExclusaoCanal || verificandoVinculosCanal}
+                  onClick={() => handleConfirmarExclusaoCanal(false)}
+                >
+                  {executandoExclusaoCanal ? 'Excluindo...' : 'Excluir Canal'}
+                </Button>
+              )
+            })()}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIÁLOGO DE CONFIRMAÇÃO DE EXCLUSÃO DE MODALIDADE */}
+      <Dialog
+        open={!!modalidadeExcluindo}
+        onOpenChange={(open) => {
+          if (!open && !executandoExclusaoMod) {
+            setModalidadeExcluindo(null)
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <div className="flex items-center gap-2.5 text-destructive mb-1">
+              <div className="h-9 w-9 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+              </div>
+              <DialogTitle className="text-base font-bold text-foreground">
+                Excluir Modalidade de Venda
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground pt-1">
+              Deseja realmente remover a modalidade{' '}
+              <strong className="text-foreground font-semibold">
+                &ldquo;{modalidadeExcluindo?.nome}&rdquo;
+              </strong>
+              ?
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-2 text-xs space-y-3">
+            {verificandoVinculosMod ? (
+              <div className="p-4 rounded-xl border border-border bg-secondary/20 flex items-center gap-3">
+                <Skeleton className="h-4 w-4 rounded-full" />
+                <span className="text-xs text-muted-foreground">
+                  Verificando taxas e precificações vinculadas...
+                </span>
+              </div>
+            ) : (
+              (() => {
+                const txCount = contagemVinculosModalidade?.taxas ?? 0
+                const precCount = contagemVinculosModalidade?.precificacoes ?? 0
+                const temVinculos = txCount > 0 || precCount > 0
+
+                if (temVinculos) {
+                  return (
+                    <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <span className="font-bold block text-xs">
+                            Atenção aos dados dependentes
+                          </span>
+                          <p className="text-[11px] leading-relaxed opacity-90">
+                            Existem{' '}
+                            {txCount > 0 && (
+                              <strong>
+                                {txCount} {txCount === 1 ? 'taxa' : 'taxas'}
+                              </strong>
+                            )}
+                            {txCount > 0 && precCount > 0 && ' e '}
+                            {precCount > 0 && (
+                              <strong>
+                                {precCount} {precCount === 1 ? 'precificação' : 'precificações'}
+                              </strong>
+                            )}{' '}
+                            específicas para esta modalidade. Ao excluir, esses registros também
+                            serão removidos para evitar erros nos cálculos.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                }
+
+                return (
+                  <p className="text-xs text-muted-foreground">
+                    Esta modalidade não possui taxas ou precificações associadas. Ela será removida
+                    imediatamente do canal.
+                  </p>
+                )
+              })()
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={executandoExclusaoMod}
+              onClick={() => setModalidadeExcluindo(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={executandoExclusaoMod || verificandoVinculosMod}
+              onClick={() => {
+                const temVinculos =
+                  (contagemVinculosModalidade?.taxas ?? 0) > 0 ||
+                  (contagemVinculosModalidade?.precificacoes ?? 0) > 0
+                handleConfirmarExclusaoModalidade(temVinculos)
+              }}
+            >
+              {executandoExclusaoMod ? 'Excluindo...' : 'Excluir Modalidade'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

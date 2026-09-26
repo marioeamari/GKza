@@ -91,6 +91,125 @@ export const precificacaoService = {
     return pb.collection('prec_canais').delete(id)
   },
 
+  /**
+   * Conta os vínculos dependentes de um canal
+   */
+  async countVinculosCanal(id: string): Promise<{
+    taxas: number
+    modalidades: number
+    precificacoes: number
+  }> {
+    const [taxas, modalidades, precificacoes] = await Promise.all([
+      pb.collection('prec_taxas').getList(1, 1, { filter: `canal = "${id}"` }),
+      pb.collection('prec_canal_modalidades').getList(1, 1, { filter: `canal = "${id}"` }),
+      pb.collection('prec_precificacoes').getList(1, 1, { filter: `canal = "${id}"` }),
+    ])
+
+    return {
+      taxas: taxas.totalItems,
+      modalidades: modalidades.totalItems,
+      precificacoes: precificacoes.totalItems,
+    }
+  },
+
+  /**
+   * Conta os vínculos dependentes de uma modalidade
+   */
+  async countVinculosModalidade(id: string): Promise<{
+    taxas: number
+    precificacoes: number
+  }> {
+    const [taxas, precificacoes] = await Promise.all([
+      pb.collection('prec_taxas').getList(1, 1, { filter: `modalidade = "${id}"` }),
+      pb.collection('prec_precificacoes').getList(1, 1, { filter: `modalidade = "${id}"` }),
+    ])
+
+    return {
+      taxas: taxas.totalItems,
+      precificacoes: precificacoes.totalItems,
+    }
+  },
+
+  /**
+   * Exclusão em cascata segura de um canal e suas dependências:
+   * 1. Remove precificações vinculadas a este canal
+   * 2. Remove taxas vinculadas a este canal
+   * 3. Remove modalidades vinculadas a este canal
+   * 4. Remove o canal
+   */
+  async deleteCanalComVinculos(id: string): Promise<{
+    taxasRemovidas: number
+    modalidadesRemovidas: number
+    precificacoesRemovidas: number
+  }> {
+    // 1. Precificações
+    const precs = await pb.collection('prec_precificacoes').getFullList<PrecPrecificacaoRecord>({
+      filter: `canal = "${id}"`,
+    })
+    for (const p of precs) {
+      await pb.collection('prec_precificacoes').delete(p.id)
+    }
+
+    // 2. Taxas
+    const txs = await pb.collection('prec_taxas').getFullList<PrecTaxaRecord>({
+      filter: `canal = "${id}"`,
+    })
+    for (const t of txs) {
+      await pb.collection('prec_taxas').delete(t.id)
+    }
+
+    // 3. Modalidades
+    const mods = await pb
+      .collection('prec_canal_modalidades')
+      .getFullList<PrecCanalModalidadeRecord>({
+        filter: `canal = "${id}"`,
+      })
+    for (const m of mods) {
+      await pb.collection('prec_canal_modalidades').delete(m.id)
+    }
+
+    // 4. Canal
+    await pb.collection('prec_canais').delete(id)
+
+    return {
+      taxasRemovidas: txs.length,
+      modalidadesRemovidas: mods.length,
+      precificacoesRemovidas: precs.length,
+    }
+  },
+
+  /**
+   * Exclusão de modalidade tratando vínculos de taxas e precificações que apontam para ela
+   */
+  async deleteModalidadeComVinculos(id: string): Promise<{
+    taxasAfetadas: number
+    precificacoesRemovidas: number
+  }> {
+    // 1. Precificações com essa modalidade específica
+    const precs = await pb.collection('prec_precificacoes').getFullList<PrecPrecificacaoRecord>({
+      filter: `modalidade = "${id}"`,
+    })
+    for (const p of precs) {
+      await pb.collection('prec_precificacoes').delete(p.id)
+    }
+
+    // 2. Taxas vinculadas à modalidade
+    const txs = await pb.collection('prec_taxas').getFullList<PrecTaxaRecord>({
+      filter: `modalidade = "${id}"`,
+    })
+    for (const t of txs) {
+      await pb.collection('prec_taxas').delete(t.id)
+    }
+
+    // 3. Modalidade
+    await pb.collection('prec_canal_modalidades').delete(id)
+
+    return {
+      taxasAfetadas: txs.length,
+      precificacoesRemovidas: precs.length,
+    }
+  },
+
   // MODALIDADES
   async listModalidades(canalId?: string): Promise<PrecCanalModalidadeRecord[]> {
     const filter = canalId ? `canal = "${canalId}"` : ''
