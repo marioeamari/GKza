@@ -490,3 +490,45 @@ export interface PeriodRange {
   previousStart: Date
   previousEnd: Date
 }
+
+export type DiaSemanaOferta =
+  | 'domingo'
+  | 'segunda'
+  | 'terca'
+  | 'quarta'
+  | 'quinta'
+  | 'sexta'
+  | 'sabado'
+
+export interface OfertaVoluntaria extends RecordModel {
+  data: string
+  valor: number
+  direcionamento?: string
+  descricao?: string
+  recorrente?: boolean
+  dia_semana?: DiaSemanaOferta
+  regra_id?: string
+  tipo?: 'voluntaria'
+  contexto_tipo?: string
+}
+
+export type TipoMovimentacaoCaixaOferta = 'entrada' | 'saida'
+
+export interface MovimentacaoCaixaOferta extends RecordModel {
+  tipo: TipoMovimentacaoCaixaOferta
+  data: string
+  valor: number
+  descricao?: string
+  direcionamento?: string
+  referencia_oferta?: string
+  expand?: {
+    referencia_oferta?: OfertaVoluntaria
+  }
+}
+
+export interface ResumoCaixaOfertas {
+  totalEntradasMes: number
+  totalSaidasMes: number
+  saldoMes: number
+  saldoAcumuladoGeral: number
+}

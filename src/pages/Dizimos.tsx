@@ -48,11 +48,16 @@ import { formatCurrency, formatDate, getLocalDateStr } from '@/lib/format'
 import { apiMessage } from '@/lib/api-error'
 import { despesasService } from '@/services/despesas'
 import { financeService } from '@/services/finance'
+import { ofertasService } from '@/services/ofertas'
+import { OfertasVoluntariasModule } from '@/components/dizimos/OfertasVoluntariasModule'
 import type {
   Categoria,
   Conta,
   ConfigCalculo,
   DespesaOcorrencia,
+  MovimentacaoCaixaOferta,
+  OfertaVoluntaria,
+  ResumoCaixaOfertas,
   TipoCalculoDizimo,
   TipoDizimo,
 } from '@/types/domain'
@@ -118,6 +123,16 @@ export default function Dizimos() {
   const [contas, setContas] = useState<Conta[]>([])
   const [categorias, setCategorias] = useState<Categoria[]>([])
 
+  // Ofertas Voluntárias & Caixa de Ofertas
+  const [ofertasVoluntarias, setOfertasVoluntarias] = useState<OfertaVoluntaria[]>([])
+  const [movimentacoesCaixa, setMovimentacoesCaixa] = useState<MovimentacaoCaixaOferta[]>([])
+  const [resumoCaixa, setResumoCaixa] = useState<ResumoCaixaOfertas>({
+    totalEntradasMes: 0,
+    totalSaidasMes: 0,
+    saldoMes: 0,
+    saldoAcumuladoGeral: 0,
+  })
+
   // Modal de edição de percentual
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editingType, setEditingType] = useState<TipoCalculoDizimo>('dizimo')
@@ -134,21 +149,28 @@ export default function Dizimos() {
   const loadData = async () => {
     setLoading(true)
     try {
-      const [tipos, configsList, cts, cats, ocorrencias] = await Promise.all([
-        despesasService.listTiposDizimo(),
-        despesasService.listConfigCalculos(),
-        financeService.listContas(),
-        financeService.listCategorias(),
-        despesasService.listOcorrencias({
-          filter: `status = 'paga' && dizimo = true`,
-          expand: 'compromisso,compromisso.categoria,conta,tipo_dizimo,lancamento',
-        }),
-      ])
+      const [tipos, configsList, cts, cats, ocorrencias, ofVoluntarias, cxMovs, cxResumo] =
+        await Promise.all([
+          despesasService.listTiposDizimo(),
+          despesasService.listConfigCalculos(),
+          financeService.listContas(),
+          financeService.listCategorias(),
+          despesasService.listOcorrencias({
+            filter: `status = 'paga' && dizimo = true`,
+            expand: 'compromisso,compromisso.categoria,conta,tipo_dizimo,lancamento',
+          }),
+          ofertasService.getOfertasMes(selectedMonth),
+          ofertasService.listMovimentacoesMes(selectedMonth),
+          ofertasService.getResumoCaixa(selectedMonth),
+        ])
 
       setTiposDizimo(tipos)
       setContas(cts)
       setCategorias(cats)
       setOcorrenciasPagas(ocorrencias)
+      setOfertasVoluntarias(ofVoluntarias)
+      setMovimentacoesCaixa(cxMovs)
+      setResumoCaixa(cxResumo)
 
       // Mapeia configs por tipo
       const map: Record<TipoCalculoDizimo, ConfigCalculo | null> = {
@@ -174,9 +196,30 @@ export default function Dizimos() {
     }
   }
 
+  // Recarrega apenas dados de ofertas voluntárias e caixa
+  const reloadOfertasVoluntarias = async () => {
+    try {
+      const [ofVoluntarias, cxMovs, cxResumo] = await Promise.all([
+        ofertasService.getOfertasMes(selectedMonth),
+        ofertasService.listMovimentacoesMes(selectedMonth),
+        ofertasService.getResumoCaixa(selectedMonth),
+      ])
+      setOfertasVoluntarias(ofVoluntarias)
+      setMovimentacoesCaixa(cxMovs)
+      setResumoCaixa(cxResumo)
+    } catch (err) {
+      console.error('Erro ao atualizar ofertas voluntárias:', err)
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao atualizar ofertas',
+        description: apiMessage(err),
+      })
+    }
+  }
+
   useEffect(() => {
     loadData()
-  }, [])
+  }, [selectedMonth])
 
   // Navegação de mês
   const handlePrevMonth = () => {
@@ -1000,6 +1043,15 @@ export default function Dizimos() {
         <TabsContent value="oferta" className="space-y-6">
           {renderCardCalculo('oferta')}
           {renderTabelaAuditoria('oferta')}
+          <OfertasVoluntariasModule
+            selectedMonth={selectedMonth}
+            monthLabel={monthLabel}
+            ofertas={ofertasVoluntarias}
+            movimentacoesCaixa={movimentacoesCaixa}
+            resumoCaixa={resumoCaixa}
+            loading={loading}
+            onReload={reloadOfertasVoluntarias}
+          />
         </TabsContent>
 
         {/* TAB 3: PRIMÍCIAS */}

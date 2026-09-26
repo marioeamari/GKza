@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-26T05:36:22.570Z",
+  "generatedAt": "2026-09-26T05:57:46.505Z",
   "collections": [
     {
       "name": "users",
@@ -2584,6 +2584,164 @@
         }
       ],
       "indexes": ["CREATE UNIQUE INDEX idx_config_calculos_tipo ON config_calculos (tipo)"]
+    },
+    {
+      "name": "ofertas_voluntarias",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "data",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "valor",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "direcionamento",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "recorrente",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dia_semana",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["domingo", "segunda", "terca", "quarta", "quinta", "sexta", "sabado"]
+        },
+        {
+          "name": "regra_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "tipo",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["voluntaria"]
+        },
+        {
+          "name": "contexto_tipo",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_ofertas_voluntarias_data ON ofertas_voluntarias (data)",
+        "CREATE INDEX idx_ofertas_voluntarias_regra ON ofertas_voluntarias (regra_id)",
+        "CREATE INDEX idx_ofertas_voluntarias_recorrente ON ofertas_voluntarias (recorrente)"
+      ]
+    },
+    {
+      "name": "caixa_ofertas",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "tipo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["entrada", "saida"]
+        },
+        {
+          "name": "data",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "valor",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "direcionamento",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "referencia_oferta",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "ofertas_voluntarias"
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_caixa_ofertas_data ON caixa_ofertas (data)",
+        "CREATE INDEX idx_caixa_ofertas_tipo ON caixa_ofertas (tipo)",
+        "CREATE INDEX idx_caixa_ofertas_ref ON caixa_ofertas (referencia_oferta)"
+      ]
     }
   ]
 }
