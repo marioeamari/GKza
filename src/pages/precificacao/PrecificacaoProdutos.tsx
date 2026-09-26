@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   PackagePlus,
   Edit2,
@@ -10,6 +10,9 @@ import {
   Check,
   Search,
   Sparkles,
+  Camera,
+  ImageIcon,
+  X,
 } from 'lucide-react'
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -58,6 +61,12 @@ export default function PrecificacaoProdutos() {
   const [openDialog, setOpenDialog] = useState(false)
   const [produtoEditando, setProdutoEditando] = useState<Partial<PrecProdutoRecord> | null>(null)
   const [composicaoTemp, setComposicaoTemp] = useState<ItemComposicaoCusto[]>([])
+
+  // Upload próprio de imagem
+  const [imagemFile, setImagemFile] = useState<File | null>(null)
+  const [imagemPreview, setImagemPreview] = useState<string | null>(null)
+  const [removerImagem, setRemoverImagem] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Controle de Fornecedor & Produto Vinculado para Revenda
   const [fornecedorSelecionadoId, setFornecedorSelecionadoId] = useState<string>('')
@@ -148,6 +157,10 @@ export default function PrecificacaoProdutos() {
         categoria_custo: 'material',
       },
     ])
+    setImagemFile(null)
+    setImagemPreview(null)
+    setRemoverImagem(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
     setFornecedorSelecionadoId('')
     setProdutoFornSelecionadoId('')
     setBuscaFornText('')
@@ -159,6 +172,17 @@ export default function PrecificacaoProdutos() {
   function abrirEditarProduto(p: PrecProdutoRecord) {
     setProdutoEditando(p)
     setComposicaoTemp(p.composicao || [])
+
+    setImagemFile(null)
+    setRemoverImagem(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    if (p.imagem) {
+      setImagemPreview(
+        `${import.meta.env.VITE_POCKETBASE_URL || ''}/api/files/prec_produtos/${p.id}/${p.imagem}`,
+      )
+    } else {
+      setImagemPreview(null)
+    }
 
     // Inicializa seleção de fornecedor e produto vinculado se houver
     const fornId = p.fornecedor || ''
@@ -187,6 +211,40 @@ export default function PrecificacaoProdutos() {
     }
 
     setOpenDialog(true)
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      toast({
+        variant: 'destructive',
+        title: 'Formato inválido',
+        description: 'Selecione um arquivo de imagem (PNG, JPG, WEBP, etc.).',
+      })
+      return
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        variant: 'destructive',
+        title: 'Arquivo muito grande',
+        description: 'A imagem deve ter no máximo 5MB.',
+      })
+      return
+    }
+
+    setImagemFile(file)
+    setRemoverImagem(false)
+    setImagemPreview(URL.createObjectURL(file))
+  }
+
+  function handleRemoverImagem() {
+    setImagemFile(null)
+    setImagemPreview(null)
+    setRemoverImagem(true)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   // Ao selecionar um produto do fornecedor, preenche automaticamente os campos que casam
@@ -219,10 +277,13 @@ export default function PrecificacaoProdutos() {
         // (h) Código de barras e Embalagem
         codigo_barras: fp.codigo_barras || atual.codigo_barras || '',
         embalagem: fp.embalagem || atual.embalagem || '',
-        // (i) Imagem sugerida do produto do fornecedor se não houver imagem
-        imagem: atual.imagem || fp.imagem || undefined,
       }
     })
+
+    // Se ainda não temos preview próprio e o produto do fornecedor possui imagem, exibir como preview
+    if (!imagemFile && !imagemPreview && !removerImagem && fp.imagem) {
+      setImagemPreview(fornecedoresService.getProdutoImageUrl(fp))
+    }
 
     // Rastreia campos como herdados do cadastro do fornecedor
     setOrigemValores({
@@ -267,6 +328,7 @@ export default function PrecificacaoProdutos() {
     if (!produtoEditando?.sku || !produtoEditando?.nome) return
 
     try {
+      // 1. Monta o payload base garantindo que NUNCA enviemos o campo imagem como string herdada
       const payload: Partial<PrecProdutoRecord> = {
         ...produtoEditando,
         fornecedor:
@@ -275,18 +337,83 @@ export default function PrecificacaoProdutos() {
           produtoEditando.tipo === 'revenda' ? produtoFornSelecionadoId || undefined : undefined,
         composicao: composicaoTemp,
       }
+      // Remove qualquer resquício de string no campo imagem para nunca falhar com HTTP 400
+      delete payload.imagem
 
-      if (produtoEditando.id) {
-        await precificacaoService.updateProduto(produtoEditando.id, payload)
-        toast({
-          title: 'Produto atualizado com sucesso!',
-          description:
-            'Cenários de precificação existentes foram marcados como "desatualizados" para conferência.',
+      let savedRecord: PrecProdutoRecord
+
+      if (imagemFile) {
+        // Usuário fez upload de arquivo próprio: usamos FormData diretamente
+        const formData = new FormData()
+        Object.entries(payload).forEach(([key, val]) => {
+          if (val !== undefined && val !== null) {
+            if (typeof val === 'object') {
+              formData.append(key, JSON.stringify(val))
+            } else {
+              formData.append(key, String(val))
+            }
+          }
         })
+        formData.append('imagem', imagemFile)
+
+        if (produtoEditando.id) {
+          savedRecord = await precificacaoService.updateProduto(produtoEditando.id, formData)
+          toast({
+            title: 'Produto atualizado com sucesso!',
+            description:
+              'Cenários de precificação existentes foram marcados como "desatualizados" para conferência.',
+          })
+        } else {
+          savedRecord = await precificacaoService.createProduto(formData)
+          toast({ title: 'Produto cadastrado com sucesso!' })
+        }
+      } else if (removerImagem && produtoEditando.id) {
+        // Usuário removeu a imagem existente
+        const formData = new FormData()
+        Object.entries(payload).forEach(([key, val]) => {
+          if (val !== undefined && val !== null) {
+            if (typeof val === 'object') {
+              formData.append(key, JSON.stringify(val))
+            } else {
+              formData.append(key, String(val))
+            }
+          }
+        })
+        formData.append('imagem', '')
+
+        savedRecord = await precificacaoService.updateProduto(produtoEditando.id, formData)
+        toast({ title: 'Produto atualizado com sucesso!' })
       } else {
-        await precificacaoService.createProduto(payload)
-        toast({ title: 'Produto cadastrado com sucesso!' })
+        // Sem arquivo próprio anexado
+        if (produtoEditando.id) {
+          savedRecord = await precificacaoService.updateProduto(produtoEditando.id, payload)
+          toast({
+            title: 'Produto atualizado com sucesso!',
+            description:
+              'Cenários de precificação existentes foram marcados como "desatualizados" para conferência.',
+          })
+        } else {
+          savedRecord = await precificacaoService.createProduto(payload)
+          toast({ title: 'Produto cadastrado com sucesso!' })
+        }
+
+        // Se o produto foi recém-criado (ou ainda não tem imagem própria) e foi vinculado a um produto de fornecedor com imagem:
+        // herdar o arquivo da imagem via download/upload real
+        if (!savedRecord.imagem && produtoEditando.tipo === 'revenda' && produtoFornSelecionadoId) {
+          const prodForn = produtosDoFornecedor.find((item) => item.id === produtoFornSelecionadoId)
+          if (prodForn?.imagem) {
+            try {
+              await precificacaoService.copiarImagemDeFornecedorProduto(savedRecord.id, prodForn)
+            } catch (copyErr) {
+              console.warn(
+                '[handleSalvarProduto] Falha não impeditiva ao herdar imagem do fornecedor:',
+                copyErr,
+              )
+            }
+          }
+        }
       }
+
       setOpenDialog(false)
       carregar()
     } catch {
@@ -524,6 +651,61 @@ export default function PrecificacaoProdutos() {
             </DialogHeader>
 
             <div className="space-y-4 py-3 text-xs">
+              {/* Upload e Imagem do Produto */}
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold">Imagem do Produto</Label>
+                <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-secondary/20">
+                  <div className="relative h-16 w-16 rounded-lg border border-border bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
+                    {imagemPreview ? (
+                      <img
+                        src={imagemPreview}
+                        alt="Preview do produto"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <ImageIcon className="h-6 w-6 text-muted-foreground/40" />
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs font-semibold"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <Camera className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                        {imagemPreview ? 'Alterar Imagem' : 'Anexar Imagem'}
+                      </Button>
+                      {imagemPreview && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-xs text-destructive hover:bg-destructive/10"
+                          onClick={handleRemoverImagem}
+                        >
+                          <X className="mr-1 h-3.5 w-3.5" />
+                          Remover
+                        </Button>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      PNG, JPG, WEBP até 5MB. Se for produto de revenda, a foto do fornecedor é
+                      sugerida automaticamente.
+                    </p>
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
+                </div>
+              </div>
+
               {/* Seleção do Tipo de Custo */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1">

@@ -26,6 +26,12 @@ export const precificacaoService = {
   },
 
   async createProduto(data: FormData | Partial<PrecProdutoRecord>): Promise<PrecProdutoRecord> {
+    // Se for objeto simples (não FormData), garante que o campo imagem não seja enviado como string herdada
+    if (!(data instanceof FormData) && typeof data.imagem === 'string') {
+      const sanitized = { ...data }
+      delete sanitized.imagem
+      return pb.collection('prec_produtos').create<PrecProdutoRecord>(sanitized)
+    }
     return pb.collection('prec_produtos').create<PrecProdutoRecord>(data)
   },
 
@@ -33,10 +39,60 @@ export const precificacaoService = {
     id: string,
     data: FormData | Partial<PrecProdutoRecord>,
   ): Promise<PrecProdutoRecord> {
-    const updated = await pb.collection('prec_produtos').update<PrecProdutoRecord>(id, data)
+    let payload = data
+    if (!(data instanceof FormData) && typeof data.imagem === 'string') {
+      const sanitized = { ...data }
+      delete sanitized.imagem
+      payload = sanitized
+    }
+    const updated = await pb.collection('prec_produtos').update<PrecProdutoRecord>(id, payload)
     // Marca precificações deste produto como desatualizadas por mudança de custo/produto
     await precificacaoService.marcarPrecificacoesComoDesatualizadas({ produtoId: id })
     return updated
+  },
+
+  /**
+   * Copia o arquivo de imagem de um registro de fornecedores_produtos para um registro de prec_produtos
+   */
+  async copiarImagemDeFornecedorProduto(
+    precProdutoId: string,
+    fornecedorProduto: { id: string; imagem?: string },
+  ): Promise<PrecProdutoRecord | null> {
+    if (!fornecedorProduto.imagem || !fornecedorProduto.id) return null
+
+    try {
+      const baseUrl = import.meta.env.VITE_POCKETBASE_URL || ''
+      const fileUrl = `${baseUrl}/api/files/fornecedores_produtos/${fornecedorProduto.id}/${fornecedorProduto.imagem}`
+
+      const headers: Record<string, string> = {}
+      if (pb.authStore.token) {
+        headers['Authorization'] = pb.authStore.token
+      }
+
+      const response = await fetch(fileUrl, { headers })
+      if (!response.ok) {
+        console.warn(
+          `[precificacaoService] Falha ao baixar imagem do fornecedor (${response.status}): ${fileUrl}`,
+        )
+        return null
+      }
+
+      const blob = await response.blob()
+      // Extrair extensão ou nome do arquivo original
+      const filename = fornecedorProduto.imagem.split('/').pop() || 'imagem_herdada.png'
+      const file = new File([blob], filename, { type: blob.type || 'image/png' })
+
+      const formData = new FormData()
+      formData.append('imagem', file)
+
+      return await pb.collection('prec_produtos').update<PrecProdutoRecord>(precProdutoId, formData)
+    } catch (err) {
+      console.warn(
+        '[precificacaoService] Erro ao copiar imagem do fornecedor para prec_produtos:',
+        err,
+      )
+      return null
+    }
   },
 
   async deleteProduto(id: string): Promise<boolean> {
