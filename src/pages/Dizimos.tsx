@@ -14,7 +14,7 @@ import {
   RefreshCw,
   Sparkles,
   Receipt,
-  FileSpreadsheet,
+  ArrowDown,
 } from 'lucide-react'
 
 import { PageHeader } from '@/components/PageHeader'
@@ -57,6 +57,43 @@ import type {
   TipoDizimo,
 } from '@/types/domain'
 
+// Formata data do pagamento respeitando o fuso de Brasília
+function formatDataPagamentoBrasilia(dateStr?: string | null): string {
+  if (!dateStr) return '—'
+  try {
+    const iso =
+      dateStr.includes(' ') && !dateStr.includes('T') ? dateStr.replace(' ', 'T') : dateStr
+    const d = new Date(iso)
+    if (!isNaN(d.getTime())) {
+      return new Intl.DateTimeFormat('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }).format(d)
+    }
+  } catch {
+    /* fallback */
+  }
+  return formatDate(dateStr.slice(0, 10))
+}
+
+// Extrai o mês YYYY-MM segundo o fuso de Brasília
+function getMesBrasilia(dateStr?: string | null): string | null {
+  if (!dateStr) return null
+  try {
+    const iso =
+      dateStr.includes(' ') && !dateStr.includes('T') ? dateStr.replace(' ', 'T') : dateStr
+    const d = new Date(iso)
+    if (!isNaN(d.getTime())) {
+      return getLocalDateStr(d).slice(0, 7) // 'YYYY-MM'
+    }
+  } catch {
+    /* fallback */
+  }
+  return dateStr.slice(0, 7)
+}
+
 export default function Dizimos() {
   const { user } = useAuth()
   const { toast } = useToast()
@@ -64,7 +101,7 @@ export default function Dizimos() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<TipoCalculoDizimo>('dizimo')
 
-  // Mês de referência (default mês corrente segundo fuso local / Brasília)
+  // Mês de referência (default mês corrente segundo fuso Brasília)
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
     const todayStr = getLocalDateStr(new Date())
     return todayStr.slice(0, 7) // 'YYYY-MM'
@@ -180,98 +217,46 @@ export default function Dizimos() {
     }
   }, [selectedMonth])
 
-  // Identifica os IDs de tipos_dizimo correspondentes a cada categoria
-  const idsPorTipo = useMemo(() => {
-    const normalize = (s: string) =>
-      s
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-
-    const res: Record<TipoCalculoDizimo, string[]> = {
-      dizimo: [],
-      oferta: [],
-      primicias: [],
-    }
-
-    for (const t of tiposDizimo) {
-      const nomeNorm = normalize(t.nome || '')
-      if (nomeNorm.includes('primicia') || nomeNorm.includes('premica')) {
-        res.primicias.push(t.id)
-      } else if (nomeNorm.includes('oferta')) {
-        res.oferta.push(t.id)
-      } else if (nomeNorm.includes('dizimo')) {
-        res.dizimo.push(t.id)
-      } else {
-        // Fallback: se não tiver palavras-chave, associa ao dízimo por padrão
-        res.dizimo.push(t.id)
-      }
-    }
-    return res
-  }, [tiposDizimo])
-
-  // Filtra as despesas pagas no mês selecionado (pela data_pagamento ou competência)
-  // O usuário foi enfático: SÓ entra despesa efetivamente PAGA/BAIXADA!
+  // BASE ÚNICA COMPARTILHADA:
+  // As 3 seções (Dízimo, Oferta, Primícias) utilizam a mesma base de cálculo =
+  // ocorrências com dizimo=true, status='paga', com data_pagamento dentro do mês de referência (fuso Brasília).
+  // O campo tipo_dizimo deixa de ser critério de filtro da base.
   const ocorrenciasFiltradas = useMemo(() => {
-    return ocorrenciasPagas.filter((oc) => {
-      if (oc.status !== 'paga') return false
-      // Verifica data do pagamento (fuso local: YYYY-MM)
-      const dataPag = oc.data_pagamento
-        ? oc.data_pagamento.slice(0, 7)
-        : oc.competencia?.slice(0, 7)
-      return dataPag === selectedMonth
-    })
+    return ocorrenciasPagas
+      .filter((oc) => {
+        if (oc.status !== 'paga') return false
+        const mes =
+          getMesBrasilia(oc.data_pagamento) || (oc.competencia ? oc.competencia.slice(0, 7) : null)
+        return mes === selectedMonth
+      })
+      .sort((a, b) => {
+        const dataA = a.data_pagamento || a.competencia || ''
+        const dataB = b.data_pagamento || b.competencia || ''
+        return dataA.localeCompare(dataB)
+      })
   }, [ocorrenciasPagas, selectedMonth])
 
-  // Separa por categoria de cálculo
-  const despesasDizimo = useMemo(() => {
-    const ids = idsPorTipo.dizimo
-    return ocorrenciasFiltradas.filter((oc) => {
-      // Se tiver tipo_dizimo explícito, confere se bate com dízimo
-      if (oc.tipo_dizimo) return ids.includes(oc.tipo_dizimo)
-      // Se não tiver tipo_dizimo mas tiver dizimo=true e nenhum tipo específico foi marcado como oferta/primícia
-      return true
-    })
-  }, [ocorrenciasFiltradas, idsPorTipo.dizimo])
-
-  const despesasOferta = useMemo(() => {
-    const ids = idsPorTipo.oferta
-    return ocorrenciasFiltradas.filter((oc) => oc.tipo_dizimo && ids.includes(oc.tipo_dizimo))
-  }, [ocorrenciasFiltradas, idsPorTipo.oferta])
-
-  const despesasPrimicias = useMemo(() => {
-    const ids = idsPorTipo.primicias
-    return ocorrenciasFiltradas.filter((oc) => oc.tipo_dizimo && ids.includes(oc.tipo_dizimo))
-  }, [ocorrenciasFiltradas, idsPorTipo.primicias])
-
-  // Totais de base de cálculo
-  const baseDizimo = useMemo(
-    () => despesasDizimo.reduce((acc, oc) => acc + (oc.valor_pago || 0), 0),
-    [despesasDizimo],
-  )
-  const baseOferta = useMemo(
-    () => despesasOferta.reduce((acc, oc) => acc + (oc.valor_pago || 0), 0),
-    [despesasOferta],
-  )
-  const basePrimicias = useMemo(
-    () => despesasPrimicias.reduce((acc, oc) => acc + (oc.valor_pago || 0), 0),
-    [despesasPrimicias],
+  // Montante total da base única compartilhada
+  const baseCompartilhada = useMemo(
+    () => ocorrenciasFiltradas.reduce((acc, oc) => acc + (oc.valor_pago || 0), 0),
+    [ocorrenciasFiltradas],
   )
 
-  // Percentuais configurados
+  // Percentuais e fatores por tipo
   const percentualDizimo = configs.dizimo?.percentual ?? 10
-  const percentualOferta = configs.oferta?.percentual ?? 10
+  const percentualOferta = configs.oferta?.percentual ?? 5
   const fatorPrimicias = 1 / diasNoMes
 
-  // Valores calculados resultantes
-  const resultadoDizimo = (baseDizimo * percentualDizimo) / 100
-  const resultadoOfertaCalculada = (baseOferta * percentualOferta) / 100
-  const resultadoPrimicias = basePrimicias * fatorPrimicias
+  // Valores calculados resultantes sobre a MESMA base
+  const resultadoDizimo = (baseCompartilhada * percentualDizimo) / 100
+  const resultadoOferta = (baseCompartilhada * percentualOferta) / 100
+  const resultadoPrimicias = baseCompartilhada * fatorPrimicias
 
-  // Abrir modal de edição de percentual
+  // Abrir modal de edição de percentual (dízimo ou oferta)
   const handleOpenEdit = (tipo: TipoCalculoDizimo) => {
     setEditingType(tipo)
-    const current = configs[tipo]?.percentual ?? (tipo === 'dizimo' || tipo === 'oferta' ? 10 : 0)
+    const current =
+      configs[tipo]?.percentual ?? (tipo === 'dizimo' ? 10 : tipo === 'oferta' ? 5 : 0)
     setPercentualInput(String(current))
     setEditDialogOpen(true)
   }
@@ -299,7 +284,9 @@ export default function Dizimos() {
       }))
       toast({
         title: 'Configuração atualizada com sucesso!',
-        description: `O percentual para ${editingType === 'dizimo' ? 'Dízimo' : 'Oferta'} agora é ${val}%.`,
+        description: `O percentual para ${
+          editingType === 'dizimo' ? 'Dízimo' : 'Oferta'
+        } agora é ${val}%.`,
       })
       setEditDialogOpen(false)
     } catch (err) {
@@ -313,7 +300,7 @@ export default function Dizimos() {
     }
   }
 
-  // Editar direcionamento da despesa/oferta
+  // Editar direcionamento da ocorrência (inline na tabela)
   const handleOpenDirecionamento = (oc: DespesaOcorrencia) => {
     setEditingOcorrencia(oc)
     setDirecionamentoInput(oc.direcionamento || '')
@@ -366,7 +353,471 @@ export default function Dizimos() {
     return cat?.nome || 'Sem categoria'
   }
 
+  const getTipoDizimoNome = (tipoId?: string, expandTipo?: TipoDizimo) => {
+    if (expandTipo?.nome) return expandTipo.nome
+    if (!tipoId) return 'Dízimo'
+    const found = tiposDizimo.find((t) => t.id === tipoId)
+    return found?.nome || 'Dízimo'
+  }
+
+  const scrollToTabela = (tipo: TipoCalculoDizimo) => {
+    const el = document.getElementById(`tabela-base-${tipo}`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
+
   if (loading) return <LoadingState label="Carregando cálculos de dízimos e ofertas..." />
+
+  // Renderiza a memória de cálculo da fórmula por seção
+  const renderCardCalculo = (tipo: TipoCalculoDizimo) => {
+    if (tipo === 'dizimo') {
+      return (
+        <Card className="border border-border shadow-soft">
+          <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg font-bold text-foreground">
+                <Calculator className="h-5 w-5 text-[#DF5830]" />
+                Cálculo do Dízimo Ministerial ({monthLabel})
+              </CardTitle>
+              <CardDescription>
+                Configuração percentual independente de {percentualDizimo}% aplicada sobre a base
+                única de despesas pagas no mês.
+              </CardDescription>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => scrollToTabela('dizimo')}
+                className="gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <ArrowDown className="h-3.5 w-3.5" />
+                Ver base de cálculo
+              </Button>
+              {can(user?.role, 'writeFinance') && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleOpenEdit('dizimo')}
+                  className="gap-1.5"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Editar percentual ({percentualDizimo}%)
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+
+          <CardContent>
+            <div className="rounded-2xl border border-[#DF5830]/30 bg-[#DF5830]/5 p-4 sm:p-5">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Fórmula de Auditoria — Dízimo
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2 text-base font-bold text-foreground sm:text-lg">
+                    <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border">
+                      Base paga no mês: {formatCurrency(baseCompartilhada)}
+                    </span>
+                    <span className="text-muted-foreground">×</span>
+                    <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border text-[#DF5830] font-black">
+                      {percentualDizimo}%
+                    </span>
+                    <span className="text-muted-foreground">=</span>
+                    <span className="rounded-lg bg-[#DF5830] px-3 py-1 font-black text-white shadow-xs">
+                      {formatCurrency(resultadoDizimo)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border bg-white p-3 text-right shadow-2xs">
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    Valor apurado de Dízimo
+                  </span>
+                  <p className="text-xl font-black text-[#DF5830] sm:text-2xl">
+                    {formatCurrency(resultadoDizimo)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Info className="h-4 w-4 text-[#DF5830] shrink-0" />
+                <span>
+                  Base única compartilhada: <strong>{ocorrenciasFiltradas.length}</strong>{' '}
+                  {ocorrenciasFiltradas.length === 1 ? 'despesa paga' : 'despesas pagas'} em{' '}
+                  <strong>{monthLabel}</strong> (fuso Brasília) compõem a base de cálculo.
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )
+    }
+
+    if (tipo === 'oferta') {
+      return (
+        <Card className="border border-border shadow-soft">
+          <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg font-bold text-foreground">
+                <HeartHandshake className="h-5 w-5 text-[#B7791F]" />
+                Cálculo de Oferta Ministerial ({monthLabel})
+              </CardTitle>
+              <CardDescription>
+                Alíquota percentual de {percentualOferta}% aplicada sobre a mesma base de cálculo
+                compartilhada do dízimo, com auditoria de direcionamentos.
+              </CardDescription>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => scrollToTabela('oferta')}
+                className="gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <ArrowDown className="h-3.5 w-3.5" />
+                Ver base de cálculo
+              </Button>
+              {can(user?.role, 'writeFinance') && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleOpenEdit('oferta')}
+                  className="gap-1.5"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Editar percentual ({percentualOferta}%)
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+
+          <CardContent>
+            <div className="rounded-2xl border border-[#B7791F]/30 bg-[#B7791F]/5 p-4 sm:p-5">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Fórmula de Auditoria — Oferta
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2 text-base font-bold text-foreground sm:text-lg">
+                    <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border">
+                      Base paga no mês: {formatCurrency(baseCompartilhada)}
+                    </span>
+                    <span className="text-muted-foreground">×</span>
+                    <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border text-[#B7791F] font-black">
+                      {percentualOferta}%
+                    </span>
+                    <span className="text-muted-foreground">=</span>
+                    <span className="rounded-lg bg-[#B7791F] px-3 py-1 font-black text-white shadow-xs">
+                      {formatCurrency(resultadoOferta)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border bg-white p-3 text-right shadow-2xs">
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    Valor apurado de Oferta
+                  </span>
+                  <p className="text-xl font-black text-[#B7791F] sm:text-2xl">
+                    {formatCurrency(resultadoOferta)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Info className="h-4 w-4 text-[#B7791F] shrink-0" />
+                <span>
+                  O montante base de cálculo é o mesmo do dízimo. Você pode atribuir o{' '}
+                  <em>"Direcionamento"</em> específico (ex.: Louvor, Bateria, Missões) em cada linha
+                  abaixo para auditoria do destino dos recursos.
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )
+    }
+
+    // Primícias (1 / diasNoMes)
+    return (
+      <Card className="border border-border shadow-soft">
+        <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-lg font-bold text-foreground">
+              <Sparkles className="h-5 w-5 text-[#1E6F5C]" />
+              Cálculo de Oferta de Primícias ({monthLabel})
+            </CardTitle>
+            <CardDescription>
+              Fórmula bíblica proporcional a 1 dia do mês: fator de 1 dividido pela quantidade de
+              dias do mês de referência ({diasNoMes} dias), aplicado sobre a base compartilhada.
+            </CardDescription>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => scrollToTabela('primicias')}
+              className="gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ArrowDown className="h-3.5 w-3.5" />
+              Ver base de cálculo
+            </Button>
+            <Badge
+              variant="outline"
+              className="border-[#1E6F5C]/40 bg-[#1E6F5C]/10 text-[#1E6F5C] font-bold"
+            >
+              Fator: 1/{diasNoMes} avos ({((1 / diasNoMes) * 100).toFixed(2)}%)
+            </Badge>
+          </div>
+        </CardHeader>
+
+        <CardContent>
+          <div className="rounded-2xl border border-[#1E6F5C]/30 bg-[#1E6F5C]/5 p-4 sm:p-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-1">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Fórmula de Auditoria — Primícias
+                </span>
+                <div className="flex flex-wrap items-center gap-2 text-base font-bold text-foreground sm:text-lg">
+                  <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border">
+                    Base paga no mês: {formatCurrency(baseCompartilhada)}
+                  </span>
+                  <span className="text-muted-foreground">×</span>
+                  <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border text-[#1E6F5C] font-black">
+                    1/{diasNoMes}
+                  </span>
+                  <span className="text-muted-foreground">=</span>
+                  <span className="rounded-lg bg-[#1E6F5C] px-3 py-1 font-black text-white shadow-xs">
+                    {formatCurrency(resultadoPrimicias)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border bg-white p-3 text-right shadow-2xs">
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  Primícias Apuradas (1/{diasNoMes})
+                </span>
+                <p className="text-xl font-black text-[#1E6F5C] sm:text-2xl">
+                  {formatCurrency(resultadoPrimicias)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Info className="h-4 w-4 text-[#1E6F5C] shrink-0" />
+              <span>
+                No mês de <strong>{monthLabel}</strong> (com <strong>{diasNoMes} dias</strong>), o
+                cálculo equivale a 1 dia ({((1 / diasNoMes) * 100).toFixed(2)}%) sobre a base única
+                compartilhada de despesas pagas.
+              </span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // Renderiza a tabela detalhada de auditoria da base compartilhada (modelo de colunas de Ofertas)
+  const renderTabelaAuditoria = (tipo: TipoCalculoDizimo) => {
+    const corTema = tipo === 'dizimo' ? '#DF5830' : tipo === 'oferta' ? '#B7791F' : '#1E6F5C'
+
+    return (
+      <Card id={`tabela-base-${tipo}`} className="border border-border shadow-soft">
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <div>
+            <CardTitle className="text-base font-bold text-foreground">
+              Base de Cálculo Compartilhada — Despesas Pagas no Mês ({monthLabel})
+            </CardTitle>
+            <CardDescription>
+              Memória de cálculo com as {ocorrenciasFiltradas.length}{' '}
+              {ocorrenciasFiltradas.length === 1 ? 'despesa' : 'despesas'} pagas que formam a base
+              única de {formatCurrency(baseCompartilhada)} para Dízimo, Oferta e Primícias.
+            </CardDescription>
+          </div>
+          <Badge variant="secondary" className="font-bold">
+            {ocorrenciasFiltradas.length}{' '}
+            {ocorrenciasFiltradas.length === 1 ? 'despesa na base' : 'despesas na base'}
+          </Badge>
+        </CardHeader>
+
+        <CardContent>
+          {ocorrenciasFiltradas.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground">
+              <Receipt className="mb-2 h-10 w-10 stroke-[1.5] text-muted-foreground/60" />
+              <p className="font-semibold text-foreground">
+                Nenhuma despesa paga com dízimo neste mês ({monthLabel})
+              </p>
+              <p className="text-xs max-w-md mt-1">
+                Ao registrar o pagamento de despesas marcadas com "Dízimo", elas aparecerão aqui
+                automaticamente formando a base compartilhada para Dízimo, Oferta e Primícias.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-border">
+              <Table>
+                {/* Colunas no modelo da seção Oferta: Data / Rótulo / Categoria / Descrição / Conta / Direcionamento / Valor */}
+                <TableHeader className="bg-secondary/40">
+                  <TableRow>
+                    <TableHead className="font-bold w-28">Data</TableHead>
+                    <TableHead className="font-bold">Rótulo</TableHead>
+                    <TableHead className="font-bold">Categoria</TableHead>
+                    <TableHead className="font-bold">Descrição</TableHead>
+                    <TableHead className="font-bold">Conta / Saída</TableHead>
+                    <TableHead className="font-bold">Direcionamento</TableHead>
+                    <TableHead className="text-right font-bold w-36">Valor Pago</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {ocorrenciasFiltradas.map((oc) => {
+                    const comp = oc.expand?.compromisso
+                    const catNome =
+                      oc.expand?.compromisso?.expand?.categoria?.nome ||
+                      getCategoriaNome(comp?.categoria)
+                    const dataPag = formatDataPagamentoBrasilia(oc.data_pagamento)
+                    const rotuloNome = getTipoDizimoNome(oc.tipo_dizimo, oc.expand?.tipo_dizimo)
+
+                    return (
+                      <TableRow key={oc.id} className="hover:bg-muted/40">
+                        {/* Data */}
+                        <TableCell className="font-medium text-xs whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1.5">
+                            <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
+                            {dataPag}
+                          </span>
+                        </TableCell>
+
+                        {/* Rótulo / Marcador ministerial */}
+                        <TableCell className="text-xs">
+                          <Badge
+                            variant="outline"
+                            className="text-[11px] font-semibold bg-muted/40"
+                          >
+                            {rotuloNome}
+                          </Badge>
+                        </TableCell>
+
+                        {/* Categoria */}
+                        <TableCell className="text-xs text-muted-foreground">
+                          <Badge variant="outline" className="text-[11px]">
+                            {catNome}
+                          </Badge>
+                        </TableCell>
+
+                        {/* Descrição e Fornecedor */}
+                        <TableCell className="font-medium text-foreground">
+                          <div>
+                            <span>{comp?.descricao || oc.observacoes || 'Despesa'}</span>
+                            {comp?.fornecedor && (
+                              <span className="block text-[11px] text-muted-foreground">
+                                {comp.fornecedor}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+
+                        {/* Conta */}
+                        <TableCell className="text-xs text-muted-foreground">
+                          {getContaNome(oc.conta || comp?.conta_padrao)}
+                        </TableCell>
+
+                        {/* Direcionamento */}
+                        <TableCell>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDirecionamento(oc)}
+                            className="group flex items-center gap-1.5 text-xs text-foreground font-medium hover:text-primary"
+                            title="Editar direcionamento desta oferta/despesa"
+                          >
+                            {oc.direcionamento ? (
+                              <Badge
+                                variant="outline"
+                                className="border-primary/40 bg-primary/5 text-primary text-[11px]"
+                              >
+                                {oc.direcionamento}
+                              </Badge>
+                            ) : (
+                              <span className="italic text-muted-foreground text-xs">
+                                + Adicionar direcionamento
+                              </span>
+                            )}
+                            {can(user?.role, 'writeFinance') && (
+                              <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity text-primary" />
+                            )}
+                          </button>
+                        </TableCell>
+
+                        {/* Valor Pago */}
+                        <TableCell className="text-right font-bold text-foreground">
+                          {formatCurrency(oc.valor_pago || 0)}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+
+                  {/* Subtotal da Base Única Compartilhada */}
+                  <TableRow className="bg-secondary/30 font-bold border-t-2 border-border">
+                    <TableCell colSpan={6} className="text-right uppercase tracking-wider text-xs">
+                      Total da Base Compartilhada ({monthLabel}):
+                    </TableCell>
+                    <TableCell className="text-right text-base text-foreground font-black">
+                      {formatCurrency(baseCompartilhada)}
+                    </TableCell>
+                  </TableRow>
+
+                  {/* Linha de Resultado Específica da Seção Ativa */}
+                  {tipo === 'dizimo' && (
+                    <TableRow className="bg-[#DF5830]/10 font-bold">
+                      <TableCell colSpan={6} className="text-right text-foreground">
+                        Dízimo Apurado ({percentualDizimo}% sobre a base):
+                      </TableCell>
+                      <TableCell
+                        className="text-right text-base font-black"
+                        style={{ color: corTema }}
+                      >
+                        {formatCurrency(resultadoDizimo)}
+                      </TableCell>
+                    </TableRow>
+                  )}
+
+                  {tipo === 'oferta' && (
+                    <TableRow className="bg-[#B7791F]/10 font-bold">
+                      <TableCell colSpan={6} className="text-right text-foreground">
+                        Oferta Apurada ({percentualOferta}% sobre a base):
+                      </TableCell>
+                      <TableCell
+                        className="text-right text-base font-black"
+                        style={{ color: corTema }}
+                      >
+                        {formatCurrency(resultadoOferta)}
+                      </TableCell>
+                    </TableRow>
+                  )}
+
+                  {tipo === 'primicias' && (
+                    <TableRow className="bg-[#1E6F5C]/10 font-bold">
+                      <TableCell colSpan={6} className="text-right text-foreground">
+                        Primícias Apuradas (Fator 1/{diasNoMes} sobre a base):
+                      </TableCell>
+                      <TableCell
+                        className="text-right text-base font-black"
+                        style={{ color: corTema }}
+                      >
+                        {formatCurrency(resultadoPrimicias)}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <div className="space-y-6 pb-12">
@@ -374,7 +825,7 @@ export default function Dizimos() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <PageHeader
           title="Dízimos, Ofertas & Primícias"
-          description="Cálculos independentes e auditoria transparente de despesas pagas com marcação ministerial."
+          description="Base única compartilhada e cálculos independentes de despesas pagas com marcação ministerial."
         />
 
         {/* Seletor de mês */}
@@ -416,12 +867,13 @@ export default function Dizimos() {
         </div>
       </div>
 
-      {/* Cards de Resumo Geral Superior */}
+      {/* Cards de Resumo Geral Superior (alimentados pela MESMA base única compartilhada) */}
       <div className="grid gap-4 sm:grid-cols-3">
         {/* Card Dízimo */}
         <Card
-          className={`border-l-4 transition-all ${
-            activeTab === 'dizimo' ? 'ring-2 ring-primary/40' : ''
+          onClick={() => setActiveTab('dizimo')}
+          className={`cursor-pointer border-l-4 transition-all hover:shadow-md ${
+            activeTab === 'dizimo' ? 'ring-2 ring-[#DF5830]/40' : ''
           }`}
           style={{ borderLeftColor: '#DF5830' }}
         >
@@ -434,7 +886,7 @@ export default function Dizimos() {
                 variant="outline"
                 className="border-[#DF5830]/30 bg-[#DF5830]/10 text-[#DF5830]"
               >
-                Base: {formatCurrency(baseDizimo)}
+                Base: {formatCurrency(baseCompartilhada)}
               </Badge>
             </div>
             <CardTitle className="text-2xl font-black text-foreground">
@@ -442,15 +894,16 @@ export default function Dizimos() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0 text-xs text-muted-foreground">
-            {despesasDizimo.length}{' '}
-            {despesasDizimo.length === 1 ? 'despesa paga' : 'despesas pagas'} no mês
+            {ocorrenciasFiltradas.length}{' '}
+            {ocorrenciasFiltradas.length === 1 ? 'despesa paga na base' : 'despesas pagas na base'}
           </CardContent>
         </Card>
 
         {/* Card Oferta */}
         <Card
-          className={`border-l-4 transition-all ${
-            activeTab === 'oferta' ? 'ring-2 ring-primary/40' : ''
+          onClick={() => setActiveTab('oferta')}
+          className={`cursor-pointer border-l-4 transition-all hover:shadow-md ${
+            activeTab === 'oferta' ? 'ring-2 ring-[#B7791F]/40' : ''
           }`}
           style={{ borderLeftColor: '#B7791F' }}
         >
@@ -463,23 +916,24 @@ export default function Dizimos() {
                 variant="outline"
                 className="border-[#B7791F]/30 bg-[#B7791F]/10 text-[#B7791F]"
               >
-                Total Ofertas: {formatCurrency(baseOferta)}
+                Base: {formatCurrency(baseCompartilhada)}
               </Badge>
             </div>
             <CardTitle className="text-2xl font-black text-foreground">
-              {formatCurrency(baseOferta > 0 ? baseOferta : resultadoOfertaCalculada)}
+              {formatCurrency(resultadoOferta)}
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0 text-xs text-muted-foreground">
-            {despesasOferta.length}{' '}
-            {despesasOferta.length === 1 ? 'oferta direcionada' : 'ofertas direcionadas'}
+            {ocorrenciasFiltradas.length}{' '}
+            {ocorrenciasFiltradas.length === 1 ? 'despesa paga na base' : 'despesas pagas na base'}
           </CardContent>
         </Card>
 
         {/* Card Primícias */}
         <Card
-          className={`border-l-4 transition-all ${
-            activeTab === 'primicias' ? 'ring-2 ring-primary/40' : ''
+          onClick={() => setActiveTab('primicias')}
+          className={`cursor-pointer border-l-4 transition-all hover:shadow-md ${
+            activeTab === 'primicias' ? 'ring-2 ring-[#1E6F5C]/40' : ''
           }`}
           style={{ borderLeftColor: '#1E6F5C' }}
         >
@@ -492,7 +946,7 @@ export default function Dizimos() {
                 variant="outline"
                 className="border-[#1E6F5C]/30 bg-[#1E6F5C]/10 text-[#1E6F5C]"
               >
-                Base: {formatCurrency(basePrimicias)}
+                Base: {formatCurrency(baseCompartilhada)}
               </Badge>
             </div>
             <CardTitle className="text-2xl font-black text-foreground">
@@ -500,8 +954,8 @@ export default function Dizimos() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0 text-xs text-muted-foreground">
-            {despesasPrimicias.length}{' '}
-            {despesasPrimicias.length === 1 ? 'despesa paga' : 'despesas pagas'} no mês
+            {ocorrenciasFiltradas.length}{' '}
+            {ocorrenciasFiltradas.length === 1 ? 'despesa paga na base' : 'despesas pagas na base'}
           </CardContent>
         </Card>
       </div>
@@ -536,593 +990,22 @@ export default function Dizimos() {
           </TabsTrigger>
         </TabsList>
 
-        {/* =========================================================
-            TAB 1: DÍZIMO
-           ========================================================= */}
+        {/* TAB 1: DÍZIMO */}
         <TabsContent value="dizimo" className="space-y-6">
-          {/* Card de Configuração & Auditoria da Fórmula */}
-          <Card className="border border-border shadow-soft">
-            <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-lg font-bold text-foreground">
-                  <Calculator className="h-5 w-5 text-primary" />
-                  Cálculo do Dízimo Ministerial ({monthLabel})
-                </CardTitle>
-                <CardDescription>
-                  Configuração percentual independente aplicada exclusivamente às despesas ticadas
-                  em dízimo e com pagamento baixado.
-                </CardDescription>
-              </div>
-
-              {can(user?.role, 'writeFinance') && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleOpenEdit('dizimo')}
-                  className="gap-1.5"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                  Editar percentual ({percentualDizimo}%)
-                </Button>
-              )}
-            </CardHeader>
-
-            <CardContent>
-              {/* Memória de Cálculo Destacada */}
-              <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:p-5">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div className="space-y-1">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Fórmula de Auditoria
-                    </span>
-                    <div className="flex flex-wrap items-center gap-2 text-base font-bold text-foreground sm:text-lg">
-                      <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border">
-                        Base paga: {formatCurrency(baseDizimo)}
-                      </span>
-                      <span className="text-muted-foreground">×</span>
-                      <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border text-primary font-black">
-                        {percentualDizimo}%
-                      </span>
-                      <span className="text-muted-foreground">=</span>
-                      <span className="rounded-lg bg-primary px-3 py-1 font-black text-white shadow-xs">
-                        {formatCurrency(resultadoDizimo)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-border bg-white p-3 text-right shadow-2xs">
-                    <span className="text-[11px] font-medium text-muted-foreground">
-                      Valor apurado de Dízimo
-                    </span>
-                    <p className="text-xl font-black text-primary sm:text-2xl">
-                      {formatCurrency(resultadoDizimo)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Info className="h-4 w-4 text-primary shrink-0" />
-                  <span>
-                    Apenas despesas com status <strong>"paga"</strong> e pagamento realizado em{' '}
-                    <strong>{monthLabel}</strong> compõem a base. Despesas previstas não entram no
-                    cálculo.
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Tabela de Auditoria / Despesas da Base */}
-          <Card className="border border-border shadow-soft">
-            <CardHeader className="flex flex-row items-center justify-between pb-3">
-              <div>
-                <CardTitle className="text-base font-bold text-foreground">
-                  Despesas Pagas Ticadas em Dízimo (Base de Cálculo)
-                </CardTitle>
-                <CardDescription>
-                  Memória de cálculo detalhada com todas as ocorrências de despesas que geraram a
-                  base de {formatCurrency(baseDizimo)}.
-                </CardDescription>
-              </div>
-              <Badge variant="secondary" className="font-bold">
-                {despesasDizimo.length} {despesasDizimo.length === 1 ? 'registro' : 'registros'}
-              </Badge>
-            </CardHeader>
-
-            <CardContent>
-              {despesasDizimo.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground">
-                  <Receipt className="mb-2 h-10 w-10 stroke-[1.5] text-muted-foreground/60" />
-                  <p className="font-semibold text-foreground">
-                    Nenhuma despesa paga com dízimo neste mês
-                  </p>
-                  <p className="text-xs">
-                    Ao registrar o pagamento de despesas marcadas com "Dízimo", elas aparecerão aqui
-                    automaticamente.
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-border">
-                  <Table>
-                    <TableHeader className="bg-secondary/40">
-                      <TableRow>
-                        <TableHead className="font-bold">Data Pagamento</TableHead>
-                        <TableHead className="font-bold">Descrição da Despesa</TableHead>
-                        <TableHead className="font-bold">Categoria</TableHead>
-                        <TableHead className="font-bold">Conta / Saída</TableHead>
-                        <TableHead className="font-bold">Direcionamento</TableHead>
-                        <TableHead className="text-right font-bold">Valor Pago</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {despesasDizimo.map((oc) => {
-                        const comp = oc.expand?.compromisso
-                        const catNome =
-                          oc.expand?.compromisso?.expand?.categoria?.nome ||
-                          getCategoriaNome(comp?.categoria)
-                        const dataPag = oc.data_pagamento
-                          ? formatDate(oc.data_pagamento.slice(0, 10))
-                          : oc.competencia || '—'
-
-                        return (
-                          <TableRow key={oc.id} className="hover:bg-muted/40">
-                            <TableCell className="font-medium text-xs whitespace-nowrap">
-                              <span className="inline-flex items-center gap-1.5">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
-                                {dataPag}
-                              </span>
-                            </TableCell>
-                            <TableCell className="font-medium text-foreground">
-                              {comp?.descricao || oc.observacoes || 'Despesa'}
-                              {comp?.fornecedor && (
-                                <span className="block text-[11px] text-muted-foreground">
-                                  {comp.fornecedor}
-                                </span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">
-                              <Badge variant="outline" className="text-[11px]">
-                                {catNome}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">
-                              {getContaNome(oc.conta || comp?.conta_padrao)}
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">
-                              <button
-                                type="button"
-                                onClick={() => handleOpenDirecionamento(oc)}
-                                className="group flex items-center gap-1 text-left hover:text-primary"
-                                title="Editar direcionamento"
-                              >
-                                <span>{oc.direcionamento || '—'}</span>
-                                {can(user?.role, 'writeFinance') && (
-                                  <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                )}
-                              </button>
-                            </TableCell>
-                            <TableCell className="text-right font-bold text-foreground">
-                              {formatCurrency(oc.valor_pago || 0)}
-                            </TableCell>
-                          </TableRow>
-                        )
-                      })}
-                      {/* Subtotal da Base */}
-                      <TableRow className="bg-secondary/30 font-bold border-t-2 border-border">
-                        <TableCell colSpan={5} className="text-right">
-                          Total da Base de Dízimo ({monthLabel}):
-                        </TableCell>
-                        <TableCell className="text-right text-base text-primary font-black">
-                          {formatCurrency(baseDizimo)}
-                        </TableCell>
-                      </TableRow>
-                      <TableRow className="bg-primary/10 font-bold">
-                        <TableCell colSpan={5} className="text-right text-foreground">
-                          Dízimo Apurado ({percentualDizimo}% sobre a base):
-                        </TableCell>
-                        <TableCell className="text-right text-base text-primary font-black">
-                          {formatCurrency(resultadoDizimo)}
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {renderCardCalculo('dizimo')}
+          {renderTabelaAuditoria('dizimo')}
         </TabsContent>
 
-        {/* =========================================================
-            TAB 2: OFERTA (MODELO DA PLANILHA DO USUÁRIO)
-           ========================================================= */}
+        {/* TAB 2: OFERTA */}
         <TabsContent value="oferta" className="space-y-6">
-          {/* Card de Configuração & Auditoria da Fórmula de Oferta */}
-          <Card className="border border-border shadow-soft">
-            <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-lg font-bold text-foreground">
-                  <FileSpreadsheet className="h-5 w-5 text-[#B7791F]" />
-                  Ofertas do Mês ({monthLabel})
-                </CardTitle>
-                <CardDescription>
-                  Organização inspirada no modelo da sua planilha: ofertas pagas discriminadas por
-                  Data, Rótulo, Categoria e Valor, com direcionamento específico.
-                </CardDescription>
-              </div>
-
-              {can(user?.role, 'writeFinance') && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleOpenEdit('oferta')}
-                  className="gap-1.5"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                  Editar percentual ({percentualOferta}%)
-                </Button>
-              )}
-            </CardHeader>
-
-            <CardContent>
-              {/* Memória de Cálculo / Resumo das Ofertas */}
-              <div className="rounded-2xl border border-[#B7791F]/30 bg-[#B7791F]/5 p-4 sm:p-5">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div className="space-y-1">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Totalizador do Mês
-                    </span>
-                    <div className="flex flex-wrap items-center gap-2 text-base font-bold text-foreground sm:text-lg">
-                      <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border">
-                        Total de Ofertas no mês: {formatCurrency(baseOferta)}
-                      </span>
-                      {baseOferta > 0 && (
-                        <>
-                          <span className="text-muted-foreground">·</span>
-                          <span className="text-xs font-normal text-muted-foreground">
-                            Critério percentual configurado: {percentualOferta}% (
-                            {formatCurrency(resultadoOfertaCalculada)})
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-border bg-white p-3 text-right shadow-2xs">
-                    <span className="text-[11px] font-medium text-muted-foreground">
-                      Total Ofertas do Mês
-                    </span>
-                    <p className="text-xl font-black text-[#B7791F] sm:text-2xl">
-                      {formatCurrency(baseOferta)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Info className="h-4 w-4 text-[#B7791F] shrink-0" />
-                  <span>
-                    Como normalmente as <strong>ofertas são direcionadas</strong> (ex.: Bateria,
-                    Louvor, Igreja, Missões), preencha o campo <em>"Direcionamento"</em> na linha
-                    para auditoria.
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Tabela no formato exato da planilha do usuário */}
-          <Card className="border border-border shadow-soft">
-            <CardHeader className="flex flex-row items-center justify-between pb-3">
-              <div>
-                <CardTitle className="text-base font-bold text-foreground">
-                  Extrato de Ofertas (Modelo Planilha)
-                </CardTitle>
-                <CardDescription>
-                  Linhas correspondentes às ofertas efetivamente pagas e baixadas no mês.
-                </CardDescription>
-              </div>
-              <Badge variant="secondary" className="font-bold">
-                {despesasOferta.length} {despesasOferta.length === 1 ? 'oferta' : 'ofertas'}
-              </Badge>
-            </CardHeader>
-
-            <CardContent>
-              {despesasOferta.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground">
-                  <HeartHandshake className="mb-2 h-10 w-10 stroke-[1.5] text-muted-foreground/60" />
-                  <p className="font-semibold text-foreground">
-                    Nenhuma oferta paga registrada em {monthLabel}
-                  </p>
-                  <p className="text-xs max-w-sm mt-1">
-                    Para registrar uma oferta no extrato, marque o compromisso ou ocorrência de
-                    despesa com tipo de dízimo "Oferta" e registre a baixa.
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-border">
-                  <Table>
-                    <TableHeader className="bg-secondary/40">
-                      <TableRow>
-                        <TableHead className="font-bold w-28">Data</TableHead>
-                        <TableHead className="font-bold">Categoria / Rótulo</TableHead>
-                        <TableHead className="font-bold">Direcionamento</TableHead>
-                        <TableHead className="font-bold">Descrição</TableHead>
-                        <TableHead className="font-bold">Conta</TableHead>
-                        <TableHead className="text-right font-bold w-36">Valor</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {despesasOferta.map((oc) => {
-                        const comp = oc.expand?.compromisso
-                        const catNome =
-                          oc.expand?.compromisso?.expand?.categoria?.nome ||
-                          getCategoriaNome(comp?.categoria)
-                        const dataPag = oc.data_pagamento
-                          ? formatDate(oc.data_pagamento.slice(0, 10))
-                          : oc.competencia || '—'
-
-                        return (
-                          <TableRow key={oc.id} className="hover:bg-muted/40">
-                            <TableCell className="font-medium text-xs whitespace-nowrap">
-                              <span className="inline-flex items-center gap-1.5">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
-                                {dataPag}
-                              </span>
-                            </TableCell>
-                            <TableCell className="font-semibold text-foreground">
-                              <div className="flex items-center gap-2">
-                                <span className="rounded-md bg-[#B7791F]/10 px-2 py-0.5 text-xs font-bold text-[#B7791F]">
-                                  {catNome || 'Oferta'}
-                                </span>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenDirecionamento(oc)}
-                                className="group flex items-center gap-1.5 text-xs text-foreground font-medium hover:text-primary"
-                                title="Editar direcionamento desta oferta"
-                              >
-                                {oc.direcionamento ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="border-primary/40 bg-primary/5 text-primary text-[11px]"
-                                  >
-                                    {oc.direcionamento}
-                                  </Badge>
-                                ) : (
-                                  <span className="italic text-muted-foreground text-xs">
-                                    + Adicionar direcionamento
-                                  </span>
-                                )}
-                                {can(user?.role, 'writeFinance') && (
-                                  <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity text-primary" />
-                                )}
-                              </button>
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">
-                              {comp?.descricao || oc.observacoes || 'Oferta voluntária'}
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">
-                              {getContaNome(oc.conta || comp?.conta_padrao)}
-                            </TableCell>
-                            <TableCell className="text-right font-bold text-foreground">
-                              {formatCurrency(oc.valor_pago || 0)}
-                            </TableCell>
-                          </TableRow>
-                        )
-                      })}
-                      {/* Linha de Totalização Fechando a Lista */}
-                      <TableRow className="bg-secondary/40 font-black border-t-2 border-border text-foreground">
-                        <TableCell
-                          colSpan={5}
-                          className="text-right uppercase tracking-wider text-xs"
-                        >
-                          Total de Ofertas do Mês ({monthLabel}):
-                        </TableCell>
-                        <TableCell className="text-right text-base text-[#B7791F] font-black">
-                          {formatCurrency(baseOferta)}
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {renderCardCalculo('oferta')}
+          {renderTabelaAuditoria('oferta')}
         </TabsContent>
 
-        {/* =========================================================
-            TAB 3: PRIMÍCIAS (1 / DIAS DO MÊS)
-           ========================================================= */}
+        {/* TAB 3: PRIMÍCIAS */}
         <TabsContent value="primicias" className="space-y-6">
-          {/* Card de Configuração & Auditoria da Fórmula de Primícias */}
-          <Card className="border border-border shadow-soft">
-            <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-lg font-bold text-foreground">
-                  <Sparkles className="h-5 w-5 text-[#1E6F5C]" />
-                  Cálculo de Oferta de Primícias ({monthLabel})
-                </CardTitle>
-                <CardDescription>
-                  Fórmula bíblica proporcional a 1 dia do mês: o fator é exatamente 1 dividido pela
-                  quantidade de dias do mês de referência.
-                </CardDescription>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Badge
-                  variant="outline"
-                  className="border-[#1E6F5C]/40 bg-[#1E6F5C]/10 text-[#1E6F5C] font-bold"
-                >
-                  Fator: 1/{diasNoMes} avos ({((1 / diasNoMes) * 100).toFixed(2)}%)
-                </Badge>
-              </div>
-            </CardHeader>
-
-            <CardContent>
-              {/* Memória de Cálculo Destacada */}
-              <div className="rounded-2xl border border-[#1E6F5C]/30 bg-[#1E6F5C]/5 p-4 sm:p-5">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div className="space-y-1">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Fórmula de Auditoria de Primícias
-                    </span>
-                    <div className="flex flex-wrap items-center gap-2 text-base font-bold text-foreground sm:text-lg">
-                      <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border">
-                        Base paga: {formatCurrency(basePrimicias)}
-                      </span>
-                      <span className="text-muted-foreground">×</span>
-                      <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border text-[#1E6F5C] font-black">
-                        1/{diasNoMes}
-                      </span>
-                      <span className="text-muted-foreground">=</span>
-                      <span className="rounded-lg bg-[#1E6F5C] px-3 py-1 font-black text-white shadow-xs">
-                        {formatCurrency(resultadoPrimicias)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-border bg-white p-3 text-right shadow-2xs">
-                    <span className="text-[11px] font-medium text-muted-foreground">
-                      Primícias Apuradas (1/{diasNoMes})
-                    </span>
-                    <p className="text-xl font-black text-[#1E6F5C] sm:text-2xl">
-                      {formatCurrency(resultadoPrimicias)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Info className="h-4 w-4 text-[#1E6F5C] shrink-0" />
-                  <span>
-                    No mês de <strong>{monthLabel}</strong> (com <strong>{diasNoMes} dias</strong>),
-                    o cálculo equivale a 1 dia ({((1 / diasNoMes) * 100).toFixed(2)}%) sobre as
-                    despesas marcadas como primícias e efetivamente pagas.
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Tabela de Auditoria / Despesas da Base de Primícias */}
-          <Card className="border border-border shadow-soft">
-            <CardHeader className="flex flex-row items-center justify-between pb-3">
-              <div>
-                <CardTitle className="text-base font-bold text-foreground">
-                  Despesas Pagas Ticadas em Primícias (Base de Cálculo)
-                </CardTitle>
-                <CardDescription>
-                  Memória de cálculo detalhada com todas as ocorrências de despesas que geraram a
-                  base de {formatCurrency(basePrimicias)}.
-                </CardDescription>
-              </div>
-              <Badge variant="secondary" className="font-bold">
-                {despesasPrimicias.length}{' '}
-                {despesasPrimicias.length === 1 ? 'registro' : 'registros'}
-              </Badge>
-            </CardHeader>
-
-            <CardContent>
-              {despesasPrimicias.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground">
-                  <Sparkles className="mb-2 h-10 w-10 stroke-[1.5] text-muted-foreground/60" />
-                  <p className="font-semibold text-foreground">
-                    Nenhuma despesa paga com primícias neste mês
-                  </p>
-                  <p className="text-xs">
-                    Ao registrar o pagamento de despesas marcadas com "Primícias", elas aparecerão
-                    aqui automaticamente.
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-border">
-                  <Table>
-                    <TableHeader className="bg-secondary/40">
-                      <TableRow>
-                        <TableHead className="font-bold">Data Pagamento</TableHead>
-                        <TableHead className="font-bold">Descrição da Despesa</TableHead>
-                        <TableHead className="font-bold">Categoria</TableHead>
-                        <TableHead className="font-bold">Conta / Saída</TableHead>
-                        <TableHead className="font-bold">Direcionamento</TableHead>
-                        <TableHead className="text-right font-bold">Valor Pago</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {despesasPrimicias.map((oc) => {
-                        const comp = oc.expand?.compromisso
-                        const catNome =
-                          oc.expand?.compromisso?.expand?.categoria?.nome ||
-                          getCategoriaNome(comp?.categoria)
-                        const dataPag = oc.data_pagamento
-                          ? formatDate(oc.data_pagamento.slice(0, 10))
-                          : oc.competencia || '—'
-
-                        return (
-                          <TableRow key={oc.id} className="hover:bg-muted/40">
-                            <TableCell className="font-medium text-xs whitespace-nowrap">
-                              <span className="inline-flex items-center gap-1.5">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
-                                {dataPag}
-                              </span>
-                            </TableCell>
-                            <TableCell className="font-medium text-foreground">
-                              {comp?.descricao || oc.observacoes || 'Despesa'}
-                              {comp?.fornecedor && (
-                                <span className="block text-[11px] text-muted-foreground">
-                                  {comp.fornecedor}
-                                </span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">
-                              <Badge variant="outline" className="text-[11px]">
-                                {catNome}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">
-                              {getContaNome(oc.conta || comp?.conta_padrao)}
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">
-                              <button
-                                type="button"
-                                onClick={() => handleOpenDirecionamento(oc)}
-                                className="group flex items-center gap-1 text-left hover:text-primary"
-                                title="Editar direcionamento"
-                              >
-                                <span>{oc.direcionamento || '—'}</span>
-                                {can(user?.role, 'writeFinance') && (
-                                  <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                )}
-                              </button>
-                            </TableCell>
-                            <TableCell className="text-right font-bold text-foreground">
-                              {formatCurrency(oc.valor_pago || 0)}
-                            </TableCell>
-                          </TableRow>
-                        )
-                      })}
-                      {/* Subtotal e Resultado de Primícias */}
-                      <TableRow className="bg-secondary/30 font-bold border-t-2 border-border">
-                        <TableCell colSpan={5} className="text-right">
-                          Total da Base de Primícias ({monthLabel}):
-                        </TableCell>
-                        <TableCell className="text-right text-base text-[#1E6F5C] font-black">
-                          {formatCurrency(basePrimicias)}
-                        </TableCell>
-                      </TableRow>
-                      <TableRow className="bg-[#1E6F5C]/10 font-bold">
-                        <TableCell colSpan={5} className="text-right text-foreground">
-                          Primícias Apuradas (Fator 1/{diasNoMes} sobre a base):
-                        </TableCell>
-                        <TableCell className="text-right text-base text-[#1E6F5C] font-black">
-                          {formatCurrency(resultadoPrimicias)}
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {renderCardCalculo('primicias')}
+          {renderTabelaAuditoria('primicias')}
         </TabsContent>
       </Tabs>
 
@@ -1135,8 +1018,8 @@ export default function Dizimos() {
               Editar percentual de {editingType === 'dizimo' ? 'Dízimo' : 'Oferta'}
             </DialogTitle>
             <DialogDescription>
-              Defina a alíquota percentual que será multiplicada pela soma das despesas pagas
-              marcadas como {editingType === 'dizimo' ? 'dízimo' : 'oferta'}.
+              Defina a alíquota percentual que será multiplicada pela base única de despesas pagas
+              para {editingType === 'dizimo' ? 'dízimo' : 'oferta'}.
             </DialogDescription>
           </DialogHeader>
 
@@ -1160,7 +1043,8 @@ export default function Dizimos() {
                 <span className="absolute right-3 top-2.5 text-muted-foreground font-bold">%</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Exemplo: 10% calcula um décimo das despesas pagas; 5% calcula a metade.
+                Exemplo: 10% calcula um décimo da base de despesas pagas; 5% calcula a vigésima
+                parte.
               </p>
             </div>
 
