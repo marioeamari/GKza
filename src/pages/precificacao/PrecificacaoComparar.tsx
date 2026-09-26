@@ -54,6 +54,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   Dialog,
   DialogContent,
@@ -174,6 +175,24 @@ export default function PrecificacaoComparar() {
   const [aliquotaIcms, setAliquotaIcms] = useState<number>(2.23)
   const [dasImpostoMes, setDasImpostoMes] = useState<number>(76.5)
   const [pedidosMes, setPedidosMes] = useState<number>(3000)
+
+  // Rastreamento da fonte das premissas tributárias ('perfil' | 'global' | 'sobrescrito')
+  const [fonteTributos, setFonteTributos] = useState<'perfil' | 'global' | 'sobrescrito'>('global')
+  const [perfilAtivoId, setPerfilAtivoId] = useState<string | null>(null)
+  const [isSobrescritoManualmente, setIsSobrescritoManualmente] = useState<boolean>(false)
+
+  // Valores padrão/originais da fonte atual para restauração
+  const [valoresOrigemFonte, setValoresOrigemFonte] = useState<{
+    aliquotaDas: number
+    aliquotaIcms: number
+    dasImpostoMes: number
+    pedidosMes: number
+  }>({
+    aliquotaDas: 6.95,
+    aliquotaIcms: 2.23,
+    dasImpostoMes: 76.5,
+    pedidosMes: 3000,
+  })
 
   useEffect(() => {
     async function loadData() {
@@ -313,6 +332,122 @@ export default function PrecificacaoComparar() {
 
     return list
   }, [modalidades, canais, taxas])
+
+  // Aplicar perfil tributário correspondente quando mudar o produto selecionado ou os perfis carregados
+  useEffect(() => {
+    if (!selectedProdutoId || !produtoAtual) {
+      // Se não há produto selecionado, manter padrão global caso não sobrescrito
+      return
+    }
+
+    // Helper para verificar se um perfil está dentro da vigência
+    const isPerfilVigente = (perfil: PrecPerfilTributarioRecord): boolean => {
+      if (!perfil.vigencia) return true
+      const vig = perfil.vigencia.trim()
+      if (!vig) return true
+      // Se for formato de data YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}/.test(vig)) {
+        const vigDate = new Date(vig)
+        if (!isNaN(vigDate.getTime())) {
+          return new Date() <= vigDate
+        }
+      }
+      return true
+    }
+
+    // Precedência de matching:
+    // 1. Perfil específico do produto selecionado
+    // 2. Perfil da empresa do produto selecionado
+    // 3. Perfil de escopo 'operacao' geral
+    const perfisValidos = perfisTributarios.filter(isPerfilVigente)
+    const perfilProduto = perfisValidos.find(
+      (p) => p.escopo === 'produto' && p.produto === selectedProdutoId,
+    )
+    const perfilEmpresa = produtoAtual.empresa
+      ? perfisValidos.find((p) => p.escopo === 'empresa' && p.empresa === produtoAtual.empresa)
+      : null
+    const perfilOperacao = perfisValidos.find((p) => p.escopo === 'operacao')
+
+    const perfilEscolhido = perfilProduto || perfilEmpresa || perfilOperacao
+
+    if (perfilEscolhido) {
+      const novaAliqDas = perfilEscolhido.aliquota_das_pct ?? 6.95
+      const novaAliqIcms = perfilEscolhido.aliquota_icms_pct ?? 2.23
+      const novoDasMes = perfilEscolhido.outros?.das_imposto_total_mes ?? 76.5
+      const novosPedidosMes = perfilEscolhido.outros?.pedidos_estimados_mes ?? 3000
+
+      setPerfilAtivoId(perfilEscolhido.id)
+      setValoresOrigemFonte({
+        aliquotaDas: novaAliqDas,
+        aliquotaIcms: novaAliqIcms,
+        dasImpostoMes: novoDasMes,
+        pedidosMes: novosPedidosMes,
+      })
+      setAliquotaDas(novaAliqDas)
+      setAliquotaIcms(novaAliqIcms)
+      setDasImpostoMes(novoDasMes)
+      setPedidosMes(novosPedidosMes)
+      setFonteTributos('perfil')
+      setIsSobrescritoManualmente(false)
+    } else {
+      // Sem perfil: aplicar padrão global
+      const padraoGlobal = {
+        aliquotaDas: 6.95,
+        aliquotaIcms: 2.23,
+        dasImpostoMes: 76.5,
+        pedidosMes: 3000,
+      }
+      setPerfilAtivoId(null)
+      setValoresOrigemFonte(padraoGlobal)
+      setAliquotaDas(padraoGlobal.aliquotaDas)
+      setAliquotaIcms(padraoGlobal.aliquotaIcms)
+      setDasImpostoMes(padraoGlobal.dasImpostoMes)
+      setPedidosMes(padraoGlobal.pedidosMes)
+      setFonteTributos('global')
+      setIsSobrescritoManualmente(false)
+    }
+  }, [selectedProdutoId, produtoAtual, perfisTributarios])
+
+  // Handlers para edição manual dos tributos
+  const handleAtualizarAliquotaDas = (valor: number) => {
+    setAliquotaDas(valor)
+    setIsSobrescritoManualmente(true)
+    setFonteTributos('sobrescrito')
+  }
+
+  const handleAtualizarAliquotaIcms = (valor: number) => {
+    setAliquotaIcms(valor)
+    setIsSobrescritoManualmente(true)
+    setFonteTributos('sobrescrito')
+  }
+
+  const handleAtualizarDasImpostoMes = (valor: number) => {
+    setDasImpostoMes(valor)
+    setIsSobrescritoManualmente(true)
+    setFonteTributos('sobrescrito')
+  }
+
+  const handleAtualizarPedidosMes = (valor: number) => {
+    setPedidosMes(valor)
+    setIsSobrescritoManualmente(true)
+    setFonteTributos('sobrescrito')
+  }
+
+  // Restaurar fonte (Perfil se houver, ou Global padrão)
+  const handleRestaurarFonteTributos = () => {
+    setAliquotaDas(valoresOrigemFonte.aliquotaDas)
+    setAliquotaIcms(valoresOrigemFonte.aliquotaIcms)
+    setDasImpostoMes(valoresOrigemFonte.dasImpostoMes)
+    setPedidosMes(valoresOrigemFonte.pedidosMes)
+    setIsSobrescritoManualmente(false)
+    setFonteTributos(perfilAtivoId ? 'perfil' : 'global')
+    toast({
+      title: 'Tributos Restaurados',
+      description: perfilAtivoId
+        ? 'Alíquotas restauradas a partir do perfil tributário vigente.'
+        : 'Alíquotas restauradas para os padrões globais da planilha (6,95% / 2,23%).',
+    })
+  }
 
   // Carregar dados salvos das precificações deste produto quando o produto selecionado mudar
   // REGRA DO USUÁRIO: Por padrão, carregar o último card de canal APROVADO (não o rascunho).
@@ -1051,6 +1186,129 @@ export default function PrecificacaoComparar() {
                     }
                   }}
                 />
+              </div>
+            </div>
+
+            {/* Painel de Tributos Editável */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 bg-secondary/40 p-2.5 rounded-xl border border-border">
+              <div className="flex flex-col gap-1 min-w-[130px]">
+                <div className="flex items-center gap-1.5">
+                  <Calculator className="h-3.5 w-3.5 text-primary" />
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase">
+                    Tributos
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {fonteTributos === 'perfil' && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] h-5 px-1.5 font-bold bg-blue-50 text-blue-700 border-blue-200"
+                    >
+                      Perfil
+                    </Badge>
+                  )}
+                  {fonteTributos === 'global' && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] h-5 px-1.5 font-bold bg-slate-50 text-slate-700 border-slate-200"
+                    >
+                      Global
+                    </Badge>
+                  )}
+                  {fonteTributos === 'sobrescrito' && (
+                    <div className="flex items-center gap-1">
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] h-5 px-1.5 font-bold bg-amber-50 text-amber-800 border-amber-300"
+                      >
+                        Sobrescrito
+                      </Badge>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleRestaurarFonteTributos}
+                        className="h-5 px-1 text-[10px] text-muted-foreground hover:text-foreground hover:bg-white"
+                        title="Restaurar valores da fonte original"
+                      >
+                        <RotateCcw className="h-2.5 w-2.5 mr-0.5" />
+                        Restaurar
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* DAS (%) */}
+              <div className="w-20 space-y-1">
+                <Label className="text-[10px] font-bold text-muted-foreground uppercase">
+                  DAS (%)
+                </Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  className="h-8 text-xs font-bold"
+                  value={aliquotaDas}
+                  onChange={(e) => handleAtualizarAliquotaDas(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+
+              {/* ICMS (%) */}
+              <div className="w-20 space-y-1">
+                <Label className="text-[10px] font-bold text-muted-foreground uppercase">
+                  ICMS (%)
+                </Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  className="h-8 text-xs font-bold"
+                  value={aliquotaIcms}
+                  onChange={(e) => handleAtualizarAliquotaIcms(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+
+              {/* Imposto Fixo Mês (R$) */}
+              <div className="w-24 space-y-1">
+                <Label
+                  className="text-[10px] font-bold text-muted-foreground uppercase truncate block"
+                  title="Imposto Fixo do Mês (R$)"
+                >
+                  Fixo Mês (R$)
+                </Label>
+                <Input
+                  type="number"
+                  step="0.50"
+                  className="h-8 text-xs font-bold"
+                  value={dasImpostoMes}
+                  onChange={(e) => handleAtualizarDasImpostoMes(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+
+              {/* Pedidos / Mês */}
+              <div className="w-24 space-y-1">
+                <Label
+                  className="text-[10px] font-bold text-muted-foreground uppercase truncate block"
+                  title="Pedidos estimados por mês para rateio"
+                >
+                  Pedidos/mês
+                </Label>
+                <Input
+                  type="number"
+                  step="10"
+                  className="h-8 text-xs font-bold"
+                  value={pedidosMes}
+                  onChange={(e) => handleAtualizarPedidosMes(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+
+              {/* Rateio por venda informativo */}
+              <div className="space-y-0.5 pt-3 sm:pt-0 sm:border-l sm:border-border/60 sm:pl-3">
+                <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-semibold block">
+                  Rateio/venda
+                </span>
+                <span className="text-xs font-mono font-bold text-foreground">
+                  {formatCurrency(pedidosMes > 0 ? dasImpostoMes / pedidosMes : 0)}
+                </span>
               </div>
             </div>
           </div>
@@ -1876,7 +2134,96 @@ export default function PrecificacaoComparar() {
                             </span>
                           </div>
                           <div className="flex items-center justify-between text-muted-foreground text-[11px]">
-                            <span>Tributos (DAS + ICMS)</span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="inline-flex items-center gap-1 cursor-help border-b border-dotted border-muted-foreground/50 hover:text-foreground transition-colors">
+                                  <span>Tributos (DAS + ICMS)</span>
+                                  <HelpCircle className="h-3 w-3 text-muted-foreground/70" />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent
+                                side="top"
+                                className="p-3 text-xs max-w-xs space-y-2 bg-slate-900 text-slate-100 border-slate-800 shadow-xl"
+                              >
+                                <div className="flex items-center justify-between border-b border-slate-800 pb-1.5 font-bold">
+                                  <span>Detalhamento dos Tributos</span>
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-[9px] h-4 px-1 font-bold ${
+                                      fonteTributos === 'perfil'
+                                        ? 'bg-blue-950 text-blue-300 border-blue-800'
+                                        : fonteTributos === 'sobrescrito'
+                                          ? 'bg-amber-950 text-amber-300 border-amber-800'
+                                          : 'bg-slate-800 text-slate-300 border-slate-700'
+                                    }`}
+                                  >
+                                    Fonte:{' '}
+                                    {fonteTributos === 'perfil'
+                                      ? 'Perfil'
+                                      : fonteTributos === 'sobrescrito'
+                                        ? 'Sobrescrito'
+                                        : 'Global'}
+                                  </Badge>
+                                </div>
+
+                                <div className="space-y-1 text-[11px]">
+                                  <div className="flex justify-between text-slate-300">
+                                    <span>Base de cálculo (NF):</span>
+                                    <span className="font-mono font-semibold text-white">
+                                      {formatCurrency(dem.base_calculo_tributos)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between text-slate-300">
+                                    <span>Alíquota efetiva total:</span>
+                                    <span className="font-mono font-semibold text-white">
+                                      {dem.aliquota_imposto_efetiva_pct.toFixed(2)}%
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="space-y-1 text-[11px] border-t border-slate-800/80 pt-1.5">
+                                  <div className="flex justify-between text-slate-400">
+                                    <span>DAS ({aliquotaDas}%):</span>
+                                    <span className="font-mono text-slate-200">
+                                      {formatCurrency(dem.imposto_das)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between text-slate-400">
+                                    <span>ICMS ({aliquotaIcms}%):</span>
+                                    <span className="font-mono text-slate-200">
+                                      {formatCurrency(dem.imposto_icms)}
+                                    </span>
+                                  </div>
+                                  {dem.outros_impostos > 0 && (
+                                    <div className="flex justify-between text-slate-400">
+                                      <span>Outros impostos:</span>
+                                      <span className="font-mono text-slate-200">
+                                        {formatCurrency(dem.outros_impostos)}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {dem.rateio_fixo_imposto_mes > 0 && (
+                                    <div className="flex justify-between text-amber-300 pt-0.5 border-t border-slate-800/60">
+                                      <span
+                                        title={`R$ ${dasImpostoMes.toFixed(2)} / ${pedidosMes} pedidos`}
+                                      >
+                                        Rateio imposto fixo mensal:
+                                      </span>
+                                      <span className="font-mono font-semibold">
+                                        +{formatCurrency(dem.rateio_fixo_imposto_mes)}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="flex justify-between border-t border-slate-800 pt-1.5 font-bold text-slate-100">
+                                  <span>Total de tributos (venda):</span>
+                                  <span className="font-mono text-white">
+                                    {formatCurrency(dem.total_tributos)}
+                                  </span>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
                             <span className="font-mono">-{formatCurrency(dem.total_tributos)}</span>
                           </div>
                           <div className="flex items-center justify-between text-muted-foreground text-[11px]">
