@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   Calculator,
   Save,
@@ -18,6 +18,9 @@ import {
   Sliders,
   Check,
   Building2,
+  Package,
+  ArrowRight,
+  ChevronDown,
 } from 'lucide-react'
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -32,6 +35,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { precificacaoService } from '@/services/precificacao'
@@ -571,12 +582,695 @@ export default function PrecificacaoComparar() {
         </CardContent>
       </Card>
 
-      {/* Painel Horizontal com Coluna Fixa do Produto + Colunas Rolantes dos Canais */}
+      {/* Barra de Ações e Filtro de Colunas Visíveis */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Layers className="h-4 w-4 text-primary" />
+          <span className="text-sm font-bold text-foreground">
+            Comparativo de Canais & Modalidades
+          </span>
+          {produtoAtual && (
+            <span className="text-xs text-muted-foreground hidden sm:inline">
+              — {colunasModalidade.filter((c) => colunasAtivas[c.modalidade.id] !== false).length}{' '}
+              de {colunasModalidade.length} modalidades visíveis
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Seletor de Colunas Visíveis (Dropdown com Checkboxes) */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 bg-white">
+                <Sliders className="h-3.5 w-3.5" />
+                <span>Colunas Visíveis</span>
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56 max-h-80 overflow-y-auto">
+              <DropdownMenuLabel className="text-xs font-bold">
+                Exibir Canais / Modalidades
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {colunasModalidade.map((col) => {
+                const modId = col.modalidade.id
+                const isAtiva = colunasAtivas[modId] !== false
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={modId}
+                    checked={isAtiva}
+                    onCheckedChange={(checked) => {
+                      setColunasAtivas((prev) => ({
+                        ...prev,
+                        [modId]: !!checked,
+                      }))
+                    }}
+                    className="text-xs cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      <span
+                        className="h-2 w-2 rounded-full shrink-0"
+                        style={{ backgroundColor: col.canal.cor || '#DF5830' }}
+                      />
+                      <span className="truncate">
+                        {col.canal.nome} - {col.modalidade.nome}
+                      </span>
+                    </div>
+                  </DropdownMenuCheckboxItem>
+                )
+              })}
+              <DropdownMenuSeparator />
+              <div className="p-1 flex items-center justify-between gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-[11px] px-2 w-full"
+                  onClick={() => {
+                    const allTrue: Record<string, boolean> = {}
+                    for (const m of colunasModalidade) allTrue[m.modalidade.id] = true
+                    setColunasAtivas(allTrue)
+                  }}
+                >
+                  Marcar todos
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-[11px] px-2 w-full text-muted-foreground"
+                  onClick={() => {
+                    const allFalse: Record<string, boolean> = {}
+                    for (const m of colunasModalidade) allFalse[m.modalidade.id] = false
+                    setColunasAtivas(allFalse)
+                  }}
+                >
+                  Desmarcar
+                </Button>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      {/* Estados Vazios Orientativos */}
       {!produtoAtual ? (
-        <Card className="p-8 text-center text-muted-foreground">
-          Nenhum produto cadastrado para precificar.
+        <Card className="p-10 text-center border-dashed border-border bg-white shadow-xs">
+          <div className="max-w-md mx-auto space-y-3">
+            <div className="mx-auto h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+              <Package className="h-6 w-6" />
+            </div>
+            <CardTitle className="text-base font-bold">Nenhum produto selecionado</CardTitle>
+            <CardDescription className="text-xs text-muted-foreground">
+              Cadastre ou selecione um produto com ficha técnica para simular e comparar preços
+              entre todos os canais de venda.
+            </CardDescription>
+            <div className="pt-2">
+              <Button asChild className="bg-primary text-white font-bold h-9 text-xs">
+                <Link to="/precificacao/produtos">
+                  Ir para Produtos de Precificação
+                  <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : (custoBaseAtual?.custo_total || 0) <= 0 ? (
+        <Card className="p-4 border-amber-300 bg-amber-50/50 shadow-xs">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="flex-1 space-y-1">
+              <p className="text-xs font-bold text-amber-900">
+                Complete a composição de custos do produto
+              </p>
+              <p className="text-xs text-amber-700">
+                O produto{' '}
+                <span className="font-mono font-bold">
+                  [{produtoAtual.sku}] {produtoAtual.nome}
+                </span>{' '}
+                ainda não possui custos diretos cadastrados (C0..Cn, despesas de compra ou aquisição
+                unitária). Os demonstrativos abaixo exibirão custo zero até que a composição seja
+                preenchida.
+              </p>
+            </div>
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs bg-white border-amber-300 text-amber-900 hover:bg-amber-100"
+            >
+              <Link to="/precificacao/produtos">
+                Editar Composição
+                <ArrowRight className="ml-1.5 h-3 w-3" />
+              </Link>
+            </Button>
+          </div>
         </Card>
       ) : null}
+
+      {/* Painel Horizontal com Coluna Fixa do Produto + Colunas Rolantes dos Canais */}
+      {produtoAtual && (
+        <div className="relative border border-border rounded-xl bg-card shadow-xs overflow-x-auto">
+          <div className="inline-flex min-w-full items-stretch divide-x divide-border">
+            {/* 1. Coluna Fixa do Produto (Sticky à esquerda) */}
+            <div className="sticky left-0 z-20 w-72 shrink-0 bg-[#fafafa] flex flex-col justify-between p-4 shadow-[4px_0_12px_-2px_rgba(0,0,0,0.06)] border-r border-border">
+              <div className="space-y-4">
+                {/* Header do Produto */}
+                <div className="flex items-start gap-3">
+                  <div className="h-14 w-14 rounded-xl bg-secondary/80 border border-border flex items-center justify-center shrink-0 overflow-hidden text-primary">
+                    {produtoAtual.imagem ? (
+                      <img
+                        src={produtoAtual.imagem}
+                        alt={produtoAtual.nome}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <Package className="h-7 w-7 text-primary/70" />
+                    )}
+                  </div>
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <span className="font-mono text-xs font-black text-primary block truncate">
+                      [{produtoAtual.sku}]
+                    </span>
+                    <h3
+                      className="text-sm font-bold text-foreground leading-snug line-clamp-2"
+                      title={produtoAtual.nome}
+                    >
+                      {produtoAtual.nome}
+                    </h3>
+                    <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] h-5 px-1.5 font-semibold capitalize bg-white"
+                      >
+                        {produtoAtual.tipo.replace('_', ' ')}
+                      </Badge>
+                      {produtoAtual.categoria && (
+                        <Badge
+                          variant="secondary"
+                          className="text-[10px] h-5 px-1.5 text-muted-foreground truncate max-w-[120px]"
+                        >
+                          {produtoAtual.categoria}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Composição Resumida de Custos (C0..Cn) */}
+                <div className="space-y-2 pt-1 border-t border-border/70">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-muted-foreground uppercase text-[10px] tracking-wider flex items-center gap-1">
+                      <Layers className="h-3 w-3" />
+                      Composição de Custo
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {produtoAtual.composicao?.length || 0} itens
+                    </span>
+                  </div>
+
+                  <div className="bg-white rounded-lg border border-border/80 p-2 space-y-1.5 text-xs max-h-48 overflow-y-auto">
+                    {produtoAtual.composicao && produtoAtual.composicao.length > 0 ? (
+                      produtoAtual.composicao.map((item, idx) => {
+                        const subtotal =
+                          (item.qtd || 0) *
+                          (item.custo_unitario || 0) *
+                          (1 + (item.perda_pct || 0) / 100)
+                        return (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between gap-1 text-[11px] leading-tight"
+                          >
+                            <span
+                              className="text-muted-foreground truncate flex-1"
+                              title={item.descricao}
+                            >
+                              <span className="font-mono font-semibold text-foreground/80 mr-1">
+                                {item.codigo || `C${idx}`}
+                              </span>
+                              {item.descricao}
+                            </span>
+                            <span className="font-mono font-semibold text-foreground shrink-0">
+                              {formatCurrency(subtotal)}
+                            </span>
+                          </div>
+                        )
+                      })
+                    ) : produtoAtual.custo_aquisicao_unitario ? (
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-muted-foreground">Aquisição Unitária</span>
+                        <span className="font-mono font-semibold text-foreground">
+                          {formatCurrency(produtoAtual.custo_aquisicao_unitario)}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-muted-foreground italic py-1">
+                        Nenhum componente cadastrado.
+                      </div>
+                    )}
+
+                    {/* Embalagem e etiqueta adicionais se existirem */}
+                    {((produtoAtual.custo_adicional_embalagem || 0) > 0 ||
+                      (produtoAtual.custo_etiqueta || 0) > 0) && (
+                      <div className="pt-1 border-t border-border/40 space-y-1">
+                        {(produtoAtual.custo_adicional_embalagem || 0) > 0 && (
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span>Embalagem</span>
+                            <span className="font-mono">
+                              {formatCurrency(produtoAtual.custo_adicional_embalagem || 0)}
+                            </span>
+                          </div>
+                        )}
+                        {(produtoAtual.custo_etiqueta || 0) > 0 && (
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span>Etiqueta</span>
+                            <span className="font-mono">
+                              {formatCurrency(produtoAtual.custo_etiqueta || 0)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Métricas Físicas do Produto */}
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-white rounded-lg border border-border/70 p-2">
+                    <span className="text-[10px] text-muted-foreground block">Peso Total</span>
+                    <span className="font-mono font-bold text-foreground">
+                      {produtoAtual.peso_g ? `${produtoAtual.peso_g} g` : '—'}
+                    </span>
+                  </div>
+                  <div className="bg-white rounded-lg border border-border/70 p-2">
+                    <span className="text-[10px] text-muted-foreground block">
+                      Dimensões (CxLxA)
+                    </span>
+                    <span className="font-mono text-[11px] font-semibold text-foreground truncate block">
+                      {produtoAtual.dimensao_comprimento_cm || 0}x
+                      {produtoAtual.dimensao_largura_cm || 0}x{produtoAtual.dimensao_altura_cm || 0}{' '}
+                      cm
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Destaque do Custo Total Base */}
+              <div className="mt-4 pt-3 border-t border-border/80">
+                <div className="bg-primary/5 rounded-xl border border-primary/20 p-3">
+                  <span className="text-[10px] font-bold text-primary uppercase tracking-wider block">
+                    Custo Total Base
+                  </span>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-xl font-black font-mono text-primary">
+                      {formatCurrency(custoBaseAtual?.custo_total || 0)}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] bg-white border-primary/30 text-primary"
+                    >
+                      Fixo p/ Canais
+                    </Badge>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1 leading-snug">
+                    Base para cálculo de markup e ponto de equilíbrio em todos os canais.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Colunas de Canais e Modalidades */}
+            {colunasModalidade.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground flex-1 flex items-center justify-center">
+                Nenhum canal ou modalidade ativa cadastrada.
+              </div>
+            ) : (
+              colunasModalidade
+                .filter((col) => colunasAtivas[col.modalidade.id] !== false)
+                .map((col) => {
+                  const modId = col.modalidade.id
+                  const cenario = demonstrativosPorColuna[modId]
+                  if (!cenario) return null
+
+                  const dem = cenario.demonstrativo
+                  const isMelhor = melhorCenario === modId
+                  const lucroNegativo = dem.lucro_liquido < 0
+                  const descConf = descontosPorColuna[modId] || { pctCliente: 0, descPixPct: 0 }
+                  const precoColuna =
+                    modoCalculo === 'manual'
+                      ? (precosPorColuna[modId] ?? valorPrecoGlobal)
+                      : cenario.precoAnunciado
+
+                  return (
+                    <div
+                      key={modId}
+                      className={`w-80 shrink-0 flex flex-col justify-between p-4 bg-white transition-colors relative ${
+                        isMelhor ? 'bg-emerald-50/20 ring-1 ring-emerald-500/30' : ''
+                      }`}
+                    >
+                      {/* Selo "Melhor Cenário" no topo */}
+                      {isMelhor && (
+                        <div className="absolute top-2 right-2">
+                          <Badge className="bg-emerald-600 text-white text-[10px] h-5 px-2 font-bold shadow-xs">
+                            <Sparkles className="h-3 w-3 mr-1" />
+                            Melhor Margem
+                          </Badge>
+                        </div>
+                      )}
+
+                      <div className="space-y-4">
+                        {/* Header do Canal / Modalidade */}
+                        <div className="space-y-1.5 pr-20">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="h-2.5 w-2.5 rounded-full shrink-0"
+                              style={{ backgroundColor: col.canal.cor || '#DF5830' }}
+                            />
+                            <h4 className="text-sm font-black text-foreground truncate">
+                              {col.canal.nome}
+                            </h4>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] h-5 px-2 font-bold text-foreground border-border bg-secondary/30"
+                              style={{
+                                borderLeftColor: col.canal.cor || '#DF5830',
+                                borderLeftWidth: 3,
+                              }}
+                            >
+                              {col.modalidade.nome}
+                            </Badge>
+                            {col.modalidade.prazo_recebimento_dias !== undefined && (
+                              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                                <Clock className="h-2.5 w-2.5" />
+                                {col.modalidade.prazo_recebimento_dias}d
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Bloco de Preço de Venda / Anunciado */}
+                        <div className="bg-secondary/30 rounded-xl p-2.5 border border-border/80 space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <Label className="text-[11px] font-bold uppercase text-muted-foreground">
+                              Preço Anunciado
+                            </Label>
+                            {modoCalculo !== 'manual' && (
+                              <span className="text-[10px] text-muted-foreground">
+                                {modoCalculo === 'mesmo_preco' ? 'Global' : 'Resolvido p/ meta'}
+                              </span>
+                            )}
+                          </div>
+
+                          {modoCalculo === 'manual' ? (
+                            <div className="relative">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">
+                                R$
+                              </span>
+                              <Input
+                                type="number"
+                                step="0.10"
+                                className="h-9 pl-8 text-sm font-black font-mono bg-white"
+                                value={precoColuna}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0
+                                  setPrecosPorColuna((prev) => ({
+                                    ...prev,
+                                    [modId]: val,
+                                  }))
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <div className="flex items-baseline justify-between pt-0.5">
+                              <span className="text-xl font-black font-mono text-foreground">
+                                {formatCurrency(cenario.precoAnunciado)}
+                              </span>
+                              {(modoCalculo === 'meta_lucro' || modoCalculo === 'meta_margem') && (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[9px] bg-primary/10 text-primary border-primary/20"
+                                >
+                                  {cenario.convergiuMeta ? 'Meta atingida' : 'Ajustado'}
+                                </Badge>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Aviso se a meta for inviável */}
+                          {(modoCalculo === 'meta_lucro' || modoCalculo === 'meta_margem') &&
+                            !cenario.convergiuMeta && (
+                              <div className="rounded-md bg-amber-50 border border-amber-200 p-1.5 flex items-start gap-1.5 text-[10px] text-amber-800">
+                                <AlertTriangle className="h-3 w-3 shrink-0 text-amber-600 mt-0.5" />
+                                <span>
+                                  Meta inviável para este canal (taxas/tributos excedem margem).
+                                  Preço limitado.
+                                </span>
+                              </div>
+                            )}
+
+                          {/* Descontos Simulados na Coluna */}
+                          <div className="pt-2 border-t border-border/60 grid grid-cols-2 gap-2 text-xs">
+                            <div className="space-y-0.5">
+                              <span className="text-[10px] text-muted-foreground block">
+                                Desc. Cliente %
+                              </span>
+                              <Input
+                                type="number"
+                                step="1"
+                                min="0"
+                                max="100"
+                                className="h-7 text-[11px] font-mono px-2 bg-white"
+                                value={descConf.pctCliente || ''}
+                                placeholder="0%"
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0
+                                  setDescontosPorColuna((prev) => ({
+                                    ...prev,
+                                    [modId]: {
+                                      pctCliente: val,
+                                      descPixPct: prev[modId]?.descPixPct || 0,
+                                    },
+                                  }))
+                                }}
+                              />
+                            </div>
+                            <div className="space-y-0.5">
+                              <span className="text-[10px] text-muted-foreground block">
+                                Desc. Pix %
+                              </span>
+                              <Input
+                                type="number"
+                                step="1"
+                                min="0"
+                                max="100"
+                                className="h-7 text-[11px] font-mono px-2 bg-white"
+                                value={descConf.descPixPct || ''}
+                                placeholder="0%"
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0
+                                  setDescontosPorColuna((prev) => ({
+                                    ...prev,
+                                    [modId]: {
+                                      pctCliente: prev[modId]?.pctCliente || 0,
+                                      descPixPct: val,
+                                    },
+                                  }))
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Demonstrativo Detalhado de Taxas */}
+                        <div className="space-y-1.5 text-xs">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-bold text-muted-foreground uppercase text-[10px]">
+                              Taxas do Canal ({dem.linhas_taxas?.length || 0})
+                            </span>
+                            <span className="font-mono font-bold text-red-600">
+                              -{formatCurrency(dem.total_taxas_retidas_canal)}
+                            </span>
+                          </div>
+
+                          <div className="bg-secondary/20 rounded-lg p-2 space-y-1 text-[11px] max-h-36 overflow-y-auto border border-border/50">
+                            {dem.linhas_taxas && dem.linhas_taxas.length > 0 ? (
+                              dem.linhas_taxas.map((tx, idx) => (
+                                <div
+                                  key={idx}
+                                  className={`flex items-center justify-between gap-1 leading-tight ${
+                                    !tx.aplicada
+                                      ? 'text-muted-foreground/50 line-through'
+                                      : 'text-foreground'
+                                  }`}
+                                  title={!tx.aplicada ? tx.motivo_nao_aplicada : tx.condicao_resumo}
+                                >
+                                  <span className="truncate flex-1">
+                                    {tx.nome}
+                                    {tx.tipo_valor === 'percentual' && (
+                                      <span className="text-[9px] text-muted-foreground ml-1 font-mono">
+                                        ({tx.aliquota_ou_fixo}%)
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="font-mono shrink-0">
+                                    {tx.aplicada
+                                      ? `-${formatCurrency(tx.valor_calculado)}`
+                                      : 'R$ 0,00'}
+                                  </span>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="text-[10px] text-muted-foreground italic py-1">
+                                Nenhuma taxa cadastrada neste canal.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Linhas de Fechamento da Venda */}
+                        <div className="space-y-1 text-xs border-t border-border/60 pt-2">
+                          <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                            <span>Preço pago cliente</span>
+                            <span className="font-mono">
+                              {formatCurrency(dem.preco_pago_cliente)}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between font-semibold text-[11px] text-blue-900">
+                            <span>A receber do canal</span>
+                            <span className="font-mono font-bold">
+                              {formatCurrency(dem.valor_receber_canal)}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                            <span>Tributos (DAS + ICMS)</span>
+                            <span className="font-mono">-{formatCurrency(dem.total_tributos)}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                            <span>Custo do produto</span>
+                            <span className="font-mono">
+                              -{formatCurrency(dem.custo_total_produto)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Destaque do Lucro Líquido e Margem */}
+                        <div
+                          className={`rounded-xl p-3 border ${
+                            lucroNegativo
+                              ? 'bg-red-50/80 border-red-200 text-red-900'
+                              : 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider">
+                            <span>Lucro Líquido</span>
+                            <span
+                              className={`text-xs px-1.5 py-0.5 rounded-md font-bold ${
+                                lucroNegativo
+                                  ? 'bg-red-200 text-red-900'
+                                  : 'bg-emerald-200 text-emerald-900'
+                              }`}
+                            >
+                              {dem.margem_liquida_pct.toFixed(1)}% margem
+                            </span>
+                          </div>
+                          <div className="mt-1 flex items-baseline justify-between">
+                            <span
+                              className={`text-2xl font-black font-mono ${
+                                lucroNegativo ? 'text-red-600' : 'text-emerald-700'
+                              }`}
+                            >
+                              {formatCurrency(dem.lucro_liquido)}
+                            </span>
+                            <span className="text-[11px] text-muted-foreground font-mono">
+                              Markup: {dem.markup_sobre_custo_pct.toFixed(0)}%
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Metas e Pontos de Referência */}
+                        <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                          <div className="bg-secondary/40 rounded-lg p-2 border border-border/60">
+                            <span className="text-[10px] text-muted-foreground block truncate">
+                              Pto. Equilíbrio
+                            </span>
+                            <span className="font-mono font-bold text-foreground text-xs">
+                              {formatCurrency(cenario.precoSugeridoEquilibrio)}
+                            </span>
+                          </div>
+                          <div className="bg-secondary/40 rounded-lg p-2 border border-border/60">
+                            <span className="text-[10px] text-muted-foreground block truncate">
+                              Preço Meta
+                            </span>
+                            <span className="font-mono font-bold text-primary text-xs">
+                              {formatCurrency(cenario.precoSugeridoMeta)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Status de Auditoria e Inconsistências */}
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-muted-foreground">Status da precificação:</span>
+                            {dem.incompleto ? (
+                              <Badge
+                                variant="outline"
+                                className="text-amber-600 border-amber-300 text-[10px] bg-amber-50"
+                              >
+                                Pendente
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="text-emerald-600 border-emerald-300 text-[10px] bg-emerald-50"
+                              >
+                                Auditado
+                              </Badge>
+                            )}
+                          </div>
+
+                          {/* Avisos do demonstrativo se existirem */}
+                          {(dem.avisos?.length || 0) > 0 && (
+                            <div className="text-[10px] text-amber-700 bg-amber-50/70 p-1.5 rounded border border-amber-200">
+                              {dem.avisos?.join(' · ')}
+                            </div>
+                          )}
+                          {(dem.motivos_invalido?.length || 0) > 0 && (
+                            <div className="text-[10px] text-red-700 bg-red-50/70 p-1.5 rounded border border-red-200">
+                              {dem.motivos_invalido?.join(' · ')}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Botões de Ação do Card */}
+                      <div className="pt-4 mt-4 border-t border-border flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs flex-1"
+                          disabled={salvando}
+                          onClick={() => handleSalvarCenario(modId, false)}
+                        >
+                          <Save className="h-3 w-3 mr-1" />
+                          Salvar
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="h-8 text-xs flex-1 bg-primary text-white font-bold"
+                          disabled={salvando}
+                          onClick={() => handleSalvarCenario(modId, true)}
+                        >
+                          <CheckCircle2 className="h-3 w-3 mr-1" />
+                          Aprovar
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ========================================================
           TABELA COMPARATIVA CONSOLIDADA (ABAIXO DAS COLUNAS)
