@@ -79,18 +79,42 @@
   .field-error {
     @apply text-xs font-semibold text-destructive;
   }
+  /* Scrollbar customizada para áreas de rolagem */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 5px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 9999px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.4);
+  }
   .nav-item {
-    @apply relative flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-bold text-muted-foreground hover:bg-secondary hover:text-foreground;
+    @apply relative flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-bold text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors;
   }
   .nav-item::before {
     content: '';
-    @apply absolute -left-3 h-6 w-[3px] rounded-r-full bg-transparent;
+    @apply absolute -left-3 h-6 w-[3px] rounded-r-full bg-transparent transition-colors;
   }
   .nav-item-active {
     @apply bg-primary/10 text-primary;
   }
   .nav-item-active::before {
     @apply bg-primary;
+  }
+  .nav-item-collapsed {
+    @apply justify-center px-0;
+  }
+  .nav-item-collapsed::before {
+    @apply -left-1.5;
   }
   .mobile-nav {
     @apply fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-border bg-white/95 px-1 pt-2 backdrop-blur;
