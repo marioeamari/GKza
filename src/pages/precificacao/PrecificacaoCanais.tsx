@@ -84,7 +84,7 @@ export default function PrecificacaoCanais() {
   const [verificandoVinculosMod, setVerificandoVinculosMod] = useState(false)
   const [executandoExclusaoMod, setExecutandoExclusaoMod] = useState(false)
 
-  async function carregarDados() {
+  async function carregarDados(novoCanalIdSelecionar?: string) {
     try {
       setLoading(true)
       const [chans, mods, txs] = await Promise.all([
@@ -95,8 +95,19 @@ export default function PrecificacaoCanais() {
       setCanais(chans)
       setModalidades(mods)
       setTaxas(txs)
-      if (chans.length > 0 && !canalAtivoId) {
-        setCanalAtivoId(chans[0].id)
+
+      if (novoCanalIdSelecionar) {
+        setCanalAtivoId(novoCanalIdSelecionar)
+      } else if (chans.length > 0) {
+        // Se não há canal ativo ou se o canal ativo não existe mais na lista
+        setCanalAtivoId((prev) => {
+          if (prev && chans.some((c) => c.id === prev)) {
+            return prev
+          }
+          return chans[0].id
+        })
+      } else {
+        setCanalAtivoId('')
       }
     } catch (err) {
       console.error('Erro ao carregar canais e taxas:', err)
@@ -116,55 +127,123 @@ export default function PrecificacaoCanais() {
   // Salvar Canal
   async function handleSalvarCanal(e: React.FormEvent) {
     e.preventDefault()
-    if (!canalEditando?.nome) return
+    const nomeLimpo = canalEditando?.nome?.trim()
+    if (!nomeLimpo) {
+      toast({ variant: 'destructive', title: 'Informe o nome do canal' })
+      return
+    }
+
     try {
-      if (canalEditando.id) {
-        await precificacaoService.updateCanal(canalEditando.id, canalEditando)
-        toast({ title: 'Canal atualizado com sucesso' })
-      } else {
-        const created = await precificacaoService.createCanal({
-          nome: canalEditando.nome,
-          tipo: canalEditando.tipo || 'marketplace',
-          ativo: true,
-          cor: canalEditando.cor || '#DF5830',
+      if (canalEditando?.id) {
+        await precificacaoService.updateCanal(canalEditando.id, {
+          ...canalEditando,
+          nome: nomeLimpo,
         })
-        setCanalAtivoId(created.id)
-        toast({ title: 'Novo canal criado com sucesso' })
+        toast({ title: 'Canal atualizado com sucesso' })
+        setOpenCanalDialog(false)
+        await carregarDados(canalEditando.id)
+      } else {
+        const { canal, reativado } = await precificacaoService.createCanal({
+          nome: nomeLimpo,
+          tipo: canalEditando?.tipo || 'marketplace',
+          ativo: true,
+          cor: canalEditando?.cor || '#DF5830',
+          vigencia: canalEditando?.vigencia || 'Vigente',
+        })
+
+        if (reativado) {
+          toast({
+            title: 'Canal reativado!',
+            description: `O canal "${canal.nome}" que havia sido desativado foi reativado e selecionado.`,
+          })
+        } else {
+          toast({
+            title: 'Canal criado com sucesso!',
+            description: `O canal "${canal.nome}" foi cadastrado e já está disponível para simulações.`,
+          })
+        }
+
+        setOpenCanalDialog(false)
+        await carregarDados(canal.id)
       }
-      setOpenCanalDialog(false)
-      carregarDados()
-    } catch (err) {
-      toast({ variant: 'destructive', title: 'Erro ao salvar canal' })
+    } catch (err: unknown) {
+      console.error('Erro ao salvar canal:', err)
+      const errObj = err as {
+        name?: string
+        message?: string
+        data?: Record<string, { code?: string; message?: string }>
+      }
+
+      if (errObj?.name === 'CanalDuplicadoError') {
+        toast({
+          variant: 'destructive',
+          title: 'Canal já cadastrado',
+          description: errObj.message || `Já existe um canal cadastrado com o nome "${nomeLimpo}".`,
+        })
+      } else if (
+        errObj?.data?.nome?.code === 'validation_not_unique' ||
+        errObj?.message?.toLowerCase().includes('unique')
+      ) {
+        toast({
+          variant: 'destructive',
+          title: 'Nome de canal em uso',
+          description: `Já existe um canal de venda com o nome "${nomeLimpo}". Escolha um nome diferente.`,
+        })
+      } else {
+        toast({
+          variant: 'destructive',
+          title: 'Erro ao salvar canal',
+          description: errObj?.message || 'Verifique os dados e tente novamente.',
+        })
+      }
     }
   }
 
   // Salvar Modalidade
   async function handleSalvarModalidade(e: React.FormEvent) {
     e.preventDefault()
-    if (!modEditando?.nome || !canalAtivoId) return
+    const nomeMod = modEditando?.nome?.trim()
+    if (!nomeMod || !canalAtivoId) {
+      toast({ variant: 'destructive', title: 'Informe o nome da modalidade' })
+      return
+    }
+
     try {
-      if (modEditando.id) {
-        await precificacaoService.updateModalidade(modEditando.id, modEditando)
+      if (modEditando?.id) {
+        await precificacaoService.updateModalidade(modEditando.id, {
+          ...modEditando,
+          nome: nomeMod,
+        })
         toast({ title: 'Modalidade atualizada' })
       } else {
         await precificacaoService.createModalidade({
           ...modEditando,
+          nome: nomeMod,
           canal: canalAtivoId,
           ativo: true,
         })
         toast({ title: 'Modalidade adicionada' })
       }
       setOpenModDialog(false)
-      carregarDados()
-    } catch (err) {
-      toast({ variant: 'destructive', title: 'Erro ao salvar modalidade' })
+      await carregarDados(canalAtivoId)
+    } catch (err: unknown) {
+      const errObj = err as { message?: string }
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao salvar modalidade',
+        description: errObj?.message || 'Verifique os dados e tente novamente.',
+      })
     }
   }
 
   // Salvar Taxa
   async function handleSalvarTaxa(e: React.FormEvent) {
     e.preventDefault()
-    if (!taxaEditando?.nome || !canalAtivoId) return
+    const nomeTaxa = taxaEditando?.nome?.trim()
+    if (!nomeTaxa || !canalAtivoId) {
+      toast({ variant: 'destructive', title: 'Informe o nome da taxa' })
+      return
+    }
 
     // Limpar valores vazios da condição para não salvar chaves undefined/NaN
     const cond = taxaEditando.condicao
@@ -207,6 +286,7 @@ export default function PrecificacaoCanais() {
     try {
       const payload: Partial<PrecTaxaRecord> = {
         ...taxaEditando,
+        nome: nomeTaxa,
         condicao: condicaoLimpa,
       }
 
@@ -228,9 +308,14 @@ export default function PrecificacaoCanais() {
         toast({ title: 'Taxa adicionada com sucesso' })
       }
       setOpenTaxaDialog(false)
-      carregarDados()
-    } catch (err) {
-      toast({ variant: 'destructive', title: 'Erro ao salvar taxa' })
+      await carregarDados(canalAtivoId)
+    } catch (err: unknown) {
+      const errObj = err as { message?: string }
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao salvar taxa',
+        description: errObj?.message || 'Verifique os dados da taxa.',
+      })
     }
   }
 

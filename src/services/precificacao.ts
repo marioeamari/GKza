@@ -79,8 +79,69 @@ export const precificacaoService = {
     })
   },
 
-  async createCanal(data: Partial<PrecCanalRecord>): Promise<PrecCanalRecord> {
-    return pb.collection('prec_canais').create<PrecCanalRecord>(data)
+  async findCanalByNome(nome: string): Promise<PrecCanalRecord | null> {
+    try {
+      const cleanNome = nome.trim()
+      const records = await pb.collection('prec_canais').getList<PrecCanalRecord>(1, 1, {
+        filter: `nome = "${cleanNome.replace(/"/g, '\\"')}"`,
+      })
+      return records.items[0] || null
+    } catch {
+      return null
+    }
+  },
+
+  async createCanal(
+    data: Partial<PrecCanalRecord>,
+  ): Promise<{ canal: PrecCanalRecord; reativado?: boolean }> {
+    const nome = (data.nome || '').trim()
+
+    // 1. Verifica se já existe canal com este nome
+    const existente = await precificacaoService.findCanalByNome(nome)
+    if (existente) {
+      if (!existente.ativo) {
+        // Canal existia mas estava inativo: reativamos com os novos dados fornecidos
+        const atualizado = await pb
+          .collection('prec_canais')
+          .update<PrecCanalRecord>(existente.id, {
+            ...data,
+            nome,
+            ativo: true,
+          })
+        return { canal: atualizado, reativado: true }
+      }
+      // Se já está ativo, lança erro com mensagem clara
+      const erro = new Error(`Já existe um canal ativo cadastrado com o nome "${nome}".`)
+      erro.name = 'CanalDuplicadoError'
+      throw erro
+    }
+
+    try {
+      const created = await pb.collection('prec_canais').create<PrecCanalRecord>({
+        ...data,
+        nome,
+      })
+      return { canal: created, reativado: false }
+    } catch (err: unknown) {
+      // Se por concorrência estourou a unique constraint idx_prec_canais_nome
+      const errObj = err as { data?: Record<string, { code?: string; message?: string }> }
+      if (errObj?.data?.nome?.code === 'validation_not_unique') {
+        // Tenta buscar se o registro concorrente está inativo para reativar
+        const conc = await precificacaoService.findCanalByNome(nome)
+        if (conc && !conc.ativo) {
+          const atualizado = await pb.collection('prec_canais').update<PrecCanalRecord>(conc.id, {
+            ...data,
+            nome,
+            ativo: true,
+          })
+          return { canal: atualizado, reativado: true }
+        }
+        const erro = new Error(`Já existe um canal cadastrado com o nome "${nome}".`)
+        erro.name = 'CanalDuplicadoError'
+        throw erro
+      }
+      throw err
+    }
   },
 
   async updateCanal(id: string, data: Partial<PrecCanalRecord>): Promise<PrecCanalRecord> {
