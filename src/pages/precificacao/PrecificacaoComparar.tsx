@@ -25,6 +25,11 @@ import {
   GripVertical,
   Store,
   Filter,
+  Bookmark,
+  Plus,
+  Trash2,
+  X,
+  History,
 } from 'lucide-react'
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -49,6 +54,13 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { precificacaoService } from '@/services/precificacao'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -107,6 +119,14 @@ export default function PrecificacaoComparar() {
 
   // Canais/Modalidades ativas na visualização
   const [colunasAtivas, setColunasAtivas] = useState<Record<string, boolean>>({})
+
+  // Cenários Rascunho / Salvos adicionados à grade a partir do Repositório (colunas extras)
+  const [cenariosSalvosAdicionados, setCenariosSalvosAdicionados] = useState<
+    PrecPrecificacaoRecord[]
+  >([])
+
+  // Modal / Dialog de Cenários Salvos (Repositório)
+  const [repositorioOpen, setRepositorioOpen] = useState(false)
 
   // Filtro de canais/marketplaces selecionados (por canal.id)
   const [canaisSelecionados, setCanaisSelecionados] = useState<string[]>(() => {
@@ -294,6 +314,68 @@ export default function PrecificacaoComparar() {
     return list
   }, [modalidades, canais, taxas])
 
+  // Carregar dados salvos das precificações deste produto quando o produto selecionado mudar
+  // REGRA DO USUÁRIO: Por padrão, carregar o último card de canal APROVADO (não o rascunho).
+  // Se não houver aprovado para o canal, o card começa vazio/pendente com o valor global padrão.
+  // Limpa cenários salvos extras adicionados na grade ao trocar de produto.
+  useEffect(() => {
+    setCenariosSalvosAdicionados([])
+    if (!selectedProdutoId || !precificacoesExistentes.length) {
+      setPrecosPorColuna({})
+      setDescontosPorColuna({})
+      return
+    }
+
+    const precsProduto = precificacoesExistentes.filter((p) => p.produto === selectedProdutoId)
+    if (!precsProduto.length) {
+      setPrecosPorColuna({})
+      setDescontosPorColuna({})
+      return
+    }
+
+    const precosRecuperados: Record<string, number> = {}
+    const descontosRecuperados: Record<string, { pctCliente: number; descPixPct: number }> = {}
+
+    // Filtrar apenas precificações com status 'aprovada'
+    const aprovadas = precsProduto
+      .filter((p) => p.status === 'aprovada' && p.modalidade)
+      .sort(
+        (a, b) =>
+          new Date(b.updated || b.created || 0).getTime() -
+          new Date(a.updated || a.created || 0).getTime(),
+      )
+
+    for (const prec of aprovadas) {
+      if (!prec.modalidade) continue
+      // Se já preenchemos com o aprovado mais recente desta modalidade, ignorar os mais antigos
+      if (precosRecuperados[prec.modalidade] !== undefined) continue
+
+      const precoSalvo = prec.preco_aprovado || prec.premissas?.preco_venda
+      if (precoSalvo && precoSalvo > 0) {
+        precosRecuperados[prec.modalidade] = precoSalvo
+      }
+
+      // Recuperar descontos salvos
+      if (prec.premissas?.descontos && Array.isArray(prec.premissas.descontos)) {
+        let pctCliente = 0
+        let descPixPct = 0
+        for (const d of prec.premissas.descontos) {
+          if (d.nome?.toLowerCase().includes('pix')) {
+            descPixPct = d.valor || 0
+          } else {
+            pctCliente = d.valor || 0
+          }
+        }
+        if (pctCliente > 0 || descPixPct > 0) {
+          descontosRecuperados[prec.modalidade] = { pctCliente, descPixPct }
+        }
+      }
+    }
+
+    setPrecosPorColuna(precosRecuperados)
+    setDescontosPorColuna(descontosRecuperados)
+  }, [selectedProdutoId, precificacoesExistentes])
+
   // Ordenação e Filtragem por marketplace/canal selecionado
   const colunasModalidade = useMemo(() => {
     // 1. Filtrar pelos canais/marketplaces ativos no filtro
@@ -401,7 +483,58 @@ export default function PrecificacaoComparar() {
     }
   }, [colunasModalidade, colunaDiffA])
 
-  // Cálculo individualizado por coluna
+  // Lista unificada de colunas: Colunas Padrão (último Aprovado ou Base) + Cenários Salvos Extras adicionados da grade
+  type ColunaItem = {
+    colKey: string
+    isSalvoExtra: boolean
+    cenarioSalvoRecord?: PrecPrecificacaoRecord
+    modalidade: PrecCanalModalidadeRecord
+    canal: PrecCanalRecord
+    taxasDoCanal: PrecTaxaRecord[]
+    precoSalvoFixo?: number
+  }
+
+  const todasColunasComSalvos = useMemo<ColunaItem[]>(() => {
+    const list: ColunaItem[] = []
+
+    // 1. Colunas Padrão de cada canal/modalidade
+    for (const col of colunasModalidade) {
+      list.push({
+        colKey: col.modalidade.id,
+        isSalvoExtra: false,
+        modalidade: col.modalidade,
+        canal: col.canal,
+        taxasDoCanal: col.taxasDoCanal,
+      })
+    }
+
+    // 2. Colunas Extras de Cenários Salvos (adicionados pelo repositório)
+    for (const cenario of cenariosSalvosAdicionados) {
+      // Encontrar a modalidade e canal correspondentes
+      const mod = modalidades.find((m) => m.id === cenario.modalidade)
+      const chan = canais.find((c) => c.id === cenario.canal || c.id === mod?.canal)
+      if (!mod || !chan) continue
+
+      // Taxas aplicáveis
+      const txs = taxas.filter(
+        (t) => t.canal === chan.id && (!t.modalidade || t.modalidade === mod.id),
+      )
+
+      list.push({
+        colKey: `salvo_${cenario.id}`,
+        isSalvoExtra: true,
+        cenarioSalvoRecord: cenario,
+        modalidade: mod,
+        canal: chan,
+        taxasDoCanal: txs,
+        precoSalvoFixo: cenario.premissas?.preco_venda || cenario.preco_aprovado,
+      })
+    }
+
+    return list
+  }, [colunasModalidade, cenariosSalvosAdicionados, modalidades, canais, taxas])
+
+  // Cálculo individualizado por coluna (inclui colunas padrão e rascunhos salvos adicionados)
   const demonstrativosPorColuna = useMemo(() => {
     if (!produtoAtual || !custoBaseAtual) return {}
 
@@ -416,21 +549,25 @@ export default function PrecificacaoComparar() {
         precoSugeridoEquilibrio: number
         precoSugeridoMeta: number
         convergiuMeta: boolean
+        isSalvoExtra: boolean
+        cenarioSalvoRecord?: PrecPrecificacaoRecord
       }
     > = {}
 
-    for (const col of colunasModalidade) {
-      const modId = col.modalidade.id
+    for (const col of todasColunasComSalvos) {
+      const colKey = col.colKey
       const canal = col.canal
 
       // Determinar preço anunciado da coluna
       let precoColuna = valorPrecoGlobal
-      if (modoCalculo === 'manual') {
-        precoColuna = precosPorColuna[modId] ?? valorPrecoGlobal
+      if (col.isSalvoExtra && col.precoSalvoFixo && precosPorColuna[colKey] === undefined) {
+        precoColuna = col.precoSalvoFixo
+      } else if (modoCalculo === 'manual' || col.isSalvoExtra) {
+        precoColuna = precosPorColuna[colKey] ?? (col.precoSalvoFixo || valorPrecoGlobal)
       }
 
       // Descontos
-      const descConf = descontosPorColuna[modId] || { pctCliente: 0, descPixPct: 0 }
+      const descConf = descontosPorColuna[colKey] || { pctCliente: 0, descPixPct: 0 }
       const descontosInput = []
       if (descConf.pctCliente > 0) {
         descontosInput.push({
@@ -489,16 +626,16 @@ export default function PrecificacaoComparar() {
         prazo_recebimento_dias: col.modalidade.prazo_recebimento_dias || 0,
       }
 
-      // Se o modo for 'meta_lucro' ou 'meta_margem', encontramos o preço ótimo
+      // Se o modo for 'meta_lucro' ou 'meta_margem' e não for um cenário salvo fixo
       let precoSugeridoMeta = precoColuna
       let convergiuMeta = true
 
-      if (modoCalculo === 'meta_lucro') {
+      if (!col.isSalvoExtra && modoCalculo === 'meta_lucro') {
         const sol = resolverPrecoParaMeta(cenarioBase, 'lucro_reais', metaLucroReais)
         precoColuna = sol.preco_sugerido
         precoSugeridoMeta = sol.preco_sugerido
         convergiuMeta = sol.convergiu
-      } else if (modoCalculo === 'meta_margem') {
+      } else if (!col.isSalvoExtra && modoCalculo === 'meta_margem') {
         const sol = resolverPrecoParaMeta(cenarioBase, 'margem_pct', metaMargemPct)
         precoColuna = sol.preco_sugerido
         precoSugeridoMeta = sol.preco_sugerido
@@ -514,7 +651,7 @@ export default function PrecificacaoComparar() {
       // Ponto de equilíbrio
       const eqSol = resolverPrecoParaMeta(cenarioBase, 'equilibrio', 0)
 
-      res[modId] = {
+      res[colKey] = {
         demonstrativo: demonstrativoFinal,
         precoAnunciado: precoColuna,
         modalidade: col.modalidade,
@@ -523,6 +660,8 @@ export default function PrecificacaoComparar() {
         precoSugeridoEquilibrio: eqSol.preco_sugerido,
         precoSugeridoMeta,
         convergiuMeta,
+        isSalvoExtra: col.isSalvoExtra,
+        cenarioSalvoRecord: col.cenarioSalvoRecord,
       }
     }
 
@@ -530,7 +669,7 @@ export default function PrecificacaoComparar() {
   }, [
     produtoAtual,
     custoBaseAtual,
-    colunasModalidade,
+    todasColunasComSalvos,
     valorPrecoGlobal,
     modoCalculo,
     precosPorColuna,
@@ -548,14 +687,15 @@ export default function PrecificacaoComparar() {
     let melhorModId: string | null = null
     let maiorLucro = -Infinity
 
-    for (const [modId, item] of Object.entries(demonstrativosPorColuna)) {
-      if (!colunasAtivas[modId]) continue
+    for (const [colKey, item] of Object.entries(demonstrativosPorColuna)) {
+      if (item.isSalvoExtra) continue
+      if (colunasAtivas[colKey] === false) continue
       // Não considerar cenários incompletos ou inválidos como mais lucrativos
       if (!item.demonstrativo.valido || item.demonstrativo.preco_anunciado <= 0) continue
 
       if (item.demonstrativo.lucro_liquido > maiorLucro) {
         maiorLucro = item.demonstrativo.lucro_liquido
-        melhorModId = modId
+        melhorModId = colKey
       }
     }
 
@@ -563,14 +703,34 @@ export default function PrecificacaoComparar() {
   }, [demonstrativosPorColuna, colunasAtivas])
 
   // Salvar Cenário de Simulação
-  async function handleSalvarCenario(modId: string, aprovar = false) {
+  async function handleSalvarCenario(colKey: string, aprovar = false) {
     if (!produtoAtual) return
-    const colData = demonstrativosPorColuna[modId]
+    const colData = demonstrativosPorColuna[colKey]
     if (!colData) return
 
     try {
       setSalvando(true)
       const dem = colData.demonstrativo
+      const modId = colData.modalidade.id
+
+      const descConf = descontosPorColuna[colKey]
+      const descontosSalvamento = []
+      if (descConf?.pctCliente) {
+        descontosSalvamento.push({
+          nome: 'Desconto ao Cliente',
+          tipo: 'percentual' as const,
+          valor: descConf.pctCliente,
+          financiado_por: 'vendedor' as const,
+        })
+      }
+      if (descConf?.descPixPct) {
+        descontosSalvamento.push({
+          nome: 'Desconto Pix',
+          tipo: 'percentual' as const,
+          valor: descConf.descPixPct,
+          financiado_por: 'vendedor' as const,
+        })
+      }
 
       const record = await precificacaoService.saveCenarioPrecificacao({
         produto: produtoAtual.id,
@@ -579,6 +739,7 @@ export default function PrecificacaoComparar() {
         modalidade: modId,
         premissas: {
           preco_venda: dem.preco_anunciado,
+          descontos: descontosSalvamento,
           aliquota_das_pct: aliquotaDas,
           aliquota_icms_pct: aliquotaIcms,
         },
@@ -593,14 +754,26 @@ export default function PrecificacaoComparar() {
           atualizado_em: new Date().toISOString(),
         },
         preco_aprovado: aprovar ? dem.preco_anunciado : undefined,
+        aprovado_por: aprovar && user?.id ? user.id : undefined,
+        aprovado_em: aprovar ? new Date().toISOString() : undefined,
       })
 
       if (aprovar && user?.id) {
         await precificacaoService.aprovarPreco(record.id, dem.preco_anunciado, user.id)
       }
 
+      // Se for um card salvo extra que foi aprovado, podemos removê-lo da lista de rascunhos extras
+      if (aprovar && colKey.startsWith('salvo_')) {
+        const salvoId = colKey.replace('salvo_', '')
+        setCenariosSalvosAdicionados((prev) => prev.filter((s) => s.id !== salvoId))
+      }
+
+      // Recarregar lista de precificações para manter repositório e comparador sincronizados
+      const precsAtualizadas = await precificacaoService.listPrecificacoes()
+      setPrecificacoesExistentes(precsAtualizadas)
+
       toast({
-        title: aprovar ? 'Preço Aprovado!' : 'Cenário Salvo com Sucesso',
+        title: aprovar ? 'Preço Aprovado!' : 'Cenário Salvo no Repositório',
         description: `${produtoAtual.nome} em ${colData.canal.nome} (${colData.modalidade.nome}) registrado como ${aprovar ? 'aprovado' : 'rascunho'}.`,
       })
     } catch (err) {
@@ -633,6 +806,76 @@ export default function PrecificacaoComparar() {
     }
   }, [demonstrativosPorColuna, colunaDiffA, colunaDiffB])
 
+  // Rascunhos salvos do produto selecionado (Repositório)
+  const rascunhosDoProduto = useMemo(() => {
+    if (!selectedProdutoId) return []
+    return precificacoesExistentes
+      .filter((p) => p.produto === selectedProdutoId && p.status === 'rascunho')
+      .sort((a, b) => new Date(b.created || 0).getTime() - new Date(a.created || 0).getTime())
+  }, [selectedProdutoId, precificacoesExistentes])
+
+  // Função para adicionar rascunho salvo à grade como coluna extra
+  const handleAdicionarCenarioSalvo = (cenario: PrecPrecificacaoRecord) => {
+    if (cenariosSalvosAdicionados.some((s) => s.id === cenario.id)) {
+      toast({
+        title: 'Cenário já está na grade',
+        description: 'Este cenário salvo já foi adicionado para comparação.',
+      })
+      return
+    }
+
+    // Inicializar os descontos do cenário na coluna se houver
+    if (cenario.premissas?.descontos && Array.isArray(cenario.premissas.descontos)) {
+      let pctCliente = 0
+      let descPixPct = 0
+      for (const d of cenario.premissas.descontos) {
+        if (d.nome?.toLowerCase().includes('pix')) {
+          descPixPct = d.valor || 0
+        } else {
+          pctCliente = d.valor || 0
+        }
+      }
+      setDescontosPorColuna((prev) => ({
+        ...prev,
+        [`salvo_${cenario.id}`]: { pctCliente, descPixPct },
+      }))
+    }
+
+    // Inicializar preço
+    const precoSalvo = cenario.premissas?.preco_venda || cenario.preco_aprovado
+    if (precoSalvo) {
+      setPrecosPorColuna((prev) => ({
+        ...prev,
+        [`salvo_${cenario.id}`]: precoSalvo,
+      }))
+    }
+
+    setCenariosSalvosAdicionados((prev) => [...prev, cenario])
+    toast({
+      title: 'Cenário Salvo adicionado',
+      description: 'O rascunho salvo foi inserido na grade para comparação com o aprovado.',
+    })
+  }
+
+  // Função para remover rascunho salvo da grade (apenas visual, sem apagar do banco)
+  const handleRemoverCenarioSalvo = (cenarioId: string) => {
+    setCenariosSalvosAdicionados((prev) => prev.filter((s) => s.id !== cenarioId))
+    setPrecosPorColuna((prev) => {
+      const next = { ...prev }
+      delete next[`salvo_${cenarioId}`]
+      return next
+    })
+    setDescontosPorColuna((prev) => {
+      const next = { ...prev }
+      delete next[`salvo_${cenarioId}`]
+      return next
+    })
+    toast({
+      title: 'Cenário removido da grade',
+      description: 'O cenário salvo continua preservado no Repositório.',
+    })
+  }
+
   return (
     <div className="space-y-6">
       <PrecHeader
@@ -640,6 +883,27 @@ export default function PrecificacaoComparar() {
         subtitulo="Simulação comparativa espelho da planilha de custos, com demonstrativo auditável por canal de venda"
         acoes={
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Botão Repositório de Cenários Salvos */}
+            <Button
+              variant="outline"
+              size="sm"
+              className={`h-8 text-xs gap-1.5 transition-colors ${
+                rascunhosDoProduto.length > 0
+                  ? 'border-primary/60 text-primary bg-primary/5 font-semibold hover:bg-primary/10'
+                  : 'bg-white text-muted-foreground'
+              }`}
+              onClick={() => setRepositorioOpen(true)}
+              title="Abrir repositório de rascunhos salvos deste produto para comparar na grade"
+            >
+              <Bookmark className="h-3.5 w-3.5 text-primary" />
+              <span>Cenários Salvos</span>
+              {rascunhosDoProduto.length > 0 && (
+                <Badge className="bg-primary text-white text-[10px] h-4 px-1.5 font-bold">
+                  {rascunhosDoProduto.length}
+                </Badge>
+              )}
+            </Button>
+
             <Button
               variant="outline"
               size="sm"
@@ -675,6 +939,7 @@ export default function PrecificacaoComparar() {
               onClick={() => {
                 setPrecosPorColuna({})
                 setDescontosPorColuna({})
+                setCenariosSalvosAdicionados([])
                 setValorPrecoGlobal(24.9)
               }}
             >
@@ -1274,8 +1539,8 @@ export default function PrecificacaoComparar() {
               </div>
             )}
 
-            {/* 2. Colunas de Canais e Modalidades Reordenáveis via DND */}
-            {colunasModalidade.length === 0 ? (
+            {/* 2. Colunas de Canais e Modalidades Reordenáveis via DND + Cenários Salvos Extras */}
+            {todasColunasComSalvos.length === 0 ? (
               <div className="p-12 text-center text-xs text-muted-foreground flex-1 flex flex-col items-center justify-center gap-2">
                 <Store className="h-8 w-8 text-muted-foreground/40 mb-1" />
                 <p className="font-bold text-sm text-foreground">
@@ -1295,62 +1560,110 @@ export default function PrecificacaoComparar() {
                 </Button>
               </div>
             ) : (
-              colunasModalidade
-                .filter((col) => colunasAtivas[col.modalidade.id] !== false)
+              todasColunasComSalvos
+                .filter((col) => col.isSalvoExtra || colunasAtivas[col.modalidade.id] !== false)
                 .map((col) => {
+                  const colKey = col.colKey
                   const modId = col.modalidade.id
-                  const cenario = demonstrativosPorColuna[modId]
+                  const cenario = demonstrativosPorColuna[colKey]
                   if (!cenario) return null
 
                   const dem = cenario.demonstrativo
-                  const isMelhor = melhorCenario === modId
+                  const isMelhor = melhorCenario === colKey
                   const lucroNegativo = dem.lucro_liquido < 0
-                  const descConf = descontosPorColuna[modId] || { pctCliente: 0, descPixPct: 0 }
+                  const descConf = descontosPorColuna[colKey] || { pctCliente: 0, descPixPct: 0 }
                   const precoColuna =
-                    modoCalculo === 'manual'
-                      ? (precosPorColuna[modId] ?? valorPrecoGlobal)
+                    modoCalculo === 'manual' || col.isSalvoExtra
+                      ? (precosPorColuna[colKey] ?? (col.precoSalvoFixo || valorPrecoGlobal))
                       : cenario.precoAnunciado
 
-                  const isDraggingThis = draggedModId === modId
-                  const isDragOverThis = dragOverModId === modId
+                  const isDraggingThis = draggedModId === modId && !col.isSalvoExtra
+                  const isDragOverThis = dragOverModId === modId && !col.isSalvoExtra
 
                   return (
                     <div
-                      key={modId}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, modId)}
-                      onDragOver={(e) => handleDragOver(e, modId)}
-                      onDragLeave={(e) => handleDragLeave(e, modId)}
-                      onDrop={(e) => handleDrop(e, modId)}
+                      key={colKey}
+                      draggable={!col.isSalvoExtra}
+                      onDragStart={(e) => !col.isSalvoExtra && handleDragStart(e, modId)}
+                      onDragOver={(e) => !col.isSalvoExtra && handleDragOver(e, modId)}
+                      onDragLeave={(e) => !col.isSalvoExtra && handleDragLeave(e, modId)}
+                      onDrop={(e) => !col.isSalvoExtra && handleDrop(e, modId)}
                       className={`w-80 shrink-0 flex flex-col justify-between p-4 bg-white transition-all relative ${
-                        isMelhor ? 'bg-emerald-50/20 ring-1 ring-emerald-500/30' : ''
+                        col.isSalvoExtra
+                          ? 'border-2 border-dashed border-amber-300 bg-amber-50/15'
+                          : isMelhor
+                            ? 'bg-emerald-50/20 ring-1 ring-emerald-500/30'
+                            : ''
                       } ${isDraggingThis ? 'opacity-40 scale-[0.98]' : 'opacity-100'} ${
                         isDragOverThis
                           ? 'border-l-4 border-l-primary ring-2 ring-primary/20 bg-primary/[0.02]'
                           : ''
                       }`}
                     >
-                      {/* Selo "Melhor Cenário" no topo */}
-                      {isMelhor && (
-                        <div className="absolute top-2 right-2">
-                          <Badge className="bg-emerald-600 text-white text-[10px] h-5 px-2 font-bold shadow-xs">
-                            <Sparkles className="h-3 w-3 mr-1" />
-                            Melhor Margem
+                      {/* Selo no topo direito: "Salvo" para card extra com botão de fechar, ou "Melhor Margem" */}
+                      {col.isSalvoExtra ? (
+                        <div className="absolute top-2 right-2 flex items-center gap-1.5">
+                          <Badge className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] h-5 px-2 font-bold shadow-xs">
+                            <Bookmark className="h-3 w-3 mr-1 text-amber-600" />
+                            Salvo (Rascunho)
                           </Badge>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-5 w-5 text-muted-foreground hover:text-red-600 hover:bg-red-50 rounded-full"
+                            title="Remover este cenário salvo da grade"
+                            onClick={() =>
+                              col.cenarioSalvoRecord &&
+                              handleRemoverCenarioSalvo(col.cenarioSalvoRecord.id)
+                            }
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="absolute top-2 right-2 flex items-center gap-1">
+                          {isMelhor && (
+                            <Badge className="bg-emerald-600 text-white text-[10px] h-5 px-2 font-bold shadow-xs">
+                              <Sparkles className="h-3 w-3 mr-1" />
+                              Melhor
+                            </Badge>
+                          )}
+                          {/* Badge indicando se é o card Aprovado ou Base */}
+                          {precosPorColuna[modId] ? (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] h-5 px-1.5 font-semibold text-emerald-800 bg-emerald-50 border-emerald-300"
+                              title="Preço e premissas carregados da última precificação aprovada"
+                            >
+                              <CheckCircle2 className="h-2.5 w-2.5 mr-0.5 text-emerald-600" />
+                              Aprovado
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] h-5 px-1.5 font-normal text-muted-foreground bg-secondary/30"
+                              title="Sem precificação aprovada gravada para este canal"
+                            >
+                              Padrão
+                            </Badge>
+                          )}
                         </div>
                       )}
 
                       <div className="space-y-4">
-                        {/* Header do Canal / Modalidade com alça de arrasto DND */}
-                        <div className="space-y-1.5 pr-20">
+                        {/* Header do Canal / Modalidade */}
+                        <div className="space-y-1.5 pr-24">
                           <div className="flex items-center gap-1.5">
-                            {/* Alça DND */}
-                            <div
-                              className="cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-foreground -ml-1 p-0.5 rounded"
-                              title="Arraste para reordenar esta coluna"
-                            >
-                              <GripVertical className="h-4 w-4" />
-                            </div>
+                            {!col.isSalvoExtra ? (
+                              <div
+                                className="cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-foreground -ml-1 p-0.5 rounded"
+                                title="Arraste para reordenar esta coluna"
+                              >
+                                <GripVertical className="h-4 w-4" />
+                              </div>
+                            ) : (
+                              <Bookmark className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                            )}
                             <span
                               className="h-2.5 w-2.5 rounded-full shrink-0"
                               style={{ backgroundColor: col.canal.cor || '#DF5830' }}
@@ -1385,14 +1698,23 @@ export default function PrecificacaoComparar() {
                             <Label className="text-[11px] font-bold uppercase text-muted-foreground">
                               Preço Anunciado
                             </Label>
-                            {modoCalculo !== 'manual' && (
+                            {col.isSalvoExtra ? (
+                              <span className="text-[10px] text-amber-700 font-semibold">
+                                Salvo em{' '}
+                                {col.cenarioSalvoRecord?.created
+                                  ? new Date(col.cenarioSalvoRecord.created).toLocaleDateString(
+                                      'pt-BR',
+                                    )
+                                  : ''}
+                              </span>
+                            ) : modoCalculo !== 'manual' ? (
                               <span className="text-[10px] text-muted-foreground">
                                 {modoCalculo === 'mesmo_preco' ? 'Global' : 'Resolvido p/ meta'}
                               </span>
-                            )}
+                            ) : null}
                           </div>
 
-                          {modoCalculo === 'manual' ? (
+                          {modoCalculo === 'manual' || col.isSalvoExtra ? (
                             <div className="relative">
                               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">
                                 R$
@@ -1406,7 +1728,7 @@ export default function PrecificacaoComparar() {
                                   const val = parseFloat(e.target.value) || 0
                                   setPrecosPorColuna((prev) => ({
                                     ...prev,
-                                    [modId]: val,
+                                    [colKey]: val,
                                   }))
                                 }}
                               />
@@ -1428,7 +1750,8 @@ export default function PrecificacaoComparar() {
                           )}
 
                           {/* Aviso se a meta for inviável */}
-                          {(modoCalculo === 'meta_lucro' || modoCalculo === 'meta_margem') &&
+                          {!col.isSalvoExtra &&
+                            (modoCalculo === 'meta_lucro' || modoCalculo === 'meta_margem') &&
                             !cenario.convergiuMeta && (
                               <div className="rounded-md bg-amber-50 border border-amber-200 p-1.5 flex items-start gap-1.5 text-[10px] text-amber-800">
                                 <AlertTriangle className="h-3 w-3 shrink-0 text-amber-600 mt-0.5" />
@@ -1457,9 +1780,9 @@ export default function PrecificacaoComparar() {
                                   const val = parseFloat(e.target.value) || 0
                                   setDescontosPorColuna((prev) => ({
                                     ...prev,
-                                    [modId]: {
+                                    [colKey]: {
                                       pctCliente: val,
-                                      descPixPct: prev[modId]?.descPixPct || 0,
+                                      descPixPct: prev[colKey]?.descPixPct || 0,
                                     },
                                   }))
                                 }}
@@ -1481,8 +1804,8 @@ export default function PrecificacaoComparar() {
                                   const val = parseFloat(e.target.value) || 0
                                   setDescontosPorColuna((prev) => ({
                                     ...prev,
-                                    [modId]: {
-                                      pctCliente: prev[modId]?.pctCliente || 0,
+                                    [colKey]: {
+                                      pctCliente: prev[colKey]?.pctCliente || 0,
                                       descPixPct: val,
                                     },
                                   }))
@@ -1660,7 +1983,7 @@ export default function PrecificacaoComparar() {
                           size="sm"
                           className="h-8 text-xs flex-1"
                           disabled={salvando}
-                          onClick={() => handleSalvarCenario(modId, false)}
+                          onClick={() => handleSalvarCenario(colKey, false)}
                         >
                           <Save className="h-3 w-3 mr-1" />
                           Salvar
@@ -1669,7 +1992,7 @@ export default function PrecificacaoComparar() {
                           size="sm"
                           className="h-8 text-xs flex-1 bg-primary text-white font-bold"
                           disabled={salvando}
-                          onClick={() => handleSalvarCenario(modId, true)}
+                          onClick={() => handleSalvarCenario(colKey, true)}
                         >
                           <CheckCircle2 className="h-3 w-3 mr-1" />
                           Aprovar
@@ -1785,32 +2108,42 @@ export default function PrecificacaoComparar() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
-              {colunasModalidade
-                .filter((col) => colunasAtivas[col.modalidade.id] !== false)
+              {todasColunasComSalvos
+                .filter((col) => col.isSalvoExtra || colunasAtivas[col.modalidade.id] !== false)
                 .map((col) => {
-                  const modId = col.modalidade.id
-                  const cenario = demonstrativosPorColuna[modId]
+                  const colKey = col.colKey
+                  const cenario = demonstrativosPorColuna[colKey]
                   if (!cenario) return null
 
                   const dem = cenario.demonstrativo
-                  const isMelhor = melhorCenario === modId
+                  const isMelhor = melhorCenario === colKey
                   const lucroNegativo = dem.lucro_liquido < 0
 
                   return (
                     <tr
-                      key={modId}
+                      key={colKey}
                       className={`hover:bg-secondary/20 transition-colors ${
-                        isMelhor ? 'bg-emerald-50/40 font-semibold' : ''
+                        col.isSalvoExtra
+                          ? 'bg-amber-50/30'
+                          : isMelhor
+                            ? 'bg-emerald-50/40 font-semibold'
+                            : ''
                       }`}
                     >
                       <td className="py-3 px-4">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-foreground">{col.canal.nome}</span>
                           <span className="text-muted-foreground">({col.modalidade.nome})</span>
-                          {isMelhor && (
-                            <Badge className="bg-emerald-600 text-white text-[9px] h-4 px-1.5">
-                              Melhor
+                          {col.isSalvoExtra ? (
+                            <Badge className="bg-amber-100 text-amber-900 border border-amber-300 text-[9px] h-4 px-1.5">
+                              Salvo
                             </Badge>
+                          ) : (
+                            isMelhor && (
+                              <Badge className="bg-emerald-600 text-white text-[9px] h-4 px-1.5">
+                                Melhor
+                              </Badge>
+                            )
                           )}
                         </div>
                       </td>
@@ -1876,6 +2209,177 @@ export default function PrecificacaoComparar() {
           </table>
         </CardContent>
       </Card>
+
+      {/* ========================================================
+          MODAL: REPOSITÓRIO DE CENÁRIOS SALVOS (RASCUNHOS)
+          ======================================================== */}
+      <Dialog open={repositorioOpen} onOpenChange={setRepositorioOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <div className="flex items-center gap-2 text-primary">
+              <Bookmark className="h-5 w-5" />
+              <DialogTitle className="text-base font-bold">
+                Repositório de Cenários Salvos
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Rascunhos salvos para o produto{' '}
+              <span className="font-semibold text-foreground">
+                {produtoAtual ? `[${produtoAtual.sku}] ${produtoAtual.nome}` : ''}
+              </span>
+              . Escolha quais deseja adicionar à grade como colunas extras para comparar lado a lado
+              com os preços aprovados.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-3 py-2 pr-1">
+            {rascunhosDoProduto.length === 0 ? (
+              <div className="text-center py-10 border border-dashed rounded-xl bg-secondary/10 space-y-2">
+                <Bookmark className="h-8 w-8 text-muted-foreground/30 mx-auto" />
+                <p className="text-xs font-semibold text-foreground">
+                  Nenhum rascunho salvo para este produto
+                </p>
+                <p className="text-[11px] text-muted-foreground max-w-sm mx-auto">
+                  Ao simular um preço no comparador e clicar em &ldquo;Salvar&rdquo;, o cenário fica
+                  guardado aqui no repositório.
+                </p>
+              </div>
+            ) : (
+              rascunhosDoProduto.map((cenario) => {
+                const canal = canais.find((c) => c.id === cenario.canal)
+                const modalidade = modalidades.find((m) => m.id === cenario.modalidade)
+                const jaAdicionado = cenariosSalvosAdicionados.some((s) => s.id === cenario.id)
+                const precoSalvo = cenario.premissas?.preco_venda || cenario.preco_aprovado || 0
+                const resultado = cenario.resultado as Record<string, unknown> | undefined
+                const lucroLiquido = (resultado?.lucro_liquido as number) || 0
+                const margemPct = (resultado?.margem_liquida_pct as number) || 0
+
+                return (
+                  <div
+                    key={cenario.id}
+                    className={`p-3 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                      jaAdicionado
+                        ? 'bg-amber-50/40 border-amber-300'
+                        : 'bg-white border-border hover:border-border/80 hover:shadow-xs'
+                    }`}
+                  >
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: canal?.cor || '#DF5830' }}
+                        />
+                        <span className="font-bold text-xs text-foreground truncate">
+                          {canal?.nome || 'Canal'}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] h-5 px-1.5 font-semibold text-muted-foreground bg-secondary/20"
+                        >
+                          {modalidade?.nome || 'Modalidade'}
+                        </Badge>
+                        <Badge className="bg-amber-100 text-amber-900 border border-amber-300 text-[9px] h-4 px-1.5 font-bold">
+                          Salvo (v{cenario.versao || 1})
+                        </Badge>
+                        {jaAdicionado && (
+                          <Badge className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[9px] h-4 px-1.5 font-semibold">
+                            Na Grade
+                          </Badge>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap pt-0.5">
+                        <div>
+                          <span>Preço: </span>
+                          <span className="font-mono font-bold text-foreground">
+                            {formatCurrency(precoSalvo)}
+                          </span>
+                        </div>
+                        {lucroLiquido !== 0 && (
+                          <div>
+                            <span>Lucro Est.: </span>
+                            <span
+                              className={`font-mono font-bold ${
+                                lucroLiquido > 0 ? 'text-emerald-600' : 'text-red-600'
+                              }`}
+                            >
+                              {formatCurrency(lucroLiquido)}
+                            </span>
+                          </div>
+                        )}
+                        {margemPct !== 0 && (
+                          <div>
+                            <span>Margem: </span>
+                            <span
+                              className={`font-mono font-bold ${
+                                margemPct > 0 ? 'text-emerald-600' : 'text-red-600'
+                              }`}
+                            >
+                              {margemPct.toFixed(1)}%
+                            </span>
+                          </div>
+                        )}
+                        <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                          <History className="h-3 w-3" />
+                          <span>
+                            Salvo em{' '}
+                            {cenario.created
+                              ? new Date(cenario.created).toLocaleDateString('pt-BR', {
+                                  day: '2-digit',
+                                  month: '2-digit',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })
+                              : 'Recente'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {jaAdicionado ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                          onClick={() => handleRemoverCenarioSalvo(cenario.id)}
+                        >
+                          <X className="h-3.5 w-3.5 mr-1" />
+                          Remover da Grade
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          className="h-8 text-xs bg-primary text-white font-bold hover:bg-primary/90"
+                          onClick={() => handleAdicionarCenarioSalvo(cenario)}
+                        >
+                          <Plus className="h-3.5 w-3.5 mr-1" />
+                          Adicionar à Grade
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+
+          <div className="border-t border-border pt-3 flex items-center justify-between text-xs text-muted-foreground">
+            <span>
+              {cenariosSalvosAdicionados.length} cenário(s) salvo(s) adicionado(s) à grade
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => setRepositorioOpen(false)}
+            >
+              Fechar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

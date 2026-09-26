@@ -444,6 +444,8 @@ export const precificacaoService = {
     custo_snapshot?: PrecPrecificacaoRecord['custo_snapshot']
     taxas_snapshot?: PrecPrecificacaoRecord['taxas_snapshot']
     preco_aprovado?: number
+    aprovado_por?: string
+    aprovado_em?: string
   }): Promise<PrecPrecificacaoRecord> {
     if (data.id) {
       return pb.collection('prec_precificacoes').update<PrecPrecificacaoRecord>(data.id, {
@@ -451,29 +453,53 @@ export const precificacaoService = {
       })
     }
 
-    // Procura se já existe rascunho para este canal + produto
     const modFilter = data.modalidade ? `modalidade = "${data.modalidade}"` : 'modalidade = ""'
-    const existing = await pb
-      .collection('prec_precificacoes')
-      .getList<PrecPrecificacaoRecord>(1, 1, {
-        filter: `produto = "${data.produto}" && canal = "${data.canal}" && ${modFilter}`,
-      })
 
-    if (existing.items.length > 0) {
-      const atual = existing.items[0]
-      return pb.collection('prec_precificacoes').update<PrecPrecificacaoRecord>(atual.id, {
-        versao: (atual.versao || 1) + 1,
-        premissas: data.premissas,
-        resultado: data.resultado,
-        status: data.status,
-        custo_snapshot: data.custo_snapshot,
-        taxas_snapshot: data.taxas_snapshot,
-      })
+    // Se estiver aprovando, podemos atualizar o aprovado existente daquele canal/modalidade
+    if (data.status === 'aprovada') {
+      const existingAprovada = await pb
+        .collection('prec_precificacoes')
+        .getList<PrecPrecificacaoRecord>(1, 1, {
+          filter: `produto = "${data.produto}" && canal = "${data.canal}" && ${modFilter} && status = "aprovada"`,
+          sort: '-updated',
+        })
+
+      if (existingAprovada.items.length > 0) {
+        const atual = existingAprovada.items[0]
+        return pb.collection('prec_precificacoes').update<PrecPrecificacaoRecord>(atual.id, {
+          versao: (atual.versao || 1) + 1,
+          premissas: data.premissas,
+          resultado: data.resultado,
+          status: 'aprovada',
+          custo_snapshot: data.custo_snapshot,
+          taxas_snapshot: data.taxas_snapshot,
+          preco_aprovado: data.preco_aprovado,
+          aprovado_por: data.aprovado_por,
+          aprovado_em: data.aprovado_em || new Date().toISOString(),
+        })
+      }
+    }
+
+    // Para rascunhos (ou primeiro aprovado), cria um novo registro preservando o histórico de salvos
+    // Buscar a versão máxima para calcular a próxima versão
+    let proximaVersao = 1
+    try {
+      const ultimos = await pb
+        .collection('prec_precificacoes')
+        .getList<PrecPrecificacaoRecord>(1, 1, {
+          filter: `produto = "${data.produto}" && canal = "${data.canal}" && ${modFilter}`,
+          sort: '-versao',
+        })
+      if (ultimos.items.length > 0 && ultimos.items[0].versao) {
+        proximaVersao = ultimos.items[0].versao + 1
+      }
+    } catch {
+      // fallback
     }
 
     return pb.collection('prec_precificacoes').create<PrecPrecificacaoRecord>({
       ...data,
-      versao: data.versao || 1,
+      versao: data.versao || proximaVersao,
     })
   },
 
@@ -483,6 +509,31 @@ export const precificacaoService = {
     userId: string,
   ): Promise<PrecPrecificacaoRecord> {
     const hoje = new Date().toISOString()
+    // Buscar a precificação sendo aprovada para obter produto, canal e modalidade
+    try {
+      const atual = await pb
+        .collection('prec_precificacoes')
+        .getOne<PrecPrecificacaoRecord>(cenarioId)
+      if (atual) {
+        const modFilter = atual.modalidade
+          ? `modalidade = "${atual.modalidade}"`
+          : 'modalidade = ""'
+        // Buscar outros aprovados desse mesmo produto/canal/modalidade e marcar como desatualizada ou manter histórico
+        const outrosAprovados = await pb
+          .collection('prec_precificacoes')
+          .getFullList<PrecPrecificacaoRecord>({
+            filter: `id != "${cenarioId}" && produto = "${atual.produto}" && canal = "${atual.canal}" && ${modFilter} && status = "aprovada"`,
+          })
+        for (const out of outrosAprovados) {
+          await pb.collection('prec_precificacoes').update(out.id, {
+            status: 'desatualizada',
+          })
+        }
+      }
+    } catch (e) {
+      console.warn('Erro ao verificar outros aprovados anteriores:', e)
+    }
+
     return pb.collection('prec_precificacoes').update<PrecPrecificacaoRecord>(cenarioId, {
       status: 'aprovada',
       preco_aprovado: preco,
