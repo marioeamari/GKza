@@ -22,6 +22,7 @@ import { useAppContext } from '@/contexts/AppContext'
 import { projetosTarefasService } from '@/services/projetosTarefas'
 import { cadastrosService } from '@/services/cadastros'
 import { useToast } from '@/hooks/use-toast'
+import { dateOnly } from '@/lib/format'
 import type {
   MetaMeta,
   Projeto,
@@ -81,7 +82,7 @@ export function MetaDialog({ open, onOpenChange, meta, onSuccess }: MetaDialogPr
         setContextoTipo(meta.contexto_tipo)
         setPessoaId(meta.pessoa || '')
         setEmpresaId(meta.empresa || '')
-        setPrazo(meta.prazo ? meta.prazo.split('T')[0] : '')
+        setPrazo(meta.prazo ? dateOnly(meta.prazo) : '')
         setTipoProgresso(meta.tipo_progresso)
         setProgressoManual(meta.progresso_manual || 0)
         setAlvoDescricao(meta.alvo_descricao || '')
@@ -111,6 +112,20 @@ export function MetaDialog({ open, onOpenChange, meta, onSuccess }: MetaDialogPr
     e.preventDefault()
     if (!titulo.trim()) return
 
+    let parsedPrazo: string | undefined = undefined
+    if (prazo && prazo.trim()) {
+      const trimmed = prazo.trim()
+      const datePart = trimmed.includes('T') || trimmed.includes(' ') ? dateOnly(trimmed) : trimmed
+      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+        parsedPrazo = `${datePart} 23:59:59.000Z`
+      } else {
+        const d = new Date(trimmed)
+        if (!isNaN(d.getTime())) {
+          parsedPrazo = d.toISOString()
+        }
+      }
+    }
+
     setLoading(true)
     try {
       const payload = {
@@ -119,7 +134,7 @@ export function MetaDialog({ open, onOpenChange, meta, onSuccess }: MetaDialogPr
         contexto_tipo: contextoTipo,
         pessoa: contextoTipo === 'pessoal' && pessoaId ? pessoaId : undefined,
         empresa: contextoTipo === 'empresa' && empresaId ? empresaId : undefined,
-        prazo: prazo ? new Date(prazo + 'T23:59:59.000Z').toISOString() : undefined,
+        prazo: parsedPrazo,
         tipo_progresso: tipoProgresso,
         progresso_manual: tipoProgresso === 'manual' ? progressoManual : undefined,
         alvo_descricao: alvoDescricao.trim() || undefined,

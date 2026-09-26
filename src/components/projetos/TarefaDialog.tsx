@@ -24,6 +24,7 @@ import { cadastrosService } from '@/services/cadastros'
 import { usersService } from '@/services/users'
 import { useToast } from '@/hooks/use-toast'
 import { Plus, Trash2, CalendarPlus } from 'lucide-react'
+import { dateOnly } from '@/lib/format'
 import type {
   Tarefa,
   Projeto,
@@ -107,7 +108,7 @@ export function TarefaDialog({
         setContextoTipo(tarefa.contexto_tipo)
         setPessoaId(tarefa.pessoa || '')
         setEmpresaId(tarefa.empresa || '')
-        setPrazo(tarefa.prazo ? tarefa.prazo.split('T')[0] : '')
+        setPrazo(tarefa.prazo ? dateOnly(tarefa.prazo) : '')
         setChecklist(tarefa.checklist || [])
       } else {
         setTitulo('')
@@ -151,6 +152,21 @@ export function TarefaDialog({
     e.preventDefault()
     if (!titulo.trim()) return
 
+    let parsedPrazo: string | undefined = undefined
+    if (prazo && prazo.trim()) {
+      const trimmed = prazo.trim()
+      // Garante formato YYYY-MM-DD antes de criar a data
+      const datePart = trimmed.includes('T') || trimmed.includes(' ') ? dateOnly(trimmed) : trimmed
+      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+        parsedPrazo = `${datePart} 23:59:59.000Z`
+      } else {
+        const d = new Date(trimmed)
+        if (!isNaN(d.getTime())) {
+          parsedPrazo = d.toISOString()
+        }
+      }
+    }
+
     setLoading(true)
     try {
       const payload = {
@@ -163,7 +179,7 @@ export function TarefaDialog({
         contexto_tipo: contextoTipo,
         pessoa: contextoTipo === 'pessoal' && pessoaId ? pessoaId : undefined,
         empresa: contextoTipo === 'empresa' && empresaId ? empresaId : undefined,
-        prazo: prazo ? new Date(prazo + 'T23:59:59.000Z').toISOString() : undefined,
+        prazo: parsedPrazo,
         checklist,
       }
 

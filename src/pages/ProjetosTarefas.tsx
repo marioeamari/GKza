@@ -12,7 +12,10 @@ import {
   Trash2,
   Target,
   ListTodo,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
 import { PageHeader } from '@/components/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -62,6 +65,51 @@ export default function ProjetosTarefas() {
   const [agendaDialogOpen, setAgendaDialogOpen] = useState(false)
   const [agendandoTitulo, setAgendandoTitulo] = useState('')
   const [agendandoData, setAgendandoData] = useState('')
+
+  // Estado para controlar quais tarefas têm checklist expandida nos cards do Kanban
+  const [expandedChecklistMap, setExpandedChecklistMap] = useState<Record<string, boolean>>({})
+
+  const toggleChecklistExpanded = (tarefaId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    setExpandedChecklistMap((prev) => ({
+      ...prev,
+      [tarefaId]: prev[tarefaId] === undefined ? true : !prev[tarefaId],
+    }))
+  }
+
+  // Toggle rápido de item da checklist diretamente no card do Kanban com persistência imediata
+  const handleToggleChecklistItemDirect = async (
+    tarefaId: string,
+    itemId: string,
+    e?: React.MouseEvent,
+  ) => {
+    e?.stopPropagation()
+    if (!can(user?.role, 'writeFinance')) {
+      toast({ title: 'Sem permissão para alterar tarefa', variant: 'destructive' })
+      return
+    }
+
+    const currentTarefa = tarefas.find((t) => t.id === tarefaId)
+    if (!currentTarefa || !currentTarefa.checklist) return
+
+    const updatedChecklist = currentTarefa.checklist.map((item) =>
+      item.id === itemId ? { ...item, feito: !item.feito } : item,
+    )
+
+    // Otimistic update
+    setTarefas((prev) =>
+      prev.map((t) => (t.id === tarefaId ? { ...t, checklist: updatedChecklist } : t)),
+    )
+
+    try {
+      await projetosTarefasService.updateTarefa(tarefaId, {
+        checklist: updatedChecklist,
+      })
+    } catch {
+      toast({ title: 'Erro ao atualizar checklist da tarefa', variant: 'destructive' })
+      loadAll()
+    }
+  }
 
   const loadAll = useCallback(async () => {
     setLoading(true)
@@ -255,6 +303,11 @@ export default function ProjetosTarefas() {
   const renderTarefaCard = (tarefa: Tarefa) => {
     const totalCheck = tarefa.checklist?.length || 0
     const feitosCheck = tarefa.checklist?.filter((c) => c.feito).length || 0
+    // Por padrão, se tiver até 4 itens, manter aberto para conveniência visual, ou respeitar o mapa
+    const isExpanded =
+      expandedChecklistMap[tarefa.id] !== undefined
+        ? expandedChecklistMap[tarefa.id]
+        : totalCheck > 0
 
     const prioridadeColors = {
       baixa: 'bg-slate-100 text-slate-700 border-slate-200',
@@ -268,13 +321,19 @@ export default function ProjetosTarefas() {
         key={tarefa.id}
         draggable
         onDragStart={(e) => handleDragStart(e, tarefa.id)}
-        className="p-3.5 rounded-xl border border-border bg-white shadow-xs cursor-grab active:cursor-grabbing hover:border-primary/50 transition-all space-y-2.5"
+        onClick={() => {
+          setEditingTarefa(tarefa)
+          setTarefaDialogOpen(true)
+        }}
+        className="p-3.5 rounded-xl border border-border bg-white shadow-xs cursor-pointer hover:border-primary/50 transition-all space-y-2.5 group"
       >
         <div className="flex items-start justify-between gap-2">
-          <h4 className="font-semibold text-foreground text-sm leading-snug">{tarefa.titulo}</h4>
+          <h4 className="font-semibold text-foreground text-sm leading-snug group-hover:text-primary transition-colors">
+            {tarefa.titulo}
+          </h4>
           <Badge
             variant="outline"
-            className={`text-[10px] uppercase font-bold py-0.5 px-1.5 ${
+            className={`text-[10px] uppercase font-bold py-0.5 px-1.5 shrink-0 ${
               prioridadeColors[tarefa.prioridade]
             }`}
           >
@@ -286,7 +345,7 @@ export default function ProjetosTarefas() {
           <p className="text-xs text-muted-foreground line-clamp-2">{tarefa.descricao}</p>
         )}
 
-        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
           <ContextBadge
             tipo={tarefa.contexto_tipo}
             pessoa={tarefa.expand?.pessoa}
@@ -299,18 +358,68 @@ export default function ProjetosTarefas() {
           )}
         </div>
 
-        {/* Checklist progress */}
+        {/* Checklist com itens marcáveis direto no card */}
         {totalCheck > 0 && (
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground pt-1">
-            <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-            <span>
-              {feitosCheck}/{totalCheck} concluídos
-            </span>
+          <div
+            className="pt-1.5 border-t border-border/50 space-y-1.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="flex items-center justify-between text-[11px] text-muted-foreground cursor-pointer hover:text-foreground select-none"
+              onClick={(e) => toggleChecklistExpanded(tarefa.id, e)}
+              title="Expandir/recolher checklist"
+            >
+              <div className="flex items-center gap-1.5">
+                <CheckCircle2
+                  className={`h-3.5 w-3.5 ${
+                    feitosCheck === totalCheck ? 'text-emerald-500' : 'text-primary'
+                  }`}
+                />
+                <span className="font-medium">
+                  Checklist ({feitosCheck}/{totalCheck})
+                </span>
+              </div>
+              <span className="flex items-center text-[10px] text-muted-foreground hover:text-primary">
+                {isExpanded ? (
+                  <ChevronUp className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                )}
+              </span>
+            </div>
+
+            {isExpanded && (
+              <div className="space-y-1 pl-0.5 pt-0.5">
+                {tarefa.checklist?.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-start gap-2 text-xs py-0.5 group/item cursor-pointer"
+                    onClick={(e) => handleToggleChecklistItemDirect(tarefa.id, item.id, e)}
+                  >
+                    <Checkbox
+                      checked={item.feito}
+                      className="mt-0.5 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                      onCheckedChange={() => handleToggleChecklistItemDirect(tarefa.id, item.id)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <span
+                      className={`text-[11px] leading-tight select-none ${
+                        item.feito
+                          ? 'line-through text-muted-foreground/70'
+                          : 'text-foreground/90 font-normal'
+                      }`}
+                    >
+                      {item.texto}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
         {/* Prazo e responsável */}
-        <div className="flex items-center justify-between pt-2 border-t border-border/60 text-[11px] text-muted-foreground">
+        <div className="flex items-center justify-between pt-1.5 border-t border-border/60 text-[11px] text-muted-foreground">
           {tarefa.prazo ? (
             <span className="flex items-center gap-1">
               <Clock className="h-3 w-3" />
@@ -327,19 +436,23 @@ export default function ProjetosTarefas() {
         </div>
 
         {/* BOTÕES DE CONTROLE MOBILE E AÇÕES */}
-        <div className="flex items-center justify-between pt-1">
+        <div
+          className="flex items-center justify-between pt-1"
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="flex items-center gap-1">
             {tarefa.etapa !== 'a_fazer' && (
               <Button
                 size="sm"
                 variant="ghost"
                 className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
-                onClick={() =>
+                onClick={(e) => {
+                  e.stopPropagation()
                   handleMoveEtapa(
                     tarefa.id,
                     tarefa.etapa === 'concluida' ? 'em_progresso' : 'a_fazer',
                   )
-                }
+                }}
                 title="Mover para etapa anterior"
               >
                 <ArrowLeft className="h-3 w-3 mr-0.5" />
@@ -351,12 +464,13 @@ export default function ProjetosTarefas() {
                 size="sm"
                 variant="ghost"
                 className="h-6 px-1.5 text-[10px] text-primary hover:bg-primary/10"
-                onClick={() =>
+                onClick={(e) => {
+                  e.stopPropagation()
                   handleMoveEtapa(
                     tarefa.id,
                     tarefa.etapa === 'a_fazer' ? 'em_progresso' : 'concluida',
                   )
-                }
+                }}
                 title="Avançar etapa"
               >
                 Avançar
@@ -370,7 +484,8 @@ export default function ProjetosTarefas() {
               size="icon"
               variant="ghost"
               className="h-6 w-6 text-muted-foreground hover:text-foreground"
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation()
                 setEditingTarefa(tarefa)
                 setTarefaDialogOpen(true)
               }}
@@ -382,7 +497,10 @@ export default function ProjetosTarefas() {
                 size="icon"
                 variant="ghost"
                 className="h-6 w-6 text-destructive hover:bg-destructive/10"
-                onClick={() => handleDeleteTarefa(tarefa.id)}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleDeleteTarefa(tarefa.id)
+                }}
               >
                 <Trash2 className="h-3 w-3" />
               </Button>

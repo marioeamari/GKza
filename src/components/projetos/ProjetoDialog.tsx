@@ -21,6 +21,7 @@ import { useAppContext } from '@/contexts/AppContext'
 import { projetosTarefasService } from '@/services/projetosTarefas'
 import { cadastrosService } from '@/services/cadastros'
 import { useToast } from '@/hooks/use-toast'
+import { dateOnly } from '@/lib/format'
 import type { Projeto, ProjetoStatus, Pessoa, Empresa } from '@/types/domain'
 
 interface ProjetoDialogProps {
@@ -66,7 +67,7 @@ export function ProjetoDialog({ open, onOpenChange, projeto, onSuccess }: Projet
         setContextoTipo(projeto.contexto_tipo)
         setPessoaId(projeto.pessoa || '')
         setEmpresaId(projeto.empresa || '')
-        setPrazo(projeto.prazo ? projeto.prazo.split('T')[0] : '')
+        setPrazo(projeto.prazo ? dateOnly(projeto.prazo) : '')
         setStatus(projeto.status)
         setCor(projeto.cor || '#DF5830')
       } else {
@@ -89,6 +90,20 @@ export function ProjetoDialog({ open, onOpenChange, projeto, onSuccess }: Projet
     e.preventDefault()
     if (!nome.trim()) return
 
+    let parsedPrazo: string | undefined = undefined
+    if (prazo && prazo.trim()) {
+      const trimmed = prazo.trim()
+      const datePart = trimmed.includes('T') || trimmed.includes(' ') ? dateOnly(trimmed) : trimmed
+      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+        parsedPrazo = `${datePart} 23:59:59.000Z`
+      } else {
+        const d = new Date(trimmed)
+        if (!isNaN(d.getTime())) {
+          parsedPrazo = d.toISOString()
+        }
+      }
+    }
+
     setLoading(true)
     try {
       const payload = {
@@ -98,7 +113,7 @@ export function ProjetoDialog({ open, onOpenChange, projeto, onSuccess }: Projet
         contexto_tipo: contextoTipo,
         pessoa: contextoTipo === 'pessoal' && pessoaId ? pessoaId : undefined,
         empresa: contextoTipo === 'empresa' && empresaId ? empresaId : undefined,
-        prazo: prazo ? new Date(prazo + 'T23:59:59.000Z').toISOString() : undefined,
+        prazo: parsedPrazo,
         status,
         cor,
       }
