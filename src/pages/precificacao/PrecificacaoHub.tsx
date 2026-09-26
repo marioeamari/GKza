@@ -307,7 +307,7 @@ export default function PrecificacaoHub() {
                       <div className="h-10 w-10 rounded-lg bg-secondary/80 flex items-center justify-center font-bold text-xs text-muted-foreground overflow-hidden">
                         {prod.imagem ? (
                           <img
-                            src={`${import.meta.env.VITE_POCKETBASE_URL || ''}/api/files/prec_produtos/${prod.id}/${prod.imagem}`}
+                            src={precificacaoService.getProdutoImageUrl(prod, '100x100')}
                             alt={prod.nome}
                             className="h-full w-full object-cover"
                           />

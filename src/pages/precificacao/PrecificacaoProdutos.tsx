@@ -177,9 +177,7 @@ export default function PrecificacaoProdutos() {
     setRemoverImagem(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
     if (p.imagem) {
-      setImagemPreview(
-        `${import.meta.env.VITE_POCKETBASE_URL || ''}/api/files/prec_produtos/${p.id}/${p.imagem}`,
-      )
+      setImagemPreview(precificacaoService.getProdutoImageUrl(p))
     } else {
       setImagemPreview(null)
     }
@@ -535,7 +533,7 @@ export default function PrecificacaoProdutos() {
                           <div className="h-9 w-9 rounded-lg bg-secondary flex items-center justify-center font-bold text-xs text-muted-foreground shrink-0 overflow-hidden">
                             {p.imagem ? (
                               <img
-                                src={`${import.meta.env.VITE_POCKETBASE_URL || ''}/api/files/prec_produtos/${p.id}/${p.imagem}`}
+                                src={precificacaoService.getProdutoImageUrl(p, '100x100')}
                                 alt={p.nome}
                                 className="h-full w-full object-cover"
                               />

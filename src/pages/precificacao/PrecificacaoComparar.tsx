@@ -1103,7 +1103,7 @@ export default function PrecificacaoComparar() {
                       <div className="h-14 w-14 rounded-xl bg-secondary/80 border border-border flex items-center justify-center shrink-0 overflow-hidden text-primary">
                         {produtoAtual.imagem ? (
                           <img
-                            src={produtoAtual.imagem}
+                            src={precificacaoService.getProdutoImageUrl(produtoAtual, '120x120')}
                             alt={produtoAtual.nome}
                             className="h-full w-full object-cover"
                           />

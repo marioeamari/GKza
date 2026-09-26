@@ -99,6 +99,16 @@ export const precificacaoService = {
     return pb.collection('prec_produtos').delete(id)
   },
 
+  getProdutoImageUrl(record: { id: string; imagem?: string }, thumb?: string): string {
+    if (!record.imagem) return ''
+    if (record.imagem.startsWith('blob:') || record.imagem.startsWith('data:')) {
+      return record.imagem
+    }
+    const baseUrl = import.meta.env.VITE_POCKETBASE_URL || ''
+    const query = thumb ? `?thumb=${thumb}` : ''
+    return `${baseUrl}/api/files/prec_produtos/${record.id}/${record.imagem}${query}`
+  },
+
   // KITS
   async getKitByProdutoPai(produtoPaiId: string): Promise<PrecKitRecord | null> {
     const records = await pb.collection('prec_kits').getList<PrecKitRecord>(1, 1, {
