@@ -50,6 +50,8 @@ export default function App() {
           <Route path="/cadastros" element={<Cadastros />} />
           <Route path="/cadastros/pessoas" element={<Pessoas />} />
           <Route path="/cadastros/empresas" element={<Empresas />} />
+          <Route path="/empresas" element={<Empresas />} />
+          <Route path="/pessoas" element={<Pessoas />} />
           <Route path="/metas-agenda" element={<MetasAgendaHub />} />
           <Route path="/habitos" element={<HabitosRotinas />} />
           <Route path="/agenda" element={<Agenda />} />
