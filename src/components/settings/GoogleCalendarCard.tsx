@@ -86,7 +86,17 @@ export function GoogleCalendarCard() {
     try {
       const res = await googleCalendarService.getAuthUrl()
       if (res.url) {
-        window.location.href = res.url
+        const popup = window.open(res.url, '_blank', 'noopener')
+        if (!popup) {
+          toast({
+            title: 'Janela bloqueada',
+            description:
+              'Seu navegador bloqueou a janela de autorização. Permita pop-ups e tente novamente.',
+            variant: 'destructive',
+          })
+          setConnecting(false)
+          return
+        }
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Verifique as configurações.'
@@ -97,6 +107,7 @@ export function GoogleCalendarCard() {
           : message,
         variant: 'destructive',
       })
+    } finally {
       setConnecting(false)
     }
   }
