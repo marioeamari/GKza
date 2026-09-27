@@ -2074,50 +2074,57 @@ export default function PrecificacaoComparar() {
                         </div>
 
                         {/* Demonstrativo Detalhado de Taxas */}
-                        <div className="space-y-1.5 text-xs">
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="font-bold text-muted-foreground uppercase text-[10px]">
-                              Taxas do Canal ({dem.linhas_taxas?.length || 0})
-                            </span>
-                            <span className="font-mono font-bold text-red-600">
-                              -{formatCurrency(dem.total_taxas_retidas_canal)}
-                            </span>
-                          </div>
+                        {(() => {
+                          const taxasAplicadas = (dem.linhas_taxas || []).filter(
+                            (tx) => tx.aplicada,
+                          )
+                          const temTaxasCadastradas = (dem.linhas_taxas?.length || 0) > 0
 
-                          <div className="bg-secondary/20 rounded-lg p-2 space-y-1 text-[11px] max-h-36 overflow-y-auto border border-border/50">
-                            {dem.linhas_taxas && dem.linhas_taxas.length > 0 ? (
-                              dem.linhas_taxas.map((tx, idx) => (
-                                <div
-                                  key={idx}
-                                  className={`flex items-center justify-between gap-1 leading-tight ${
-                                    !tx.aplicada
-                                      ? 'text-muted-foreground/50 line-through'
-                                      : 'text-foreground'
-                                  }`}
-                                  title={!tx.aplicada ? tx.motivo_nao_aplicada : tx.condicao_resumo}
-                                >
-                                  <span className="truncate flex-1">
-                                    {tx.nome}
-                                    {tx.tipo_valor === 'percentual' && (
-                                      <span className="text-[9px] text-muted-foreground ml-1 font-mono">
-                                        ({tx.aliquota_ou_fixo}%)
-                                      </span>
-                                    )}
-                                  </span>
-                                  <span className="font-mono shrink-0">
-                                    {tx.aplicada
-                                      ? `-${formatCurrency(tx.valor_calculado)}`
-                                      : 'R$ 0,00'}
-                                  </span>
-                                </div>
-                              ))
-                            ) : (
-                              <div className="text-[10px] text-muted-foreground italic py-1">
-                                Nenhuma taxa cadastrada neste canal.
+                          return (
+                            <div className="space-y-1.5 text-xs">
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="font-bold text-muted-foreground uppercase text-[10px]">
+                                  Taxas do Canal ({taxasAplicadas.length})
+                                </span>
+                                <span className="font-mono font-bold text-red-600">
+                                  -{formatCurrency(dem.total_taxas_retidas_canal)}
+                                </span>
                               </div>
-                            )}
-                          </div>
-                        </div>
+
+                              <div className="bg-secondary/20 rounded-lg p-2 space-y-1 text-[11px] max-h-36 overflow-y-auto border border-border/50">
+                                {!temTaxasCadastradas ? (
+                                  <div className="text-[10px] text-muted-foreground italic py-1">
+                                    Nenhuma taxa cadastrada neste canal.
+                                  </div>
+                                ) : taxasAplicadas.length === 0 ? (
+                                  <div className="text-[10px] text-muted-foreground italic py-1">
+                                    Nenhuma taxa aplicável ao preço/peso atual.
+                                  </div>
+                                ) : (
+                                  taxasAplicadas.map((tx, idx) => (
+                                    <div
+                                      key={tx.taxa_id || idx}
+                                      className="flex items-center justify-between gap-1 leading-tight text-foreground"
+                                      title={tx.condicao_resumo || tx.nome}
+                                    >
+                                      <span className="truncate flex-1">
+                                        {tx.nome}
+                                        {tx.tipo_valor === 'percentual' && (
+                                          <span className="text-[9px] text-muted-foreground ml-1 font-mono">
+                                            ({tx.aliquota_ou_fixo}%)
+                                          </span>
+                                        )}
+                                      </span>
+                                      <span className="font-mono shrink-0">
+                                        -{formatCurrency(tx.valor_calculado)}
+                                      </span>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })()}
 
                         {/* Linhas de Fechamento da Venda */}
                         <div className="space-y-1 text-xs border-t border-border/60 pt-2">
