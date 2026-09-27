@@ -1923,6 +1923,30 @@ export default function PrecificacaoComparar() {
                             ) : (
                               <Bookmark className="h-3.5 w-3.5 text-amber-600 shrink-0" />
                             )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-foreground shrink-0"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (col.isSalvoExtra) {
+                                  if (col.cenarioSalvoRecord) {
+                                    handleRemoverCenarioSalvo(col.cenarioSalvoRecord.id)
+                                  }
+                                } else {
+                                  setColunasAtivas((prev) => ({
+                                    ...prev,
+                                    [modId]: false,
+                                  }))
+                                }
+                              }}
+                              title={`Ocultar coluna ${col.canal.nome} - ${col.modalidade.nome}`}
+                              aria-label={`Ocultar coluna ${col.canal.nome} - ${col.modalidade.nome}`}
+                            >
+                              <EyeOff className="h-3.5 w-3.5" />
+                            </Button>
                             <span
                               className="h-2.5 w-2.5 rounded-full shrink-0"
                               style={{ backgroundColor: col.canal.cor || '#DF5830' }}
