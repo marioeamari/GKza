@@ -1085,16 +1085,26 @@ export default function PrecificacaoComparar() {
         }
       />
 
-      {/* Seleção do SKU / Produto Base */}
-      <Card className="border-border bg-white shadow-xs">
-        <CardContent className="pt-5 pb-5">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="space-y-1 flex-1">
-              <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+      {/* Bloco de Controles do Topo (3 cartões em 2 linhas) */}
+      <div className="space-y-4">
+        {/* 1. Cartão Superior: PRODUTO PARA ESTUDO (Full Width) */}
+        <Card className="border-border bg-white shadow-xs">
+          <CardContent className="p-4 sm:p-5 space-y-3">
+            <div className="flex items-center gap-2.5">
+              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <Package className="h-4 w-4 text-primary" />
+              </div>
+              <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
+                Produto para Estudo
+              </h2>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                 Selecione o Produto / SKU para Estudo
               </Label>
-              <div className="flex items-center gap-3">
-                <div className="w-full max-w-md">
+              <div className="flex items-center gap-3 w-full">
+                <div className="flex-1 min-w-0">
                   <Select
                     value={selectedProdutoId}
                     onValueChange={(val) => {
@@ -1103,14 +1113,14 @@ export default function PrecificacaoComparar() {
                       if (p) setSearchParams({ sku: p.sku })
                     }}
                   >
-                    <SelectTrigger className="font-bold text-sm h-10">
+                    <SelectTrigger className="font-bold text-sm h-11 w-full bg-secondary/30 border-border">
                       <SelectValue placeholder="Selecione um produto..." />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-h-80 w-[var(--radix-select-trigger-width)]">
                       {produtos.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
+                        <SelectItem key={p.id} value={p.id} className="cursor-pointer py-2">
                           <span className="font-mono font-bold text-primary mr-2">[{p.sku}]</span>
-                          <span>{p.nome}</span>
+                          <span className="font-medium text-foreground">{p.nome}</span>
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1118,202 +1128,254 @@ export default function PrecificacaoComparar() {
                 </div>
 
                 {produtoAtual && (
-                  <Badge variant="outline" className="h-7 px-2 font-mono text-xs">
+                  <Badge
+                    variant="outline"
+                    className="h-9 px-3.5 text-xs font-mono font-semibold shrink-0 bg-white border-border text-foreground rounded-lg"
+                  >
                     {produtoAtual.tipo.replace('_', ' ')}
                   </Badge>
                 )}
               </div>
             </div>
+          </CardContent>
+        </Card>
 
-            {/* Controle de Modo de Simulação */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 bg-secondary/40 p-2.5 rounded-xl border border-border">
-              <div className="space-y-1">
-                <Label className="text-[11px] font-bold text-muted-foreground uppercase">
-                  Modo de Simulação
-                </Label>
-                <Tabs
-                  value={modoCalculo}
-                  onValueChange={(v) => setModoCalculo(v as typeof modoCalculo)}
-                  className="w-auto"
-                >
-                  <TabsList className="h-8">
-                    <TabsTrigger value="mesmo_preco" className="text-xs px-2.5">
-                      Mesmo Preço
-                    </TabsTrigger>
-                    <TabsTrigger value="meta_lucro" className="text-xs px-2.5">
-                      Meta Lucro R$
-                    </TabsTrigger>
-                    <TabsTrigger value="meta_margem" className="text-xs px-2.5">
-                      Meta Margem %
-                    </TabsTrigger>
-                    <TabsTrigger value="manual" className="text-xs px-2.5">
-                      Manual
-                    </TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </div>
-
-              {/* Valor de Entrada do Modo */}
-              <div className="w-28 space-y-1">
-                <Label className="text-[11px] font-bold text-muted-foreground uppercase">
-                  {modoCalculo === 'mesmo_preco'
-                    ? 'Preço (R$)'
-                    : modoCalculo === 'meta_lucro'
-                      ? 'Meta Lucro (R$)'
-                      : modoCalculo === 'meta_margem'
-                        ? 'Meta Margem (%)'
-                        : 'Preço Base'}
-                </Label>
-                <Input
-                  type="number"
-                  step="0.10"
-                  className="h-8 text-xs font-bold"
-                  value={
-                    modoCalculo === 'mesmo_preco' || modoCalculo === 'manual'
-                      ? valorPrecoGlobal
-                      : modoCalculo === 'meta_lucro'
-                        ? metaLucroReais
-                        : metaMargemPct
-                  }
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value) || 0
-                    if (modoCalculo === 'mesmo_preco' || modoCalculo === 'manual') {
-                      setValorPrecoGlobal(val)
-                    } else if (modoCalculo === 'meta_lucro') {
-                      setMetaLucroReais(val)
-                    } else {
-                      setMetaMargemPct(val)
-                    }
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Painel de Tributos Editável */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 bg-secondary/40 p-2.5 rounded-xl border border-border">
-              <div className="flex flex-col gap-1 min-w-[130px]">
-                <div className="flex items-center gap-1.5">
-                  <Calculator className="h-3.5 w-3.5 text-primary" />
-                  <span className="text-[11px] font-bold text-muted-foreground uppercase">
-                    Tributos
-                  </span>
+        {/* 2. Linha Inferior: SIMULAÇÃO DE PREÇO e TRIBUTOS E RATEIO lado a lado */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Cartão "SIMULAÇÃO DE PREÇO" */}
+          <Card className="border-border bg-white shadow-xs">
+            <CardContent className="p-4 sm:p-5 space-y-3.5">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <DollarSign className="h-4 w-4 text-primary" />
                 </div>
-                <div className="flex items-center gap-1.5">
-                  {fonteTributos === 'perfil' && (
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] h-5 px-1.5 font-bold bg-blue-50 text-blue-700 border-blue-200"
-                    >
-                      Perfil
-                    </Badge>
-                  )}
-                  {fonteTributos === 'global' && (
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] h-5 px-1.5 font-bold bg-slate-50 text-slate-700 border-slate-200"
-                    >
-                      Global
-                    </Badge>
-                  )}
-                  {fonteTributos === 'sobrescrito' && (
-                    <div className="flex items-center gap-1">
+                <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
+                  Simulação de Preço
+                </h2>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 pt-0.5">
+                {/* Abas do Modo de Simulação */}
+                <div className="space-y-1.5 flex-1 min-w-0">
+                  <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Modo de Simulação
+                  </Label>
+                  <Tabs
+                    value={modoCalculo}
+                    onValueChange={(v) => setModoCalculo(v as typeof modoCalculo)}
+                    className="w-full"
+                  >
+                    <TabsList className="h-10 w-full grid grid-cols-4 p-1 bg-secondary/40 border border-border">
+                      <TabsTrigger
+                        value="mesmo_preco"
+                        className="text-xs px-2 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:font-bold"
+                      >
+                        Mesmo Preço
+                      </TabsTrigger>
+                      <TabsTrigger
+                        value="meta_lucro"
+                        className="text-xs px-2 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:font-bold"
+                      >
+                        Meta Lucro R$
+                      </TabsTrigger>
+                      <TabsTrigger
+                        value="meta_margem"
+                        className="text-xs px-2 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:font-bold"
+                      >
+                        Meta Margem %
+                      </TabsTrigger>
+                      <TabsTrigger
+                        value="manual"
+                        className="text-xs px-2 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:font-bold"
+                      >
+                        Manual
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
+
+                {/* Divisor vertical em telas sm+ */}
+                <div className="hidden sm:block h-10 w-px bg-border/80 self-end mb-1" />
+
+                {/* Valor de Entrada do Modo */}
+                <div className="w-full sm:w-28 space-y-1.5 shrink-0">
+                  <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider truncate block">
+                    {modoCalculo === 'mesmo_preco'
+                      ? 'Preço (R$)'
+                      : modoCalculo === 'meta_lucro'
+                        ? 'Meta Lucro (R$)'
+                        : modoCalculo === 'meta_margem'
+                          ? 'Meta Margem (%)'
+                          : 'Preço Base'}
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.10"
+                    className="h-10 text-sm font-bold text-center bg-secondary/30 border-border"
+                    value={
+                      modoCalculo === 'mesmo_preco' || modoCalculo === 'manual'
+                        ? valorPrecoGlobal
+                        : modoCalculo === 'meta_lucro'
+                          ? metaLucroReais
+                          : metaMargemPct
+                    }
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value) || 0
+                      if (modoCalculo === 'mesmo_preco' || modoCalculo === 'manual') {
+                        setValorPrecoGlobal(val)
+                      } else if (modoCalculo === 'meta_lucro') {
+                        setMetaLucroReais(val)
+                      } else {
+                        setMetaMargemPct(val)
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Cartão "TRIBUTOS E RATEIO" */}
+          <Card className="border-border bg-white shadow-xs">
+            <CardContent className="p-4 sm:p-5 space-y-3.5">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <Calculator className="h-4 w-4 text-primary" />
+                </div>
+                <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
+                  Tributos e Rateio
+                </h2>
+              </div>
+
+              <div className="flex flex-wrap items-end gap-2 sm:gap-2.5 pt-0.5">
+                {/* Fonte dos tributos (Perfil, Global, Sobrescrito) */}
+                <div className="space-y-1.5 min-w-[70px]">
+                  <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
+                    Tributos
+                  </Label>
+                  <div className="h-10 flex items-center">
+                    {fonteTributos === 'perfil' && (
                       <Badge
                         variant="outline"
-                        className="text-[10px] h-5 px-1.5 font-bold bg-amber-50 text-amber-800 border-amber-300"
+                        className="text-xs h-9 px-2.5 font-bold bg-blue-50/80 text-blue-700 border-blue-200 rounded-lg"
                       >
-                        Sobrescrito
+                        Perfil
                       </Badge>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleRestaurarFonteTributos}
-                        className="h-5 px-1 text-[10px] text-muted-foreground hover:text-foreground hover:bg-white"
-                        title="Restaurar valores da fonte original"
+                    )}
+                    {fonteTributos === 'global' && (
+                      <Badge
+                        variant="outline"
+                        className="text-xs h-9 px-3 font-bold bg-slate-50/80 text-slate-700 border-slate-200 rounded-lg"
                       >
-                        <RotateCcw className="h-2.5 w-2.5 mr-0.5" />
-                        Restaurar
-                      </Button>
-                    </div>
-                  )}
+                        Global
+                      </Badge>
+                    )}
+                    {fonteTributos === 'sobrescrito' && (
+                      <div className="flex items-center gap-1">
+                        <Badge
+                          variant="outline"
+                          className="text-xs h-9 px-2 font-bold bg-amber-50/80 text-amber-800 border-amber-300 rounded-lg"
+                        >
+                          Sobrescrito
+                        </Badge>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleRestaurarFonteTributos}
+                          className="h-8 px-1.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                          title="Restaurar valores da fonte original"
+                        >
+                          <RotateCcw className="h-2.5 w-2.5 mr-0.5" />
+                          Restaurar
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="hidden sm:block h-8 w-px bg-border/60 self-center" />
+
+                {/* DAS (%) */}
+                <div className="w-[72px] space-y-1.5">
+                  <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block truncate">
+                    DAS (%)
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    className="h-10 text-xs font-bold text-center bg-secondary/30 border-border px-1"
+                    value={aliquotaDas}
+                    onChange={(e) => handleAtualizarAliquotaDas(parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+
+                {/* ICMS (%) */}
+                <div className="w-[72px] space-y-1.5">
+                  <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block truncate">
+                    ICMS (%)
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    className="h-10 text-xs font-bold text-center bg-secondary/30 border-border px-1"
+                    value={aliquotaIcms}
+                    onChange={(e) => handleAtualizarAliquotaIcms(parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+
+                {/* Imposto Fixo Mês (R$) */}
+                <div className="w-[84px] space-y-1.5">
+                  <Label
+                    className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate block"
+                    title="Imposto Fixo do Mês (R$)"
+                  >
+                    Fixo Mês (R$)
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.50"
+                    className="h-10 text-xs font-bold text-center bg-secondary/30 border-border px-1"
+                    value={dasImpostoMes}
+                    onChange={(e) => handleAtualizarDasImpostoMes(parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+
+                {/* Pedidos / Mês */}
+                <div className="w-[84px] space-y-1.5">
+                  <Label
+                    className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate block"
+                    title="Pedidos estimados por mês para rateio"
+                  >
+                    Pedidos/mês
+                  </Label>
+                  <Input
+                    type="number"
+                    step="10"
+                    className="h-10 text-xs font-bold text-center bg-secondary/30 border-border px-1"
+                    value={pedidosMes}
+                    onChange={(e) => handleAtualizarPedidosMes(parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+
+                <div className="hidden sm:block h-8 w-px bg-border/60 self-center" />
+
+                {/* Rateio por venda informativo */}
+                <div className="space-y-1.5 min-w-[80px]">
+                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block truncate">
+                    Rateio/venda
+                  </Label>
+                  <div className="h-10 flex items-center justify-center bg-secondary/30 border border-border rounded-md px-2.5">
+                    <span className="text-xs font-mono font-bold text-foreground">
+                      {formatCurrency(pedidosMes > 0 ? dasImpostoMes / pedidosMes : 0)}
+                    </span>
+                  </div>
                 </div>
               </div>
-
-              {/* DAS (%) */}
-              <div className="w-20 space-y-1">
-                <Label className="text-[10px] font-bold text-muted-foreground uppercase">
-                  DAS (%)
-                </Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  className="h-8 text-xs font-bold"
-                  value={aliquotaDas}
-                  onChange={(e) => handleAtualizarAliquotaDas(parseFloat(e.target.value) || 0)}
-                />
-              </div>
-
-              {/* ICMS (%) */}
-              <div className="w-20 space-y-1">
-                <Label className="text-[10px] font-bold text-muted-foreground uppercase">
-                  ICMS (%)
-                </Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  className="h-8 text-xs font-bold"
-                  value={aliquotaIcms}
-                  onChange={(e) => handleAtualizarAliquotaIcms(parseFloat(e.target.value) || 0)}
-                />
-              </div>
-
-              {/* Imposto Fixo Mês (R$) */}
-              <div className="w-24 space-y-1">
-                <Label
-                  className="text-[10px] font-bold text-muted-foreground uppercase truncate block"
-                  title="Imposto Fixo do Mês (R$)"
-                >
-                  Fixo Mês (R$)
-                </Label>
-                <Input
-                  type="number"
-                  step="0.50"
-                  className="h-8 text-xs font-bold"
-                  value={dasImpostoMes}
-                  onChange={(e) => handleAtualizarDasImpostoMes(parseFloat(e.target.value) || 0)}
-                />
-              </div>
-
-              {/* Pedidos / Mês */}
-              <div className="w-24 space-y-1">
-                <Label
-                  className="text-[10px] font-bold text-muted-foreground uppercase truncate block"
-                  title="Pedidos estimados por mês para rateio"
-                >
-                  Pedidos/mês
-                </Label>
-                <Input
-                  type="number"
-                  step="10"
-                  className="h-8 text-xs font-bold"
-                  value={pedidosMes}
-                  onChange={(e) => handleAtualizarPedidosMes(parseFloat(e.target.value) || 0)}
-                />
-              </div>
-
-              {/* Rateio por venda informativo */}
-              <div className="space-y-0.5 pt-3 sm:pt-0 sm:border-l sm:border-border/60 sm:pl-3">
-                <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-semibold block">
-                  Rateio/venda
-                </span>
-                <span className="text-xs font-mono font-bold text-foreground">
-                  {formatCurrency(pedidosMes > 0 ? dasImpostoMes / pedidosMes : 0)}
-                </span>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
 
       {/* Barra de Ações, Filtro de Marketplaces e Seletor de Colunas Visíveis */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
