@@ -36,14 +36,24 @@ declare global {
   interface Window {
     PluggyConnect?: new (options: {
       connectToken: string
-      onSuccess?: (itemData: { item: { id: string } }) => void
-      onError?: (error: unknown) => void
-      onClose?: () => void
+      updateItem?: string
+      includeSandbox?: boolean
+      onSuccess?: (itemData: { item: { id: string } }) => void | Promise<void>
+      onError?: (error: unknown) => void | Promise<void>
+      onClose?: () => void | Promise<void>
+      onOpen?: () => void | Promise<void>
+      onEvent?: (payload: unknown) => void | Promise<void>
     }) => {
       init: () => void
+      close?: () => void
+      hide?: () => void
     }
   }
 }
+
+// Versões estáveis suportadas pelo CDN da Pluggy
+const PLUGGY_CDN_URL = 'https://cdn.pluggy.ai/pluggy-connect/v2.8.2/pluggy-connect.js'
+const PLUGGY_CDN_FALLBACK = 'https://cdn.pluggy.ai/pluggy-connect/v2.7.0/pluggy-connect.js'
 
 export function OpenFinanceCard() {
   const { user } = useAuth()
@@ -54,6 +64,7 @@ export function OpenFinanceCard() {
   const [items, setItems] = useState<PluggyItemRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [connecting, setConnecting] = useState(false)
+  const [connectionError, setConnectionError] = useState<string | null>(null)
   const [syncingId, setSyncingId] = useState<string | null>(null)
   const [itemParaDesconectar, setItemParaDesconectar] = useState<PluggyItemRecord | null>(null)
   const [desconectando, setDesconectando] = useState(false)
@@ -63,8 +74,14 @@ export function OpenFinanceCard() {
     try {
       setLoading(true)
       const [statusRes, itemsRes] = await Promise.all([
-        pluggyService.getStatus().catch(() => null),
-        pluggyService.listConnectedItems().catch(() => []),
+        pluggyService.getStatus().catch((err) => {
+          console.warn('Erro ao consultar /backend/v1/pluggy/status:', err)
+          return null
+        }),
+        pluggyService.listConnectedItems().catch((err) => {
+          console.warn('Erro ao listar registros de pluggy_items:', err)
+          return []
+        }),
       ])
       if (statusRes) setStatus(statusRes)
       setItems(itemsRes)
@@ -79,85 +96,179 @@ export function OpenFinanceCard() {
     loadData()
   }, [loadData])
 
-  // Injetar script do Pluggy Connect Widget sob demanda
-  const loadPluggyScript = (): Promise<void> => {
+  // Injetar script do Pluggy Connect Widget sob demanda com timeout e fallback
+  const loadSingleScript = (src: string, timeoutMs: number): Promise<void> => {
     return new Promise((resolve, reject) => {
-      if (window.PluggyConnect) {
-        resolve()
-        return
+      const scriptId = 'pluggy-widget-script'
+      const oldScript = document.getElementById(scriptId)
+      if (oldScript) {
+        oldScript.remove()
       }
-      const existingScript = document.getElementById('pluggy-widget-script')
-      if (existingScript) {
-        existingScript.onload = () => resolve()
-        return
-      }
+
+      let timedOut = false
+      const timer = window.setTimeout(() => {
+        timedOut = true
+        reject(new Error(`Timeout de ${timeoutMs / 1000}s ao carregar ${src}`))
+      }, timeoutMs)
+
       const script = document.createElement('script')
-      script.id = 'pluggy-widget-script'
-      script.src = 'https://cdn.pluggy.ai/pluggy-connect/v1/pluggy-connect.js'
+      script.id = scriptId
+      script.src = src
       script.async = true
-      script.onload = () => resolve()
-      script.onerror = () => reject(new Error('Não foi possível carregar o widget do Pluggy'))
+      script.onload = () => {
+        if (timedOut) return
+        window.clearTimeout(timer)
+        if (typeof window.PluggyConnect === 'function') {
+          resolve()
+        } else {
+          reject(new Error(`Script carregou mas window.PluggyConnect não foi definido (${src})`))
+        }
+      }
+      script.onerror = (e) => {
+        if (timedOut) return
+        window.clearTimeout(timer)
+        console.error('Falha de rede ao carregar script do widget Pluggy:', src, e)
+        reject(new Error(`Falha de rede ao baixar script do Pluggy: ${src}`))
+      }
       document.body.appendChild(script)
+    })
+  }
+
+  const loadPluggyScript = async (): Promise<void> => {
+    if (typeof window.PluggyConnect === 'function') {
+      return
+    }
+
+    try {
+      await loadSingleScript(PLUGGY_CDN_URL, 8000)
+    } catch (errPrimary) {
+      console.warn('Tentativa com CDN principal falhou, testando fallback...', errPrimary)
+      try {
+        await loadSingleScript(PLUGGY_CDN_FALLBACK, 8000)
+      } catch (errFallback) {
+        console.error('Ambas as fontes do CDN do Pluggy Connect falharam:', errFallback)
+        throw new Error(
+          'Não foi possível carregar o widget do Open Finance (Pluggy). Verifique sua conexão com a internet.',
+        )
+      }
+    }
+  }
+
+  // Helper para timeout genérico de promises
+  const withTimeout = <T,>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        reject(new Error(errorMsg))
+      }, ms)
+      promise
+        .then((res) => {
+          window.clearTimeout(timer)
+          resolve(res)
+        })
+        .catch((err) => {
+          window.clearTimeout(timer)
+          reject(err)
+        })
     })
   }
 
   // Abrir o widget do Pluggy
   const handleConectarBanco = async (existingItemId?: string) => {
     if (!canEdit) return
+    setConnectionError(null)
+    setConnecting(true)
+
     try {
-      setConnecting(true)
-      await loadPluggyScript()
+      console.log('Iniciando conexão Open Finance (Pluggy)...')
 
-      // Gera connect_token seguro no backend via skip cloud
-      const tokenRes = await pluggyService.getConnectToken(existingItemId)
-      if (!tokenRes.accessToken) {
-        throw new Error('Não foi possível obter o token de conexão do Open Finance.')
+      // 1. Carrega o script do widget Pluggy com timeout de 10s
+      await withTimeout(
+        loadPluggyScript(),
+        10000,
+        'Tempo limite esgotado ao carregar o widget do Open Finance. Verifique sua conexão e tente novamente.',
+      )
+
+      if (typeof window.PluggyConnect !== 'function') {
+        throw new Error('Biblioteca Pluggy Connect não inicializada após carregamento.')
       }
 
-      if (!window.PluggyConnect) {
-        throw new Error('Biblioteca Pluggy Connect não carregada.')
+      // 2. Gera connect_token seguro no backend via skip cloud com timeout de 10s
+      console.log('Solicitando connect_token ao backend /backend/v1/pluggy/connect-token...')
+      const tokenRes = await withTimeout(
+        pluggyService.getConnectToken(existingItemId),
+        10000,
+        'Tempo limite esgotado ao gerar o token de conexão bancária no servidor.',
+      )
+
+      if (!tokenRes?.accessToken) {
+        throw new Error('Token de acesso do Open Finance não foi retornado pelo servidor.')
       }
 
+      console.log('Connect token obtido com sucesso. Abrindo widget PluggyConnect...')
+
+      // 3. Instancia e inicializa o widget
       const pluggyConnect = new window.PluggyConnect({
         connectToken: tokenRes.accessToken,
+        ...(existingItemId ? { updateItem: existingItemId } : {}),
+        onOpen: () => {
+          console.log('Widget Pluggy Connect aberto.')
+        },
         onSuccess: async (data) => {
+          console.log('Pluggy Connect onSuccess disparado:', data)
+          const newItemId = data?.item?.id || existingItemId
           toast({
             title: 'Banco conectado com sucesso!',
-            description: 'Iniciando sincronização inicial das transações para Triagem...',
+            description: 'Iniciando sincronização das transações para Triagem (/pendentes)...',
           })
+
           try {
-            // Sincroniza e puxa as transações já enviando para a triagem pendente
-            const syncRes = await pluggyService.syncItem(data?.item?.id)
-            toast({
-              title: 'Sincronização concluída',
-              description: `${syncRes.imported_pendentes} transações enviadas para /pendentes para sua triagem.`,
-            })
+            if (newItemId) {
+              const syncRes = await pluggyService.syncItem(newItemId)
+              toast({
+                title: 'Sincronização concluída!',
+                description: `${syncRes.imported_pendentes} novas transações enviadas para /pendentes para aprovação (${syncRes.skipped_duplicates} duplicadas ignoradas).`,
+              })
+            }
           } catch (syncErr) {
-            console.error('Erro na sincronização inicial:', syncErr)
+            console.error('Erro na sincronização automática pós-conexão:', syncErr)
+            toast({
+              variant: 'destructive',
+              title: 'Aviso na sincronização',
+              description:
+                'O banco foi conectado, mas a sincronização inicial falhou. Você pode clicar em "Sincronizar" manualmente.',
+            })
+          } finally {
+            await loadData()
           }
-          await loadData()
         },
         onError: (err) => {
-          console.error('Erro no widget Pluggy:', err)
+          console.error('Erro reportado pelo widget Pluggy:', err)
           toast({
             variant: 'destructive',
-            title: 'Erro na conexão',
-            description: 'Houve uma falha durante o processo de conexão do banco.',
+            title: 'Erro na conexão do banco',
+            description:
+              'Houve uma falha durante o processo de conexão no widget da instituição financeira.',
           })
         },
         onClose: () => {
-          // Widget fechado
+          console.log('Widget Pluggy Connect fechado pelo usuário.')
         },
       })
 
       pluggyConnect.init()
     } catch (err) {
+      console.error('Erro no fluxo de conexão Pluggy:', err)
+      const msg =
+        apiMessage(err) ||
+        'Não foi possível abrir a conexão com o banco. Verifique sua internet e tente novamente.'
+      setConnectionError(msg)
       toast({
         variant: 'destructive',
         title: 'Falha ao iniciar conexão',
-        description: apiMessage(err),
+        description: msg,
       })
     } finally {
+      // Sempre encerra o spinner no botão após o disparo do init() ou erro
       setConnecting(false)
     }
   }
@@ -286,6 +397,33 @@ export function OpenFinanceCard() {
               </p>
             </div>
           </div>
+
+          {/* Mensagem de erro de conexão com opção de tentar novamente */}
+          {connectionError && (
+            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3.5 text-xs text-destructive flex items-start justify-between gap-3 animate-in fade-in">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-destructive">
+                    Não foi possível abrir a conexão com o banco
+                  </p>
+                  <p className="mt-0.5 text-destructive/90">{connectionError}</p>
+                </div>
+              </div>
+              {canEdit && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs font-bold border-destructive/40 text-destructive hover:bg-destructive/10 shrink-0"
+                  onClick={() => handleConectarBanco()}
+                  disabled={connecting}
+                >
+                  <RefreshCw className={`mr-1 h-3 w-3 ${connecting ? 'animate-spin' : ''}`} />
+                  Tentar novamente
+                </Button>
+              )}
+            </div>
+          )}
 
           {/* Lista de Bancos Conectados */}
           <div className="space-y-2">
