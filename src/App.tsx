@@ -32,6 +32,12 @@ import ResetPassword from '@/pages/auth/ResetPassword'
 import Signup from '@/pages/auth/Signup'
 import TokenAction from '@/pages/auth/TokenAction'
 
+// Redirecionador auxiliar caso algum fluxo do Google bata direto no frontend
+function GoogleCallbackRedirect() {
+  const location = window.location
+  return <Navigate to={`/configuracoes${location.search}`} replace />
+}
+
 export default function App() {
   return (
     <Routes>
@@ -43,6 +49,10 @@ export default function App() {
       </Route>
       <Route path="/verificar-email" element={<TokenAction type="verification" />} />
       <Route path="/confirmar-email" element={<ConfirmEmail />} />
+      {/* Rotas de segurança para callbacks do Google redirecionarem para /configuracoes sem cair em NotFound */}
+      <Route path="/backend/v1/google/callback" element={<GoogleCallbackRedirect />} />
+      <Route path="/google/callback" element={<GoogleCallbackRedirect />} />
+      <Route path="/auth/google/callback" element={<GoogleCallbackRedirect />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route index element={<Dashboard />} />

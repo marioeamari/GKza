@@ -8,8 +8,10 @@ export const googleCalendarService = {
     })
   },
 
-  async getAuthUrl(): Promise<{ url: string; redirect_uri: string }> {
-    return pb.send<{ url: string; redirect_uri: string }>('/backend/v1/google/auth-url', {
+  async getAuthUrl(origin?: string): Promise<{ url: string; redirect_uri: string }> {
+    const currentOrigin = origin || (typeof window !== 'undefined' ? window.location.origin : '')
+    const query = currentOrigin ? `?origin=${encodeURIComponent(currentOrigin)}` : ''
+    return pb.send<{ url: string; redirect_uri: string }>(`/backend/v1/google/auth-url${query}`, {
       method: 'GET',
     })
   },

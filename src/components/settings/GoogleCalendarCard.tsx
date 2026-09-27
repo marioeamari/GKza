@@ -47,8 +47,9 @@ export function GoogleCalendarCard() {
     const success = searchParams.get('success')
     const error = searchParams.get('error')
 
-    if (isGoogleCalendar) {
-      if (success === '1') {
+    if (isGoogleCalendar !== null || success !== null || error !== null) {
+      // Se tiver indicador de sucesso
+      if (success === '1' || isGoogleCalendar === 'success') {
         toast({
           title: 'Google Calendar Conectado!',
           description:
@@ -56,18 +57,26 @@ export function GoogleCalendarCard() {
         })
         loadStatus()
       } else if (error) {
+        let msg = error
+        try {
+          msg = decodeURIComponent(error)
+        } catch {
+          /* intentionally ignored */
+        }
         toast({
           title: 'Erro ao conectar Google Calendar',
-          description: decodeURIComponent(error),
+          description: msg,
           variant: 'destructive',
         })
       }
 
-      // Limpar parâmetros da URL
+      // Limpar parâmetros da URL de forma segura
       const newParams = new URLSearchParams(searchParams)
       newParams.delete('google_calendar')
       newParams.delete('success')
       newParams.delete('error')
+      newParams.delete('state')
+      newParams.delete('code')
       setSearchParams(newParams, { replace: true })
     }
   }, [searchParams, setSearchParams, toast])
@@ -178,6 +187,14 @@ export function GoogleCalendarCard() {
                   Aviso: {status.last_error}
                 </p>
               )}
+              <div className="pt-1.5 border-t border-border/30 text-[11px] text-muted-foreground flex items-center gap-1.5">
+                <KeyRound className="h-3 w-3 text-primary shrink-0" />
+                <span>URI Autorizada:</span>
+                <code className="font-mono text-[10px] bg-background/80 px-1.5 py-0.5 rounded border border-border/50 select-all">
+                  {status.redirect_uri ||
+                    'https://gestao-financeira-e-marketplaces-d7ede.shrd00.internal.goskip.dev/backend/v1/google/callback'}
+                </code>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -241,13 +258,26 @@ export function GoogleCalendarCard() {
                 </div>
               )}
 
-              <div className="pt-1 text-[11px] text-muted-foreground flex items-center gap-1.5">
-                <KeyRound className="h-3.5 w-3.5 text-primary shrink-0" />
-                <span>Redirect URI autorizado:</span>
-                <code className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded select-all break-all">
-                  {status?.redirect_uri ||
-                    'https://gestao-financeira-e-marketplaces-d7ede.shrd00.internal.goskip.dev/backend/v1/google/callback'}
-                </code>
+              <div className="pt-2 border-t border-border/40 space-y-1.5">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                  <KeyRound className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span>URI de Redirecionamento Autorizado (Google Cloud Console):</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 font-mono text-[11px] bg-muted p-2 rounded-md border border-border select-all break-all font-semibold text-primary">
+                    {status?.redirect_uri ||
+                      'https://gestao-financeira-e-marketplaces-d7ede.shrd00.internal.goskip.dev/backend/v1/google/callback'}
+                  </code>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  No Google Cloud Console (ID de cliente{' '}
+                  <code className="font-mono text-[10px]">
+                    788252458556-ri5fjf39bvn9p96m4akiipk24lbt90hf...
+                  </code>
+                  ), certifique-se de que a URI acima esteja listada exatamente em{' '}
+                  <strong>URIs de redirecionamento autorizados</strong> e que seu e-mail esteja
+                  cadastrado como usuário de teste caso o app esteja em modo de teste.
+                </p>
               </div>
             </div>
 

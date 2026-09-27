@@ -26,10 +26,39 @@ routerAdd(
       'https://www.googleapis.com/auth/userinfo.email',
     ].join(' ')
 
-    // Envia o user id no state para associação no callback
+    // Captura origin do frontend passada via query param (?origin=...) ou cabeçalho Origin/Referer
+    const queryOrigin = e.requestInfo().query.origin
+    const headerOrigin = e.requestInfo().headers['origin'] || ''
+    const headerReferer = e.requestInfo().headers['referer'] || ''
+    let candidateOrigin = ''
+
+    if (queryOrigin && typeof queryOrigin === 'string') {
+      candidateOrigin = queryOrigin.trim()
+    } else if (headerOrigin) {
+      candidateOrigin = headerOrigin.trim()
+    } else if (headerReferer) {
+      try {
+        const refParts = headerReferer.split('/')
+        if (refParts.length >= 3) {
+          candidateOrigin = refParts[0] + '//' + refParts[2]
+        }
+      } catch (_) {}
+    }
+
+    if (!candidateOrigin) {
+      candidateOrigin =
+        $os.getenv('SITE_URL') || 'https://gestao-financeira-e-marketplaces-d7ede.goskip.app'
+    }
+
+    // Normaliza removendo trailing slash
+    if (candidateOrigin.endsWith('/')) {
+      candidateOrigin = candidateOrigin.slice(0, -1)
+    }
+
+    // Envia o user id e a origin no state para associação no callback
     const statePayload = JSON.stringify({
       userId: auth ? auth.id : '',
-      origin: $os.getenv('SITE_URL') || 'https://gestao-financeira-e-marketplaces-d7ede.goskip.app',
+      origin: candidateOrigin,
     })
     const encodedState = encodeURIComponent(statePayload)
 

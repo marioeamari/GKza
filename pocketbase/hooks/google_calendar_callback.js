@@ -9,19 +9,117 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
     hasError: !!error,
   })
 
-  const siteUrl =
-    $os.getenv('SITE_URL') || 'https://gestao-financeira-e-marketplaces-d7ede.goskip.app'
+  // 1. Extração segura de state (userId e origin)
+  let userId = ''
+  let stateOrigin = ''
+  try {
+    if (stateStr) {
+      const decodedState = decodeURIComponent(stateStr)
+      let parsed = null
+      try {
+        parsed = JSON.parse(decodedState)
+      } catch (_) {
+        // Tenta parse direto sem decode adicional
+        parsed = JSON.parse(stateStr)
+      }
+      if (parsed) {
+        userId = parsed.userId || ''
+        stateOrigin = parsed.origin || ''
+      }
+    }
+  } catch (err) {
+    console.log('[Google Callback] Falha ao processar state:', err)
+  }
 
-  const targetRedirect = siteUrl + '/configuracoes?google_calendar=status'
+  // 2. Validação da origin do state e resolução de fallback
+  // Domínios autorizados: goskip.app, goskip.dev, localhost, 127.0.0.1
+  let resolvedBaseUrl = ''
+  if (stateOrigin && typeof stateOrigin === 'string') {
+    const trimmed = stateOrigin.trim()
+    const isAllowed =
+      trimmed.includes('.goskip.app') ||
+      trimmed.includes('.goskip.dev') ||
+      trimmed.includes('localhost') ||
+      trimmed.includes('127.0.0.1')
+    if (isAllowed) {
+      resolvedBaseUrl = trimmed
+    }
+  }
+
+  // Fallback 1: Headers X-Forwarded-Host ou Host
+  if (!resolvedBaseUrl) {
+    const fwdProto = e.requestInfo().headers['x-forwarded-proto'] || 'https'
+    const fwdHost =
+      e.requestInfo().headers['x-forwarded-host'] || e.requestInfo().headers['host'] || ''
+    if (fwdHost) {
+      resolvedBaseUrl = fwdProto + '://' + fwdHost
+    }
+  }
+
+  // Fallback 2: SITE_URL fixo
+  if (!resolvedBaseUrl) {
+    resolvedBaseUrl =
+      $os.getenv('SITE_URL') || 'https://gestao-financeira-e-marketplaces-d7ede.goskip.app'
+  }
+
+  if (resolvedBaseUrl.endsWith('/')) {
+    resolvedBaseUrl = resolvedBaseUrl.slice(0, -1)
+  }
+
+  const targetRedirect = resolvedBaseUrl + '/configuracoes?google_calendar=status'
+
+  console.log('[Google Callback] Base URL resolvida para retorno:', resolvedBaseUrl)
+
+  // 3. Tradução amigável de erros do Google para pt-BR
+  const translateGoogleError = (rawErr, rawDesc) => {
+    const key = (rawErr || '').toLowerCase()
+    const desc = (rawDesc || '').toLowerCase()
+
+    if (key === 'access_denied') {
+      return 'Acesso negado: você cancelou a autorização com o Google.'
+    }
+    if (
+      key === 'invalid_grant' ||
+      desc.includes('invalid_grant') ||
+      desc.includes('code has expired')
+    ) {
+      return 'Código de autorização expirado ou inválido. Por favor, tente conectar novamente.'
+    }
+    if (key === 'redirect_uri_mismatch' || desc.includes('redirect_uri_mismatch')) {
+      return 'A URI de redirecionamento configurada no Google Cloud não coincide com o endereço deste servidor.'
+    }
+    if (
+      key === 'invalid_client' ||
+      desc.includes('invalid_client') ||
+      desc.includes('unauthorized_client')
+    ) {
+      return 'Credenciais de cliente inválidas ou não autorizadas no Google Cloud Console.'
+    }
+    if (key === 'no_code') {
+      return 'Código de autorização não recebido do Google.'
+    }
+    if (key === 'missing_credentials') {
+      return 'As credenciais GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET não foram configuradas no servidor.'
+    }
+    if (key === 'user_not_identified') {
+      return 'Não foi possível associar a conta do Google ao seu usuário no ERP.'
+    }
+    if (rawDesc && rawDesc.trim()) {
+      return rawDesc
+    }
+    return rawErr || 'Ocorreu um erro desconhecido durante a autenticação com o Google.'
+  }
 
   if (error) {
     console.log('[Google Callback] Parâmetro error presente na query:', error)
-    return e.redirect(302, targetRedirect + '&error=' + encodeURIComponent(error))
+    const friendlyMsg = translateGoogleError(error, '')
+    return e.redirect(302, targetRedirect + '&error=' + encodeURIComponent(friendlyMsg))
   }
 
   if (!code) {
     console.log('[Google Callback] Parâmetro code ausente')
-    return e.redirect(302, targetRedirect + '&error=no_code')
+    const friendlyMsg = translateGoogleError('no_code', '')
+    return e.redirect(302, targetRedirect + '&error=' + encodeURIComponent(friendlyMsg))
   }
 
   const clientId =
@@ -35,16 +133,9 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
 
   if (!clientId || !clientSecret) {
     console.log('[Google Callback] Credenciais OAuth não configuradas no servidor')
-    return e.redirect(302, targetRedirect + '&error=missing_credentials')
+    const friendlyMsg = translateGoogleError('missing_credentials', '')
+    return e.redirect(302, targetRedirect + '&error=' + encodeURIComponent(friendlyMsg))
   }
-
-  let userId = ''
-  try {
-    if (stateStr) {
-      const parsed = JSON.parse(decodeURIComponent(stateStr))
-      userId = parsed.userId || ''
-    }
-  } catch (_) {}
 
   // Troca o code por access_token e refresh_token
   try {
@@ -66,13 +157,17 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
     })
 
     if (tokenRes.statusCode !== 200 || !tokenRes.json) {
-      const errMsg = (tokenRes.json && tokenRes.json.error_description) || 'Falha ao obter tokens'
+      const errCode = (tokenRes.json && tokenRes.json.error) || ''
+      const errDesc = (tokenRes.json && tokenRes.json.error_description) || ''
+      const friendlyMsg = translateGoogleError(errCode || 'token_exchange_failed', errDesc)
+
       console.log('[Google Callback] Falha na troca de tokens com Google:', {
         statusCode: tokenRes.statusCode,
-        error_description: errMsg,
-        body: tokenRes.json || tokenRes.raw,
+        error: errCode,
+        error_description: errDesc,
+        friendly: friendlyMsg,
       })
-      return e.redirect(302, targetRedirect + '&error=' + encodeURIComponent(errMsg))
+      return e.redirect(302, targetRedirect + '&error=' + encodeURIComponent(friendlyMsg))
     }
 
     console.log('[Google Callback] Sucesso na troca de tokens com Google (statusCode 200)')
@@ -113,7 +208,8 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
 
     if (!userId) {
       console.log('[Google Callback] Usuário não identificado (sem state e sem admin fallback)')
-      return e.redirect(302, targetRedirect + '&error=user_not_identified')
+      const friendlyMsg = translateGoogleError('user_not_identified', '')
+      return e.redirect(302, targetRedirect + '&error=' + encodeURIComponent(friendlyMsg))
     }
 
     // Upsert na coleção google_calendar_config
@@ -148,6 +244,11 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
     return e.redirect(302, targetRedirect + '&success=1')
   } catch (err) {
     console.log('[Google Callback] Exceção capturada durante fluxo de callback:', err)
-    return e.redirect(302, targetRedirect + '&error=' + encodeURIComponent('' + err))
+    return e.redirect(
+      302,
+      targetRedirect +
+        '&error=' +
+        encodeURIComponent('Erro no servidor ao processar autorização: ' + err),
+    )
   }
 })
