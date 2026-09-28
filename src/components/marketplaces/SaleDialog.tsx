@@ -19,13 +19,30 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from '@/components/ui/command'
+import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/hooks/use-toast'
 import { apiFieldErrors, apiMessage } from '@/lib/api-error'
 import { dateOnly, formatCurrency, toPocketBaseDate } from '@/lib/format'
 import { marketplacesService } from '@/services/marketplaces'
 import { precificacaoService } from '@/services/precificacao'
 import type { MarketplaceConta, SaleStatus, Venda, VendaItem } from '@/types/domain'
-import type { PrecPrecificacaoRecord, PrecProdutoRecord } from '@/types/precificacao'
+import type {
+  PrecCanalModalidadeRecord,
+  PrecCanalRecord,
+  PrecPrecificacaoRecord,
+  PrecProdutoRecord,
+} from '@/types/precificacao'
+import { Check, ChevronsUpDown } from 'lucide-react'
 
 export function SaleDialog({
   open,
@@ -54,23 +71,30 @@ export function SaleDialog({
   const [saving, setSaving] = useState(false)
   const [catalogoProdutos, setCatalogoProdutos] = useState<PrecProdutoRecord[]>([])
   const [precificacoes, setPrecificacoes] = useState<PrecPrecificacaoRecord[]>([])
+  const [canais, setCanais] = useState<PrecCanalRecord[]>([])
+  const [modalidades, setModalidades] = useState<PrecCanalModalidadeRecord[]>([])
   const [loadingCatalog, setLoadingCatalog] = useState(false)
+  const [openComboboxIndex, setOpenComboboxIndex] = useState<number | null>(null)
 
   const { toast } = useToast()
 
-  // Carregar produtos cadastrados e precificações aprovadas para preencher o valor unitário automaticamente
+  // Carregar produtos cadastrados, canais, modalidades e precificações para preencher os valores unitários
   useEffect(() => {
     if (open) {
       let active = true
       setLoadingCatalog(true)
       Promise.all([
         precificacaoService.listProdutos('status = "ativo"'),
-        precificacaoService.listPrecificacoes('status = "aprovada"'),
+        precificacaoService.listPrecificacoes(),
+        precificacaoService.listCanais(true),
+        precificacaoService.listModalidades(),
       ])
-        .then(([prods, precs]) => {
+        .then(([prods, precs, chans, mods]) => {
           if (!active) return
-          setCatalogoProdutos(prods)
-          setPrecificacoes(precs)
+          setCatalogoProdutos(prods || [])
+          setPrecificacoes(precs || [])
+          setCanais(chans || [])
+          setModalidades(mods || [])
         })
         .catch((err) => {
           console.warn('Falha ao carregar catálogo para vendas:', err)
@@ -162,37 +186,85 @@ export function SaleDialog({
     }))
   }
 
-  // Obter preço sugerido para um produto (prioriza preço aprovado no marketplace da conta selecionada)
-  const getPrecoSugerido = (produtoId: string): number => {
-    const prod = catalogoProdutos.find((p) => p.id === produtoId)
-    if (!prod) return 0
+  // Mapa de canais e modalidades para rótulos nos itens
+  const canaisMap = useMemo(() => new Map(canais.map((c) => [c.id, c])), [canais])
+  const modalidadesMap = useMemo(() => new Map(modalidades.map((m) => [m.id, m])), [modalidades])
 
-    // Procurar precificação aprovada deste produto
-    const precsDoProd = precificacoes.filter((p) => p.produto === produtoId)
-
-    // Se a conta de marketplace selecionada estiver vinculada a um canal, buscar precificação desse canal
-    if (selectedConta?.marketplace) {
-      // prec_canais vinculados a esse marketplace
-      const precExata = precsDoProd.find((p) => {
-        // Se a precificação tiver canal com id ou nome
-        return p.expand?.canal?.marketplace === selectedConta.marketplace
-      })
-      if (precExata && (precExata.preco_aprovado || precExata.premissas?.preco_venda)) {
-        return precExata.preco_aprovado || precExata.premissas?.preco_venda || 0
-      }
-    }
-
-    // Qualquer aprovada do produto
-    if (precsDoProd.length > 0) {
-      const p = precsDoProd[0]
-      if (p.preco_aprovado || p.premissas?.preco_venda) {
-        return p.preco_aprovado || p.premissas?.preco_venda || 0
-      }
-    }
-
-    // Fallback: custo unitário ou zero
-    return prod.custo_aquisicao_unitario || 0
+  // Estrutura agrupada de opções por produto com todas as modalidades/preços aprovados
+  type OpcaoProdutoModalidade = {
+    key: string // formato: `${produtoId}__${precId}` ou `${produtoId}__sem_aprovado`
+    produtoId: string
+    produtoNome: string
+    sku: string
+    precId?: string
+    canalNome?: string
+    canalCor?: string
+    modalidadeNome?: string
+    preco: number
+    temPrecoAprovado: boolean
+    labelBusca: string
   }
+
+  const opcoesAgrupadasPorProduto = useMemo(() => {
+    const grupos: Array<{
+      produto: PrecProdutoRecord
+      opcoes: OpcaoProdutoModalidade[]
+    }> = []
+
+    for (const prod of catalogoProdutos) {
+      // Filtrar todas as precificações com preço aprovado deste produto
+      const precsAprovadas = precificacoes.filter(
+        (p) =>
+          p.produto === prod.id &&
+          (p.status === 'aprovada' || (p.preco_aprovado !== undefined && p.preco_aprovado > 0)),
+      )
+
+      const opcoesDoProd: OpcaoProdutoModalidade[] = []
+
+      if (precsAprovadas.length > 0) {
+        // Incluir cada precificação aprovada como uma modalidade de compra
+        for (const prec of precsAprovadas) {
+          const canal = canaisMap.get(prec.canal)
+          const mod = prec.modalidade ? modalidadesMap.get(prec.modalidade) : null
+          const preco = prec.preco_aprovado || prec.premissas?.preco_venda || 0
+
+          opcoesDoProd.push({
+            key: `${prod.id}__${prec.id}`,
+            produtoId: prod.id,
+            produtoNome: prod.nome,
+            sku: prod.sku,
+            precId: prec.id,
+            canalNome: canal?.nome || 'Canal Homologado',
+            canalCor: canal?.cor,
+            modalidadeNome: mod?.nome,
+            preco,
+            temPrecoAprovado: true,
+            labelBusca:
+              `${prod.sku} ${prod.nome} ${canal?.nome || ''} ${mod?.nome || ''}`.toLowerCase(),
+          })
+        }
+      } else {
+        // Produto sem nenhum preço aprovado: fallback com custo unitário
+        const custoUnit = prod.custo_aquisicao_unitario || 0
+        opcoesDoProd.push({
+          key: `${prod.id}__sem_aprovado`,
+          produtoId: prod.id,
+          produtoNome: prod.nome,
+          sku: prod.sku,
+          preco: custoUnit,
+          temPrecoAprovado: false,
+          labelBusca: `${prod.sku} ${prod.nome} sem preco aprovado custo`.toLowerCase(),
+        })
+      }
+
+      grupos.push({
+        produto: prod,
+        opcoes: opcoesDoProd,
+      })
+    }
+
+    return grupos
+  }, [catalogoProdutos, precificacoes, canaisMap, modalidadesMap])
 
   // Manipulação de itens da venda
   const handleItemChange = (index: number, field: keyof VendaItem, value: string | number) => {
@@ -223,28 +295,25 @@ export function SaleDialog({
     })
   }
 
-  const handleSelectProduto = (index: number, produtoId: string) => {
-    if (produtoId === 'custom') {
-      handleItemChange(index, 'produto_id', '')
-      return
-    }
-
-    const prod = catalogoProdutos.find((p) => p.id === produtoId)
-    if (!prod) return
-
-    const precoSugerido = getPrecoSugerido(produtoId)
-
+  // Ao selecionar uma opção específica de modalidade/preço aprovado do produto
+  const handleSelectOpcaoProduto = (index: number, opcao: OpcaoProdutoModalidade) => {
     setForm((prev) => {
       const novosItens = [...prev.itens]
       const qtdAtual = novosItens[index]?.quantidade || 1
-      const subtotal = Math.round(qtdAtual * precoSugerido * 100) / 100
+      const subtotal = Math.round(qtdAtual * opcao.preco * 100) / 100
+
+      // Formatar descrição descritiva com canal e modalidade se houver
+      const sufixoModalidade = opcao.canalNome
+        ? ` (${opcao.canalNome}${opcao.modalidadeNome ? ` - ${opcao.modalidadeNome}` : ''})`
+        : ''
+      const descricaoFinal = `${opcao.produtoNome}${sufixoModalidade}`
 
       novosItens[index] = {
         ...novosItens[index],
-        produto_id: prod.id,
-        sku: prod.sku,
-        descricao: prod.nome,
-        preco_unitario: precoSugerido,
+        produto_id: opcao.produtoId,
+        sku: opcao.sku,
+        descricao: descricaoFinal,
+        preco_unitario: opcao.preco,
         subtotal,
       }
 
@@ -437,32 +506,147 @@ export function SaleDialog({
                   className="rounded-lg border border-border/70 bg-white p-2.5 space-y-2 shadow-xs"
                 >
                   <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
-                    {/* Seletor de produto do catálogo */}
+                    {/* Seletor de produto do catálogo com todas as modalidades aprovadas agrupadas */}
                     <div className="sm:col-span-5 space-y-1">
                       <span className="text-[10px] font-semibold text-muted-foreground uppercase block">
-                        Produto (Catálogo)
+                        Produto / Modalidade Aprovada
                       </span>
-                      <Select
-                        value={item.produto_id || 'custom'}
-                        onValueChange={(v) => handleSelectProduto(idx, v)}
+                      <Popover
+                        open={openComboboxIndex === idx}
+                        onOpenChange={(isOpen) => setOpenComboboxIndex(isOpen ? idx : null)}
                       >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue placeholder="Selecione o produto..." />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-56">
-                          <SelectItem
-                            value="custom"
-                            className="text-xs italic text-muted-foreground"
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={openComboboxIndex === idx}
+                            className="h-8 w-full justify-between text-xs px-2.5 font-normal bg-white truncate"
                           >
-                            Item avulso / Digitar descrição
-                          </SelectItem>
-                          {catalogoProdutos.map((p) => (
-                            <SelectItem key={p.id} value={p.id} className="text-xs">
-                              [{p.sku}] {p.nome}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                            <span className="truncate text-left">
+                              {item.produto_id ? (
+                                <span className="font-semibold text-foreground">
+                                  {item.sku ? `[${item.sku}] ` : ''}
+                                  {item.descricao || 'Produto selecionado'}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground italic">
+                                  Item avulso ou buscar no catálogo...
+                                </span>
+                              )}
+                            </span>
+                            <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[380px] p-0" align="start">
+                          <Command>
+                            <CommandInput
+                              placeholder="Buscar por nome, SKU, canal..."
+                              className="h-9 text-xs"
+                            />
+                            <CommandList className="max-h-72">
+                              <CommandEmpty className="py-4 text-center text-xs text-muted-foreground">
+                                Nenhum produto encontrado.
+                              </CommandEmpty>
+
+                              {/* Opção para limpar / Item avulso */}
+                              <CommandGroup heading="Avulso">
+                                <CommandItem
+                                  value="__custom_item__"
+                                  onSelect={() => {
+                                    handleItemChange(idx, 'produto_id', '')
+                                    setOpenComboboxIndex(null)
+                                  }}
+                                  className="text-xs cursor-pointer py-1.5"
+                                >
+                                  <span className="italic text-muted-foreground">
+                                    Item avulso (digitar manualmente)
+                                  </span>
+                                  {!item.produto_id && (
+                                    <Check className="ml-auto h-3.5 w-3.5 text-primary" />
+                                  )}
+                                </CommandItem>
+                              </CommandGroup>
+
+                              <CommandSeparator />
+
+                              {/* Grupos por Produto com todas as modalidades/preços aprovados */}
+                              {opcoesAgrupadasPorProduto.map(({ produto, opcoes }) => (
+                                <CommandGroup
+                                  key={produto.id}
+                                  heading={
+                                    <span className="font-bold text-foreground flex items-center gap-1.5">
+                                      <span className="font-mono text-primary">
+                                        [{produto.sku}]
+                                      </span>
+                                      <span className="truncate">{produto.nome}</span>
+                                    </span>
+                                  }
+                                >
+                                  {opcoes.map((opcao) => {
+                                    const isSelected =
+                                      item.produto_id === opcao.produtoId &&
+                                      item.preco_unitario === opcao.preco
+
+                                    return (
+                                      <CommandItem
+                                        key={opcao.key}
+                                        value={opcao.labelBusca}
+                                        onSelect={() => {
+                                          handleSelectOpcaoProduto(idx, opcao)
+                                          setOpenComboboxIndex(null)
+                                        }}
+                                        className="text-xs cursor-pointer py-1.5 pl-4 flex items-center justify-between gap-2"
+                                      >
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                          {opcao.temPrecoAprovado ? (
+                                            <>
+                                              <span
+                                                className="h-2 w-2 rounded-full shrink-0"
+                                                style={{
+                                                  backgroundColor: opcao.canalCor || '#10B981',
+                                                }}
+                                              />
+                                              <span className="font-semibold text-foreground truncate">
+                                                {opcao.canalNome}
+                                              </span>
+                                              {opcao.modalidadeNome && (
+                                                <span className="text-[10px] text-muted-foreground truncate">
+                                                  ({opcao.modalidadeNome})
+                                                </span>
+                                              )}
+                                            </>
+                                          ) : (
+                                            <span className="text-[11px] text-amber-700 italic">
+                                              Sem preço aprovado (usando custo)
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <div className="flex items-center gap-1.5 shrink-0">
+                                          <Badge
+                                            variant="secondary"
+                                            className={`font-mono text-[10px] font-bold ${
+                                              opcao.temPrecoAprovado
+                                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                                : 'bg-amber-50 text-amber-800 border border-amber-200'
+                                            }`}
+                                          >
+                                            {formatCurrency(opcao.preco)}
+                                          </Badge>
+                                          {isSelected && (
+                                            <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                          )}
+                                        </div>
+                                      </CommandItem>
+                                    )
+                                  })}
+                                </CommandGroup>
+                              ))}
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
                     </div>
 
                     {/* Descrição do item */}

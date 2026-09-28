@@ -129,6 +129,9 @@ export default function PrecificacaoComparar() {
   // Modal / Dialog de Cenários Salvos (Repositório)
   const [repositorioOpen, setRepositorioOpen] = useState(false)
 
+  // Modal / Dialog de Cenários Aprovados
+  const [aprovadosOpen, setAprovadosOpen] = useState(false)
+
   // Filtro de canais/marketplaces selecionados (por canal.id)
   const [canaisSelecionados, setCanaisSelecionados] = useState<string[]>(() => {
     try {
@@ -949,6 +952,22 @@ export default function PrecificacaoComparar() {
       .sort((a, b) => new Date(b.created || 0).getTime() - new Date(a.created || 0).getTime())
   }, [selectedProdutoId, precificacoesExistentes])
 
+  // Cenários aprovados do produto selecionado
+  const aprovadosDoProduto = useMemo(() => {
+    if (!selectedProdutoId) return []
+    return precificacoesExistentes
+      .filter(
+        (p) =>
+          p.produto === selectedProdutoId &&
+          (p.status === 'aprovada' || (p.preco_aprovado !== undefined && p.preco_aprovado > 0)),
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.updated || b.created || 0).getTime() -
+          new Date(a.updated || a.created || 0).getTime(),
+      )
+  }, [selectedProdutoId, precificacoesExistentes])
+
   // Função para adicionar rascunho salvo à grade como coluna extra
   const handleAdicionarCenarioSalvo = (cenario: PrecPrecificacaoRecord) => {
     if (cenariosSalvosAdicionados.some((s) => s.id === cenario.id)) {
@@ -1035,6 +1054,27 @@ export default function PrecificacaoComparar() {
               {rascunhosDoProduto.length > 0 && (
                 <Badge className="bg-primary text-white text-[10px] h-4 px-1.5 font-bold">
                   {rascunhosDoProduto.length}
+                </Badge>
+              )}
+            </Button>
+
+            {/* Botão Cenários Aprovados */}
+            <Button
+              variant="outline"
+              size="sm"
+              className={`h-8 text-xs gap-1.5 transition-colors ${
+                aprovadosDoProduto.length > 0
+                  ? 'border-emerald-500/60 text-emerald-700 bg-emerald-50/60 font-semibold hover:bg-emerald-100/60'
+                  : 'bg-white text-muted-foreground'
+              }`}
+              onClick={() => setAprovadosOpen(true)}
+              title="Visualizar preços e modalidades aprovadas deste produto"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+              <span>Cenários Aprovados</span>
+              {aprovadosDoProduto.length > 0 && (
+                <Badge className="bg-emerald-600 text-white text-[10px] h-4 px-1.5 font-bold">
+                  {aprovadosDoProduto.length}
                 </Badge>
               )}
             </Button>
@@ -2824,6 +2864,162 @@ export default function PrecificacaoComparar() {
               size="sm"
               className="h-8 text-xs"
               onClick={() => setRepositorioOpen(false)}
+            >
+              Fechar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ========================================================
+          MODAL: CENÁRIOS APROVADOS DO PRODUTO
+          ======================================================== */}
+      <Dialog open={aprovadosOpen} onOpenChange={setAprovadosOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <div className="flex items-center gap-2 text-emerald-600">
+              <CheckCircle2 className="h-5 w-5" />
+              <DialogTitle className="text-base font-bold">Cenários e Preços Aprovados</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Modalidades e canais com preço aprovado para o produto{' '}
+              <span className="font-semibold text-foreground">
+                {produtoAtual ? `[${produtoAtual.sku}] ${produtoAtual.nome}` : ''}
+              </span>
+              . Estes preços alimentam o registro de vendas diárias nos marketplaces.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-3 py-2 pr-1">
+            {aprovadosDoProduto.length === 0 ? (
+              <div className="text-center py-10 border border-dashed rounded-xl bg-secondary/10 space-y-2">
+                <CheckCircle2 className="h-8 w-8 text-muted-foreground/30 mx-auto" />
+                <p className="text-xs font-semibold text-foreground">
+                  Nenhum preço aprovado para este produto
+                </p>
+                <p className="text-[11px] text-muted-foreground max-w-sm mx-auto">
+                  Simule um preço no comparador e clique em &ldquo;Aprovar Preço&rdquo; no canal
+                  desejado para oficializar o valor de venda.
+                </p>
+              </div>
+            ) : (
+              aprovadosDoProduto.map((cenario) => {
+                const canal = canais.find((c) => c.id === cenario.canal)
+                const modalidade = modalidades.find((m) => m.id === cenario.modalidade)
+                const precoAprovado = cenario.preco_aprovado || cenario.premissas?.preco_venda || 0
+                const resultado = cenario.resultado as Record<string, unknown> | undefined
+                const lucroLiquido = (resultado?.lucro_liquido as number) || 0
+                const margemPct = (resultado?.margem_liquida_pct as number) || 0
+
+                return (
+                  <div
+                    key={cenario.id}
+                    className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/20 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
+                  >
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: canal?.cor || '#10B981' }}
+                        />
+                        <span className="font-bold text-xs text-foreground truncate">
+                          {canal?.nome || 'Canal'}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] h-5 px-1.5 font-semibold text-muted-foreground bg-white"
+                        >
+                          {modalidade?.nome || 'Modalidade Padrão'}
+                        </Badge>
+                        <Badge className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[9px] h-4 px-1.5 font-bold">
+                          Aprovado (v{cenario.versao || 1})
+                        </Badge>
+                      </div>
+
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap pt-0.5">
+                        <div>
+                          <span>Preço Aprovado: </span>
+                          <span className="font-mono font-bold text-emerald-700 text-sm">
+                            {formatCurrency(precoAprovado)}
+                          </span>
+                        </div>
+                        {lucroLiquido !== 0 && (
+                          <div>
+                            <span>Lucro Líq.: </span>
+                            <span
+                              className={`font-mono font-bold ${
+                                lucroLiquido > 0 ? 'text-emerald-600' : 'text-red-600'
+                              }`}
+                            >
+                              {formatCurrency(lucroLiquido)}
+                            </span>
+                          </div>
+                        )}
+                        {margemPct !== 0 && (
+                          <div>
+                            <span>Margem: </span>
+                            <span
+                              className={`font-mono font-bold ${
+                                margemPct > 0 ? 'text-emerald-600' : 'text-red-600'
+                              }`}
+                            >
+                              {margemPct.toFixed(1)}%
+                            </span>
+                          </div>
+                        )}
+                        <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                          <History className="h-3 w-3" />
+                          <span>
+                            Aprovado em{' '}
+                            {cenario.aprovado_em || cenario.updated || cenario.created
+                              ? new Date(
+                                  cenario.aprovado_em || cenario.updated || cenario.created || '',
+                                ).toLocaleDateString('pt-BR', {
+                                  day: '2-digit',
+                                  month: '2-digit',
+                                  year: 'numeric',
+                                })
+                              : 'Recente'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs font-semibold border-primary/40 text-primary hover:bg-primary/5"
+                        onClick={() => {
+                          setAprovadosOpen(false)
+                          if (cenario.modalidade && precoAprovado > 0) {
+                            setPrecosPorColuna((prev) => ({
+                              ...prev,
+                              [cenario.modalidade!]: precoAprovado,
+                            }))
+                            toast({
+                              title: 'Preço carregado na grade',
+                              description: `Preço aprovado de ${formatCurrency(precoAprovado)} aplicado na modalidade ${modalidade?.nome || ''}.`,
+                            })
+                          }
+                        }}
+                      >
+                        Carregar na Grade
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+
+          <div className="border-t border-border pt-3 flex items-center justify-between text-xs text-muted-foreground">
+            <span>{aprovadosDoProduto.length} modalidade(s) com preço aprovado</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => setAprovadosOpen(false)}
             >
               Fechar
             </Button>

@@ -8,6 +8,7 @@ import {
   PackageCheck,
   ChevronRight,
   Truck,
+  BookmarkCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -23,6 +24,7 @@ export function PrecHeader({ titulo, subtitulo, acoes }: PrecHeaderProps) {
   const tabs = [
     { to: '/precificacao', label: 'Visão Geral & Hub', icon: Layers, end: true },
     { to: '/precificacao/comparar', label: 'Comparador Lado a Lado', icon: Calculator },
+    { to: '/precificacao/aprovados', label: 'Cenários & Repositório', icon: BookmarkCheck },
     { to: '/precificacao/dashboard', label: 'Dashboard de Margens', icon: LayoutDashboard },
     { to: '/precificacao/produtos', label: 'Produtos & Custos', icon: PackageCheck },
     { to: '/precificacao/canais', label: 'Canais & Taxas', icon: Store },

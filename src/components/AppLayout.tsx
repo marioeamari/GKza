@@ -31,6 +31,7 @@ import {
   Layers,
   LayoutDashboard,
   PackageCheck,
+  BookmarkCheck,
 } from 'lucide-react'
 import { ContextSelector } from '@/components/ContextSelector'
 
@@ -185,6 +186,7 @@ export function AppLayout() {
   const precificacaoChildren: SubItem[] = [
     { to: '/precificacao', label: 'Visão Geral & Hub', icon: Layers, end: true },
     { to: '/precificacao/comparar', label: 'Comparador Lado a Lado', icon: Calculator },
+    { to: '/precificacao/aprovados', label: 'Cenários & Repositório', icon: BookmarkCheck },
     { to: '/precificacao/dashboard', label: 'Dashboard de Margens', icon: LayoutDashboard },
     { to: '/precificacao/produtos', label: 'Produtos & Custos', icon: PackageCheck },
     { to: '/precificacao/canais', label: 'Canais & Taxas', icon: Store },
@@ -725,6 +727,11 @@ export function AppLayout() {
                 {[
                   ['/precificacao', 'Precificação & Margens (Hub)', Calculator],
                   ['/precificacao/comparar', 'Precificação: Comparador Lado a Lado', Calculator],
+                  [
+                    '/precificacao/aprovados',
+                    'Precificação: Cenários & Repositório',
+                    BookmarkCheck,
+                  ],
                   [
                     '/precificacao/dashboard',
                     'Precificação: Dashboard de Margens',

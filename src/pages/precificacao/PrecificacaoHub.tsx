@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   PackagePlus,
   Store,
+  BookmarkCheck,
   Layers,
   ArrowRight,
   TrendingUp,
@@ -81,9 +82,9 @@ export default function PrecificacaoHub() {
         acoes={
           <div className="flex gap-2">
             <Button asChild variant="outline" className="border-border">
-              <Link to="/precificacao/produtos">
-                <PackagePlus className="mr-2 h-4 w-4" />
-                Novo Produto / Custo
+              <Link to="/precificacao/aprovados">
+                <BookmarkCheck className="mr-2 h-4 w-4 text-emerald-600" />
+                Repositório de Cenários
               </Link>
             </Button>
             <Button

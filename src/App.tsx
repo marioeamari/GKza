@@ -25,6 +25,7 @@ import PrecificacaoDashboard from '@/pages/precificacao/PrecificacaoDashboard'
 import PrecificacaoComparar from '@/pages/precificacao/PrecificacaoComparar'
 import PrecificacaoCanais from '@/pages/precificacao/PrecificacaoCanais'
 import PrecificacaoProdutos from '@/pages/precificacao/PrecificacaoProdutos'
+import PrecificacaoAprovados from '@/pages/precificacao/PrecificacaoAprovados'
 import ConfirmEmail from '@/pages/auth/ConfirmEmail'
 import ForgotPassword from '@/pages/auth/ForgotPassword'
 import Login from '@/pages/auth/Login'
@@ -73,6 +74,7 @@ export default function App() {
           <Route path="/precificacao" element={<PrecificacaoHub />} />
           <Route path="/precificacao/dashboard" element={<PrecificacaoDashboard />} />
           <Route path="/precificacao/comparar" element={<PrecificacaoComparar />} />
+          <Route path="/precificacao/aprovados" element={<PrecificacaoAprovados />} />
           <Route path="/precificacao/canais" element={<PrecificacaoCanais />} />
           <Route path="/precificacao/produtos" element={<PrecificacaoProdutos />} />
           <Route path="/metas-agenda" element={<MetasAgendaHub />} />
