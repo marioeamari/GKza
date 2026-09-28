@@ -114,7 +114,7 @@ export default function HabitosRotinas() {
     return filteredHabitos.filter((h) => {
       if (!h.ativo) return false
       // Verifica se a data de início é <= hoje no fuso local
-      const dtIni = h.data_inicio ? h.data_inicio.split('T')[0] : ''
+      const dtIni = h.data_inicio ? h.data_inicio.slice(0, 10) : ''
       if (dtIni && dtIni > todayStr) return false
       // Verifica se o dia da semana atual está programado
       const dias = h.dias_semana || []
@@ -224,7 +224,7 @@ export default function HabitosRotinas() {
     filteredHabitos.forEach((h) => {
       if (!h.ativo) return
       const diasProg = h.dias_semana || []
-      const dtIni = h.data_inicio ? h.data_inicio.split('T')[0] : ''
+      const dtIni = h.data_inicio ? h.data_inicio.slice(0, 10) : ''
 
       diasDoMes.forEach((dia) => {
         const diaDate = new Date(ano, mesIndex, dia)
@@ -574,7 +574,7 @@ export default function HabitosRotinas() {
                 </thead>
                 <tbody>
                   {filteredHabitos.map((habito) => {
-                    const dtIni = habito.data_inicio ? habito.data_inicio.split('T')[0] : ''
+                    const dtIni = habito.data_inicio ? habito.data_inicio.slice(0, 10) : ''
                     const diasProg = habito.dias_semana || []
 
                     return (

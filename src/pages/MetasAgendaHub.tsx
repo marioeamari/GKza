@@ -149,7 +149,7 @@ export default function MetasAgendaHub() {
   const habitosHoje = useMemo(() => {
     return filteredHabitos.filter((h) => {
       if (!h.ativo) return false
-      const dtIni = h.data_inicio ? h.data_inicio.split('T')[0] : ''
+      const dtIni = h.data_inicio ? h.data_inicio.slice(0, 10) : ''
       if (dtIni && dtIni > todayStr) return false
       return (h.dias_semana || []).includes(hojeDayOfWeek)
     })
@@ -164,7 +164,7 @@ export default function MetasAgendaHub() {
     return filteredTarefas.filter((t) => {
       if (t.etapa === 'concluida') return false
       if (!t.prazo) return true
-      const pStr = t.prazo.split('T')[0]
+      const pStr = t.prazo.slice(0, 10)
       return pStr <= todayStr
     })
   }, [filteredTarefas, todayStr])

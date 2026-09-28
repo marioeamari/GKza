@@ -79,7 +79,7 @@ export function HabitoDialog({ open, onOpenChange, habito, onSuccess }: HabitoDi
         setEmpresaId(habito.empresa || '')
         setDiasSemana(habito.dias_semana || [1, 2, 3, 4, 5])
         setHorario(habito.horario || '')
-        setDataInicio(habito.data_inicio ? habito.data_inicio.split('T')[0] : getLocalDateStr())
+        setDataInicio(habito.data_inicio ? habito.data_inicio.slice(0, 10) : getLocalDateStr())
         setCor(habito.cor || '#DF5830')
       } else {
         setNome('')

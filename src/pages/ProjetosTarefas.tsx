@@ -268,7 +268,7 @@ export default function ProjetosTarefas() {
   // Agendar tarefa na agenda
   const handleAgendarTarefa = (tarefa: Tarefa) => {
     setAgendandoTitulo(`Executar: ${tarefa.titulo}`)
-    setAgendandoData(tarefa.prazo ? tarefa.prazo.split('T')[0] : getLocalDateStr())
+    setAgendandoData(tarefa.prazo ? tarefa.prazo.slice(0, 10) : getLocalDateStr())
     setAgendaDialogOpen(true)
   }
 

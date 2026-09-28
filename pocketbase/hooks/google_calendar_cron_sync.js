@@ -177,10 +177,10 @@ cronAdd('google_calendar_cron_sync', '0 * * * *', () => {
           description: lEv.getString('descricao') || '',
           location: lEv.getString('local') || '',
           start: isDiaInteiro
-            ? { date: dtInicio.split('T')[0] }
+            ? { date: dtInicio.slice(0, 10) }
             : { dateTime: dtInicio, timeZone: 'America/Sao_Paulo' },
           end: isDiaInteiro
-            ? { date: dtFim.split('T')[0] }
+            ? { date: dtFim.slice(0, 10) }
             : { dateTime: dtFim, timeZone: 'America/Sao_Paulo' },
         }
 
