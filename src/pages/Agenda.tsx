@@ -239,12 +239,15 @@ export default function Agenda() {
     })
   }, [currentDate])
 
-  // Mapeia eventos por dia YYYY-MM-DD
+  // Mapeia eventos por dia YYYY-MM-DD respeitando o fuso America/Sao_Paulo
   const eventosPorDia = useMemo(() => {
     const map = new Map<string, AgendaEvento[]>()
     filteredEventos.forEach((ev) => {
       if (!ev.data_inicio) return
-      const dStr = ev.data_inicio.split('T')[0]
+      const dStr =
+        ev.data_inicio.includes('T') || ev.data_inicio.includes(' ')
+          ? getLocalDateStr(new Date(ev.data_inicio))
+          : ev.data_inicio.slice(0, 10)
       const current = map.get(dStr) || []
       current.push(ev)
       map.set(dStr, current)
@@ -380,15 +383,20 @@ export default function Agenda() {
                                 setEditingEvento(ev)
                                 setDialogOpen(true)
                               }}
-                              className="w-full text-left truncate text-[11px] px-1.5 py-0.5 rounded font-medium transition-opacity hover:opacity-80 block"
+                              className="w-full text-left truncate text-[11px] px-1.5 py-0.5 rounded font-medium transition-opacity hover:opacity-80 flex items-center gap-1"
                               style={{
-                                backgroundColor: `${ev.cor || '#DF5830'}15`,
-                                borderLeft: `3px solid ${ev.cor || '#DF5830'}`,
-                                color: ev.cor || '#DF5830',
+                                backgroundColor: `${ev.cor || (ev.origem === 'google' ? '#2563EB' : '#DF5830')}15`,
+                                borderLeft: `3px solid ${ev.cor || (ev.origem === 'google' ? '#2563EB' : '#DF5830')}`,
+                                color: ev.cor || (ev.origem === 'google' ? '#1D4ED8' : '#DF5830'),
                               }}
-                              title={`${ev.titulo} - ${ev.local || ''}`}
+                              title={`${ev.origem === 'google' ? '[Google Calendar] ' : ''}${ev.titulo}${ev.local ? ' - ' + ev.local : ''}`}
                             >
-                              {ev.titulo}
+                              {ev.origem === 'google' && (
+                                <span className="inline-flex items-center text-[9px] font-bold px-1 rounded bg-blue-100 text-blue-700 shrink-0">
+                                  G
+                                </span>
+                              )}
+                              <span className="truncate">{ev.titulo}</span>
                             </button>
                           ))}
                           {evList.length > 3 && (
@@ -465,11 +473,21 @@ export default function Agenda() {
                               <h5 className="font-semibold text-foreground line-clamp-2">
                                 {ev.titulo}
                               </h5>
-                              <ContextBadge
-                                tipo={ev.contexto_tipo}
-                                pessoa={ev.expand?.pessoa}
-                                empresa={ev.expand?.empresa}
-                              />
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <ContextBadge
+                                  tipo={ev.contexto_tipo}
+                                  pessoa={ev.expand?.pessoa}
+                                  empresa={ev.expand?.empresa}
+                                />
+                                {ev.origem === 'google' && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] bg-blue-50/80 text-blue-700 border-blue-200 py-0 px-1.5"
+                                  >
+                                    Google
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
                           )
                         })}
@@ -546,10 +564,10 @@ export default function Agenda() {
                                   />
                                   {ev.origem === 'google' && (
                                     <Badge
-                                      variant="secondary"
-                                      className="text-[10px] bg-blue-50 text-blue-700"
+                                      variant="outline"
+                                      className="text-[10px] bg-blue-50 text-blue-700 border-blue-200"
                                     >
-                                      Google
+                                      Google Calendar
                                     </Badge>
                                   )}
                                 </div>
@@ -652,8 +670,8 @@ export default function Agenda() {
                                 />
                                 {ev.origem === 'google' && (
                                   <Badge
-                                    variant="secondary"
-                                    className="text-[10px] bg-blue-50 text-blue-700"
+                                    variant="outline"
+                                    className="text-[10px] bg-blue-50 text-blue-700 border-blue-200"
                                   >
                                     Google Calendar
                                   </Badge>

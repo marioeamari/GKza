@@ -6,6 +6,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -180,7 +181,16 @@ export function EventoDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[540px]">
         <DialogHeader>
-          <DialogTitle>{evento ? 'Editar Compromisso' : 'Novo Compromisso / Reunião'}</DialogTitle>
+          <div className="flex items-center justify-between pr-6">
+            <DialogTitle>
+              {evento ? 'Editar Compromisso' : 'Novo Compromisso / Reunião'}
+            </DialogTitle>
+            {evento?.origem === 'google' && (
+              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-xs">
+                Sincronizado via Google Calendar
+              </Badge>
+            )}
+          </div>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           <div className="space-y-1.5">

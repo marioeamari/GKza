@@ -46,7 +46,15 @@ export const getLocalDateStr = (date = new Date()): string => {
 }
 
 export const dateOnly = (value: string | Date) => {
+  if (!value) return ''
   if (value instanceof Date) return getLocalDateStr(value)
+  // Se for string ISO com timestamp (ex: '2026-09-21 12:00:00.000Z' ou '2026-09-21T12:00:00.000Z')
+  if (value.includes('T') || value.includes(' ') || value.includes('Z')) {
+    const d = new Date(value)
+    if (!isNaN(d.getTime())) {
+      return getLocalDateStr(d)
+    }
+  }
   return value.slice(0, 10)
 }
 

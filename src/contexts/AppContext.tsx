@@ -342,19 +342,22 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
       }
 
       // Se for contexto pessoal:
-      // - Match se o grupo contém a pessoa do item (verificado acima caso tenha pessoa)
-      // - Se o grupo tem pessoas e o item tem pessoa, só dá match se essa pessoa estiver no grupo
-      // - OU se o grupo NÃO possui membros do tipo empresa (grupo de contexto pessoal/familiar)
+      // - Se o item tem pessoa definida, dá match se essa pessoa estiver no grupo (ou se for órfã conforme checagem acima)
+      // - Se o item NÃO tem pessoa definida (ex.: eventos do Google Calendar, compromissos gerais, anotações):
+      //   dá match se o grupo possui pessoas OU se o grupo for puramente pessoal (sem empresas).
+      //   Nunca bloqueia se o grupo for pessoal. Se o grupo for exclusivamente empresarial (só empresas, sem pessoas),
+      //   então não exibe registros puramente pessoais não vinculados.
       if (item.contexto_tipo === 'pessoal') {
-        if (activeContext.pessoaIds.length > 0) {
-          if (item.pessoa) {
-            return activeContext.pessoaIds.includes(item.pessoa)
+        if (item.pessoa) {
+          if (activeContext.pessoaIds.includes(item.pessoa)) {
+            return true
           }
-          return true
-        }
-        // Se o grupo não tem membros empresa, considera-se grupo pessoal/familiar
-        if (activeContext.empresaIds.length === 0) {
-          return true
+        } else {
+          // Registro pessoal geral (sem pessoa específica):
+          // Se o grupo ativo possui pessoas ou é um grupo sem membros empresa, deve ser exibido.
+          if (activeContext.hasPessoas || activeContext.empresaIds.length === 0) {
+            return true
+          }
         }
       }
 

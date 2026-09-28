@@ -175,7 +175,10 @@ export default function MetasAgendaHub() {
       .filter((ev) => {
         if (ev.status === 'cancelado') return false
         if (!ev.data_inicio) return false
-        const dStr = ev.data_inicio.split('T')[0]
+        const dStr =
+          ev.data_inicio.includes('T') || ev.data_inicio.includes(' ')
+            ? getLocalDateStr(new Date(ev.data_inicio))
+            : ev.data_inicio.slice(0, 10)
         return dStr >= todayStr
       })
       .slice(0, 5)
@@ -406,6 +409,14 @@ export default function MetasAgendaHub() {
                               pessoa={ev.expand?.pessoa}
                               empresa={ev.expand?.empresa}
                             />
+                            {ev.origem === 'google' && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] bg-blue-50 text-blue-700 border-blue-200 py-0 px-1.5"
+                              >
+                                Google
+                              </Badge>
+                            )}
                             {ev.local && (
                               <span className="text-[11px] text-muted-foreground truncate max-w-[140px]">
                                 · {ev.local}
