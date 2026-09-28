@@ -536,7 +536,7 @@ export default function PrecificacaoAprovados() {
                       <Link to={`/precificacao/comparar?sku=${produto.sku}`}>
                         <Calculator className="h-3.5 w-3.5 mr-1.5" />
                         Simular no Comparador
-                      </Link>{' '}
+                      </Link>
                     </Button>
                   </div>
                 </div>
