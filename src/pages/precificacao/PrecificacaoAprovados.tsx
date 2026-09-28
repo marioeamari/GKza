@@ -973,28 +973,30 @@ export default function PrecificacaoAprovados() {
                 Retirar aprovação do cenário?
               </AlertDialogTitle>
             </div>
-            <AlertDialogDescription className="text-xs text-muted-foreground space-y-2 text-left">
-              <p>
-                Você está retirando a aprovação do preço{' '}
-                <strong className="text-foreground font-mono">
-                  {cenarioParaRetirar?.cenario.preco_aprovado
-                    ? formatCurrency(cenarioParaRetirar.cenario.preco_aprovado)
-                    : ''}
-                </strong>{' '}
-                para o produto{' '}
-                <strong className="text-foreground">{cenarioParaRetirar?.produto.nome}</strong> no
-                canal{' '}
-                <strong className="text-foreground">
-                  {cenarioParaRetirar
-                    ? canaisMap.get(cenarioParaRetirar.cenario.canal)?.nome || 'Canal'
-                    : ''}
-                </strong>
-                .
-              </p>
-              <p className="bg-amber-50 border border-amber-200 text-amber-900 p-2.5 rounded-lg text-[11px] leading-relaxed">
-                O cenário voltará para rascunho e o preço aprovado será removido. As vendas já
-                registradas não são afetadas.
-              </p>
+            <AlertDialogDescription asChild>
+              <div className="text-xs text-muted-foreground space-y-2 text-left">
+                <p>
+                  Você está retirando a aprovação do preço{' '}
+                  <strong className="text-foreground font-mono">
+                    {cenarioParaRetirar?.cenario.preco_aprovado
+                      ? formatCurrency(cenarioParaRetirar.cenario.preco_aprovado)
+                      : ''}
+                  </strong>{' '}
+                  para o produto{' '}
+                  <strong className="text-foreground">{cenarioParaRetirar?.produto.nome}</strong> no
+                  canal{' '}
+                  <strong className="text-foreground">
+                    {cenarioParaRetirar
+                      ? canaisMap.get(cenarioParaRetirar.cenario.canal)?.nome || 'Canal'
+                      : ''}
+                  </strong>
+                  .
+                </p>
+                <p className="bg-amber-50 border border-amber-200 text-amber-900 p-2.5 rounded-lg text-[11px] leading-relaxed">
+                  O cenário voltará para rascunho e o preço aprovado será removido. As vendas já
+                  registradas não são afetadas.
+                </p>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-2">
@@ -1045,30 +1047,32 @@ export default function PrecificacaoAprovados() {
                 Excluir cenário salvo?
               </AlertDialogTitle>
             </div>
-            <AlertDialogDescription className="text-xs text-muted-foreground space-y-2 text-left">
-              <p>
-                Você está prestes a remover o cenário salvo{' '}
-                {cenarioParaExcluir?.cenario.versao ? (
-                  <span className="font-semibold text-foreground">
-                    (versão {cenarioParaExcluir.cenario.versao})
-                  </span>
-                ) : (
-                  ''
-                )}{' '}
-                do produto{' '}
-                <strong className="text-foreground">{cenarioParaExcluir?.produto.nome}</strong> no
-                canal{' '}
-                <strong className="text-foreground">
-                  {cenarioParaExcluir
-                    ? canaisMap.get(cenarioParaExcluir.cenario.canal)?.nome || 'Canal'
-                    : ''}
-                </strong>
-                .
-              </p>
-              <p className="bg-destructive/10 border border-destructive/20 text-destructive p-2.5 rounded-lg text-[11px] leading-relaxed">
-                O cenário salvo será excluído permanentemente. Esta ação não pode ser desfeita.
-                Vendas já registradas não são afetadas.
-              </p>
+            <AlertDialogDescription asChild>
+              <div className="text-xs text-muted-foreground space-y-2 text-left">
+                <p>
+                  Você está prestes a remover o cenário salvo{' '}
+                  {cenarioParaExcluir?.cenario.versao ? (
+                    <span className="font-semibold text-foreground">
+                      (versão {cenarioParaExcluir.cenario.versao})
+                    </span>
+                  ) : (
+                    ''
+                  )}{' '}
+                  do produto{' '}
+                  <strong className="text-foreground">{cenarioParaExcluir?.produto.nome}</strong> no
+                  canal{' '}
+                  <strong className="text-foreground">
+                    {cenarioParaExcluir
+                      ? canaisMap.get(cenarioParaExcluir.cenario.canal)?.nome || 'Canal'
+                      : ''}
+                  </strong>
+                  .
+                </p>
+                <p className="bg-destructive/10 border border-destructive/20 text-destructive p-2.5 rounded-lg text-[11px] leading-relaxed">
+                  O cenário salvo será excluído permanentemente. Esta ação não pode ser desfeita.
+                  Vendas já registradas não são afetadas.
+                </p>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-2">

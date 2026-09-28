@@ -3215,28 +3215,30 @@ export default function PrecificacaoComparar() {
                 Excluir cenário salvo?
               </AlertDialogTitle>
             </div>
-            <AlertDialogDescription className="text-xs text-muted-foreground space-y-2 text-left">
-              <p>
-                Você está prestes a remover o cenário salvo{' '}
-                {cenarioParaExcluirModal?.versao ? (
-                  <span className="font-semibold text-foreground">
-                    (versão {cenarioParaExcluirModal.versao})
-                  </span>
-                ) : (
-                  ''
-                )}{' '}
-                do canal{' '}
-                <strong className="text-foreground">
-                  {cenarioParaExcluirModal
-                    ? canais.find((c) => c.id === cenarioParaExcluirModal.canal)?.nome || 'Canal'
-                    : ''}
-                </strong>
-                .
-              </p>
-              <p className="bg-destructive/10 border border-destructive/20 text-destructive p-2.5 rounded-lg text-[11px] leading-relaxed">
-                O cenário salvo será excluído permanentemente. Esta ação não pode ser desfeita.
-                Vendas já registradas não são afetadas.
-              </p>
+            <AlertDialogDescription asChild>
+              <div className="text-xs text-muted-foreground space-y-2 text-left">
+                <p>
+                  Você está prestes a remover o cenário salvo{' '}
+                  {cenarioParaExcluirModal?.versao ? (
+                    <span className="font-semibold text-foreground">
+                      (versão {cenarioParaExcluirModal.versao})
+                    </span>
+                  ) : (
+                    ''
+                  )}{' '}
+                  do canal{' '}
+                  <strong className="text-foreground">
+                    {cenarioParaExcluirModal
+                      ? canais.find((c) => c.id === cenarioParaExcluirModal.canal)?.nome || 'Canal'
+                      : ''}
+                  </strong>
+                  .
+                </p>
+                <p className="bg-destructive/10 border border-destructive/20 text-destructive p-2.5 rounded-lg text-[11px] leading-relaxed">
+                  O cenário salvo será excluído permanentemente. Esta ação não pode ser desfeita.
+                  Vendas já registradas não são afetadas.
+                </p>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-2">
@@ -3287,27 +3289,29 @@ export default function PrecificacaoComparar() {
                 Retirar aprovação do cenário?
               </AlertDialogTitle>
             </div>
-            <AlertDialogDescription className="text-xs text-muted-foreground space-y-2 text-left">
-              <p>
-                Você está retirando a aprovação do preço{' '}
-                <strong className="text-foreground font-mono">
-                  {cenarioParaRetirarAprovacao?.preco_aprovado
-                    ? formatCurrency(cenarioParaRetirarAprovacao.preco_aprovado)
-                    : ''}
-                </strong>{' '}
-                para o canal{' '}
-                <strong className="text-foreground">
-                  {cenarioParaRetirarAprovacao
-                    ? canais.find((c) => c.id === cenarioParaRetirarAprovacao.canal)?.nome ||
-                      'Canal'
-                    : ''}
-                </strong>
-                .
-              </p>
-              <p className="bg-amber-50 border border-amber-200 text-amber-900 p-2.5 rounded-lg text-[11px] leading-relaxed">
-                O cenário voltará para rascunho e o preço aprovado será removido. As vendas já
-                registradas não são afetadas.
-              </p>
+            <AlertDialogDescription asChild>
+              <div className="text-xs text-muted-foreground space-y-2 text-left">
+                <p>
+                  Você está retirando a aprovação do preço{' '}
+                  <strong className="text-foreground font-mono">
+                    {cenarioParaRetirarAprovacao?.preco_aprovado
+                      ? formatCurrency(cenarioParaRetirarAprovacao.preco_aprovado)
+                      : ''}
+                  </strong>{' '}
+                  para o canal{' '}
+                  <strong className="text-foreground">
+                    {cenarioParaRetirarAprovacao
+                      ? canais.find((c) => c.id === cenarioParaRetirarAprovacao.canal)?.nome ||
+                        'Canal'
+                      : ''}
+                  </strong>
+                  .
+                </p>
+                <p className="bg-amber-50 border border-amber-200 text-amber-900 p-2.5 rounded-lg text-[11px] leading-relaxed">
+                  O cenário voltará para rascunho e o preço aprovado será removido. As vendas já
+                  registradas não são afetadas.
+                </p>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-2">
