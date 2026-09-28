@@ -16,6 +16,8 @@ import {
   ExternalLink,
   ShieldAlert,
   Clock,
+  Undo2,
+  Loader2,
 } from 'lucide-react'
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { Button } from '@/components/ui/button'
@@ -31,6 +33,18 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { useToast } from '@/hooks/use-toast'
 import { precificacaoService } from '@/services/precificacao'
 import {
   PrecProdutoRecord,
@@ -56,12 +70,52 @@ export default function PrecificacaoAprovados() {
   const [perfisTributarios, setPerfisTributarios] = useState<PrecPerfilTributarioRecord[]>([])
 
   // Filtros
+  const { toast } = useToast()
   const [busca, setBusca] = useState('')
   const [canalFiltro, setCanalFiltro] = useState<string>('todos')
   const [statusAba, setStatusAba] = useState<TabFiltroStatus>('todos')
   const [ordenacao, setOrdenacao] = useState<'recente' | 'preco_desc' | 'margem_desc' | 'nome'>(
     'recente',
   )
+
+  // Estado para confirmação de retirada de aprovação
+  const [cenarioParaRetirar, setCenarioParaRetirar] = useState<{
+    cenario: PrecPrecificacaoRecord
+    produto: PrecProdutoRecord
+  } | null>(null)
+  const [retirandoAprovacao, setRetirandoAprovacao] = useState(false)
+
+  const recarregarPrecificacoes = async () => {
+    try {
+      const precs = await precificacaoService.listPrecificacoes()
+      setPrecificacoes(precs || [])
+    } catch (err) {
+      console.error('Erro ao recarregar precificações:', err)
+    }
+  }
+
+  const handleConfirmarRetirada = async () => {
+    if (!cenarioParaRetirar) return
+    try {
+      setRetirandoAprovacao(true)
+      await precificacaoService.retirarAprovacao(cenarioParaRetirar.cenario.id)
+      await recarregarPrecificacoes()
+      toast({
+        title: 'Aprovação retirada',
+        description: `O cenário de ${cenarioParaRetirar.produto.nome} voltou para rascunho com sucesso.`,
+      })
+      setCenarioParaRetirar(null)
+    } catch (err) {
+      console.error('Erro ao retirar aprovação:', err)
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao retirar aprovação',
+        description: 'Não foi possível reverter o status do cenário. Tente novamente.',
+      })
+    } finally {
+      setRetirandoAprovacao(false)
+    }
+  }
 
   useEffect(() => {
     let active = true
@@ -696,7 +750,7 @@ export default function PrecificacaoAprovados() {
                           }`}
                         >
                           <div className="space-y-2">
-                            {/* Linha Superior: Canal + Modalidade + Badge de Status */}
+                            {/* Linha Superior: Canal + Modalidade + Badge de Status + Ação de Retirar */}
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-1.5 min-w-0">
                                 <span
@@ -711,17 +765,42 @@ export default function PrecificacaoAprovados() {
                                 </span>
                               </div>
 
-                              {isAprovado ? (
-                                <Badge className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] h-5 px-1.5 font-bold shrink-0 gap-1">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  Aprovado {cenario.versao ? `(v${cenario.versao})` : ''}
-                                </Badge>
-                              ) : (
-                                <Badge className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] h-5 px-1.5 font-bold shrink-0 gap-1">
-                                  <Bookmark className="h-3 w-3" />
-                                  Salvo {cenario.versao ? `(v${cenario.versao})` : ''}
-                                </Badge>
-                              )}
+                              <div className="flex items-center gap-1 shrink-0">
+                                {isAprovado ? (
+                                  <>
+                                    <Badge className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] h-5 px-1.5 font-bold shrink-0 gap-1">
+                                      <CheckCircle2 className="h-3 w-3" />
+                                      Aprovado {cenario.versao ? `(v${cenario.versao})` : ''}
+                                    </Badge>
+                                    <TooltipProvider delayDuration={200}>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() =>
+                                              setCenarioParaRetirar({ cenario, produto })
+                                            }
+                                            className="h-6 w-6 p-0 text-muted-foreground hover:text-amber-700 hover:bg-amber-100/60 transition-colors"
+                                            aria-label="Retirar aprovação"
+                                          >
+                                            <Undo2 className="h-3.5 w-3.5" />
+                                          </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="top" className="text-xs">
+                                          Retirar aprovação
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  </>
+                                ) : (
+                                  <Badge className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] h-5 px-1.5 font-bold shrink-0 gap-1">
+                                    <Bookmark className="h-3 w-3" />
+                                    Salvo {cenario.versao ? `(v${cenario.versao})` : ''}
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
 
                             {/* Modalidade */}
@@ -818,6 +897,78 @@ export default function PrecificacaoAprovados() {
           })}
         </div>
       )}
+
+      {/* AlertDialog de Confirmação para Retirar Aprovação */}
+      <AlertDialog
+        open={!!cenarioParaRetirar}
+        onOpenChange={(open) => {
+          if (!open && !retirandoAprovacao) {
+            setCenarioParaRetirar(null)
+          }
+        }}
+      >
+        <AlertDialogContent className="bg-white border-border sm:max-w-md">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 text-primary mb-1">
+              <Undo2 className="h-5 w-5 text-primary" />
+              <AlertDialogTitle className="text-base font-bold text-foreground">
+                Retirar aprovação do cenário?
+              </AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-xs text-muted-foreground space-y-2 text-left">
+              <p>
+                Você está retirando a aprovação do preço{' '}
+                <strong className="text-foreground font-mono">
+                  {cenarioParaRetirar?.cenario.preco_aprovado
+                    ? formatCurrency(cenarioParaRetirar.cenario.preco_aprovado)
+                    : ''}
+                </strong>{' '}
+                para o produto{' '}
+                <strong className="text-foreground">{cenarioParaRetirar?.produto.nome}</strong> no
+                canal{' '}
+                <strong className="text-foreground">
+                  {cenarioParaRetirar
+                    ? canaisMap.get(cenarioParaRetirar.cenario.canal)?.nome || 'Canal'
+                    : ''}
+                </strong>
+                .
+              </p>
+              <p className="bg-amber-50 border border-amber-200 text-amber-900 p-2.5 rounded-lg text-[11px] leading-relaxed">
+                O cenário voltará para rascunho e o preço aprovado será removido. As vendas já
+                registradas não são afetadas.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-2">
+            <AlertDialogCancel
+              disabled={retirandoAprovacao}
+              className="text-xs h-9 bg-secondary/50 hover:bg-secondary border-border"
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={retirandoAprovacao}
+              onClick={(e) => {
+                e.preventDefault()
+                handleConfirmarRetirada()
+              }}
+              className="text-xs h-9 bg-primary hover:bg-primary/90 text-white font-bold gap-1.5"
+            >
+              {retirandoAprovacao ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Retirando...
+                </>
+              ) : (
+                <>
+                  <Undo2 className="h-3.5 w-3.5" />
+                  Retirar aprovação
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

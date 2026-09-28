@@ -62,6 +62,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { precificacaoService } from '@/services/precificacao'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -131,6 +141,9 @@ export default function PrecificacaoComparar() {
 
   // Modal / Dialog de Cenários Aprovados
   const [aprovadosOpen, setAprovadosOpen] = useState(false)
+  const [cenarioParaRetirarAprovacao, setCenarioParaRetirarAprovacao] =
+    useState<PrecPrecificacaoRecord | null>(null)
+  const [retirandoAprovacaoModal, setRetirandoAprovacaoModal] = useState(false)
 
   // Filtro de canais/marketplaces selecionados (por canal.id)
   const [canaisSelecionados, setCanaisSelecionados] = useState<string[]>(() => {
@@ -1085,6 +1098,31 @@ export default function PrecificacaoComparar() {
       title: 'Cenário removido da grade',
       description: 'O cenário salvo continua preservado no Repositório.',
     })
+  }
+
+  // Função para retirar aprovação de um cenário no modal de Aprovados
+  const handleConfirmarRetiradaModal = async () => {
+    if (!cenarioParaRetirarAprovacao) return
+    try {
+      setRetirandoAprovacaoModal(true)
+      await precificacaoService.retirarAprovacao(cenarioParaRetirarAprovacao.id)
+      const precsAtualizadas = await precificacaoService.listPrecificacoes()
+      setPrecificacoesExistentes(precsAtualizadas)
+      toast({
+        title: 'Aprovação retirada',
+        description: `O cenário voltou para rascunho com sucesso.`,
+      })
+      setCenarioParaRetirarAprovacao(null)
+    } catch (err) {
+      console.error('Erro ao retirar aprovação do modal:', err)
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao retirar aprovação',
+        description: 'Não foi possível reverter o status do cenário. Tente novamente.',
+      })
+    } finally {
+      setRetirandoAprovacaoModal(false)
+    }
   }
 
   return (
@@ -3065,6 +3103,16 @@ export default function PrecificacaoComparar() {
                       >
                         Carregar na Grade
                       </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 text-xs text-muted-foreground hover:text-amber-700 hover:bg-amber-100/60"
+                        onClick={() => setCenarioParaRetirarAprovacao(cenario)}
+                        title="Retirar aprovação deste cenário"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                        Retirar aprovação
+                      </Button>
                     </div>
                   </div>
                 )
@@ -3085,6 +3133,67 @@ export default function PrecificacaoComparar() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Confirmação de Retirada de Aprovação no Modal do Comparador */}
+      <AlertDialog
+        open={!!cenarioParaRetirarAprovacao}
+        onOpenChange={(open) => {
+          if (!open && !retirandoAprovacaoModal) {
+            setCenarioParaRetirarAprovacao(null)
+          }
+        }}
+      >
+        <AlertDialogContent className="bg-white border-border sm:max-w-md">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 text-primary mb-1">
+              <RotateCcw className="h-5 w-5 text-primary" />
+              <AlertDialogTitle className="text-base font-bold text-foreground">
+                Retirar aprovação do cenário?
+              </AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-xs text-muted-foreground space-y-2 text-left">
+              <p>
+                Você está retirando a aprovação do preço{' '}
+                <strong className="text-foreground font-mono">
+                  {cenarioParaRetirarAprovacao?.preco_aprovado
+                    ? formatCurrency(cenarioParaRetirarAprovacao.preco_aprovado)
+                    : ''}
+                </strong>{' '}
+                para o canal{' '}
+                <strong className="text-foreground">
+                  {cenarioParaRetirarAprovacao
+                    ? canais.find((c) => c.id === cenarioParaRetirarAprovacao.canal)?.nome ||
+                      'Canal'
+                    : ''}
+                </strong>
+                .
+              </p>
+              <p className="bg-amber-50 border border-amber-200 text-amber-900 p-2.5 rounded-lg text-[11px] leading-relaxed">
+                O cenário voltará para rascunho e o preço aprovado será removido. As vendas já
+                registradas não são afetadas.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-2">
+            <AlertDialogCancel
+              disabled={retirandoAprovacaoModal}
+              className="text-xs h-9 bg-secondary/50 hover:bg-secondary border-border"
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={retirandoAprovacaoModal}
+              onClick={(e) => {
+                e.preventDefault()
+                handleConfirmarRetiradaModal()
+              }}
+              className="text-xs h-9 bg-primary hover:bg-primary/90 text-white font-bold gap-1.5"
+            >
+              {retirandoAprovacaoModal ? 'Retirando...' : 'Retirar aprovação'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

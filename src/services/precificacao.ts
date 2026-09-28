@@ -543,6 +543,15 @@ export const precificacaoService = {
     })
   },
 
+  async retirarAprovacao(cenarioId: string): Promise<PrecPrecificacaoRecord> {
+    return pb.collection('prec_precificacoes').update<PrecPrecificacaoRecord>(cenarioId, {
+      status: 'rascunho',
+      preco_aprovado: 0,
+      aprovado_por: '',
+      aprovado_em: '',
+    })
+  },
+
   /**
    * Marca precificações como 'desatualizada' quando custos ou taxas são modificados
    */
