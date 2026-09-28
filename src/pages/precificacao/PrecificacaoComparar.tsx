@@ -219,10 +219,19 @@ export default function PrecificacaoComparar() {
 
         // Inicializar produto da URL ou o primeiro disponível
         const paramSku = searchParams.get('sku')
+        const paramCenarioId = searchParams.get('cenarioId')
+
         if (paramSku && prods.length > 0) {
           const match = prods.find((p) => p.sku === paramSku)
           if (match) setSelectedProdutoId(match.id)
           else setSelectedProdutoId(prods[0]?.id || '')
+        } else if (paramCenarioId && precs.length > 0) {
+          const cenarioEncontrado = precs.find((c) => c.id === paramCenarioId)
+          if (cenarioEncontrado && cenarioEncontrado.produto) {
+            setSelectedProdutoId(cenarioEncontrado.produto)
+          } else if (prods.length > 0) {
+            setSelectedProdutoId(prods[0].id)
+          }
         } else if (prods.length > 0) {
           setSelectedProdutoId(prods[0].id)
         }
@@ -455,10 +464,13 @@ export default function PrecificacaoComparar() {
   // Carregar dados salvos das precificações deste produto quando o produto selecionado mudar
   // REGRA DO USUÁRIO: Por padrão, carregar o último card de canal APROVADO (não o rascunho).
   // Se não houver aprovado para o canal, o card começa vazio/pendente com o valor global padrão.
-  // Limpa cenários salvos extras adicionados na grade ao trocar de produto.
+  // Limpa cenários salvos extras adicionados na grade ao trocar de produto (a menos que venha cenarioId de rascunho na URL).
   useEffect(() => {
-    setCenariosSalvosAdicionados([])
+    const cenarioIdParam = searchParams.get('cenarioId')
+    let cenarioAlvoParam: PrecPrecificacaoRecord | undefined
+
     if (!selectedProdutoId || !precificacoesExistentes.length) {
+      setCenariosSalvosAdicionados([])
       setPrecosPorColuna({})
       setDescontosPorColuna({})
       return
@@ -466,9 +478,14 @@ export default function PrecificacaoComparar() {
 
     const precsProduto = precificacoesExistentes.filter((p) => p.produto === selectedProdutoId)
     if (!precsProduto.length) {
+      setCenariosSalvosAdicionados([])
       setPrecosPorColuna({})
       setDescontosPorColuna({})
       return
+    }
+
+    if (cenarioIdParam) {
+      cenarioAlvoParam = precsProduto.find((p) => p.id === cenarioIdParam)
     }
 
     const precosRecuperados: Record<string, number> = {}
@@ -510,9 +527,46 @@ export default function PrecificacaoComparar() {
       }
     }
 
+    // Se o cenarioId na URL apontar para um cenário aprovado específico deste produto
+    if (cenarioAlvoParam && cenarioAlvoParam.status === 'aprovada' && cenarioAlvoParam.modalidade) {
+      const precoAlvo = cenarioAlvoParam.preco_aprovado || cenarioAlvoParam.premissas?.preco_venda
+      if (precoAlvo && precoAlvo > 0) {
+        precosRecuperados[cenarioAlvoParam.modalidade] = precoAlvo
+      }
+      setModoCalculo('manual')
+      setCenariosSalvosAdicionados([])
+    } else if (cenarioAlvoParam && cenarioAlvoParam.status === 'rascunho') {
+      // Se for um rascunho salvo vindo da URL: importar para a grade
+      setCenariosSalvosAdicionados([cenarioAlvoParam])
+
+      if (
+        cenarioAlvoParam.premissas?.descontos &&
+        Array.isArray(cenarioAlvoParam.premissas.descontos)
+      ) {
+        let pctCliente = 0
+        let descPixPct = 0
+        for (const d of cenarioAlvoParam.premissas.descontos) {
+          if (d.nome?.toLowerCase().includes('pix')) {
+            descPixPct = d.valor || 0
+          } else {
+            pctCliente = d.valor || 0
+          }
+        }
+        descontosRecuperados[`salvo_${cenarioAlvoParam.id}`] = { pctCliente, descPixPct }
+      }
+
+      const precoRascunho =
+        cenarioAlvoParam.preco_aprovado || cenarioAlvoParam.premissas?.preco_venda
+      if (precoRascunho) {
+        precosRecuperados[`salvo_${cenarioAlvoParam.id}`] = precoRascunho
+      }
+    } else {
+      setCenariosSalvosAdicionados([])
+    }
+
     setPrecosPorColuna(precosRecuperados)
     setDescontosPorColuna(descontosRecuperados)
-  }, [selectedProdutoId, precificacoesExistentes])
+  }, [selectedProdutoId, precificacoesExistentes, searchParams])
 
   // Ordenação e Filtragem por marketplace/canal selecionado
   const colunasModalidade = useMemo(() => {
@@ -665,7 +719,7 @@ export default function PrecificacaoComparar() {
         modalidade: mod,
         canal: chan,
         taxasDoCanal: txs,
-        precoSalvoFixo: cenario.premissas?.preco_venda || cenario.preco_aprovado,
+        precoSalvoFixo: cenario.preco_aprovado || cenario.premissas?.preco_venda,
       })
     }
 
@@ -697,12 +751,7 @@ export default function PrecificacaoComparar() {
       const canal = col.canal
 
       // Determinar preço anunciado da coluna
-      let precoColuna = valorPrecoGlobal
-      if (col.isSalvoExtra && col.precoSalvoFixo && precosPorColuna[colKey] === undefined) {
-        precoColuna = col.precoSalvoFixo
-      } else if (modoCalculo === 'manual' || col.isSalvoExtra) {
-        precoColuna = precosPorColuna[colKey] ?? (col.precoSalvoFixo || valorPrecoGlobal)
-      }
+      let precoColuna = precosPorColuna[colKey] ?? (col.precoSalvoFixo || valorPrecoGlobal)
 
       // Descontos
       const descConf = descontosPorColuna[colKey] || { pctCliente: 0, descPixPct: 0 }
@@ -768,12 +817,20 @@ export default function PrecificacaoComparar() {
       let precoSugeridoMeta = precoColuna
       let convergiuMeta = true
 
-      if (!col.isSalvoExtra && modoCalculo === 'meta_lucro') {
+      if (
+        !col.isSalvoExtra &&
+        precosPorColuna[colKey] === undefined &&
+        modoCalculo === 'meta_lucro'
+      ) {
         const sol = resolverPrecoParaMeta(cenarioBase, 'lucro_reais', metaLucroReais)
         precoColuna = sol.preco_sugerido
         precoSugeridoMeta = sol.preco_sugerido
         convergiuMeta = sol.convergiu
-      } else if (!col.isSalvoExtra && modoCalculo === 'meta_margem') {
+      } else if (
+        !col.isSalvoExtra &&
+        precosPorColuna[colKey] === undefined &&
+        modoCalculo === 'meta_margem'
+      ) {
         const sol = resolverPrecoParaMeta(cenarioBase, 'margem_pct', metaMargemPct)
         precoColuna = sol.preco_sugerido
         precoSugeridoMeta = sol.preco_sugerido
@@ -996,7 +1053,7 @@ export default function PrecificacaoComparar() {
     }
 
     // Inicializar preço
-    const precoSalvo = cenario.premissas?.preco_venda || cenario.preco_aprovado
+    const precoSalvo = cenario.preco_aprovado || cenario.premissas?.preco_venda
     if (precoSalvo) {
       setPrecosPorColuna((prev) => ({
         ...prev,
@@ -1934,9 +1991,10 @@ export default function PrecificacaoComparar() {
                   const lucroNegativo = dem.lucro_liquido < 0
                   const descConf = descontosPorColuna[colKey] || { pctCliente: 0, descPixPct: 0 }
                   const precoColuna =
-                    modoCalculo === 'manual' || col.isSalvoExtra
-                      ? (precosPorColuna[colKey] ?? (col.precoSalvoFixo || valorPrecoGlobal))
-                      : cenario.precoAnunciado
+                    precosPorColuna[colKey] ??
+                    (modoCalculo === 'manual' || col.isSalvoExtra
+                      ? col.precoSalvoFixo || valorPrecoGlobal
+                      : cenario.precoAnunciado)
 
                   const isDraggingThis = draggedModId === modId && !col.isSalvoExtra
                   const isDragOverThis = dragOverModId === modId && !col.isSalvoExtra
@@ -2739,7 +2797,7 @@ export default function PrecificacaoComparar() {
                 const canal = canais.find((c) => c.id === cenario.canal)
                 const modalidade = modalidades.find((m) => m.id === cenario.modalidade)
                 const jaAdicionado = cenariosSalvosAdicionados.some((s) => s.id === cenario.id)
-                const precoSalvo = cenario.premissas?.preco_venda || cenario.preco_aprovado || 0
+                const precoSalvo = cenario.preco_aprovado || cenario.premissas?.preco_venda || 0
                 const resultado = cenario.resultado as Record<string, unknown> | undefined
                 const lucroLiquido = (resultado?.lucro_liquido as number) || 0
                 const margemPct = (resultado?.margem_liquida_pct as number) || 0
@@ -2993,6 +3051,7 @@ export default function PrecificacaoComparar() {
                         onClick={() => {
                           setAprovadosOpen(false)
                           if (cenario.modalidade && precoAprovado > 0) {
+                            setModoCalculo('manual')
                             setPrecosPorColuna((prev) => ({
                               ...prev,
                               [cenario.modalidade!]: precoAprovado,

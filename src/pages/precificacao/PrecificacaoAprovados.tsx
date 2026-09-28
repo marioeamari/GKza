@@ -536,7 +536,7 @@ export default function PrecificacaoAprovados() {
                       <Link to={`/precificacao/comparar?sku=${produto.sku}`}>
                         <Calculator className="h-3.5 w-3.5 mr-1.5" />
                         Simular no Comparador
-                      </Link>
+                      </Link>{' '}
                     </Button>
                   </div>
                 </div>
@@ -674,7 +674,9 @@ export default function PrecificacaoAprovados() {
                               size="sm"
                               className="h-6 px-1.5 text-[10px] font-bold text-primary hover:text-primary hover:bg-primary/10"
                             >
-                              <Link to={`/precificacao/comparar?sku=${produto.sku}`}>
+                              <Link
+                                to={`/precificacao/comparar?sku=${produto.sku}&cenarioId=${cenario.id}`}
+                              >
                                 Abrir
                                 <ArrowRight className="h-2.5 w-2.5 ml-1" />
                               </Link>
