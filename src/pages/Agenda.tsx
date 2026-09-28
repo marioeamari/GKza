@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
-  Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -10,14 +9,14 @@ import {
   Trash2,
   Edit2,
   CalendarRange,
-  ListFilter,
-  CheckCircle2,
+  Repeat,
 } from 'lucide-react'
 import { PageHeader } from '@/components/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Switch } from '@/components/ui/switch'
 import { ContextBadge } from '@/components/ContextBadge'
 import { EventoDialog } from '@/components/agenda/EventoDialog'
 import { agendaService } from '@/services/agenda'
@@ -32,7 +31,7 @@ import type { AgendaEvento } from '@/types/domain'
 type ViewMode = 'mes' | 'semana' | 'dia' | 'lista'
 
 export default function Agenda() {
-  const { matchesContext } = useAppContext()
+  const { matchesContext, activeContext } = useAppContext()
   const { user } = useAuth()
   const { toast } = useToast()
 
@@ -40,6 +39,7 @@ export default function Agenda() {
   const [loading, setLoading] = useState(true)
   const [viewMode, setViewMode] = useState<ViewMode>('mes')
   const [currentDate, setCurrentDate] = useState(() => new Date())
+  const [exibirPessoaisGoogle, setExibirPessoaisGoogle] = useState(true)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingEvento, setEditingEvento] = useState<AgendaEvento | null>(null)
@@ -103,16 +103,37 @@ export default function Agenda() {
     }
   }
 
+  // Determina se o contexto ativo é puramente empresarial (só empresas, sem pessoas)
+  const isContextoEmpresarial = useMemo(() => {
+    return !activeContext.isAll && activeContext.hasEmpresas && !activeContext.hasPessoas
+  }, [activeContext])
+
   // Filtragem pelo contexto de visualização ativo
+  // Eventos do Google e compromissos gerais (sem pessoa e sem empresa) são tratados como eventos globais do usuário.
+  // Em contextos puramente empresariais, eles aparecem por padrão e podem ser alternados pelo toggle.
   const filteredEventos = useMemo(() => {
-    return eventos.filter((ev) =>
-      matchesContext({
+    return eventos.filter((ev) => {
+      const isGoogle = ev.origem === 'google'
+      const isGeral = !ev.pessoa && !ev.empresa
+
+      // Se for contexto puramente empresarial e for evento Google ou geral
+      if (isContextoEmpresarial && (isGoogle || isGeral)) {
+        return exibirPessoaisGoogle
+      }
+
+      // Se não for contexto empresarial puramente restrito, Google e gerais aparecem sempre
+      if (isGoogle || isGeral) {
+        return true
+      }
+
+      // Regra padrão de contexto por pessoa/empresa/contexto_tipo
+      return matchesContext({
         contexto_tipo: ev.contexto_tipo,
         pessoa: ev.pessoa,
         empresa: ev.empresa,
-      }),
-    )
-  }, [eventos, matchesContext])
+      })
+    })
+  }, [eventos, matchesContext, isContextoEmpresarial, exibirPessoaisGoogle])
 
   const handleDelete = async (id: string) => {
     if (!can(user?.role, 'deleteFinance')) {
@@ -175,85 +196,273 @@ export default function Agenda() {
     return 'Próximos Compromissos'
   }, [currentDate, viewMode])
 
+  // Helpers para manipulação consistente de datas 'YYYY-MM-DD' (fuso America/Sao_Paulo)
+  const addDaysToStr = useCallback((dateStr: string, days: number): string => {
+    const [y, m, d] = dateStr.split('-').map(Number)
+    const dt = new Date(Date.UTC(y, m - 1, d + days, 12, 0, 0))
+    return getLocalDateStr(dt)
+  }, [])
+
+  const getDayNumberFromStr = useCallback((dateStr: string): number => {
+    return parseInt(dateStr.slice(8, 10), 10)
+  }, [])
+
   // --- VISUALIZAÇÃO EM MÊS ---
+  // Padronizado com getLocalDateStr (America/Sao_Paulo) para sincronizar com os eventosPorDia
   const daysInMonth = useMemo(() => {
-    const y = currentDate.getFullYear()
-    const m = currentDate.getMonth()
-    const firstDayIndex = new Date(y, m, 1).getDay() // 0 = Dom
-    const lastDate = new Date(y, m + 1, 0).getDate()
+    const currStr = getLocalDateStr(currentDate)
+    const currYear = parseInt(currStr.slice(0, 4), 10)
+    const currMonth = parseInt(currStr.slice(5, 7), 10)
+
+    // Primeiro dia do mês corrente às 12h UTC para navegação estável
+    const firstOfMonthUtc = new Date(Date.UTC(currYear, currMonth - 1, 1, 12, 0, 0))
+    const firstDayIndex = firstOfMonthUtc.getUTCDay() // 0 = Dom ... 6 = Sáb
+
+    // Data de início da grade: voltar firstDayIndex dias a partir do dia 1
+    const startDateUtc = new Date(Date.UTC(currYear, currMonth - 1, 1 - firstDayIndex, 12, 0, 0))
 
     const days: { dateStr: string; dayNumber: number; inMonth: boolean }[] = []
+    for (let i = 0; i < 42; i++) {
+      const cellDateUtc = new Date(
+        Date.UTC(
+          startDateUtc.getUTCFullYear(),
+          startDateUtc.getUTCMonth(),
+          startDateUtc.getUTCDate() + i,
+          12,
+          0,
+          0,
+        ),
+      )
+      const dateStr = getLocalDateStr(cellDateUtc)
+      const cellMonth = parseInt(dateStr.slice(5, 7), 10)
+      const inMonth = cellMonth === currMonth
+      const dayNumber = getDayNumberFromStr(dateStr)
 
-    // Dias do mês anterior
-    const prevLastDate = new Date(y, m, 0).getDate()
-    for (let i = firstDayIndex - 1; i >= 0; i--) {
-      const dNum = prevLastDate - i
-      const prevM = m === 0 ? 12 : m
-      const prevY = m === 0 ? y - 1 : y
       days.push({
-        dateStr: `${prevY}-${String(prevM).padStart(2, '0')}-${String(dNum).padStart(2, '0')}`,
-        dayNumber: dNum,
-        inMonth: false,
+        dateStr,
+        dayNumber,
+        inMonth,
       })
     }
 
-    // Dias do mês atual
-    for (let i = 1; i <= lastDate; i++) {
-      days.push({
-        dateStr: `${y}-${String(m + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`,
-        dayNumber: i,
-        inMonth: true,
-      })
-    }
-
-    // Completar até 35 ou 42 para fechar grade
-    const remaining = 42 - days.length
-    if (remaining < 7) {
-      for (let i = 1; i <= remaining; i++) {
-        const nextM = m + 2 > 12 ? 1 : m + 2
-        const nextY = m + 2 > 12 ? y + 1 : y
-        days.push({
-          dateStr: `${nextY}-${String(nextM).padStart(2, '0')}-${String(i).padStart(2, '0')}`,
-          dayNumber: i,
-          inMonth: false,
-        })
-      }
-    }
-
-    return days
-  }, [currentDate])
+    // Se a última semana inteira (índices 35..41) pertencer ao próximo mês, podemos manter 35 ou 42.
+    // Reduz para 35 se a 6ª linha for totalmente fora do mês
+    const lastRowAllOutside = days.slice(35).every((d) => !d.inMonth)
+    return lastRowAllOutside ? days.slice(0, 35) : days
+  }, [currentDate, getDayNumberFromStr])
 
   // --- VISUALIZAÇÃO EM SEMANA ---
+  // Padronizado com getLocalDateStr (America/Sao_Paulo)
   const weekDays = useMemo(() => {
-    const start = new Date(currentDate)
-    start.setDate(currentDate.getDate() - currentDate.getDay())
+    const currStr = getLocalDateStr(currentDate)
+    const [y, m, d] = currStr.split('-').map(Number)
+    const currUtc = new Date(Date.UTC(y, m - 1, d, 12, 0, 0))
+    const dayOfWeek = currUtc.getUTCDay() // 0 = Dom ... 6 = Sáb
+    const startUtc = new Date(Date.UTC(y, m - 1, d - dayOfWeek, 12, 0, 0))
+
+    const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+
     return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(start)
-      d.setDate(start.getDate() + i)
+      const cellUtc = new Date(
+        Date.UTC(
+          startUtc.getUTCFullYear(),
+          startUtc.getUTCMonth(),
+          startUtc.getUTCDate() + i,
+          12,
+          0,
+          0,
+        ),
+      )
+      const dateStr = getLocalDateStr(cellUtc)
       return {
-        date: d,
-        dateStr: getLocalDateStr(d),
-        dayNumber: d.getDate(),
-        dayName: ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][d.getDay()],
+        date: cellUtc,
+        dateStr,
+        dayNumber: getDayNumberFromStr(dateStr),
+        dayName: dayNames[i],
       }
     })
-  }, [currentDate])
+  }, [currentDate, getDayNumberFromStr])
 
-  // Mapeia eventos por dia YYYY-MM-DD respeitando o fuso America/Sao_Paulo
+  // Intervalo visível atual para projeção de recorrências
+  const visibleRange = useMemo(() => {
+    if (viewMode === 'mes') {
+      if (daysInMonth.length === 0) {
+        const t = getLocalDateStr(currentDate)
+        return { startStr: t, endStr: t }
+      }
+      return {
+        startStr: daysInMonth[0].dateStr,
+        endStr: daysInMonth[daysInMonth.length - 1].dateStr,
+      }
+    }
+    if (viewMode === 'semana') {
+      if (weekDays.length === 0) {
+        const t = getLocalDateStr(currentDate)
+        return { startStr: t, endStr: t }
+      }
+      return {
+        startStr: weekDays[0].dateStr,
+        endStr: weekDays[6].dateStr,
+      }
+    }
+    if (viewMode === 'dia') {
+      const d = getLocalDateStr(currentDate)
+      return { startStr: d, endStr: d }
+    }
+    // Para modo lista: projeta no horizonte dos próximos 90 dias a partir da data de referência
+    const startStr = getLocalDateStr(currentDate)
+    const endStr = addDaysToStr(startStr, 90)
+    return { startStr, endStr }
+  }, [viewMode, daysInMonth, weekDays, currentDate, addDaysToStr])
+
+  // Mapeia eventos projetados por dia YYYY-MM-DD respeitando o fuso America/Sao_Paulo
+  // Suporta projeção de eventos com recorrência ('diaria', 'semanal', 'mensal', 'anual')
   const eventosPorDia = useMemo(() => {
     const map = new Map<string, AgendaEvento[]>()
+    const { startStr, endStr } = visibleRange
+
     filteredEventos.forEach((ev) => {
-      if (!ev.data_inicio) return
-      const dStr =
+      if (!ev.data_inicio || ev.status === 'cancelado') return
+
+      const baseStartStr =
         ev.data_inicio.includes('T') || ev.data_inicio.includes(' ')
           ? getLocalDateStr(new Date(ev.data_inicio))
           : ev.data_inicio.slice(0, 10)
-      const current = map.get(dStr) || []
-      current.push(ev)
-      map.set(dStr, current)
+
+      // Time original para reconstruir data_inicio em instâncias projetadas
+      let timeSuffix = 'T09:00:00.000Z'
+      if (ev.data_inicio.includes('T')) {
+        timeSuffix = 'T' + ev.data_inicio.split('T')[1]
+      } else if (ev.data_inicio.includes(' ')) {
+        timeSuffix = 'T' + ev.data_inicio.split(' ')[1]
+      }
+
+      const rec = ev.recorrencia && ev.recorrencia !== 'nenhuma' ? ev.recorrencia : null
+
+      if (!rec) {
+        // Evento pontual simples
+        const current = map.get(baseStartStr) || []
+        current.push(ev)
+        map.set(baseStartStr, current)
+        return
+      }
+
+      // Evento com recorrência: projetar ocorrências no intervalo [startStr, endStr]
+      // Não projeta antes da data de início original
+      const maxRangeEnd = endStr
+      if (baseStartStr > maxRangeEnd) return
+
+      // Parse da data base
+      const [bY, bM, bD] = baseStartStr.split('-').map(Number)
+      const [sY, sM, sD] = startStr.split('-').map(Number)
+      const [eY, eM, eD] = maxRangeEnd.split('-').map(Number)
+
+      const baseDateUtc = new Date(Date.UTC(bY, bM - 1, bD, 12, 0, 0))
+      const rangeStartUtc = new Date(Date.UTC(sY, sM - 1, sD, 12, 0, 0))
+      const rangeEndUtc = new Date(Date.UTC(eY, eM - 1, eD, 12, 0, 0))
+
+      const addInstance = (targetDateStr: string) => {
+        const isOccurrenceOriginal = targetDateStr === baseStartStr
+        const instance: AgendaEvento = isOccurrenceOriginal
+          ? ev
+          : {
+              ...ev,
+              id: `${ev.id}_${targetDateStr}`,
+              data_inicio: `${targetDateStr}${timeSuffix}`,
+              data_fim: ev.data_fim ? `${targetDateStr}${timeSuffix}` : undefined,
+            }
+        const current = map.get(targetDateStr) || []
+        current.push(instance)
+        map.set(targetDateStr, current)
+      }
+
+      if (rec === 'diaria') {
+        const cur = new Date(baseDateUtc < rangeStartUtc ? rangeStartUtc : baseDateUtc)
+        while (cur <= rangeEndUtc) {
+          const dStr = getLocalDateStr(cur)
+          if (dStr >= baseStartStr) {
+            addInstance(dStr)
+          }
+          cur.setUTCDate(cur.getUTCDate() + 1)
+        }
+      } else if (rec === 'semanal') {
+        // Alinhamento de semanas: calcular distância em dias desde baseDateUtc
+        const diffDays = Math.floor((rangeStartUtc.getTime() - baseDateUtc.getTime()) / 86400000)
+        let stepMultiplier = 0
+        if (diffDays > 0) {
+          stepMultiplier = Math.floor(diffDays / 7)
+        }
+        const cur = new Date(Date.UTC(bY, bM - 1, bD + stepMultiplier * 7, 12, 0, 0))
+        while (cur < rangeStartUtc) {
+          cur.setUTCDate(cur.getUTCDate() + 7)
+        }
+        while (cur <= rangeEndUtc) {
+          const dStr = getLocalDateStr(cur)
+          if (dStr >= baseStartStr) {
+            addInstance(dStr)
+          }
+          cur.setUTCDate(cur.getUTCDate() + 7)
+        }
+      } else if (rec === 'mensal') {
+        let curYear = bY
+        let curMonth = bM // 1..12
+        let curUtc = new Date(Date.UTC(curYear, curMonth - 1, bD, 12, 0, 0))
+
+        // Avançar se estiver antes do início do intervalo visível
+        while (curUtc < rangeStartUtc) {
+          curMonth++
+          if (curMonth > 12) {
+            curMonth = 1
+            curYear++
+          }
+          curUtc = new Date(Date.UTC(curYear, curMonth - 1, bD, 12, 0, 0))
+        }
+
+        while (curUtc <= rangeEndUtc) {
+          const dStr = getLocalDateStr(curUtc)
+          if (dStr >= baseStartStr) {
+            addInstance(dStr)
+          }
+          curMonth++
+          if (curMonth > 12) {
+            curMonth = 1
+            curYear++
+          }
+          curUtc = new Date(Date.UTC(curYear, curMonth - 1, bD, 12, 0, 0))
+        }
+      } else if (rec === 'anual') {
+        let curYear = bY
+        let curUtc = new Date(Date.UTC(curYear, bM - 1, bD, 12, 0, 0))
+
+        while (curUtc < rangeStartUtc) {
+          curYear++
+          curUtc = new Date(Date.UTC(curYear, bM - 1, bD, 12, 0, 0))
+        }
+
+        while (curUtc <= rangeEndUtc) {
+          const dStr = getLocalDateStr(curUtc)
+          if (dStr >= baseStartStr) {
+            addInstance(dStr)
+          }
+          curYear++
+          curUtc = new Date(Date.UTC(curYear, bM - 1, bD, 12, 0, 0))
+        }
+      }
     })
+
     return map
-  }, [filteredEventos])
+  }, [filteredEventos, visibleRange])
+
+  // Lista plana de eventos para a view 'lista', já considerando ocorrências projetadas e ordenadas
+  const eventosLista = useMemo(() => {
+    const list: AgendaEvento[] = []
+    const dates = Array.from(eventosPorDia.keys()).sort()
+    dates.forEach((dStr) => {
+      const items = eventosPorDia.get(dStr) || []
+      list.push(...items)
+    })
+    return list
+  }, [eventosPorDia])
 
   const todayStr = getLocalDateStr()
 
@@ -290,6 +499,26 @@ export default function Agenda() {
           )}
         </div>
       </PageHeader>
+
+      {/* BANNER / TOGGLE DE COMPROMISSOS PESSOAIS E GOOGLE EM CONTEXTO EMPRESARIAL */}
+      {isContextoEmpresarial && (
+        <div className="flex items-center justify-between bg-blue-50/70 border border-blue-200/80 rounded-xl px-4 py-2.5 text-xs text-blue-900">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-blue-950">Contexto PJ ativo:</span>
+            <span>Exibir compromissos pessoais e Google Calendar</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium text-blue-800">
+              {exibirPessoaisGoogle ? 'Visíveis' : 'Ocultos'}
+            </span>
+            <Switch
+              checked={exibirPessoaisGoogle}
+              onCheckedChange={setExibirPessoaisGoogle}
+              aria-label="Exibir compromissos pessoais/Google"
+            />
+          </div>
+        </div>
+      )}
 
       {/* CONTROLES DA AGENDA */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-border">
@@ -375,30 +604,34 @@ export default function Agenda() {
                         </div>
 
                         <div className="space-y-1 flex-1 overflow-y-auto max-h-[80px]">
-                          {evList.slice(0, 3).map((ev) => (
-                            <button
-                              key={ev.id}
-                              type="button"
-                              onClick={() => {
-                                setEditingEvento(ev)
-                                setDialogOpen(true)
-                              }}
-                              className="w-full text-left truncate text-[11px] px-1.5 py-0.5 rounded font-medium transition-opacity hover:opacity-80 flex items-center gap-1"
-                              style={{
-                                backgroundColor: `${ev.cor || (ev.origem === 'google' ? '#2563EB' : '#DF5830')}15`,
-                                borderLeft: `3px solid ${ev.cor || (ev.origem === 'google' ? '#2563EB' : '#DF5830')}`,
-                                color: ev.cor || (ev.origem === 'google' ? '#1D4ED8' : '#DF5830'),
-                              }}
-                              title={`${ev.origem === 'google' ? '[Google Calendar] ' : ''}${ev.titulo}${ev.local ? ' - ' + ev.local : ''}`}
-                            >
-                              {ev.origem === 'google' && (
-                                <span className="inline-flex items-center text-[9px] font-bold px-1 rounded bg-blue-100 text-blue-700 shrink-0">
-                                  G
-                                </span>
-                              )}
-                              <span className="truncate">{ev.titulo}</span>
-                            </button>
-                          ))}
+                          {evList.slice(0, 3).map((ev) => {
+                            const origId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
+                            const baseEvent = eventos.find((e) => e.id === origId) || ev
+                            return (
+                              <button
+                                key={ev.id}
+                                type="button"
+                                onClick={() => {
+                                  setEditingEvento(baseEvent)
+                                  setDialogOpen(true)
+                                }}
+                                className="w-full text-left truncate text-[11px] px-1.5 py-0.5 rounded font-medium transition-opacity hover:opacity-80 flex items-center gap-1"
+                                style={{
+                                  backgroundColor: `${ev.cor || (ev.origem === 'google' ? '#2563EB' : '#DF5830')}15`,
+                                  borderLeft: `3px solid ${ev.cor || (ev.origem === 'google' ? '#2563EB' : '#DF5830')}`,
+                                  color: ev.cor || (ev.origem === 'google' ? '#1D4ED8' : '#DF5830'),
+                                }}
+                                title={`${ev.origem === 'google' ? '[Google Calendar] ' : ''}${ev.titulo}${ev.local ? ' - ' + ev.local : ''}`}
+                              >
+                                {ev.origem === 'google' && (
+                                  <span className="inline-flex items-center text-[9px] font-bold px-1 rounded bg-blue-100 text-blue-700 shrink-0">
+                                    G
+                                  </span>
+                                )}
+                                <span className="truncate">{ev.titulo}</span>
+                              </button>
+                            )
+                          })}
                           {evList.length > 3 && (
                             <span className="text-[10px] text-muted-foreground block text-center">
                               +{evList.length - 3} mais
@@ -460,7 +693,9 @@ export default function Agenda() {
                             <div
                               key={ev.id}
                               onClick={() => {
-                                setEditingEvento(ev)
+                                const origId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
+                                const baseEvent = eventos.find((e) => e.id === origId) || ev
+                                setEditingEvento(baseEvent)
                                 setDialogOpen(true)
                               }}
                               className="p-2 rounded-lg border border-border bg-white text-xs cursor-pointer hover:shadow-xs transition-shadow space-y-1"
@@ -469,6 +704,14 @@ export default function Agenda() {
                               <span className="text-[10px] text-muted-foreground font-semibold flex items-center gap-1">
                                 <Clock className="h-3 w-3" />
                                 {timeStr}
+                                {ev.recorrencia && ev.recorrencia !== 'nenhuma' && (
+                                  <span
+                                    title={`Recorrência: ${ev.recorrencia}`}
+                                    className="inline-flex items-center"
+                                  >
+                                    <Repeat className="h-2.5 w-2.5 ml-0.5 text-muted-foreground" />
+                                  </span>
+                                )}
                               </span>
                               <h5 className="font-semibold text-foreground line-clamp-2">
                                 {ev.titulo}
@@ -482,8 +725,11 @@ export default function Agenda() {
                                 {ev.origem === 'google' && (
                                   <Badge
                                     variant="outline"
-                                    className="text-[10px] bg-blue-50/80 text-blue-700 border-blue-200 py-0 px-1.5"
+                                    className="text-[10px] bg-blue-50/80 text-blue-700 border-blue-200 py-0 px-1.5 flex items-center gap-1"
                                   >
+                                    <span className="font-bold text-[9px] bg-blue-600 text-white rounded px-0.5 leading-none">
+                                      G
+                                    </span>
                                     Google
                                   </Badge>
                                 )}
@@ -565,9 +811,17 @@ export default function Agenda() {
                                   {ev.origem === 'google' && (
                                     <Badge
                                       variant="outline"
-                                      className="text-[10px] bg-blue-50 text-blue-700 border-blue-200"
+                                      className="text-[10px] bg-blue-50 text-blue-700 border-blue-200 flex items-center gap-1"
                                     >
+                                      <span className="font-bold text-[9px] bg-blue-600 text-white rounded px-1 leading-none">
+                                        G
+                                      </span>
                                       Google Calendar
+                                    </Badge>
+                                  )}
+                                  {ev.recorrencia && ev.recorrencia !== 'nenhuma' && (
+                                    <Badge variant="secondary" className="text-[10px] capitalize">
+                                      {ev.recorrencia}
                                     </Badge>
                                   )}
                                 </div>
@@ -595,7 +849,9 @@ export default function Agenda() {
                                   variant="ghost"
                                   className="h-8 w-8 text-muted-foreground hover:text-foreground"
                                   onClick={() => {
-                                    setEditingEvento(ev)
+                                    const origId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
+                                    const baseEvent = eventos.find((e) => e.id === origId) || ev
+                                    setEditingEvento(baseEvent)
                                     setDialogOpen(true)
                                   }}
                                 >
@@ -607,7 +863,10 @@ export default function Agenda() {
                                   size="icon"
                                   variant="ghost"
                                   className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                                  onClick={() => handleDelete(ev.id)}
+                                  onClick={() => {
+                                    const origId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
+                                    handleDelete(origId)
+                                  }}
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
@@ -627,13 +886,13 @@ export default function Agenda() {
           {viewMode === 'lista' && (
             <Card className="border-border/60">
               <CardContent className="p-6">
-                {filteredEventos.length === 0 ? (
+                {eventosLista.length === 0 ? (
                   <div className="text-center py-12 text-sm text-muted-foreground">
                     Nenhum compromisso cadastrado para o contexto ativo.
                   </div>
                 ) : (
                   <div className="divide-y divide-border">
-                    {filteredEventos.map((ev) => {
+                    {eventosLista.map((ev) => {
                       const dIni = new Date(ev.data_inicio)
                       const dataFormatada = dIni.toLocaleDateString('pt-BR', {
                         weekday: 'short',
@@ -644,6 +903,9 @@ export default function Agenda() {
                       const hora = ev.dia_inteiro
                         ? 'Dia todo'
                         : `${String(dIni.getHours()).padStart(2, '0')}:${String(dIni.getMinutes()).padStart(2, '0')}`
+
+                      // Para exclusão/edição, se for ocorrência projetada, extrai o ID original da base
+                      const originalId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
 
                       return (
                         <div
@@ -671,9 +933,17 @@ export default function Agenda() {
                                 {ev.origem === 'google' && (
                                   <Badge
                                     variant="outline"
-                                    className="text-[10px] bg-blue-50 text-blue-700 border-blue-200"
+                                    className="text-[10px] bg-blue-50 text-blue-700 border-blue-200 flex items-center gap-1"
                                   >
+                                    <span className="font-bold text-[9px] bg-blue-600 text-white rounded px-1 leading-none">
+                                      G
+                                    </span>
                                     Google Calendar
+                                  </Badge>
+                                )}
+                                {ev.recorrencia && ev.recorrencia !== 'nenhuma' && (
+                                  <Badge variant="secondary" className="text-[10px] capitalize">
+                                    {ev.recorrencia}
                                   </Badge>
                                 )}
                               </div>
@@ -700,7 +970,9 @@ export default function Agenda() {
                                 variant="ghost"
                                 className="h-8 w-8 text-muted-foreground hover:text-foreground"
                                 onClick={() => {
-                                  setEditingEvento(ev)
+                                  // Abre o registro original para edição
+                                  const baseEvent = eventos.find((e) => e.id === originalId) || ev
+                                  setEditingEvento(baseEvent)
                                   setDialogOpen(true)
                                 }}
                               >
@@ -712,7 +984,7 @@ export default function Agenda() {
                                 size="icon"
                                 variant="ghost"
                                 className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                                onClick={() => handleDelete(ev.id)}
+                                onClick={() => handleDelete(originalId)}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
