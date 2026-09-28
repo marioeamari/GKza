@@ -37,7 +37,10 @@ import {
   PrecPrecificacaoRecord,
   PrecCanalRecord,
   PrecCanalModalidadeRecord,
+  PrecTaxaRecord,
+  PrecPerfilTributarioRecord,
 } from '@/types/precificacao'
+import { calcularDemonstrativo, DemonstrativoResultado } from '@/lib/precificacao/calculo'
 import { formatCurrency } from '@/lib/format'
 
 type TabFiltroStatus = 'todos' | 'aprovados' | 'salvos'
@@ -49,6 +52,8 @@ export default function PrecificacaoAprovados() {
   const [precificacoes, setPrecificacoes] = useState<PrecPrecificacaoRecord[]>([])
   const [canais, setCanais] = useState<PrecCanalRecord[]>([])
   const [modalidades, setModalidades] = useState<PrecCanalModalidadeRecord[]>([])
+  const [taxas, setTaxas] = useState<PrecTaxaRecord[]>([])
+  const [perfisTributarios, setPerfisTributarios] = useState<PrecPerfilTributarioRecord[]>([])
 
   // Filtros
   const [busca, setBusca] = useState('')
@@ -64,11 +69,13 @@ export default function PrecificacaoAprovados() {
     async function carregarDados() {
       try {
         setLoading(true)
-        const [prods, precs, chans, mods] = await Promise.all([
+        const [prods, precs, chans, mods, txs, tribs] = await Promise.all([
           precificacaoService.listProdutos(),
           precificacaoService.listPrecificacoes(),
           precificacaoService.listCanais(true),
           precificacaoService.listModalidades(),
+          precificacaoService.listTaxas(),
+          precificacaoService.listPerfisTributarios(),
         ])
 
         if (active) {
@@ -76,6 +83,8 @@ export default function PrecificacaoAprovados() {
           setPrecificacoes(precs || [])
           setCanais(chans || [])
           setModalidades(mods || [])
+          setTaxas(txs || [])
+          setPerfisTributarios(tribs || [])
         }
       } catch (err) {
         console.error('Erro ao carregar dados do repositório de precificações:', err)
@@ -140,6 +149,115 @@ export default function PrecificacaoAprovados() {
     })
   }, [precificacoes, statusAba, canalFiltro, busca, produtos, canaisMap, modalidadesMap])
 
+  // Recalcular demonstrativo em tempo real para cada cenário/produto com as regras e custos vigentes
+  const demonstrativosMap = useMemo(() => {
+    const mapa = new Map<string, DemonstrativoResultado>()
+    const produtosMap = new Map(produtos.map((p) => [p.id, p]))
+
+    // Helper para perfil tributário vigente
+    const isPerfilVigente = (perfil: PrecPerfilTributarioRecord): boolean => {
+      if (!perfil.vigencia) return true
+      const vig = perfil.vigencia.trim()
+      if (!vig) return true
+      if (/^\d{4}-\d{2}-\d{2}/.test(vig)) {
+        const vigDate = new Date(vig)
+        if (!isNaN(vigDate.getTime())) {
+          return new Date() <= vigDate
+        }
+      }
+      return true
+    }
+    const perfisValidos = perfisTributarios.filter(isPerfilVigente)
+
+    for (const cenario of precificacoes) {
+      const prod = produtosMap.get(cenario.produto)
+      if (!prod) continue
+
+      const preco = cenario.preco_aprovado || cenario.premissas?.preco_venda || 0
+
+      // Modalidade e canal
+      const modalidade = cenario.modalidade ? modalidadesMap.get(cenario.modalidade) : null
+
+      // Taxas do canal/modalidade vigentes
+      const taxasDoCanal = taxas.filter(
+        (t) => t.canal === cenario.canal && (!t.modalidade || t.modalidade === cenario.modalidade),
+      )
+
+      // Perfil tributário
+      const perfilProduto = perfisValidos.find(
+        (p) => p.escopo === 'produto' && p.produto === prod.id,
+      )
+      const perfilEmpresa = prod.empresa
+        ? perfisValidos.find((p) => p.escopo === 'empresa' && p.empresa === prod.empresa)
+        : null
+      const perfilOperacao = perfisValidos.find((p) => p.escopo === 'operacao')
+      const perfil = perfilProduto || perfilEmpresa || perfilOperacao
+
+      const aliquotaDas = cenario.premissas?.aliquota_das_pct ?? perfil?.aliquota_das_pct ?? 6.95
+      const aliquotaIcms = cenario.premissas?.aliquota_icms_pct ?? perfil?.aliquota_icms_pct ?? 2.23
+      const dasImpostoMes = perfil?.outros?.das_imposto_total_mes ?? 76.5
+      const pedidosMes = perfil?.outros?.pedidos_estimados_mes ?? 3000
+      const prazoRecebimentoDias = modalidade?.prazo_recebimento_dias || 0
+
+      // Descontos salvos no cenário se houver
+      const descontosInput = Array.isArray(cenario.premissas?.descontos)
+        ? cenario.premissas.descontos.map((d) => ({
+            nome: d.nome || 'Desconto',
+            tipo: d.tipo || ('percentual' as const),
+            valor: d.valor || 0,
+            financiado_por: d.financiado_por || ('vendedor' as const),
+          }))
+        : []
+
+      try {
+        const dem = calcularDemonstrativo({
+          produto: {
+            sku: prod.sku,
+            nome: prod.nome,
+            tipo: prod.tipo,
+            categoria: prod.categoria,
+            peso_g: prod.peso_g,
+            dimensao_comprimento_cm: prod.dimensao_comprimento_cm,
+            dimensao_largura_cm: prod.dimensao_largura_cm,
+            dimensao_altura_cm: prod.dimensao_altura_cm,
+            composicao: prod.composicao,
+            perda_pct: prod.perda_pct,
+            custo_aquisicao_unitario: prod.custo_aquisicao_unitario,
+            despesas_compra: prod.despesas_compra,
+            custo_etiqueta: prod.custo_etiqueta,
+            custo_adicional_embalagem: prod.custo_adicional_embalagem,
+          },
+          preco_anunciado: preco,
+          descontos: descontosInput,
+          taxas: taxasDoCanal.map((t) => ({
+            id: t.id,
+            nome: t.nome,
+            base_calculo: t.base_calculo,
+            tipo_valor: t.tipo_valor,
+            valor: t.valor,
+            condicao: t.condicao,
+            responsavel: t.responsavel,
+            tipo_regra: t.tipo_regra,
+            financiado_por: t.financiado_por,
+            status_conferencia: t.status_conferencia,
+          })),
+          tributos: {
+            aliquota_das_pct: aliquotaDas,
+            aliquota_icms_pct: aliquotaIcms,
+            das_imposto_total_mes: dasImpostoMes,
+            pedidos_estimados_mes: pedidosMes,
+          },
+          prazo_recebimento_dias: prazoRecebimentoDias,
+        })
+        mapa.set(cenario.id, dem)
+      } catch (err) {
+        console.warn(`Erro ao calcular demonstrativo para o cenário ${cenario.id}:`, err)
+      }
+    }
+
+    return mapa
+  }, [precificacoes, produtos, modalidadesMap, taxas, perfisTributarios])
+
   // Agrupamento por produto
   const gruposPorProduto = useMemo(() => {
     const mapa = new Map<
@@ -165,10 +283,13 @@ export default function PrecificacaoAprovados() {
         const precoA = a.preco_aprovado || a.premissas?.preco_venda || 0
         const precoB = b.preco_aprovado || b.premissas?.preco_venda || 0
 
+        const demA = demonstrativosMap.get(a.id)
+        const demB = demonstrativosMap.get(b.id)
         const resA = a.resultado as Record<string, unknown> | undefined
         const resB = b.resultado as Record<string, unknown> | undefined
-        const margemA = (resA?.margem_liquida_pct as number) || 0
-        const margemB = (resB?.margem_liquida_pct as number) || 0
+
+        const margemA = demA?.margem_liquida_pct ?? (resA?.margem_liquida_pct as number) ?? 0
+        const margemB = demB?.margem_liquida_pct ?? (resB?.margem_liquida_pct as number) ?? 0
 
         if (ordenacao === 'preco_desc') return precoB - precoA
         if (ordenacao === 'margem_desc') return margemB - margemA
@@ -194,7 +315,7 @@ export default function PrecificacaoAprovados() {
     })
 
     return lista
-  }, [precificacoesFiltradas, produtos, ordenacao])
+  }, [precificacoesFiltradas, produtos, ordenacao, demonstrativosMap])
 
   // Estatísticas do repositório
   const stats = useMemo(() => {
@@ -554,11 +675,16 @@ export default function PrecificacaoAprovados() {
                         (cenario.preco_aprovado !== undefined && cenario.preco_aprovado > 0)
                       const preco = cenario.preco_aprovado || cenario.premissas?.preco_venda || 0
 
+                      const dem = demonstrativosMap.get(cenario.id)
                       const resultado = cenario.resultado as Record<string, unknown> | undefined
-                      const lucroLiquido = (resultado?.lucro_liquido as number) || 0
-                      const margemPct = (resultado?.margem_liquida_pct as number) || 0
-                      const custoTotal = (resultado?.custo_total_produto as number) || 0
-                      const taxasTotal = (resultado?.total_taxas_reais as number) || 0
+
+                      const lucroLiquido =
+                        dem?.lucro_liquido ?? ((resultado?.lucro_liquido as number) || 0)
+                      const margemPct =
+                        dem?.margem_liquida_pct ?? ((resultado?.margem_liquida_pct as number) || 0)
+                      const taxasTotal =
+                        dem?.total_taxas_retidas_canal ??
+                        ((resultado?.total_taxas_retidas_canal as number) || 0)
 
                       return (
                         <div
