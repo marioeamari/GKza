@@ -142,6 +142,7 @@ export const precificacaoService = {
     return pb.collection('prec_canais').getFullList<PrecCanalRecord>({
       filter,
       sort: 'ordem,nome',
+      expand: 'marketplace',
     })
   },
 

@@ -273,6 +273,15 @@ export interface MarketplaceConta extends RecordModel {
   }
 }
 
+export interface VendaItem {
+  produto_id?: string
+  sku?: string
+  descricao: string
+  quantidade: number
+  preco_unitario: number
+  subtotal: number
+}
+
 export interface Venda extends RecordModel {
   pedido_id: string
   marketplace_conta: string
@@ -283,6 +292,7 @@ export interface Venda extends RecordModel {
   valor_liquido: number
   status: SaleStatus
   lancamento: string
+  itens?: VendaItem[]
   expand?: {
     marketplace_conta?: MarketplaceConta
     lancamento?: Lancamento

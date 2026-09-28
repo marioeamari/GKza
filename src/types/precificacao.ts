@@ -73,12 +73,21 @@ export interface PrecCanalRecord {
   updated: string
   nome: string
   tipo: 'site_proprio' | 'marketplace'
+  marketplace?: string
   ativo?: boolean
   programas_frete?: unknown
   formas_pagamento?: unknown
   vigencia?: string
   cor?: string
   ordem?: number
+  expand?: {
+    marketplace?: {
+      id: string
+      nome: string
+      slug: string
+      cor: string
+    }
+  }
 }
 
 export interface PrecCanalModalidadeRecord {

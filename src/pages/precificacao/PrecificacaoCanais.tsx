@@ -34,7 +34,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { marketplacesService } from '@/services/marketplaces'
 import { precificacaoService } from '@/services/precificacao'
+import type { Marketplace } from '@/types/domain'
 import { PrecCanalModalidadeRecord, PrecCanalRecord, PrecTaxaRecord } from '@/types/precificacao'
 import { formatarResumoCondicao } from '@/lib/precificacao/calculo'
 import { formatCurrency } from '@/lib/format'
@@ -47,6 +49,7 @@ export default function PrecificacaoCanais() {
   const [canais, setCanais] = useState<PrecCanalRecord[]>([])
   const [modalidades, setModalidades] = useState<PrecCanalModalidadeRecord[]>([])
   const [taxas, setTaxas] = useState<PrecTaxaRecord[]>([])
+  const [marketplacesList, setMarketplacesList] = useState<Marketplace[]>([])
 
   // Filtro de canal selecionado
   const [canalAtivoId, setCanalAtivoId] = useState<string>('')
@@ -87,14 +90,16 @@ export default function PrecificacaoCanais() {
   async function carregarDados(novoCanalIdSelecionar?: string) {
     try {
       setLoading(true)
-      const [chans, mods, txs] = await Promise.all([
+      const [chans, mods, txs, mps] = await Promise.all([
         precificacaoService.listCanais(),
         precificacaoService.listModalidades(),
         precificacaoService.listTaxas(),
+        marketplacesService.listMarketplaces(),
       ])
       setCanais(chans)
       setModalidades(mods)
       setTaxas(txs)
+      setMarketplacesList(mps)
 
       if (novoCanalIdSelecionar) {
         setCanalAtivoId(novoCanalIdSelecionar)
@@ -134,10 +139,16 @@ export default function PrecificacaoCanais() {
     }
 
     try {
+      const marketplaceVinculo =
+        (canalEditando?.tipo || 'marketplace') === 'marketplace'
+          ? canalEditando?.marketplace || ''
+          : ''
+
       if (canalEditando?.id) {
         await precificacaoService.updateCanal(canalEditando.id, {
           ...canalEditando,
           nome: nomeLimpo,
+          marketplace: marketplaceVinculo,
         })
         toast({ title: 'Canal atualizado com sucesso' })
         setOpenCanalDialog(false)
@@ -146,6 +157,7 @@ export default function PrecificacaoCanais() {
         const { canal, reativado } = await precificacaoService.createCanal({
           nome: nomeLimpo,
           tipo: canalEditando?.tipo || 'marketplace',
+          marketplace: marketplaceVinculo,
           ativo: true,
           cor: canalEditando?.cor || '#DF5830',
           vigencia: canalEditando?.vigencia || 'Vigente',
@@ -560,9 +572,20 @@ export default function PrecificacaoCanais() {
                             </Badge>
                           )}
                         </div>
-                        <span className="text-[10px] text-muted-foreground block capitalize">
-                          {c.tipo.replace('_', ' ')} • {countTaxas} taxas
-                        </span>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[10px] text-muted-foreground block capitalize">
+                            {c.tipo.replace('_', ' ')} • {countTaxas} taxas
+                          </span>
+                          {c.expand?.marketplace && (
+                            <Badge
+                              variant="secondary"
+                              className="text-[9px] h-4 px-1 py-0 bg-primary/10 text-primary border border-primary/20 font-normal"
+                              title={`Vinculado ao marketplace ${c.expand.marketplace.nome}`}
+                            >
+                              🔗 {c.expand.marketplace.nome}
+                            </Badge>
+                          )}
+                        </div>
                       </div>
                     </button>
 
@@ -621,9 +644,24 @@ export default function PrecificacaoCanais() {
                         <Badge variant="secondary" className="text-xs capitalize">
                           {canalSelecionado.tipo.replace('_', ' ')}
                         </Badge>
+                        {canalSelecionado.expand?.marketplace && (
+                          <Badge
+                            variant="outline"
+                            className="text-xs border-primary/30 text-primary bg-primary/5 flex items-center gap-1"
+                          >
+                            <span
+                              className="h-2 w-2 rounded-full"
+                              style={{ backgroundColor: canalSelecionado.expand.marketplace.cor }}
+                            />
+                            Vinculado: {canalSelecionado.expand.marketplace.nome}
+                          </Badge>
+                        )}
                       </div>
                       <CardDescription className="text-xs mt-0.5">
                         Vigência: {canalSelecionado.vigencia || 'Valores da Planilha'}
+                        {canalSelecionado.expand?.marketplace && (
+                          <span> • Sincronizado com o módulo /marketplaces</span>
+                        )}
                       </CardDescription>
                     </div>
                   </div>
@@ -930,6 +968,44 @@ export default function PrecificacaoCanais() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {canalEditando?.tipo !== 'site_proprio' && (
+                <div className="space-y-1">
+                  <Label>Marketplace Vinculado (Coleção Marketplaces)</Label>
+                  <Select
+                    value={canalEditando?.marketplace || 'none'}
+                    onValueChange={(v) => {
+                      const selectedMp = marketplacesList.find((m) => m.id === v)
+                      setCanalEditando((prev) => ({
+                        ...prev,
+                        marketplace: v === 'none' ? '' : v,
+                        cor: selectedMp?.cor || prev?.cor,
+                      }))
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione o marketplace correspondente..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Nenhum vínculo (avulso)</SelectItem>
+                      {marketplacesList.map((mp) => (
+                        <SelectItem key={mp.id} value={mp.id}>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="h-2 w-2 rounded-full inline-block"
+                              style={{ backgroundColor: mp.cor || '#DF5830' }}
+                            />
+                            <span>{mp.nome}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-muted-foreground">
+                    Vincula este canal de precificação com o marketplace do módulo financeiro.
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-1">
                 <Label>Cor de Destaque (Hex)</Label>

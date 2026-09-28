@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-27T23:57:17.993Z",
+  "generatedAt": "2026-09-28T01:03:27.846Z",
   "collections": [
     {
       "name": "users",
@@ -641,6 +641,12 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "itens",
+          "type": "json",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [
@@ -3056,6 +3062,13 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "marketplace",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "marketplaces"
         }
       ],
       "indexes": [

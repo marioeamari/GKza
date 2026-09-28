@@ -2016,8 +2016,17 @@ export default function PrecificacaoComparar() {
                             <h4 className="text-sm font-black text-foreground truncate">
                               {col.canal.nome}
                             </h4>
+                            {col.canal.expand?.marketplace && (
+                              <Badge
+                                variant="secondary"
+                                className="text-[9px] h-4 px-1 py-0 bg-primary/10 text-primary border border-primary/20 shrink-0 font-normal"
+                                title={`Marketplace vinculado: ${col.canal.expand.marketplace.nome}`}
+                              >
+                                🔗 {col.canal.expand.marketplace.nome}
+                              </Badge>
+                            )}
                           </div>
-                          <div className="flex items-center gap-1.5 ml-4">
+                          <div className="flex items-center gap-1.5 ml-4 flex-wrap">
                             <Badge
                               variant="outline"
                               className="text-[10px] h-5 px-2 font-bold text-foreground border-border bg-secondary/30"

@@ -8,12 +8,14 @@ import {
   Pencil,
   Plus,
   Receipt,
+  ShieldAlert,
   Store,
   Trash2,
   TrendingUp,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 
+import { AuditoriaTaxasTab } from '@/components/marketplaces/AuditoriaTaxasTab'
 import { ConfirmPayoutDialog } from '@/components/marketplaces/ConfirmPayoutDialog'
 import { MarketplaceAccountDialog } from '@/components/marketplaces/MarketplaceAccountDialog'
 import { PayoutDialog } from '@/components/marketplaces/PayoutDialog'
@@ -52,6 +54,7 @@ import { formatCurrency, formatDate, getPeriodRange, isWithin, parseDate } from 
 import { can } from '@/lib/permissions'
 import { financeService } from '@/services/finance'
 import { marketplacesService } from '@/services/marketplaces'
+import { precificacaoService } from '@/services/precificacao'
 import type {
   Conta,
   Marketplace,
@@ -60,6 +63,11 @@ import type {
   Repasse,
   Venda,
 } from '@/types/domain'
+import type {
+  PrecCanalModalidadeRecord,
+  PrecCanalRecord,
+  PrecTaxaRecord,
+} from '@/types/precificacao'
 
 export default function Marketplaces() {
   const { user } = useAuth(),
@@ -73,6 +81,9 @@ export default function Marketplaces() {
   const [marketplaces, setMarketplaces] = useState<Marketplace[]>([]),
     [accounts, setAccounts] = useState<MarketplaceConta[]>([]),
     [financial, setFinancial] = useState<Conta[]>([]),
+    [precCanais, setPrecCanais] = useState<PrecCanalRecord[]>([]),
+    [precModalidades, setPrecModalidades] = useState<PrecCanalModalidadeRecord[]>([]),
+    [precTaxas, setPrecTaxas] = useState<PrecTaxaRecord[]>([]),
     [sales, setSales] = useState<Venda[]>([]),
     [payouts, setPayouts] = useState<Repasse[]>([]),
     [loading, setLoading] = useState(true)
@@ -89,18 +100,24 @@ export default function Marketplaces() {
     } | null>(null)
   const load = useCallback(async () => {
     try {
-      const [a, b, c, d, e] = await Promise.all([
+      const [a, b, c, d, e, chans, mods, txs] = await Promise.all([
         marketplacesService.listMarketplaces(),
         marketplacesService.listContas(),
         financeService.listContas(),
         marketplacesService.listVendas(),
         marketplacesService.listRepasses(),
+        precificacaoService.listCanais(),
+        precificacaoService.listModalidades(),
+        precificacaoService.listTaxas(),
       ])
       setMarketplaces(a)
       setAccounts(b)
       setFinancial(c)
       setSales(d)
       setPayouts(e)
+      setPrecCanais(chans)
+      setPrecModalidades(mods)
+      setPrecTaxas(txs)
     } catch (error) {
       toast({
         variant: 'destructive',
@@ -116,6 +133,8 @@ export default function Marketplaces() {
   }, [load])
   useRealtime('vendas', load)
   useRealtime('repasses', load)
+  useRealtime('prec_canais', load)
+  useRealtime('prec_taxas', load)
   const setParam = (key: string, value: string) => {
     const next = new URLSearchParams(params)
     if (value && value !== 'all') next.set(key, value)
@@ -161,19 +180,23 @@ export default function Marketplaces() {
           setEditingAccount(null)
           setAccountDialog(true)
         }
-      : tab === 'vendas'
+      : tab === 'vendas' || tab === 'auditoria'
         ? () => {
             setEditingSale(null)
             setSaleDialog(true)
           }
         : () => setPayoutDialog(true)
   const actionLabel =
-    tab === 'contas' ? 'Nova conta' : tab === 'vendas' ? 'Registrar venda' : 'Novo repasse'
+    tab === 'contas'
+      ? 'Nova conta'
+      : tab === 'vendas' || tab === 'auditoria'
+        ? 'Registrar venda'
+        : 'Novo repasse'
   return (
     <>
       <PageHeader
         title="Marketplaces"
-        description="Concilie vendas, comissões e repasses em um só lugar."
+        description="Concilie vendas, comissões e repasses em um só lugar com auditoria direta contra a precificação."
         action={
           <PermissionButton allowed={can(user?.role, 'writeMarketplace')} onClick={action}>
             <Plus className="mr-2 h-4 w-4" />
@@ -183,10 +206,14 @@ export default function Marketplaces() {
       />
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Tabs value={tab} onValueChange={(v) => setParam('tab', v)}>
-          <TabsList className="grid w-full grid-cols-3 sm:w-auto">
+          <TabsList className="grid w-full grid-cols-4 sm:w-auto">
             <TabsTrigger value="contas">Contas</TabsTrigger>
             <TabsTrigger value="vendas">Vendas</TabsTrigger>
             <TabsTrigger value="repasses">Repasses</TabsTrigger>
+            <TabsTrigger value="auditoria" className="gap-1.5">
+              <ShieldAlert className="h-3.5 w-3.5 text-primary" />
+              Auditoria de Taxas
+            </TabsTrigger>
           </TabsList>
         </Tabs>
         {tab !== 'contas' && (
@@ -343,6 +370,25 @@ export default function Marketplaces() {
                     <tr key={s.id}>
                       <td>
                         <strong>{s.pedido_id}</strong>
+                        {Array.isArray(s.itens) && s.itens.length > 0 && (
+                          <div className="mt-1 space-y-0.5">
+                            <span className="text-[10px] font-medium text-muted-foreground block">
+                              {s.itens.length} {s.itens.length === 1 ? 'item' : 'itens'}:
+                            </span>
+                            <div className="max-w-xs space-y-0.5">
+                              {s.itens.slice(0, 2).map((it, idx) => (
+                                <p key={idx} className="text-[11px] text-foreground truncate">
+                                  • {it.quantidade}x {it.descricao || 'Item'}
+                                </p>
+                              ))}
+                              {s.itens.length > 2 && (
+                                <p className="text-[10px] text-muted-foreground italic">
+                                  + {s.itens.length - 2} outro(s)...
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
                         {s.lancamento && (
                           <Link
                             to={`/lancamentos?editar=${s.lancamento}`}
@@ -444,6 +490,11 @@ export default function Marketplaces() {
                       >
                         {mp?.nome}
                       </Badge>
+                      {Array.isArray(s.itens) && s.itens.length > 0 && (
+                        <span className="ml-2 text-[11px] text-muted-foreground">
+                          ({s.itens.length} {s.itens.length === 1 ? 'item' : 'itens'})
+                        </span>
+                      )}
                     </span>
                     <StatusBadge status={s.status} />
                   </div>
@@ -539,6 +590,37 @@ export default function Marketplaces() {
                           (parseDate(p.data_prevista).getTime() - new Date().setHours(0, 0, 0, 0)) /
                             86400000,
                         )
+
+                      // Validação com canal vinculado
+                      const canalVinculado = precCanais.find((c) => c.marketplace === mp?.id)
+                      const taxaDoCanal = precTaxas.find(
+                        (t) =>
+                          t.canal === canalVinculado?.id &&
+                          t.tipo_valor === 'percentual' &&
+                          (t.tipo_regra === 'comissao' || t.nome.toLowerCase().includes('comiss')),
+                      )
+                      const taxaEsperadaPct =
+                        taxaDoCanal?.valor !== undefined
+                          ? taxaDoCanal.valor
+                          : acc?.comissao_percentual || 0
+
+                      const dInicio = new Date(p.periodo_inicio)
+                      const dFim = new Date(p.periodo_fim)
+                      const vendasPeriodo = sales.filter(
+                        (s) =>
+                          s.marketplace_conta === p.marketplace_conta &&
+                          isWithin(s.data, dInicio, dFim),
+                      )
+                      const brutoPeriodo = vendasPeriodo.reduce(
+                        (n, s) => n + (s.valor_bruto || 0),
+                        0,
+                      )
+                      const esperadoPeriodo = Math.max(
+                        0,
+                        Math.round(brutoPeriodo * (1 - taxaEsperadaPct / 100) * 100) / 100,
+                      )
+                      const diffRepasse = Math.round((p.valor - esperadoPeriodo) * 100) / 100
+
                       return (
                         <article
                           key={p.id}
@@ -550,7 +632,17 @@ export default function Marketplaces() {
                               style={{ background: mp?.cor || '#DF5830' }}
                             />
                             <span className="flex-1">
-                              <strong className="text-sm">{acc?.apelido}</strong>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <strong className="text-sm">{acc?.apelido}</strong>
+                                {canalVinculado && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] h-4.5 px-1.5 border-primary/30 text-primary bg-primary/5"
+                                  >
+                                    🔗 {canalVinculado.nome} ({taxaEsperadaPct}%)
+                                  </Badge>
+                                )}
+                              </div>
                               <p className="mt-1 text-xs text-muted-foreground">
                                 {formatDate(p.periodo_inicio)} a {formatDate(p.periodo_fim)}
                               </p>
@@ -565,6 +657,32 @@ export default function Marketplaces() {
                                       ? 'Vence hoje'
                                       : `Previsto em ${days} dias`}
                               </p>
+
+                              {/* Conciliação inline no card do repasse */}
+                              {vendasPeriodo.length > 0 && (
+                                <div className="mt-2 text-[11px] rounded-md bg-secondary/30 p-2 flex items-center justify-between">
+                                  <span className="text-muted-foreground">
+                                    Vendas: {formatCurrency(brutoPeriodo)} (esperado:{' '}
+                                    {formatCurrency(esperadoPeriodo)})
+                                  </span>
+                                  {Math.abs(diffRepasse) <= 0.5 ? (
+                                    <Badge className="bg-emerald-600 text-[10px] text-white h-4.5">
+                                      ✓ Comissão bate
+                                    </Badge>
+                                  ) : diffRepasse < 0 ? (
+                                    <Badge
+                                      variant="destructive"
+                                      className="text-[10px] bg-red-600 text-white h-4.5"
+                                    >
+                                      Faltando {formatCurrency(Math.abs(diffRepasse))}
+                                    </Badge>
+                                  ) : (
+                                    <Badge className="bg-blue-600 text-[10px] text-white h-4.5">
+                                      +{formatCurrency(diffRepasse)} a mais
+                                    </Badge>
+                                  )}
+                                </div>
+                              )}
                             </span>
                             <strong className="text-sm tabular-nums">
                               {formatCurrency(p.valor)}
@@ -601,6 +719,16 @@ export default function Marketplaces() {
               </section>
             ))}
           </div>
+        </TabsContent>
+        <TabsContent value="auditoria" className="mt-0">
+          <AuditoriaTaxasTab
+            sales={filteredSales}
+            accounts={accounts}
+            marketplaces={marketplaces}
+            canais={precCanais}
+            modalidades={precModalidades}
+            taxas={precTaxas}
+          />
         </TabsContent>
       </Tabs>
       <MarketplaceAccountDialog

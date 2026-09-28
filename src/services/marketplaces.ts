@@ -43,5 +43,13 @@ export const marketplacesService = {
       : pb.collection<Repasse>('repasses').create(data, {
           expand: 'marketplace_conta.marketplace,marketplace_conta.conta,lancamento',
         }),
+  confirmRepasse: (id: string, data_realizada: string) =>
+    pb
+      .collection<Repasse>('repasses')
+      .update(
+        id,
+        { status: 'realizado', data_realizada },
+        { expand: 'marketplace_conta.marketplace,marketplace_conta.conta,lancamento' },
+      ),
   deleteRepasse: (id: string) => pb.collection('repasses').delete(id),
 }
