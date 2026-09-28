@@ -17,6 +17,7 @@ import {
   ShieldAlert,
   Clock,
   Undo2,
+  Trash2,
   Loader2,
 } from 'lucide-react'
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
@@ -85,6 +86,13 @@ export default function PrecificacaoAprovados() {
   } | null>(null)
   const [retirandoAprovacao, setRetirandoAprovacao] = useState(false)
 
+  // Estado para confirmação de exclusão de cenário salvo (rascunho)
+  const [cenarioParaExcluir, setCenarioParaExcluir] = useState<{
+    cenario: PrecPrecificacaoRecord
+    produto: PrecProdutoRecord
+  } | null>(null)
+  const [excluindoCenario, setExcluindoCenario] = useState(false)
+
   const recarregarPrecificacoes = async () => {
     try {
       const precs = await precificacaoService.listPrecificacoes()
@@ -114,6 +122,33 @@ export default function PrecificacaoAprovados() {
       })
     } finally {
       setRetirandoAprovacao(false)
+    }
+  }
+
+  const handleConfirmarExclusao = async () => {
+    if (!cenarioParaExcluir) return
+    try {
+      setExcluindoCenario(true)
+      await precificacaoService.excluirCenario(cenarioParaExcluir.cenario.id)
+      await recarregarPrecificacoes()
+      toast({
+        title: 'Cenário removido',
+        description: `O cenário salvo de ${cenarioParaExcluir.produto.nome} foi excluído com sucesso.`,
+      })
+      setCenarioParaExcluir(null)
+    } catch (err: unknown) {
+      console.error('Erro ao excluir cenário:', err)
+      const mensagem =
+        err instanceof Error
+          ? err.message
+          : 'Não foi possível excluir o cenário salvo. Tente novamente.'
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao remover cenário',
+        description: mensagem,
+      })
+    } finally {
+      setExcluindoCenario(false)
     }
   }
 
@@ -795,10 +830,33 @@ export default function PrecificacaoAprovados() {
                                     </TooltipProvider>
                                   </>
                                 ) : (
-                                  <Badge className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] h-5 px-1.5 font-bold shrink-0 gap-1">
-                                    <Bookmark className="h-3 w-3" />
-                                    Salvo {cenario.versao ? `(v${cenario.versao})` : ''}
-                                  </Badge>
+                                  <>
+                                    <Badge className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] h-5 px-1.5 font-bold shrink-0 gap-1">
+                                      <Bookmark className="h-3 w-3" />
+                                      Salvo {cenario.versao ? `(v${cenario.versao})` : ''}
+                                    </Badge>
+                                    <TooltipProvider delayDuration={200}>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() =>
+                                              setCenarioParaExcluir({ cenario, produto })
+                                            }
+                                            className="h-6 w-6 p-0 text-muted-foreground hover:text-red-700 hover:bg-red-100/60 transition-colors"
+                                            aria-label="Remover cenário salvo"
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                          </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="top" className="text-xs">
+                                          Remover cenário salvo
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  </>
                                 )}
                               </div>
                             </div>
@@ -963,6 +1021,80 @@ export default function PrecificacaoAprovados() {
                 <>
                   <Undo2 className="h-3.5 w-3.5" />
                   Retirar aprovação
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* AlertDialog de Confirmação para Excluir Cenário Salvo (Rascunho) */}
+      <AlertDialog
+        open={!!cenarioParaExcluir}
+        onOpenChange={(open) => {
+          if (!open && !excluindoCenario) {
+            setCenarioParaExcluir(null)
+          }
+        }}
+      >
+        <AlertDialogContent className="bg-white border-border sm:max-w-md">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 text-destructive mb-1">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              <AlertDialogTitle className="text-base font-bold text-foreground">
+                Excluir cenário salvo?
+              </AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-xs text-muted-foreground space-y-2 text-left">
+              <p>
+                Você está prestes a remover o cenário salvo{' '}
+                {cenarioParaExcluir?.cenario.versao ? (
+                  <span className="font-semibold text-foreground">
+                    (versão {cenarioParaExcluir.cenario.versao})
+                  </span>
+                ) : (
+                  ''
+                )}{' '}
+                do produto{' '}
+                <strong className="text-foreground">{cenarioParaExcluir?.produto.nome}</strong> no
+                canal{' '}
+                <strong className="text-foreground">
+                  {cenarioParaExcluir
+                    ? canaisMap.get(cenarioParaExcluir.cenario.canal)?.nome || 'Canal'
+                    : ''}
+                </strong>
+                .
+              </p>
+              <p className="bg-destructive/10 border border-destructive/20 text-destructive p-2.5 rounded-lg text-[11px] leading-relaxed">
+                O cenário salvo será excluído permanentemente. Esta ação não pode ser desfeita.
+                Vendas já registradas não são afetadas.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-2">
+            <AlertDialogCancel
+              disabled={excluindoCenario}
+              className="text-xs h-9 bg-secondary/50 hover:bg-secondary border-border"
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={excluindoCenario}
+              onClick={(e) => {
+                e.preventDefault()
+                handleConfirmarExclusao()
+              }}
+              className="text-xs h-9 bg-destructive hover:bg-destructive/90 text-destructive-foreground font-bold gap-1.5"
+            >
+              {excluindoCenario ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Excluindo...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Excluir cenário
                 </>
               )}
             </AlertDialogAction>

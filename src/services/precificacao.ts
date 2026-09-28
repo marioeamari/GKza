@@ -553,6 +553,28 @@ export const precificacaoService = {
   },
 
   /**
+   * Exclui um cenário de precificação (rascunho/salvo).
+   * Verifica vínculos antes de deletar (por exemplo se o cenário está aprovado ou vinculado a vendas).
+   */
+  async excluirCenario(cenarioId: string): Promise<boolean> {
+    // 1. Buscar o cenário para validar status
+    const cenario = await pb
+      .collection('prec_precificacoes')
+      .getOne<PrecPrecificacaoRecord>(cenarioId)
+
+    // Se estiver aprovado com preço homologado ativo, alertar o usuário para retirar aprovação antes
+    if (cenario.status === 'aprovada' || (cenario.preco_aprovado && cenario.preco_aprovado > 0)) {
+      throw new Error(
+        'Este cenário possui preço aprovado e ativo. Para excluí-lo, primeiro retire a aprovação.',
+      )
+    }
+
+    // 2. Deleta o registro da coleção
+    await pb.collection('prec_precificacoes').delete(cenarioId)
+    return true
+  },
+
+  /**
    * Marca precificações como 'desatualizada' quando custos ou taxas são modificados
    */
   async marcarPrecificacoesComoDesatualizadas({

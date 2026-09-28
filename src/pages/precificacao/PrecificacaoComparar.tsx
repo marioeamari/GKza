@@ -30,6 +30,7 @@ import {
   Trash2,
   X,
   History,
+  Loader2,
 } from 'lucide-react'
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -144,6 +145,11 @@ export default function PrecificacaoComparar() {
   const [cenarioParaRetirarAprovacao, setCenarioParaRetirarAprovacao] =
     useState<PrecPrecificacaoRecord | null>(null)
   const [retirandoAprovacaoModal, setRetirandoAprovacaoModal] = useState(false)
+
+  // Estado para confirmação de exclusão permanente de cenário salvo no modal do repositório
+  const [cenarioParaExcluirModal, setCenarioParaExcluirModal] =
+    useState<PrecPrecificacaoRecord | null>(null)
+  const [excluindoCenarioModal, setExcluindoCenarioModal] = useState(false)
 
   // Filtro de canais/marketplaces selecionados (por canal.id)
   const [canaisSelecionados, setCanaisSelecionados] = useState<string[]>(() => {
@@ -1098,6 +1104,52 @@ export default function PrecificacaoComparar() {
       title: 'Cenário removido da grade',
       description: 'O cenário salvo continua preservado no Repositório.',
     })
+  }
+
+  // Função para excluir definitivamente um cenário salvo no modal do Repositório
+  const handleConfirmarExclusaoModal = async () => {
+    if (!cenarioParaExcluirModal) return
+    try {
+      setExcluindoCenarioModal(true)
+      const cenarioId = cenarioParaExcluirModal.id
+      await precificacaoService.excluirCenario(cenarioId)
+
+      // Se o cenário estava adicionado à grade temporária, remove também
+      setCenariosSalvosAdicionados((prev) => prev.filter((s) => s.id !== cenarioId))
+      setPrecosPorColuna((prev) => {
+        const next = { ...prev }
+        delete next[`salvo_${cenarioId}`]
+        return next
+      })
+      setDescontosPorColuna((prev) => {
+        const next = { ...prev }
+        delete next[`salvo_${cenarioId}`]
+        return next
+      })
+
+      // Atualiza a lista geral de precificações
+      const precsAtualizadas = await precificacaoService.listPrecificacoes()
+      setPrecificacoesExistentes(precsAtualizadas)
+
+      toast({
+        title: 'Cenário removido',
+        description: 'O cenário salvo foi excluído permanentemente.',
+      })
+      setCenarioParaExcluirModal(null)
+    } catch (err: unknown) {
+      console.error('Erro ao excluir cenário salvo no modal:', err)
+      const mensagem =
+        err instanceof Error
+          ? err.message
+          : 'Não foi possível excluir o cenário salvo. Tente novamente.'
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao remover cenário',
+        description: mensagem,
+      })
+    } finally {
+      setExcluindoCenarioModal(false)
+    }
   }
 
   // Função para retirar aprovação de um cenário no modal de Aprovados
@@ -2928,11 +2980,12 @@ export default function PrecificacaoComparar() {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-8 text-xs text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                          className="h-8 text-xs text-amber-700 border-amber-200 hover:bg-amber-50"
                           onClick={() => handleRemoverCenarioSalvo(cenario.id)}
+                          title="Remover visualização deste cenário da grade"
                         >
                           <X className="h-3.5 w-3.5 mr-1" />
-                          Remover da Grade
+                          Tirar da Grade
                         </Button>
                       ) : (
                         <Button
@@ -2944,6 +2997,17 @@ export default function PrecificacaoComparar() {
                           Adicionar à Grade
                         </Button>
                       )}
+
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => setCenarioParaExcluirModal(cenario)}
+                        title="Remover cenário salvo permanentemente"
+                        aria-label="Remover cenário salvo"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
                   </div>
                 )
@@ -3133,6 +3197,78 @@ export default function PrecificacaoComparar() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Confirmação de Exclusão de Cenário Salvo no Modal do Repositório */}
+      <AlertDialog
+        open={!!cenarioParaExcluirModal}
+        onOpenChange={(open) => {
+          if (!open && !excluindoCenarioModal) {
+            setCenarioParaExcluirModal(null)
+          }
+        }}
+      >
+        <AlertDialogContent className="bg-white border-border sm:max-w-md">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 text-destructive mb-1">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              <AlertDialogTitle className="text-base font-bold text-foreground">
+                Excluir cenário salvo?
+              </AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-xs text-muted-foreground space-y-2 text-left">
+              <p>
+                Você está prestes a remover o cenário salvo{' '}
+                {cenarioParaExcluirModal?.versao ? (
+                  <span className="font-semibold text-foreground">
+                    (versão {cenarioParaExcluirModal.versao})
+                  </span>
+                ) : (
+                  ''
+                )}{' '}
+                do canal{' '}
+                <strong className="text-foreground">
+                  {cenarioParaExcluirModal
+                    ? canais.find((c) => c.id === cenarioParaExcluirModal.canal)?.nome || 'Canal'
+                    : ''}
+                </strong>
+                .
+              </p>
+              <p className="bg-destructive/10 border border-destructive/20 text-destructive p-2.5 rounded-lg text-[11px] leading-relaxed">
+                O cenário salvo será excluído permanentemente. Esta ação não pode ser desfeita.
+                Vendas já registradas não são afetadas.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-2">
+            <AlertDialogCancel
+              disabled={excluindoCenarioModal}
+              className="text-xs h-9 bg-secondary/50 hover:bg-secondary border-border"
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={excluindoCenarioModal}
+              onClick={(e) => {
+                e.preventDefault()
+                handleConfirmarExclusaoModal()
+              }}
+              className="text-xs h-9 bg-destructive hover:bg-destructive/90 text-destructive-foreground font-bold gap-1.5"
+            >
+              {excluindoCenarioModal ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Excluindo...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Excluir cenário
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Confirmação de Retirada de Aprovação no Modal do Comparador */}
       <AlertDialog
