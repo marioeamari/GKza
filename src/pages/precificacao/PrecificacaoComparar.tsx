@@ -93,6 +93,75 @@ import {
 import { formatCurrency } from '@/lib/format'
 import { useToast } from '@/hooks/use-toast'
 import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
+
+interface AccordionTaxasNaoAplicadasProps {
+  taxas: Array<{
+    taxa_id?: string
+    nome: string
+    tipo_valor?: string
+    aliquota_ou_fixo?: number
+    motivo_nao_aplicada?: string
+    condicao_resumo?: string
+  }>
+}
+
+function AccordionTaxasNaoAplicadas({ taxas }: AccordionTaxasNaoAplicadasProps) {
+  const [aberto, setAberto] = useState(false)
+
+  if (!taxas || taxas.length === 0) return null
+
+  const labelContador =
+    taxas.length === 1 ? '1 taxa não aplicada' : `${taxas.length} taxas não aplicadas`
+
+  return (
+    <div className="rounded-lg border border-[#DF5830]/30 bg-[#DF5830]/5 overflow-hidden transition-all text-[11px]">
+      <button
+        type="button"
+        onClick={() => setAberto((prev) => !prev)}
+        aria-expanded={aberto}
+        className="w-full flex items-center justify-between gap-1.5 p-2 text-left hover:bg-[#DF5830]/10 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#DF5830]"
+      >
+        <div className="flex items-center gap-1.5 text-[#DF5830] font-semibold text-[10px] uppercase tracking-wider">
+          <AlertTriangle className="h-3 w-3 shrink-0" />
+          <span>{labelContador}</span>
+        </div>
+        <ChevronDown
+          className={cn(
+            'h-3.5 w-3.5 text-[#DF5830] shrink-0 transition-transform duration-200',
+            aberto && 'rotate-180',
+          )}
+        />
+      </button>
+
+      {aberto && (
+        <div className="px-2 pb-2 pt-0.5 space-y-1 border-t border-[#DF5830]/20">
+          {taxas.map((tx, idx) => {
+            const labelTaxa = `${tx.nome}${
+              tx.tipo_valor === 'percentual'
+                ? ` ${tx.aliquota_ou_fixo}%`
+                : tx.tipo_valor === 'fixo'
+                  ? ` ${formatCurrency(tx.aliquota_ou_fixo)}`
+                  : ''
+            }`
+            const motivo =
+              tx.motivo_nao_aplicada || tx.condicao_resumo || 'Condição da regra não atendida'
+
+            return (
+              <div
+                key={tx.taxa_id || idx}
+                className="text-[10.5px] leading-tight text-foreground/90 pl-1 border-l-2 border-[#DF5830]/40 py-0.5"
+              >
+                <span className="font-medium text-[#DF5830]">{labelTaxa}:</span>{' '}
+                <span className="text-muted-foreground">{motivo}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function PrecificacaoComparar() {
   const { user } = useAuth()
@@ -2435,46 +2504,8 @@ export default function PrecificacaoComparar() {
                                 )}
                               </div>
 
-                              {/* Indicador / Aviso discreto de taxas desconsideradas por condição não atendida */}
-                              {taxasDesconsideradas.length > 0 && (
-                                <div className="rounded-lg border border-[#DF5830]/30 bg-[#DF5830]/5 p-2 space-y-1 text-[11px]">
-                                  <div className="flex items-center gap-1.5 text-[#DF5830] font-semibold text-[10px] uppercase tracking-wider">
-                                    <AlertTriangle className="h-3 w-3 shrink-0" />
-                                    <span>
-                                      {taxasDesconsideradas.length === 1
-                                        ? '1 taxa não aplicada'
-                                        : `${taxasDesconsideradas.length} taxas não aplicadas`}
-                                    </span>
-                                  </div>
-                                  <div className="space-y-1 pt-0.5">
-                                    {taxasDesconsideradas.map((tx, idx) => {
-                                      const labelTaxa = `${tx.nome}${
-                                        tx.tipo_valor === 'percentual'
-                                          ? ` ${tx.aliquota_ou_fixo}%`
-                                          : tx.tipo_valor === 'fixo'
-                                            ? ` ${formatCurrency(tx.aliquota_ou_fixo)}`
-                                            : ''
-                                      }`
-                                      const motivo =
-                                        tx.motivo_nao_aplicada ||
-                                        tx.condicao_resumo ||
-                                        'Condição da regra não atendida'
-
-                                      return (
-                                        <div
-                                          key={tx.taxa_id || idx}
-                                          className="text-[10.5px] leading-tight text-foreground/90 pl-1 border-l-2 border-[#DF5830]/40 py-0.5"
-                                        >
-                                          <span className="font-medium text-[#DF5830]">
-                                            {labelTaxa}:
-                                          </span>{' '}
-                                          <span className="text-muted-foreground">{motivo}</span>
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
-                                </div>
-                              )}
+                              {/* Accordion discreto para mostrar / ocultar taxas não aplicadas por condição não atendida */}
+                              <AccordionTaxasNaoAplicadas taxas={taxasDesconsideradas} />
                             </div>
                           )
                         })()}
