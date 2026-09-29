@@ -54,7 +54,7 @@ export function apiMessage(
     if (error instanceof Error) {
       const msg = error.message.toLowerCase()
       if (msg.includes('too many requests') || msg.includes('429')) {
-        return 'Muitas tentativas consecutivas. Aguarde alguns instantes e tente novamente.'
+        return 'Servidor ocupado (limite de requisições). Tente novamente em instantes.'
       }
       return error.message
     }
@@ -62,7 +62,7 @@ export function apiMessage(
   }
 
   if (error.status === 429) {
-    return 'Muitas tentativas consecutivas. Aguarde alguns instantes e tente novamente.'
+    return 'Servidor ocupado (limite de requisições). Tente novamente em instantes.'
   }
 
   const responseMessage = typeof error.response?.message === 'string' ? error.response.message : ''
