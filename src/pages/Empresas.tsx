@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  Boxes,
   Building2,
   Mail,
   MapPin,
+  PackagePlus,
   Pencil,
   Phone,
   Plus,
@@ -35,22 +37,36 @@ import { apiMessage } from '@/lib/api-error'
 import { onlyDigits } from '@/lib/documents'
 import { can } from '@/lib/permissions'
 import { cadastrosService } from '@/services/cadastros'
+import { precificacaoService } from '@/services/precificacao'
 import type { Empresa } from '@/types/domain'
 
 export default function Empresas() {
   const { user } = useAuth()
   const { toast } = useToast()
   const [companies, setCompanies] = useState<Empresa[]>([])
+  const [contagemProdutos, setContagemProdutos] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [companyDialog, setCompanyDialog] = useState(false)
+  const [dialogTab, setDialogTab] = useState<'dados' | 'produtos'>('dados')
   const [editingCompany, setEditingCompany] = useState<Empresa | null>(null)
   const [deleting, setDeleting] = useState<{ id: string; label: string } | null>(null)
 
   const load = useCallback(async () => {
     try {
-      const data = await cadastrosService.listEmpresas()
+      const [data, todosProdutos] = await Promise.all([
+        cadastrosService.listEmpresas(),
+        precificacaoService.listProdutos().catch(() => []),
+      ])
       setCompanies(data)
+
+      const contagem: Record<string, number> = {}
+      for (const prod of todosProdutos) {
+        if (prod.empresa) {
+          contagem[prod.empresa] = (contagem[prod.empresa] || 0) + 1
+        }
+      }
+      setContagemProdutos(contagem)
     } catch (e) {
       toast({
         variant: 'destructive',
@@ -82,6 +98,13 @@ export default function Empresas() {
 
   const create = () => {
     setEditingCompany(null)
+    setDialogTab('dados')
+    setCompanyDialog(true)
+  }
+
+  const openFicha = (c: Empresa, tab: 'dados' | 'produtos' = 'dados') => {
+    setEditingCompany(c)
+    setDialogTab(tab)
     setCompanyDialog(true)
   }
 
@@ -109,7 +132,7 @@ export default function Empresas() {
     <>
       <PageHeader
         title="Empresas"
-        description="Cadastro e gerenciamento de pessoas jurídicas (CNPJ), fornecedores e clientes."
+        description="Cadastro e ficha detalhada das empresas do sistema. Cada empresa atua como fornecedor de fabricação própria, com dados cadastrais e produtos fabricados para precificação."
         action={
           <div className="flex items-center gap-2">
             <Button variant="outline" asChild className="hidden sm:inline-flex">
@@ -122,6 +145,12 @@ export default function Empresas() {
               <Link to="/fornecedores">
                 <Truck className="mr-2 h-4 w-4" />
                 Fornecedores
+              </Link>
+            </Button>
+            <Button variant="outline" asChild className="hidden sm:inline-flex">
+              <Link to="/precificacao/produtos">
+                <PackagePlus className="mr-2 h-4 w-4 text-primary" />
+                Precificação de Produtos
               </Link>
             </Button>
             <PermissionButton allowed={writable} onClick={create}>
@@ -154,69 +183,103 @@ export default function Empresas() {
           {filteredCompanies.map((c, i) => (
             <article
               key={c.id}
-              className="card-hover rise-in rounded-2xl border border-border bg-white p-5 shadow-soft"
+              className="card-hover rise-in rounded-2xl border border-border bg-white p-5 shadow-soft cursor-pointer group flex flex-col justify-between"
               style={{ animationDelay: `${i * 40}ms` }}
+              onClick={() => openFicha(c, 'dados')}
             >
-              <div className="flex items-start justify-between">
-                <span className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <Building2 className="h-5 w-5" />
-                </span>
-                <div>
-                  {writable && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => {
-                        setEditingCompany(c)
-                        setCompanyDialog(true)
-                      }}
-                      title="Editar empresa"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
+              <div>
+                <div className="flex items-start justify-between">
+                  <span className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary">
+                    <Building2 className="h-5 w-5" />
+                  </span>
+                  <div onClick={(ev) => ev.stopPropagation()}>
+                    {writable && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => openFicha(c, 'dados')}
+                        title="Ver ficha da empresa"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {can(user?.role, 'deleteFinance') && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="text-destructive"
+                        onClick={() => setDeleting({ id: c.id, label: c.nome_fantasia })}
+                        title="Excluir empresa"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <h2 className="mt-4 font-bold text-foreground group-hover:text-primary transition-colors">
+                  {c.nome_fantasia}
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">{c.razao_social}</p>
+                <div className="mt-3 flex items-center gap-2">
+                  <Badge variant="secondary" className="tabular-nums font-mono text-[11px]">
+                    {c.cnpj}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                    Fabricação Própria
+                  </Badge>
+                </div>
+                <div className="mt-4 space-y-2 border-t border-border pt-4 text-xs text-muted-foreground">
+                  {c.email && (
+                    <p className="flex items-center gap-2 truncate">
+                      <Mail className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{c.email}</span>
+                    </p>
                   )}
-                  {can(user?.role, 'deleteFinance') && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="text-destructive"
-                      onClick={() => setDeleting({ id: c.id, label: c.nome_fantasia })}
-                      title="Excluir empresa"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                  {c.telefone && (
+                    <p className="flex items-center gap-2">
+                      <Phone className="h-3.5 w-3.5 shrink-0" />
+                      <span>{c.telefone}</span>
+                    </p>
+                  )}
+                  {c.endereco && (
+                    <p className="flex items-start gap-2">
+                      <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span className="line-clamp-2">{c.endereco}</span>
+                    </p>
+                  )}
+                  {c.observacoes && (
+                    <p className="italic text-muted-foreground/80 line-clamp-2 pt-1 border-t border-dashed border-border/60">
+                      {c.observacoes}
+                    </p>
                   )}
                 </div>
               </div>
-              <h2 className="mt-4 font-bold">{c.nome_fantasia}</h2>
-              <p className="mt-1 text-xs text-muted-foreground">{c.razao_social}</p>
-              <Badge variant="secondary" className="mt-3 tabular-nums">
-                {c.cnpj}
-              </Badge>
-              <div className="mt-5 space-y-2 border-t border-border pt-4 text-xs text-muted-foreground">
-                {c.email && (
-                  <p className="flex items-center gap-2 truncate">
-                    <Mail className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{c.email}</span>
-                  </p>
-                )}
-                {c.telefone && (
-                  <p className="flex items-center gap-2">
-                    <Phone className="h-3.5 w-3.5 shrink-0" />
-                    <span>{c.telefone}</span>
-                  </p>
-                )}
-                {c.endereco && (
-                  <p className="flex items-start gap-2">
-                    <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    <span className="line-clamp-2">{c.endereco}</span>
-                  </p>
-                )}
-                {c.observacoes && (
-                  <p className="italic text-muted-foreground/80 line-clamp-2 pt-1 border-t border-dashed border-border/60">
-                    {c.observacoes}
-                  </p>
-                )}
+
+              {/* Seção de produtos fabricados da empresa (análogo a fornecedores) */}
+              <div
+                className="mt-4 pt-3 border-t border-border flex items-center justify-between"
+                onClick={(ev) => ev.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  onClick={() => openFicha(c, 'produtos')}
+                  className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline font-semibold"
+                >
+                  <Boxes className="h-3.5 w-3.5" />
+                  <span>
+                    {contagemProdutos[c.id]
+                      ? `${contagemProdutos[c.id]} produto(s) fabricado(s)`
+                      : '0 produtos fabricados'}
+                  </span>
+                </button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+                  onClick={() => openFicha(c, 'dados')}
+                >
+                  Ver Ficha
+                </Button>
               </div>
             </article>
           ))}
@@ -232,9 +295,11 @@ export default function Empresas() {
         open={companyDialog}
         onOpenChange={setCompanyDialog}
         record={editingCompany}
+        defaultTab={dialogTab}
+        canWrite={writable}
+        canDelete={can(user?.role, 'deleteFinance')}
         onSaved={load}
       />
-
       <AlertDialog open={!!deleting} onOpenChange={(v) => !v && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>

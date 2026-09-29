@@ -47,10 +47,11 @@ import {
 } from '@/lib/precificacao/calculo'
 import { formatCurrency } from '@/lib/format'
 import { useToast } from '@/hooks/use-toast'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Skeleton } from '@/components/ui/skeleton'
 
 export default function PrecificacaoProdutos() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const { toast } = useToast()
   const [loading, setLoading] = useState(true)
   const [produtos, setProdutos] = useState<PrecProdutoRecord[]>([])
@@ -72,6 +73,7 @@ export default function PrecificacaoProdutos() {
   const [fornecedorSelecionadoId, setFornecedorSelecionadoId] = useState<string>('')
   const [produtosDoFornecedor, setProdutosDoFornecedor] = useState<FornecedorProduto[]>([])
   const [loadingProdsForn, setLoadingProdsForn] = useState(false)
+  const [buscaEmpresaText, setBuscaEmpresaText] = useState('')
   const [produtoFornSelecionadoId, setProdutoFornSelecionadoId] = useState<string>('')
   const [buscaFornText, setBuscaFornText] = useState('')
   const [buscaProdFornText, setBuscaProdFornText] = useState('')
@@ -107,6 +109,20 @@ export default function PrecificacaoProdutos() {
     carregar()
   }, [])
 
+  // Suporte a abertura direta via query params (ex: ?novo=1&empresa=XYZ ou ?empresa=XYZ)
+  useEffect(() => {
+    const isNovo = searchParams.get('novo') === '1'
+    const empresaParam = searchParams.get('empresa')
+    if (isNovo && empresas.length > 0) {
+      abrirNovoProduto(empresaParam || undefined)
+      // Limpa os params para evitar reabrir ao salvar ou recarregar
+      const nextParams = new URLSearchParams(searchParams)
+      nextParams.delete('novo')
+      nextParams.delete('empresa')
+      setSearchParams(nextParams, { replace: true })
+    }
+  }, [searchParams, empresas])
+
   // Carrega produtos do fornecedor quando o fornecedor selecionado mudar
   useEffect(() => {
     if (fornecedorSelecionadoId) {
@@ -128,7 +144,7 @@ export default function PrecificacaoProdutos() {
     }
   }, [fornecedorSelecionadoId])
 
-  function abrirNovoProduto() {
+  function abrirNovoProduto(empresaPreSelecionadaId?: string) {
     setProdutoEditando({
       sku: '',
       nome: '',
@@ -143,6 +159,7 @@ export default function PrecificacaoProdutos() {
       dimensao_comprimento_cm: undefined,
       dimensao_largura_cm: undefined,
       dimensao_altura_cm: undefined,
+      empresa: empresaPreSelecionadaId || undefined,
       custo_aquisicao_unitario: 0,
       custo_adicional_embalagem: 0.1,
       custo_etiqueta: 0.05,
@@ -163,6 +180,7 @@ export default function PrecificacaoProdutos() {
     if (fileInputRef.current) fileInputRef.current.value = ''
     setFornecedorSelecionadoId('')
     setProdutoFornSelecionadoId('')
+    setBuscaEmpresaText('')
     setBuscaFornText('')
     setBuscaProdFornText('')
     setOrigemValores({})
@@ -187,6 +205,7 @@ export default function PrecificacaoProdutos() {
     const prodFornId = p.fornecedor_produto || ''
     setFornecedorSelecionadoId(fornId)
     setProdutoFornSelecionadoId(prodFornId)
+    setBuscaEmpresaText('')
     setBuscaFornText('')
     setBuscaProdFornText('')
 
@@ -430,7 +449,17 @@ export default function PrecificacaoProdutos() {
     }
   }
 
-  // Filtragem de fornecedores e produtos vinculados na busca
+  // Filtragem de empresas, fornecedores e produtos vinculados na busca
+  const empresasFiltradas = empresas.filter((e) => {
+    if (!buscaEmpresaText.trim()) return true
+    const term = buscaEmpresaText.toLocaleLowerCase('pt-BR')
+    return (
+      (e.nome_fantasia && e.nome_fantasia.toLocaleLowerCase('pt-BR').includes(term)) ||
+      (e.razao_social && e.razao_social.toLocaleLowerCase('pt-BR').includes(term)) ||
+      (e.cnpj && e.cnpj.includes(term))
+    )
+  })
+
   const fornecedoresFiltrados = fornecedores.filter((f) => {
     if (!buscaFornText.trim()) return true
     const term = buscaFornText.toLocaleLowerCase('pt-BR')
@@ -457,7 +486,7 @@ export default function PrecificacaoProdutos() {
         titulo="Cadastro de Produtos, Custos & Kits"
         subtitulo="Gestão das composições analíticas (C0..C12), produtos de revenda com fornecedor e kits"
         acoes={
-          <Button className="bg-primary text-white font-bold" onClick={abrirNovoProduto}>
+          <Button className="bg-primary text-white font-bold" onClick={() => abrirNovoProduto()}>
             <PackagePlus className="mr-1.5 h-4 w-4" />
             Novo Produto / Custo
           </Button>
@@ -490,7 +519,11 @@ export default function PrecificacaoProdutos() {
               <p className="text-xs mt-1">
                 Cadastre produtos de fabricação própria, revenda ou kits para iniciar simulações.
               </p>
-              <Button onClick={abrirNovoProduto} className="mt-4 bg-primary text-white" size="sm">
+              <Button
+                onClick={() => abrirNovoProduto()}
+                className="mt-4 bg-primary text-white"
+                size="sm"
+              >
                 Cadastrar Primeiro Produto
               </Button>
             </div>
@@ -704,10 +737,10 @@ export default function PrecificacaoProdutos() {
                 </div>
               </div>
 
-              {/* Seleção do Tipo de Custo */}
+              {/* Seleção do Tipo de Custo e Empresa Fabricante / Fornecedor */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1">
-                  <Label>Tipo de Custo *</Label>
+                  <Label className="text-xs font-semibold">Tipo de Custo / Origem *</Label>
                   <Select
                     value={produtoEditando?.tipo || 'fabricacao_propria'}
                     onValueChange={(v) =>
@@ -718,15 +751,30 @@ export default function PrecificacaoProdutos() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="fabricacao_propria">Fabricação Própria</SelectItem>
-                      <SelectItem value="revenda">Revenda</SelectItem>
+                      <SelectItem value="fabricacao_propria">
+                        Fabricação Própria (Empresa)
+                      </SelectItem>
+                      <SelectItem value="revenda">Revenda (Fornecedor)</SelectItem>
                       <SelectItem value="kit">Kit / Combo</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="space-y-1 sm:col-span-2">
-                  <Label>Empresa Própria Responsável</Label>
+                  <Label className="text-xs font-semibold flex items-center justify-between">
+                    <span>
+                      {produtoEditando?.tipo === 'fabricacao_propria'
+                        ? 'Empresa Fabricante (Fabricação Própria) *'
+                        : 'Empresa do Sistema (Titular)'}
+                    </span>
+                    <Link
+                      to="/empresas"
+                      target="_blank"
+                      className="text-[10px] text-primary hover:underline font-normal"
+                    >
+                      + Gerenciar empresas
+                    </Link>
+                  </Label>
                   <Select
                     value={produtoEditando?.empresa || 'nenhuma'}
                     onValueChange={(v) =>
@@ -736,14 +784,26 @@ export default function PrecificacaoProdutos() {
                       }))
                     }
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione empresa..." />
+                    <SelectTrigger className="bg-white">
+                      <SelectValue placeholder="Selecione a empresa cadastrada..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="nenhuma">Nenhuma (Geral)</SelectItem>
-                      {empresas.map((e) => (
+                      <div className="p-1 border-b border-border">
+                        <div className="relative">
+                          <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                          <Input
+                            placeholder="Filtrar empresa..."
+                            value={buscaEmpresaText}
+                            onChange={(e) => setBuscaEmpresaText(e.target.value)}
+                            className="h-8 pl-8 text-xs"
+                            onKeyDown={(e) => e.stopPropagation()}
+                          />
+                        </div>
+                      </div>
+                      <SelectItem value="nenhuma">Nenhuma (Geral do sistema)</SelectItem>
+                      {empresasFiltradas.map((e) => (
                         <SelectItem key={e.id} value={e.id}>
-                          {e.nome_fantasia || e.razao_social}
+                          {e.nome_fantasia || e.razao_social} {e.cnpj ? `(${e.cnpj})` : ''}
                         </SelectItem>
                       ))}
                     </SelectContent>
