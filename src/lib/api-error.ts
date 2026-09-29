@@ -9,10 +9,22 @@ const messages: Record<string, string> = {
   'Missing required value.': 'Este campo é obrigatório.',
   'The value is invalid.': 'Valor inválido.',
   'The value is already in use.': 'Este valor já está cadastrado.',
+  'Value must be unique.': 'Este valor já está em uso.',
+  validation_not_unique: 'Este valor já está em uso.',
+  'Failed to create record.': 'Não foi possível criar o registro. Verifique os campos informados.',
+  'Failed to update record.':
+    'Não foi possível atualizar o registro. Verifique os campos informados.',
   'Must be a valid email address.': 'Informe um e-mail válido.',
   'Too Many Requests': 'Muitas tentativas em sequência. Aguarde alguns segundos e tente novamente.',
   'Too many requests. Please try again later.':
     'Muitas tentativas em sequência. Aguarde alguns segundos e tente novamente.',
+}
+
+const uniqueFieldLabels: Record<string, string> = {
+  sku: 'Já existe um produto com este SKU. Escolha outro SKU.',
+  cnpj: 'Já existe um cadastro com este CNPJ.',
+  cpf: 'Já existe um cadastro com este CPF.',
+  slug: 'Já existe um registro com este identificador (slug).',
 }
 
 export function isNetworkOrServerUnavailable(error: unknown): boolean {
@@ -65,9 +77,16 @@ export function apiMessage(
     return 'Servidor ocupado (limite de requisições). Tente novamente em instantes.'
   }
 
+  const details = error.response?.data
+  if (details && typeof details === 'object') {
+    const skuDetail = (details as Record<string, { code?: string; message?: string }>).sku
+    if (skuDetail?.code === 'validation_not_unique') {
+      return 'Já existe um produto com este SKU cadastrado. Escolha outro SKU para continuar.'
+    }
+  }
+
   const responseMessage = typeof error.response?.message === 'string' ? error.response.message : ''
   if (messages[responseMessage]) return messages[responseMessage]
-  const details = error.response?.data
   if (details && typeof details === 'object') {
     const first = Object.values(details)[0] as { message?: string } | undefined
     if (first?.message) return messages[first.message] || first.message
@@ -80,8 +99,14 @@ export function apiMessage(
 export function apiFieldErrors(error: unknown): FormErrors {
   if (!(error instanceof ClientResponseError) || !error.response?.data) return {}
   const result: FormErrors = {}
-  Object.entries(error.response.data).forEach(([field, detail]) => {
-    const message = (detail as { message?: string })?.message
+  Object.entries(error.response.data).forEach(([field, rawDetail]) => {
+    const detail = rawDetail as { code?: string; message?: string } | undefined
+    if (!detail) return
+    if (detail.code === 'validation_not_unique' || detail.message === 'Value must be unique.') {
+      result[field] = uniqueFieldLabels[field] || 'Este valor já está cadastrado.'
+      return
+    }
+    const message = detail.message
     if (message) result[field] = messages[message] || message
   })
   return result

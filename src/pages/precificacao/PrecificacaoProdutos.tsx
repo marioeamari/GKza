@@ -47,6 +47,7 @@ import {
 } from '@/lib/precificacao/calculo'
 import { formatCurrency } from '@/lib/format'
 import { useToast } from '@/hooks/use-toast'
+import { apiFieldErrors, apiMessage } from '@/lib/api-error'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -62,6 +63,8 @@ export default function PrecificacaoProdutos() {
   const [openDialog, setOpenDialog] = useState(false)
   const [produtoEditando, setProdutoEditando] = useState<Partial<PrecProdutoRecord> | null>(null)
   const [composicaoTemp, setComposicaoTemp] = useState<ItemComposicaoCusto[]>([])
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
 
   // Upload próprio de imagem
   const [imagemFile, setImagemFile] = useState<File | null>(null)
@@ -219,6 +222,7 @@ export default function PrecificacaoProdutos() {
     setBuscaProdFornText('')
     setBuscaProdEmpresaText('')
     setOrigemValores({})
+    setFormErrors({})
     setOpenDialog(true)
   }
 
@@ -264,6 +268,7 @@ export default function PrecificacaoProdutos() {
       setOrigemValores({})
     }
 
+    setFormErrors({})
     setOpenDialog(true)
   }
 
@@ -457,6 +462,7 @@ export default function PrecificacaoProdutos() {
     e.preventDefault()
     if (!produtoEditando?.sku || !produtoEditando?.nome) return
 
+    setSaving(true)
     try {
       // 1. Monta o payload base garantindo que NUNCA enviemos o campo imagem como string herdada
       const payload: Partial<PrecProdutoRecord> = {
@@ -544,10 +550,24 @@ export default function PrecificacaoProdutos() {
         }
       }
 
+      setFormErrors({})
       setOpenDialog(false)
       carregar()
-    } catch {
-      toast({ variant: 'destructive', title: 'Erro ao salvar produto' })
+    } catch (err) {
+      const fieldErrs = apiFieldErrors(err)
+      const errorMsg = apiMessage(err, 'Não foi possível salvar o produto.')
+      if (fieldErrs.sku) {
+        const valorDigitado = (produtoEditando?.sku || '').trim()
+        fieldErrs.sku = `Já existe um produto com o SKU '${valorDigitado}'. Escolha outro SKU.`
+      }
+      setFormErrors({ ...fieldErrs, form: errorMsg })
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao salvar produto',
+        description: fieldErrs.sku || errorMsg,
+      })
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -804,6 +824,15 @@ export default function PrecificacaoProdutos() {
                 kit).
               </DialogDescription>
             </DialogHeader>
+
+            {(formErrors.sku || formErrors.form) && (
+              <div className="mt-3 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
+                <p className="font-semibold">{formErrors.sku || formErrors.form}</p>
+                {formErrors.sku && formErrors.form && formErrors.form !== formErrors.sku && (
+                  <p className="mt-1 text-[11px] opacity-90">{formErrors.form}</p>
+                )}
+              </div>
+            )}
 
             <div className="space-y-4 py-3 text-xs">
               {/* Upload e Imagem do Produto */}
@@ -1216,18 +1245,32 @@ export default function PrecificacaoProdutos() {
                     required
                     placeholder="Ex: BLeve?, PA-03..."
                     className={
-                      origemValores.sku?.herdado
-                        ? origemValores.sku.sobrescrito
-                          ? 'border-amber-400 bg-amber-50/30'
-                          : 'border-primary/40 bg-primary/5'
-                        : ''
+                      formErrors.sku
+                        ? 'border-destructive focus-visible:ring-destructive'
+                        : origemValores.sku?.herdado
+                          ? origemValores.sku.sobrescrito
+                            ? 'border-amber-400 bg-amber-50/30'
+                            : 'border-primary/40 bg-primary/5'
+                          : ''
                     }
                     value={produtoEditando?.sku || ''}
                     onChange={(e) => {
                       marcarSobrescrita('sku')
+                      if (formErrors.sku) {
+                        setFormErrors((prev) => {
+                          const next = { ...prev }
+                          delete next.sku
+                          return next
+                        })
+                      }
                       setProdutoEditando((prev) => ({ ...prev, sku: e.target.value }))
                     }}
                   />
+                  {formErrors.sku && (
+                    <p className="text-[11px] text-destructive font-medium mt-1">
+                      {formErrors.sku}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-1">
@@ -1722,12 +1765,17 @@ export default function PrecificacaoProdutos() {
             </div>
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setOpenDialog(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving}
+                onClick={() => setOpenDialog(false)}
+              >
                 Cancelar
               </Button>
-              <Button type="submit" className="bg-primary text-white font-bold">
+              <Button type="submit" disabled={saving} className="bg-primary text-white font-bold">
                 <Check className="mr-1.5 h-4 w-4" />
-                Salvar Produto
+                {saving ? 'Salvando...' : 'Salvar Produto'}
               </Button>
             </DialogFooter>
           </form>
