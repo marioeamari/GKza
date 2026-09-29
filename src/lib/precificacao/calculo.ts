@@ -238,6 +238,87 @@ export function round4(num: number): number {
 }
 
 /**
+ * Normaliza strings para comparação flexível de categorias:
+ * remove acentuação (NFD), pontuações, caracteres especiais e converte para minúsculas
+ */
+export function normalizarTextoCategoria(texto?: string): string {
+  if (!texto) return ''
+  return texto
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove diacríticos / acentos
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ') // pontuações e símbolos viram espaço
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Verifica se a categoria do produto atende à condição da taxa de forma resiliente.
+ * - Suporta múltiplos termos na condição separados por vírgula (ex.: "cama, mesa e banho", "eletrônicos, informática")
+ * - Compara por inclusão nos dois sentidos (produto contém termo ou termo contém produto)
+ * - Categoria vazia no produto continua NÃO casando com condição preenchida, com motivo explícito.
+ */
+export function verificarCorrespondenciaCategoria(
+  categoriaProduto?: string,
+  categoriaCondicao?: string,
+): { casou: boolean; motivo?: string } {
+  if (!categoriaCondicao || categoriaCondicao.trim() === '') {
+    return { casou: true }
+  }
+
+  const condOriginal = categoriaCondicao.trim()
+  const prodOriginal = (categoriaProduto || '').trim()
+
+  if (!prodOriginal) {
+    return {
+      casou: false,
+      motivo: `Categoria do produto não definida (condição: ${condOriginal})`,
+    }
+  }
+
+  const normProd = normalizarTextoCategoria(prodOriginal)
+  if (!normProd) {
+    return {
+      casou: false,
+      motivo: `Categoria do produto não definida (condição: ${condOriginal})`,
+    }
+  }
+
+  // Se a condição contiver termos separados por vírgula, dividimos em termos
+  const termosCondicao = condOriginal
+    .split(',')
+    .map((t) => normalizarTextoCategoria(t))
+    .filter((t) => t.length > 0)
+
+  // Caso não tenha sobrado termos válidos
+  if (termosCondicao.length === 0) {
+    return { casou: true }
+  }
+
+  // Também podemos avaliar a condição inteira normalizada (caso não tenha vírgula ou como conjunto)
+  const normCondInteira = normalizarTextoCategoria(condOriginal)
+
+  // Checar match direto ou substring bilateral entre o produto e qualquer termo
+  const casou =
+    termosCondicao.some((termo) => {
+      return normProd === termo || normProd.includes(termo) || termo.includes(normProd)
+    }) ||
+    (normCondInteira.length > 0 &&
+      (normProd === normCondInteira ||
+        normProd.includes(normCondInteira) ||
+        normCondInteira.includes(normProd)))
+
+  if (!casou) {
+    return {
+      casou: false,
+      motivo: `Categoria do produto (${prodOriginal}) diferente de ${condOriginal}`,
+    }
+  }
+
+  return { casou: true }
+}
+
+/**
  * Retorna dimensões e volume em cm³ do produto
  */
 export function extrairDimensoesEVolume(produto: ProdutoCalculoInput): {
@@ -399,12 +480,9 @@ export function avaliarCondicaoTaxa(
 
   // 4. Categoria
   if (condicao.categoria && condicao.categoria.trim() !== '') {
-    const catProd = (produto.categoria || '').trim().toLowerCase()
-    const catCond = condicao.categoria.trim().toLowerCase()
-    if (catProd !== catCond) {
-      motivos.push(
-        `Categoria do produto (${produto.categoria || 'não definida'}) diferente de ${condicao.categoria}`,
-      )
+    const matchCat = verificarCorrespondenciaCategoria(produto.categoria, condicao.categoria)
+    if (!matchCat.casou && matchCat.motivo) {
+      motivos.push(matchCat.motivo)
     }
   }
 

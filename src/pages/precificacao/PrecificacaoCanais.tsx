@@ -1434,7 +1434,7 @@ export default function PrecificacaoCanais() {
                     Categoria Específica (Opcional)
                   </span>
                   <Input
-                    placeholder="Ex: Cama e Banho, Eletrônicos..."
+                    placeholder="Ex: Cama, Mesa e Banho ou Eletrônicos..."
                     value={taxaEditando?.condicao?.categoria || ''}
                     onChange={(e) => {
                       const val = e.target.value
@@ -1447,8 +1447,10 @@ export default function PrecificacaoCanais() {
                       }))
                     }}
                   />
-                  <span className="text-[9px] text-muted-foreground block">
-                    Aplica apenas a produtos com esta categoria no cadastro.
+                  <span className="text-[9px] text-muted-foreground block leading-tight">
+                    Suporta termos separados por vírgula (ex.: cama, mesa e banho). A comparação
+                    ignora maiúsculas e acentos e casa por termo. Se o produto estiver sem
+                    categoria, a taxa não será aplicada e o comparador exibirá um aviso.
                   </span>
                 </div>
               </div>

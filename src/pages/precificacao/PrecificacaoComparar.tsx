@@ -1900,12 +1900,21 @@ export default function PrecificacaoComparar() {
                           >
                             {produtoAtual.tipo.replace('_', ' ')}
                           </Badge>
-                          {produtoAtual.categoria && (
+                          {produtoAtual.categoria ? (
                             <Badge
                               variant="secondary"
-                              className="text-[10px] h-5 px-1.5 text-muted-foreground truncate max-w-[120px]"
+                              className="text-[10px] h-5 px-1.5 text-muted-foreground truncate max-w-[140px]"
+                              title={`Categoria: ${produtoAtual.categoria}`}
                             >
                               {produtoAtual.categoria}
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] h-5 px-1.5 text-[#DF5830] border-[#DF5830]/40 bg-[#DF5830]/5 font-medium"
+                              title="Produto sem categoria: regras de taxa condicionadas por categoria não serão aplicadas no comparador"
+                            >
+                              Sem categoria
                             </Badge>
                           )}
                         </div>
@@ -2020,6 +2029,22 @@ export default function PrecificacaoComparar() {
                       </span>
                     </div>
                   </div>
+
+                  {/* Aviso no painel do produto se não houver categoria cadastrada */}
+                  {!produtoAtual.categoria && (
+                    <div className="rounded-lg border border-[#DF5830]/30 bg-[#DF5830]/5 p-2 flex items-start gap-1.5 text-[11px] text-foreground">
+                      <AlertTriangle className="h-3.5 w-3.5 text-[#DF5830] shrink-0 mt-0.5" />
+                      <div className="leading-tight space-y-0.5">
+                        <span className="font-semibold text-[#DF5830] block text-[10.5px]">
+                          Produto sem categoria
+                        </span>
+                        <span className="text-[10.5px] text-muted-foreground">
+                          Regras de canais com condição de categoria (ex.: SHEIN Cama, Mesa e Banho)
+                          não serão aplicadas.
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Destaque do Custo Total Base */}
@@ -2362,6 +2387,9 @@ export default function PrecificacaoComparar() {
                           const taxasAplicadas = (dem.linhas_taxas || []).filter(
                             (tx) => tx.aplicada,
                           )
+                          const taxasDesconsideradas = (dem.linhas_taxas || []).filter(
+                            (tx) => !tx.aplicada,
+                          )
                           const temTaxasCadastradas = (dem.linhas_taxas?.length || 0) > 0
 
                           return (
@@ -2406,6 +2434,47 @@ export default function PrecificacaoComparar() {
                                   ))
                                 )}
                               </div>
+
+                              {/* Indicador / Aviso discreto de taxas desconsideradas por condição não atendida */}
+                              {taxasDesconsideradas.length > 0 && (
+                                <div className="rounded-lg border border-[#DF5830]/30 bg-[#DF5830]/5 p-2 space-y-1 text-[11px]">
+                                  <div className="flex items-center gap-1.5 text-[#DF5830] font-semibold text-[10px] uppercase tracking-wider">
+                                    <AlertTriangle className="h-3 w-3 shrink-0" />
+                                    <span>
+                                      {taxasDesconsideradas.length === 1
+                                        ? '1 taxa não aplicada'
+                                        : `${taxasDesconsideradas.length} taxas não aplicadas`}
+                                    </span>
+                                  </div>
+                                  <div className="space-y-1 pt-0.5">
+                                    {taxasDesconsideradas.map((tx, idx) => {
+                                      const labelTaxa = `${tx.nome}${
+                                        tx.tipo_valor === 'percentual'
+                                          ? ` ${tx.aliquota_ou_fixo}%`
+                                          : tx.tipo_valor === 'fixo'
+                                            ? ` ${formatCurrency(tx.aliquota_ou_fixo)}`
+                                            : ''
+                                      }`
+                                      const motivo =
+                                        tx.motivo_nao_aplicada ||
+                                        tx.condicao_resumo ||
+                                        'Condição da regra não atendida'
+
+                                      return (
+                                        <div
+                                          key={tx.taxa_id || idx}
+                                          className="text-[10.5px] leading-tight text-foreground/90 pl-1 border-l-2 border-[#DF5830]/40 py-0.5"
+                                        >
+                                          <span className="font-medium text-[#DF5830]">
+                                            {labelTaxa}:
+                                          </span>{' '}
+                                          <span className="text-muted-foreground">{motivo}</span>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )
                         })()}

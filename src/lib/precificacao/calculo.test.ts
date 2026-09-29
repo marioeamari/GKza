@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
+  avaliarCondicaoTaxa,
   calcularCustoBaseProduto,
   calcularDemonstrativo,
   formatarResumoCondicao,
+  normalizarTextoCategoria,
   resolverPrecoParaMeta,
   round2,
+  verificarCorrespondenciaCategoria,
 } from './calculo'
 
 describe('Motor de Cálculo de Precificação - ERP GKza', () => {
@@ -481,5 +484,93 @@ describe('Motor de Cálculo de Precificação - ERP GKza', () => {
       preco_anunciado: dem.ponto_equilibrio,
     })
     expect(Math.abs(demEq.lucro_liquido)).toBeLessThanOrEqual(0.05)
+  })
+
+  describe('Correspondência resiliente de categorias nas regras de taxas', () => {
+    it('deve normalizar acentos, caixa alta e pontuações', () => {
+      expect(normalizarTextoCategoria('Cama, Mesa e Banhão!')).toBe('cama mesa e banhao')
+      expect(normalizarTextoCategoria('  ELETRÔNICOS / INFORMÁTICA  ')).toBe(
+        'eletronicos informatica',
+      )
+    })
+
+    it('deve casar categoria com termos múltiplos separados por vírgula em qualquer direção', () => {
+      // Condição SHEIN: "cama, mesa e banho"
+      // Produto com categoria "Banho Banhão"
+      const res1 = verificarCorrespondenciaCategoria('Banho Banhão', 'cama, mesa e banho')
+      expect(res1.casou).toBe(true)
+
+      // Produto com categoria "cama, mesa e banho" vs condição "Mesa"
+      const res2 = verificarCorrespondenciaCategoria('cama, mesa e banho', 'Mesa')
+      expect(res2.casou).toBe(true)
+
+      // Produto com acentuação: "Toalhas de Banho" vs condição "cama, mesa e banho"
+      const res3 = verificarCorrespondenciaCategoria('Toalhas de Banho', 'cama, mesa e banho')
+      expect(res3.casou).toBe(true)
+
+      // Produto "Praia" vs "cama, mesa e banho" -> não casa
+      const res4 = verificarCorrespondenciaCategoria('Praia', 'cama, mesa e banho')
+      expect(res4.casou).toBe(false)
+      expect(res4.motivo).toContain('Categoria do produto (Praia) diferente de cama, mesa e banho')
+    })
+
+    it('categoria vazia no produto NÃO casa com condição preenchida e traz motivo claro', () => {
+      const resVazio = verificarCorrespondenciaCategoria('', 'cama, mesa e banho')
+      expect(resVazio.casou).toBe(false)
+      expect(resVazio.motivo).toBe(
+        'Categoria do produto não definida (condição: cama, mesa e banho)',
+      )
+
+      const resUndefined = verificarCorrespondenciaCategoria(undefined, 'cama, mesa e banho')
+      expect(resUndefined.casou).toBe(false)
+      expect(resUndefined.motivo).toBe(
+        'Categoria do produto não definida (condição: cama, mesa e banho)',
+      )
+    })
+
+    it('avaliarCondicaoTaxa integra a verificação e expõe motivo na linha da taxa desconsiderada', () => {
+      const prodSemCategoria = {
+        sku: 'TESTE-SEM-CAT',
+        nome: 'Toalha Sem Categoria',
+        tipo: 'revenda' as const,
+        categoria: '',
+      }
+
+      const avaliacao = avaliarCondicaoTaxa(
+        { categoria: 'cama, mesa e banho' },
+        50.0,
+        prodSemCategoria,
+      )
+
+      expect(avaliacao.aplicavel).toBe(false)
+      expect(avaliacao.motivoNaoAplicavel).toBe(
+        'Categoria do produto não definida (condição: cama, mesa e banho)',
+      )
+
+      const dem = calcularDemonstrativo({
+        produto: prodSemCategoria,
+        preco_anunciado: 50.0,
+        taxas: [
+          {
+            id: 'exezqec68sm6kjc',
+            nome: 'Comissão SHEIN',
+            base_calculo: 'preco_anunciado',
+            tipo_valor: 'percentual',
+            valor: 18.0,
+            condicao: { categoria: 'cama, mesa e banho' },
+            responsavel: 'marketplace',
+            tipo_regra: 'comissao',
+            financiado_por: 'marketplace',
+          },
+        ],
+      })
+
+      const l = dem.linhas_taxas.find((t) => t.taxa_id === 'exezqec68sm6kjc')
+      expect(l?.aplicada).toBe(false)
+      expect(l?.motivo_nao_aplicada).toBe(
+        'Categoria do produto não definida (condição: cama, mesa e banho)',
+      )
+      expect(dem.total_taxas_retidas_canal).toBe(0)
+    })
   })
 })

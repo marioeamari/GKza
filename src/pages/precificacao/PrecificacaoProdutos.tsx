@@ -995,7 +995,7 @@ export default function PrecificacaoProdutos() {
                     )}
                   </div>
                   <Input
-                    placeholder="Ex: Cama e Banho"
+                    placeholder="Ex: Cama, Mesa e Banho"
                     className={
                       origemValores.categoria?.herdado
                         ? origemValores.categoria.sobrescrito
@@ -1009,6 +1009,12 @@ export default function PrecificacaoProdutos() {
                       setProdutoEditando((prev) => ({ ...prev, categoria: e.target.value }))
                     }}
                   />
+                  {!produtoEditando?.categoria?.trim() && (
+                    <span className="text-[10px] text-muted-foreground block leading-tight">
+                      Recomendado: canais como SHEIN usam a categoria para aplicar alíquotas de
+                      comissão.
+                    </span>
+                  )}
                 </div>
 
                 <div className="space-y-1">
