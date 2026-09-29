@@ -78,10 +78,17 @@ export default function PrecificacaoProdutos() {
   const [buscaFornText, setBuscaFornText] = useState('')
   const [buscaProdFornText, setBuscaProdFornText] = useState('')
 
-  // Rastreamento de quais campos foram preenchidos via fornecedor e se foram sobrescritos
+  // Controle de Fabricação Própria: Produtos cadastrados na Empresa selecionada
+  const [produtosDaEmpresa, setProdutosDaEmpresa] = useState<PrecProdutoRecord[]>([])
+  const [loadingProdsEmpresa, setLoadingProdsEmpresa] = useState(false)
+  const [produtoEmpresaSelecionadoId, setProdutoEmpresaSelecionadoId] = useState<string>('')
+  const [buscaProdEmpresaText, setBuscaProdEmpresaText] = useState('')
+
+  // Rastreamento de quais campos foram preenchidos via fornecedor ou empresa e se foram sobrescritos
   const [origemValores, setOrigemValores] = useState<{
     [campo: string]: {
       herdado: boolean
+      origemTipo?: 'fornecedor' | 'empresa'
       valorOriginal?: string | number
       sobrescrito?: boolean
     }
@@ -144,6 +151,32 @@ export default function PrecificacaoProdutos() {
     }
   }, [fornecedorSelecionadoId])
 
+  // Carrega produtos fabricados da empresa quando a empresa selecionada mudar no fluxo de fabricação própria
+  useEffect(() => {
+    const empresaId = produtoEditando?.empresa
+    if (produtoEditando?.tipo === 'fabricacao_propria' && empresaId) {
+      setLoadingProdsEmpresa(true)
+      precificacaoService
+        .listProdutosPorEmpresa(empresaId)
+        .then((items) => {
+          // Exclui o próprio produto que está sendo editado (se já existir) para evitar auto-referência
+          const filtrados = produtoEditando?.id
+            ? items.filter((it) => it.id !== produtoEditando.id)
+            : items
+          setProdutosDaEmpresa(filtrados)
+        })
+        .catch(() => {
+          setProdutosDaEmpresa([])
+        })
+        .finally(() => {
+          setLoadingProdsEmpresa(false)
+        })
+    } else {
+      setProdutosDaEmpresa([])
+      setProdutoEmpresaSelecionadoId('')
+    }
+  }, [produtoEditando?.tipo, produtoEditando?.empresa, produtoEditando?.id])
+
   function abrirNovoProduto(empresaPreSelecionadaId?: string) {
     setProdutoEditando({
       sku: '',
@@ -180,9 +213,11 @@ export default function PrecificacaoProdutos() {
     if (fileInputRef.current) fileInputRef.current.value = ''
     setFornecedorSelecionadoId('')
     setProdutoFornSelecionadoId('')
+    setProdutoEmpresaSelecionadoId('')
     setBuscaEmpresaText('')
     setBuscaFornText('')
     setBuscaProdFornText('')
+    setBuscaProdEmpresaText('')
     setOrigemValores({})
     setOpenDialog(true)
   }
@@ -205,23 +240,25 @@ export default function PrecificacaoProdutos() {
     const prodFornId = p.fornecedor_produto || ''
     setFornecedorSelecionadoId(fornId)
     setProdutoFornSelecionadoId(prodFornId)
+    setProdutoEmpresaSelecionadoId('')
     setBuscaEmpresaText('')
     setBuscaFornText('')
     setBuscaProdFornText('')
+    setBuscaProdEmpresaText('')
 
     // Se já havia vínculo salvo, marcar campos que casam como herdados
     if (prodFornId) {
       setOrigemValores({
-        sku: { herdado: true },
-        nome: { herdado: true },
-        custo_aquisicao_unitario: { herdado: true },
-        peso_g: { herdado: true },
-        dimensoes: { herdado: true },
-        marca: { herdado: true },
-        categoria: { herdado: true },
-        unidade: { herdado: true },
-        codigo_barras: { herdado: true },
-        embalagem: { herdado: true },
+        sku: { herdado: true, origemTipo: 'fornecedor' },
+        nome: { herdado: true, origemTipo: 'fornecedor' },
+        custo_aquisicao_unitario: { herdado: true, origemTipo: 'fornecedor' },
+        peso_g: { herdado: true, origemTipo: 'fornecedor' },
+        dimensoes: { herdado: true, origemTipo: 'fornecedor' },
+        marca: { herdado: true, origemTipo: 'fornecedor' },
+        categoria: { herdado: true, origemTipo: 'fornecedor' },
+        unidade: { herdado: true, origemTipo: 'fornecedor' },
+        codigo_barras: { herdado: true, origemTipo: 'fornecedor' },
+        embalagem: { herdado: true, origemTipo: 'fornecedor' },
       })
     } else {
       setOrigemValores({})
@@ -304,25 +341,101 @@ export default function PrecificacaoProdutos() {
 
     // Rastreia campos como herdados do cadastro do fornecedor
     setOrigemValores({
-      sku: { herdado: true, valorOriginal: fp.sku_fornecedor || '' },
-      nome: { herdado: true, valorOriginal: fp.descricao || '' },
-      custo_aquisicao_unitario: { herdado: true, valorOriginal: fp.preco_custo_unitario },
-      peso_g: { herdado: true, valorOriginal: fp.peso_g ?? 0 },
+      sku: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.sku_fornecedor || '' },
+      nome: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.descricao || '' },
+      custo_aquisicao_unitario: {
+        herdado: true,
+        origemTipo: 'fornecedor',
+        valorOriginal: fp.preco_custo_unitario,
+      },
+      peso_g: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.peso_g ?? 0 },
       dimensoes: {
         herdado: true,
+        origemTipo: 'fornecedor',
         valorOriginal: `${fp.comprimento_cm || 0}x${fp.largura_cm || 0}x${fp.altura_cm || 0}`,
       },
-      marca: { herdado: true, valorOriginal: fp.marca || '' },
-      categoria: { herdado: true, valorOriginal: fp.categoria || '' },
-      unidade: { herdado: true, valorOriginal: fp.unidade || 'un' },
-      codigo_barras: { herdado: true, valorOriginal: fp.codigo_barras || '' },
-      embalagem: { herdado: true, valorOriginal: fp.embalagem || '' },
+      marca: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.marca || '' },
+      categoria: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.categoria || '' },
+      unidade: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.unidade || 'un' },
+      codigo_barras: {
+        herdado: true,
+        origemTipo: 'fornecedor',
+        valorOriginal: fp.codigo_barras || '',
+      },
+      embalagem: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.embalagem || '' },
     })
 
     toast({
       title: 'Dados do produto carregados!',
       description:
         'Custo, peso, dimensões, SKU, marca e categoria foram preenchidos a partir do cadastro do fornecedor.',
+    })
+  }
+
+  // Ao selecionar um produto já cadastrado na Empresa, herda automaticamente todos os dados e composições analíticas
+  function handleSelecionarProdutoEmpresa(pe: PrecProdutoRecord) {
+    setProdutoEmpresaSelecionadoId(pe.id)
+
+    setProdutoEditando((prev) => {
+      const atual = prev || {}
+      return {
+        ...atual,
+        nome: pe.nome || atual.nome || '',
+        sku: pe.sku || atual.sku || '',
+        marca: pe.marca || atual.marca || '',
+        categoria: pe.categoria || atual.categoria || '',
+        unidade: pe.unidade || atual.unidade || 'un',
+        codigo_barras: pe.codigo_barras || atual.codigo_barras || '',
+        embalagem: pe.embalagem || atual.embalagem || '',
+        peso_g: pe.peso_g ?? atual.peso_g ?? 0,
+        dimensao_comprimento_cm: pe.dimensao_comprimento_cm ?? atual.dimensao_comprimento_cm,
+        dimensao_largura_cm: pe.dimensao_largura_cm ?? atual.dimensao_largura_cm,
+        dimensao_altura_cm: pe.dimensao_altura_cm ?? atual.dimensao_altura_cm,
+        custo_adicional_embalagem:
+          pe.custo_adicional_embalagem ?? atual.custo_adicional_embalagem ?? 0.1,
+        custo_etiqueta: pe.custo_etiqueta ?? atual.custo_etiqueta ?? 0.05,
+        perda_pct: pe.perda_pct ?? atual.perda_pct ?? 10,
+        custo_aquisicao_unitario:
+          pe.custo_aquisicao_unitario ?? atual.custo_aquisicao_unitario ?? 0,
+      }
+    })
+
+    // Herança da Composição Analítica de Custos (C0..C12)
+    if (pe.composicao && pe.composicao.length > 0) {
+      setComposicaoTemp(JSON.parse(JSON.stringify(pe.composicao)))
+    }
+
+    // Se ainda não temos preview próprio e o produto da empresa possui imagem, exibir como preview
+    if (!imagemFile && !imagemPreview && !removerImagem && pe.imagem) {
+      setImagemPreview(precificacaoService.getProdutoImageUrl(pe))
+    }
+
+    // Rastreia campos como herdados do cadastro da empresa
+    setOrigemValores({
+      sku: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.sku || '' },
+      nome: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.nome || '' },
+      peso_g: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.peso_g ?? 0 },
+      dimensoes: {
+        herdado: true,
+        origemTipo: 'empresa',
+        valorOriginal: `${pe.dimensao_comprimento_cm || 0}x${pe.dimensao_largura_cm || 0}x${pe.dimensao_altura_cm || 0}`,
+      },
+      marca: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.marca || '' },
+      categoria: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.categoria || '' },
+      unidade: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.unidade || 'un' },
+      codigo_barras: {
+        herdado: true,
+        origemTipo: 'empresa',
+        valorOriginal: pe.codigo_barras || '',
+      },
+      embalagem: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.embalagem || '' },
+      composicao: { herdado: true, origemTipo: 'empresa' },
+    })
+
+    toast({
+      title: 'Produto fabricado carregado!',
+      description:
+        'Composições analíticas (C0..C12), custos, peso, dimensões, SKU, marca e categoria herdados da empresa.',
     })
   }
 
@@ -477,6 +590,17 @@ export default function PrecificacaoProdutos() {
       p.descricao.toLocaleLowerCase('pt-BR').includes(term) ||
       (p.sku_fornecedor && p.sku_fornecedor.toLocaleLowerCase('pt-BR').includes(term)) ||
       (p.marca && p.marca.toLocaleLowerCase('pt-BR').includes(term))
+    )
+  })
+
+  const produtosEmpresaFiltrados = produtosDaEmpresa.filter((p) => {
+    if (!buscaProdEmpresaText.trim()) return true
+    const term = buscaProdEmpresaText.toLocaleLowerCase('pt-BR')
+    return (
+      p.nome.toLocaleLowerCase('pt-BR').includes(term) ||
+      p.sku.toLocaleLowerCase('pt-BR').includes(term) ||
+      (p.marca && p.marca.toLocaleLowerCase('pt-BR').includes(term)) ||
+      (p.categoria && p.categoria.toLocaleLowerCase('pt-BR').includes(term))
     )
   })
 
@@ -811,6 +935,120 @@ export default function PrecificacaoProdutos() {
                 </div>
               </div>
 
+              {/* SEÇÃO ESPECÍFICA: BUSCADOR DE PRODUTOS DE FABRICAÇÃO PRÓPRIA DA EMPRESA */}
+              {produtoEditando?.tipo === 'fabricacao_propria' && produtoEditando?.empresa && (
+                <div className="rounded-2xl border-2 border-primary/20 bg-primary/5 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Layers className="h-4 w-4 text-primary" />
+                      <span className="font-bold text-xs uppercase tracking-wider text-primary">
+                        Auto-Preenchimento via Empresa Fabricante
+                      </span>
+                    </div>
+                    {produtoEmpresaSelecionadoId && (
+                      <Badge className="bg-primary text-white text-[10px] font-bold">
+                        Produto herdado
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Selecione um produto já cadastrado na empresa para herdar automaticamente:
+                    composições analíticas (C0..C12), custos, peso, dimensões, SKU, marca e foto.
+                  </p>
+
+                  <div className="space-y-1.5 pt-1">
+                    <Label className="text-xs font-semibold flex items-center justify-between">
+                      <span>
+                        Produto Fabricado da Empresa ({produtosDaEmpresa.length})
+                        {loadingProdsEmpresa && ' (carregando...)'}
+                      </span>
+                      <Link
+                        to="/empresas"
+                        target="_blank"
+                        className="text-[10px] text-primary hover:underline font-normal"
+                      >
+                        + Gerenciar produtos da empresa
+                      </Link>
+                    </Label>
+
+                    <Select
+                      disabled={loadingProdsEmpresa}
+                      value={produtoEmpresaSelecionadoId || 'nenhum'}
+                      onValueChange={(v) => {
+                        if (v === 'nenhum') {
+                          setProdutoEmpresaSelecionadoId('')
+                          return
+                        }
+                        const prodEmp = produtosDaEmpresa.find((item) => item.id === v)
+                        if (prodEmp) handleSelecionarProdutoEmpresa(prodEmp)
+                      }}
+                    >
+                      <SelectTrigger className="bg-white">
+                        <SelectValue
+                          placeholder={
+                            produtosDaEmpresa.length === 0
+                              ? 'Empresa sem produtos fabricados cadastrados'
+                              : 'Escolha o produto para herdar composições e dados...'
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <div className="p-1 border-b border-border">
+                          <div className="relative">
+                            <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                            <Input
+                              placeholder="Filtrar por nome ou SKU..."
+                              value={buscaProdEmpresaText}
+                              onChange={(e) => setBuscaProdEmpresaText(e.target.value)}
+                              className="h-8 pl-8 text-xs"
+                              onKeyDown={(e) => e.stopPropagation()}
+                            />
+                          </div>
+                        </div>
+                        <SelectItem value="nenhum">Nenhum / Novo Produto em Branco</SelectItem>
+                        {produtosEmpresaFiltrados.map((pe) => {
+                          const cCalc = calcularCustoBaseProduto({
+                            sku: pe.sku,
+                            nome: pe.nome,
+                            tipo: pe.tipo,
+                            peso_g: pe.peso_g,
+                            composicao: pe.composicao,
+                            perda_pct: pe.perda_pct,
+                            custo_etiqueta: pe.custo_etiqueta,
+                            custo_adicional_embalagem: pe.custo_adicional_embalagem,
+                          })
+                          return (
+                            <SelectItem key={pe.id} value={pe.id}>
+                              {pe.nome} [SKU: {pe.sku}] — Custo: {formatCurrency(cCalc.custo_total)}
+                              {pe.composicao?.length ? ` (${pe.composicao.length} insumos)` : ''}
+                            </SelectItem>
+                          )
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {produtosDaEmpresa.length === 0 && !loadingProdsEmpresa && (
+                    <div className="p-2.5 rounded-xl border border-dashed border-primary/30 bg-white/60 text-center">
+                      <p className="text-[11px] text-muted-foreground">
+                        Esta empresa ainda não possui produtos de fabricação própria cadastrados em
+                        sua ficha.
+                      </p>
+                      <Button
+                        asChild
+                        size="sm"
+                        variant="link"
+                        className="h-6 text-xs text-primary p-0 mt-1"
+                      >
+                        <Link to="/empresas" target="_blank">
+                          Abrir /empresas e cadastrar produtos com ficha detalhada
+                        </Link>
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* SEÇÃO ESPECÍFICA: BUSCADOR DE FORNECEDOR E PRODUTO FORNECIDO (APENAS PARA REVENDA) */}
               {produtoEditando?.tipo === 'revenda' && (
                 <div className="rounded-2xl border-2 border-primary/20 bg-primary/5 p-4 space-y-3">
@@ -966,7 +1204,11 @@ export default function PrecificacaoProdutos() {
                     {origemValores.sku?.herdado && (
                       <span className="text-[10px] text-primary flex items-center gap-1 font-semibold">
                         <Sparkles className="h-3 w-3" />
-                        {origemValores.sku.sobrescrito ? 'Sobrescrito' : 'Herdado do fornecedor'}
+                        {origemValores.sku.sobrescrito
+                          ? 'Sobrescrito'
+                          : origemValores.sku.origemTipo === 'empresa'
+                            ? 'Herdado da empresa'
+                            : 'Herdado do fornecedor'}
                       </span>
                     )}
                   </div>
@@ -994,7 +1236,11 @@ export default function PrecificacaoProdutos() {
                     {origemValores.nome?.herdado && (
                       <span className="text-[10px] text-primary flex items-center gap-1 font-semibold">
                         <Sparkles className="h-3 w-3" />
-                        {origemValores.nome.sobrescrito ? 'Sobrescrito' : 'Herdado do fornecedor'}
+                        {origemValores.nome.sobrescrito
+                          ? 'Sobrescrito'
+                          : origemValores.nome.origemTipo === 'empresa'
+                            ? 'Herdado da empresa'
+                            : 'Herdado do fornecedor'}
                       </span>
                     )}
                   </div>
@@ -1269,15 +1515,28 @@ export default function PrecificacaoProdutos() {
               {produtoEditando?.tipo === 'fabricacao_propria' && (
                 <div className="rounded-xl border border-border p-3 space-y-3 bg-secondary/10">
                   <div className="flex justify-between items-center">
-                    <span className="font-bold text-xs uppercase tracking-wider text-muted-foreground">
-                      Composição de Custo / Insumos (C0..C12)
-                    </span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs uppercase tracking-wider text-muted-foreground">
+                          Composição de Custo / Insumos (C0..C12)
+                        </span>
+                        {origemValores.composicao?.herdado && (
+                          <span className="text-[10px] text-primary flex items-center gap-1 font-semibold">
+                            <Sparkles className="h-3 w-3" />
+                            {origemValores.composicao.sobrescrito
+                              ? 'Editado manualmente'
+                              : 'Estrutura herdada da empresa'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
                       className="h-7 text-[11px]"
                       onClick={() => {
+                        marcarSobrescrita('composicao')
                         const nextIdx = composicaoTemp.length
                         setComposicaoTemp([
                           ...composicaoTemp,
@@ -1304,6 +1563,7 @@ export default function PrecificacaoProdutos() {
                           placeholder="C0"
                           value={item.codigo || `C${idx}`}
                           onChange={(e) => {
+                            marcarSobrescrita('composicao')
                             const arr = [...composicaoTemp]
                             arr[idx].codigo = e.target.value
                             setComposicaoTemp(arr)
@@ -1314,6 +1574,7 @@ export default function PrecificacaoProdutos() {
                           placeholder="Descrição do insumo ou serviço..."
                           value={item.descricao}
                           onChange={(e) => {
+                            marcarSobrescrita('composicao')
                             const arr = [...composicaoTemp]
                             arr[idx].descricao = e.target.value
                             setComposicaoTemp(arr)
@@ -1327,6 +1588,7 @@ export default function PrecificacaoProdutos() {
                             placeholder="Qtd"
                             value={item.qtd}
                             onChange={(e) => {
+                              marcarSobrescrita('composicao')
                               const arr = [...composicaoTemp]
                               arr[idx].qtd = parseFloat(e.target.value) || 0
                               setComposicaoTemp(arr)
@@ -1341,6 +1603,7 @@ export default function PrecificacaoProdutos() {
                             placeholder="R$ Unit"
                             value={item.custo_unitario}
                             onChange={(e) => {
+                              marcarSobrescrita('composicao')
                               const arr = [...composicaoTemp]
                               arr[idx].custo_unitario = parseFloat(e.target.value) || 0
                               setComposicaoTemp(arr)
@@ -1353,6 +1616,7 @@ export default function PrecificacaoProdutos() {
                           variant="ghost"
                           className="h-8 w-8 text-destructive"
                           onClick={() => {
+                            marcarSobrescrita('composicao')
                             setComposicaoTemp(composicaoTemp.filter((_, i) => i !== idx))
                           }}
                         >
