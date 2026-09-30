@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
+  ArrowUpDown,
   Building2,
   Calendar,
   CalendarDays,
@@ -381,6 +382,28 @@ export default function Despesas() {
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterSecao, setFilterSecao] = useState('all') // Seção do painel: 'all' | 'contas_mensais_pix_boleto' | 'assinaturas_anuais' | 'cartoes_credito'
 
+  // Ordenação: 'urgente' (mais urgente primeiro: pendentes vencidas/hoje/futuras no topo) | 'recente' (mais tarde primeiro)
+  const [sortBy, setSortBy] = useState<'urgente' | 'recente'>(() => {
+    try {
+      const saved = localStorage.getItem('despesas_ordem_vencimento')
+      if (saved === 'urgente' || saved === 'recente') {
+        return saved
+      }
+    } catch (e) {
+      console.warn('Erro ao ler ordem de vencimento do localStorage:', e)
+    }
+    return 'urgente'
+  })
+
+  const handleSortChange = (value: 'urgente' | 'recente') => {
+    setSortBy(value)
+    try {
+      localStorage.setItem('despesas_ordem_vencimento', value)
+    } catch (e) {
+      console.warn('Erro ao salvar ordem de vencimento no localStorage:', e)
+    }
+  }
+
   // Ocorrências atrasadas (status 'prevista' com vencimento anterior ao mês atual)
   const [ocorrenciasAtrasadas, setOcorrenciasAtrasadas] = useState<DespesaOcorrencia[]>([])
 
@@ -652,15 +675,75 @@ export default function Despesas() {
     filterStatus,
   ])
 
-  // Seção 1: Boletos & Contas Mensais Pix
-  const secaoBoletosPix = useMemo(
-    () => filteredOcorrencias.filter((oc) => !oc.secao || oc.secao === 'contas_mensais_pix_boleto'),
-    [filteredOcorrencias],
+  // Função utilitária para ordenação inteligente de ocorrências:
+  // Separa não pagas (previstas) das já pagas.
+  // - Em 'urgente' (default):
+  //     * Pendentes vencidas e que vencem hoje primeiro em ordem cronológica (a mais atrasada/antiga no topo),
+  //       depois as pendentes futuras em ordem crescente.
+  //     * Pagas ficam agrupadas ao final (ou por data de pagamento/vencimento decrescente).
+  // - Em 'recente':
+  //     * Pendentes com vencimento mais distante no topo (decrescente), vencidas/hoje no fim das pendentes.
+  //     * Pagas após as pendentes.
+  const sortOcorrenciasList = useCallback(
+    (list: DespesaOcorrencia[]) => {
+      const copy = [...list]
+      const today = realTodayStr // 'YYYY-MM-DD'
+
+      return copy.sort((a, b) => {
+        const isPagaA = a.status === 'paga'
+        const isPagaB = b.status === 'paga'
+
+        // 1. As pagas ficam sempre abaixo das não pagas para garantir que as que precisam ser pagas fiquem no topo
+        if (isPagaA !== isPagaB) {
+          return isPagaA ? 1 : -1
+        }
+
+        // Se ambas são pagas: ordena pela data de pagamento decrescente ou vencimento decrescente
+        if (isPagaA && isPagaB) {
+          const dtA = a.data_pagamento || a.data_vencimento || ''
+          const dtB = b.data_pagamento || b.data_vencimento || ''
+          return dtB.localeCompare(dtA)
+        }
+
+        // Se ambas são pendentes (previstas):
+        const dueA = a.data_vencimento ? a.data_vencimento.slice(0, 10) : '9999-99-99'
+        const dueB = b.data_vencimento ? b.data_vencimento.slice(0, 10) : '9999-99-99'
+
+        if (sortBy === 'urgente') {
+          // Prioriza vencidas (due < today) e vencendo hoje (due === today)
+          const isUrgenteA = dueA <= today
+          const isUrgenteB = dueB <= today
+
+          if (isUrgenteA && !isUrgenteB) return -1
+          if (!isUrgenteA && isUrgenteB) return 1
+
+          // Ambas vencidas/hoje OU ambas futuras: ordem crescente de vencimento (mais antiga/urgente primeiro)
+          const cmp = dueA.localeCompare(dueB)
+          if (cmp !== 0) return cmp
+          // Desempate por valor decrescente
+          return (b.valor_previsto || 0) - (a.valor_previsto || 0)
+        } else {
+          // 'recente' (mais tarde primeiro / vencimento decrescente para as pendentes)
+          const cmp = dueB.localeCompare(dueA)
+          if (cmp !== 0) return cmp
+          return (b.valor_previsto || 0) - (a.valor_previsto || 0)
+        }
+      })
+    },
+    [realTodayStr, sortBy],
   )
+
+  // Seção 1: Boletos & Contas Mensais Pix
+  const secaoBoletosPix = useMemo(() => {
+    const raw = filteredOcorrencias.filter(
+      (oc) => !oc.secao || oc.secao === 'contas_mensais_pix_boleto',
+    )
+    return sortOcorrenciasList(raw)
+  }, [filteredOcorrencias, sortOcorrenciasList])
 
   // Seção 2: Compromissos anuais ativos (visíveis em qualquer competência) + ocorrências do mês
   const compromissosAnuais = useMemo(() => {
-    return compromissos.filter((c) => {
+    const filtered = compromissos.filter((c) => {
       const isAnual = c.secao === 'assinaturas_anuais' || c.regra_repeticao === 'anual'
       if (!isAnual || c.ativo === false) return false
 
@@ -687,7 +770,58 @@ export default function Despesas() {
 
       return matchesSearch && matchesTag && matchesCategoria && matchesTitular
     })
-  }, [compromissos, search, filterTag, filterCategoria, filterTitular, filterStatus, ocorrencias])
+
+    // Ordenação dos compromissos anuais respeitando sortBy
+    const [anoComp, mesComp] = currentCompetencia.split('-').map((v) => parseInt(v, 10))
+    const today = realTodayStr
+
+    return [...filtered].sort((cA, cB) => {
+      const ocA = ocorrencias.find((o) => o.compromisso === cA.id)
+      const ocB = ocorrencias.find((o) => o.compromisso === cB.id)
+
+      const isPagaA = ocA?.status === 'paga'
+      const isPagaB = ocB?.status === 'paga'
+
+      // Não pagas sobem
+      if (isPagaA !== isPagaB) {
+        return isPagaA ? 1 : -1
+      }
+
+      // Calcula data de renovação/vencimento
+      const dateA = cA.data_inicio ? new Date(cA.data_inicio) : new Date()
+      const diaA = cA.dia_vencimento || dateA.getUTCDate() || 10
+      const mesA = !isNaN(dateA.getTime()) ? dateA.getUTCMonth() + 1 : 1
+      const dueStrA = `${anoComp || 2025}-${String(mesA).padStart(2, '0')}-${String(diaA).padStart(2, '0')}`
+
+      const dateB = cB.data_inicio ? new Date(cB.data_inicio) : new Date()
+      const diaB = cB.dia_vencimento || dateB.getUTCDate() || 10
+      const mesB = !isNaN(dateB.getTime()) ? dateB.getUTCMonth() + 1 : 1
+      const dueStrB = `${anoComp || 2025}-${String(mesB).padStart(2, '0')}-${String(diaB).padStart(2, '0')}`
+
+      if (sortBy === 'urgente') {
+        if (!isPagaA) {
+          const isUrgenteA = dueStrA <= today
+          const isUrgenteB = dueStrB <= today
+          if (isUrgenteA && !isUrgenteB) return -1
+          if (!isUrgenteA && isUrgenteB) return 1
+        }
+        return dueStrA.localeCompare(dueStrB)
+      } else {
+        return dueStrB.localeCompare(dueStrA)
+      }
+    })
+  }, [
+    compromissos,
+    search,
+    filterTag,
+    filterCategoria,
+    filterTitular,
+    filterStatus,
+    ocorrencias,
+    currentCompetencia,
+    realTodayStr,
+    sortBy,
+  ])
 
   // Ocorrências da seção de assinaturas anuais na competência atual
   const secaoAssinaturasOcorrencias = useMemo(
@@ -807,8 +941,12 @@ export default function Despesas() {
       map.get(contaId)!.ocorrenciasTodas.push(oc)
     })
 
-    return Array.from(map.values())
-  }, [cartaoContas, filteredOcorrencias, filteredCartaoOcorrenciasAll, contas])
+    return Array.from(map.values()).map((item) => ({
+      ...item,
+      ocorrenciasMes: sortOcorrenciasList(item.ocorrenciasMes),
+      ocorrenciasTodas: sortOcorrenciasList(item.ocorrenciasTodas),
+    }))
+  }, [cartaoContas, filteredOcorrencias, filteredCartaoOcorrenciasAll, contas, sortOcorrenciasList])
 
   // Totais do Período
   const totalPrevistoGeral = useMemo(
@@ -1105,28 +1243,69 @@ export default function Despesas() {
             </SelectContent>
           </Select>
 
-          {(search ||
-            filterTag !== 'all' ||
-            filterCategoria !== 'all' ||
-            filterTitular !== 'all' ||
-            filterSecao !== 'all' ||
-            filterStatus !== 'all') && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setSearch('')
-                setFilterTag('all')
-                setFilterCategoria('all')
-                setFilterTitular('all')
-                setFilterSecao('all')
-                setFilterStatus('all')
-              }}
-              className="h-9 text-xs text-primary"
-            >
-              <X className="mr-1 h-3.5 w-3.5" /> Limpar filtros
-            </Button>
-          )}
+          {/* Ordenação por Vencimento */}
+          <div className="flex items-center gap-1.5 ml-auto">
+            <Select value={sortBy} onValueChange={handleSortChange}>
+              <SelectTrigger
+                className="h-9 w-56 text-xs font-medium border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 transition"
+                title="Critério de ordenação da lista"
+              >
+                <div className="flex items-center gap-1.5 truncate">
+                  <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-primary" />
+                  <span className="truncate">
+                    {sortBy === 'urgente'
+                      ? 'Vencimento: mais urgente primeiro'
+                      : 'Vencimento: mais tarde primeiro'}
+                  </span>
+                </div>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="urgente">
+                  <div className="flex flex-col py-0.5">
+                    <span className="font-semibold text-xs text-foreground">
+                      Vencimento (mais urgente primeiro)
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      Vencidas e a pagar hoje no topo
+                    </span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="recente">
+                  <div className="flex flex-col py-0.5">
+                    <span className="font-semibold text-xs text-foreground">
+                      Vencimento (mais tarde primeiro)
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      Datas mais distantes no topo
+                    </span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            {(search ||
+              filterTag !== 'all' ||
+              filterCategoria !== 'all' ||
+              filterTitular !== 'all' ||
+              filterSecao !== 'all' ||
+              filterStatus !== 'all') && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearch('')
+                  setFilterTag('all')
+                  setFilterCategoria('all')
+                  setFilterTitular('all')
+                  setFilterSecao('all')
+                  setFilterStatus('all')
+                }}
+                className="h-9 text-xs text-primary"
+              >
+                <X className="mr-1 h-3.5 w-3.5" /> Limpar filtros
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
