@@ -28,6 +28,7 @@ import { calcularFaturaCartao, getAvisoFaturaCartao } from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { despesasService } from '@/services/despesas'
 import { ContaContextoWarning } from '@/components/ContaContextoWarning'
+import { AnexoUploadField } from '@/components/despesas/AnexoUploadField'
 import type { Conta, DespesaCompromisso, DespesaOcorrencia } from '@/types/domain'
 
 interface BaixaOcorrenciaDialogProps {
@@ -53,6 +54,7 @@ export function BaixaOcorrenciaDialog({
   const [dataPagamento, setDataPagamento] = useState<string>('')
   const [contaId, setContaId] = useState<string>('')
   const [observacoes, setObservacoes] = useState<string>('')
+  const [comprovanteArquivo, setComprovanteArquivo] = useState<File | null>(null)
 
   // Pode receber ocorrencia existente OU compromisso direto (para registrar pagamento retroativo)
   const comp = ocorrencia?.expand?.compromisso || compromisso
@@ -68,6 +70,7 @@ export function BaixaOcorrenciaDialog({
 
   useEffect(() => {
     if (open) {
+      setComprovanteArquivo(null)
       if (ocorrencia) {
         setValorPago(ocorrencia.valor_pago || ocorrencia.valor_previsto || 0)
         setDataPagamento(
@@ -139,6 +142,7 @@ export function BaixaOcorrenciaDialog({
           empresaId: ocorrencia.empresa,
           pessoaId: comp?.pessoa,
           observacoes,
+          comprovanteArquivo,
           descricao: `${comp?.descricao || 'Despesa'}${
             ocorrencia.numero_parcela
               ? ` (${ocorrencia.numero_parcela}/${ocorrencia.total_parcelas})`
@@ -155,6 +159,7 @@ export function BaixaOcorrenciaDialog({
           empresaId: compromisso.empresa,
           pessoaId: compromisso.pessoa,
           observacoes,
+          comprovanteArquivo,
           descricao: compromisso.descricao || 'Despesa',
           secao: compromisso.secao,
           contextoTipo: compromisso.contexto_tipo,
@@ -310,6 +315,19 @@ export function BaixaOcorrenciaDialog({
               value={observacoes}
               onChange={(e) => setObservacoes(e.target.value)}
               placeholder="Ex.: Pago via Pix com desconto, comprovante nº..."
+            />
+          </div>
+
+          <div className="pt-1 border-t border-stone-100">
+            <AnexoUploadField
+              label="Comprovante de pagamento (opcional)"
+              helperText="Anexe um .PDF ou tire uma foto/escolha da galeria o comprovante de pagamento."
+              selectedFile={comprovanteArquivo}
+              onFileSelect={setComprovanteArquivo}
+              currentFileName={ocorrencia?.comprovante_pagamento}
+              collectionNameOrId="despesas_ocorrencias"
+              recordId={ocorrencia?.id}
+              disabled={submitting}
             />
           </div>
 

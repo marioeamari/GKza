@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-30T22:44:13.813Z",
+  "generatedAt": "2026-09-30T22:58:51.890Z",
   "collections": [
     {
       "name": "users",
@@ -550,6 +550,12 @@
           "required": false,
           "system": false,
           "collectionRef": "contas"
+        },
+        {
+          "name": "comprovante",
+          "type": "file",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [
@@ -1175,6 +1181,12 @@
           "type": "text",
           "required": false,
           "system": false
+        },
+        {
+          "name": "anexo_conta",
+          "type": "file",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [
@@ -1339,6 +1351,12 @@
         {
           "name": "direcionamento",
           "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "comprovante_pagamento",
+          "type": "file",
           "required": false,
           "system": false
         }

@@ -11,6 +11,7 @@ import {
   Clock,
   CreditCard,
   ExternalLink,
+  FileText,
   Filter,
   HeartHandshake,
   LoaderCircle,
@@ -56,6 +57,7 @@ import {
 import { useAppContext } from '@/contexts/AppContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
+import { pb } from '@/lib/pocketbase/client'
 import { apiMessage } from '@/lib/api-error'
 import { formatCurrency, formatDate, getLocalDateStr } from '@/lib/format'
 import { calcularFaturaCartao } from '@/lib/cartao-fatura'
@@ -240,6 +242,38 @@ function CompromissoAnualRow({
               >
                 <ExternalLink className="h-3 w-3" />
                 Painel / Link
+              </a>
+            )}
+
+            {compromisso.anexo_conta && (
+              <a
+                href={pb.files.getURL(
+                  { id: compromisso.id, collectionName: 'despesas_compromisso' } as any,
+                  compromisso.anexo_conta,
+                )}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-semibold text-[#DF5830] hover:underline"
+                title="Ver anexo / conta a pagar"
+              >
+                <FileText className="h-3 w-3" />
+                Ver conta/fatura
+              </a>
+            )}
+
+            {ocorrenciaMes?.comprovante_pagamento && (
+              <a
+                href={pb.files.getURL(
+                  { id: ocorrenciaMes.id, collectionName: 'despesas_ocorrencias' } as any,
+                  ocorrenciaMes.comprovante_pagamento,
+                )}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-semibold text-success hover:underline"
+                title="Ver comprovante de pagamento"
+              >
+                <FileText className="h-3 w-3" />
+                Comprovante
               </a>
             )}
           </div>
@@ -2068,6 +2102,40 @@ function OcorrenciaRow({
               >
                 <ExternalLink className="h-3 w-3" />
                 Link de pagamento
+              </a>
+            )}
+
+            {/* Anexo da conta a pagar (compromisso) */}
+            {comp?.anexo_conta && (
+              <a
+                href={pb.files.getURL(
+                  { id: comp.id, collectionName: 'despesas_compromisso' } as any,
+                  comp.anexo_conta,
+                )}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-semibold text-[#DF5830] hover:underline"
+                title="Ver fatura / conta a pagar anexada"
+              >
+                <FileText className="h-3 w-3" />
+                Ver conta
+              </a>
+            )}
+
+            {/* Comprovante da baixa de pagamento */}
+            {ocorrencia.comprovante_pagamento && (
+              <a
+                href={pb.files.getURL(
+                  { id: ocorrencia.id, collectionName: 'despesas_ocorrencias' } as any,
+                  ocorrencia.comprovante_pagamento,
+                )}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-semibold text-success hover:underline"
+                title="Ver comprovante de pagamento"
+              >
+                <FileText className="h-3 w-3" />
+                Ver comprovante
               </a>
             )}
           </div>

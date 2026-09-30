@@ -172,6 +172,7 @@ export interface DespesaCompromisso extends RecordModel {
   data_fim_calculada?: string
   valor_estimado: number
   link_pagamento?: string
+  anexo_conta?: string
   dizimo?: boolean
   tipo_dizimo?: string
   direcionamento?: string
@@ -214,6 +215,7 @@ export interface DespesaOcorrencia extends RecordModel {
   tipo_dizimo?: string
   direcionamento?: string
   link_pagamento?: string
+  comprovante_pagamento?: string
   observacoes?: string
   expand?: {
     compromisso?: DespesaCompromisso
@@ -242,6 +244,7 @@ export interface Lancamento extends RecordModel {
   pessoa: string
   observacoes: string
   competencia?: string // 'YYYY-MM' (competência da fatura para cartão ou do mês)
+  comprovante?: string
   fatura_paga?: boolean // indica se a compra no cartão já foi quitada pelo pagamento da fatura
   fatura_pagamento_id?: string // id do lançamento de pagamento de fatura que quitou esta compra
   is_pagamento_fatura?: boolean // true se este lançamento é a saída de caixa referente ao pagamento de fatura

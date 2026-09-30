@@ -43,6 +43,7 @@ import { calcularFaturaCartao, getAvisoFaturaCartao } from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { despesasService } from '@/services/despesas'
 import { ContaContextoWarning } from '@/components/ContaContextoWarning'
+import { AnexoUploadField } from '@/components/despesas/AnexoUploadField'
 import type {
   Categoria,
   Conta,
@@ -100,6 +101,10 @@ export function DespesaCompromissoDialog({
   const [newTagName, setNewTagName] = useState('')
   const [localTags, setLocalTags] = useState<TagItem[]>(tags)
 
+  // Arquivo anexo da conta a ser paga (PDF ou imagem / foto da câmera)
+  const [selectedAnexoConta, setSelectedAnexoConta] = useState<File | null>(null)
+  const [removerAnexoConta, setRemoverAnexoConta] = useState(false)
+
   useEffect(() => {
     setLocalTags(tags)
   }, [tags])
@@ -147,6 +152,8 @@ export function DespesaCompromissoDialog({
   // Popula o formulário ao abrir
   useEffect(() => {
     if (open) {
+      setSelectedAnexoConta(null)
+      setRemoverAnexoConta(false)
       if (compromisso) {
         // Deduz titular
         let tTipo: TitularTipo = compromisso.titular_tipo || 'cpf'
@@ -589,73 +596,151 @@ export function DespesaCompromissoDialog({
         dataFimIso = calculoParcelamento.ultimaData.toISOString()
       }
 
-      const payload: Partial<DespesaCompromisso> = {
-        descricao: form.descricao.trim(),
-        fornecedor: form.fornecedor.trim() || (null as unknown as string),
-        categoria: form.categoria || (null as unknown as string),
-        tag: form.tag || (null as unknown as string),
-        secao: form.secao,
+      const isFormData = Boolean(selectedAnexoConta || removerAnexoConta)
+      let saved: DespesaCompromisso
 
-        // Titular da obrigação
-        titular_tipo: form.titular_tipo,
-        titular_pessoa:
-          form.titular_tipo === 'cpf' && form.titular_pessoa
-            ? form.titular_pessoa
-            : (null as unknown as string),
-        titular_empresa:
-          form.titular_tipo === 'cnpj' && form.titular_empresa
-            ? form.titular_empresa
-            : (null as unknown as string),
+      if (isFormData) {
+        const fd = new FormData()
+        fd.append('descricao', form.descricao.trim())
+        if (form.fornecedor.trim()) fd.append('fornecedor', form.fornecedor.trim())
+        if (form.categoria) fd.append('categoria', form.categoria)
+        if (form.tag) fd.append('tag', form.tag)
+        fd.append('secao', form.secao)
 
-        // Contexto_tipo legado para manter filtros e compatibilidade
-        contexto_tipo: form.titular_tipo === 'cnpj' ? 'empresa' : 'pessoal',
-        empresa:
-          form.titular_tipo === 'cnpj' && form.titular_empresa
-            ? form.titular_empresa
-            : (null as unknown as string),
-        pessoa:
-          form.pessoa_responsavel ||
-          (form.titular_tipo === 'cpf' ? form.titular_pessoa : null) ||
-          (null as unknown as string),
+        // Titular
+        fd.append('titular_tipo', form.titular_tipo)
+        if (form.titular_tipo === 'cpf' && form.titular_pessoa) {
+          fd.append('titular_pessoa', form.titular_pessoa)
+        }
+        if (form.titular_tipo === 'cnpj' && form.titular_empresa) {
+          fd.append('titular_empresa', form.titular_empresa)
+        }
 
-        // Cobrança e valores independentes
-        // Se parcelado, regra_repeticao no banco deve ser 'mensal' (enum PB: 'mensal' | 'anual' | 'avulso')
-        regra_repeticao: isParcelado ? 'mensal' : form.regra_repeticao,
-        tipo_valor: form.tipo_valor,
-        modalidade_parcelamento: form.modalidade_parcelamento,
-        total_parcelas: totalParcelasNum,
-        parcela_inicial: parcelaInicialNum,
-        valor_parcela: isParcelado ? Number(form.valor_estimado) : (null as unknown as number),
-        dia_vencimento:
+        // Contexto_tipo legado
+        fd.append('contexto_tipo', form.titular_tipo === 'cnpj' ? 'empresa' : 'pessoal')
+        if (form.titular_tipo === 'cnpj' && form.titular_empresa) {
+          fd.append('empresa', form.titular_empresa)
+        }
+        const pessoaFinal =
+          form.pessoa_responsavel || (form.titular_tipo === 'cpf' ? form.titular_pessoa : null)
+        if (pessoaFinal) fd.append('pessoa', pessoaFinal)
+
+        // Cobrança
+        fd.append('regra_repeticao', isParcelado ? 'mensal' : form.regra_repeticao)
+        fd.append('tipo_valor', form.tipo_valor)
+        fd.append('modalidade_parcelamento', form.modalidade_parcelamento)
+        fd.append('total_parcelas', String(totalParcelasNum))
+        fd.append('parcela_inicial', String(parcelaInicialNum))
+        if (isParcelado) {
+          fd.append('valor_parcela', String(Number(form.valor_estimado)))
+        }
+        const diaVencNum =
           form.regra_repeticao === 'avulso'
             ? parseInt(form.data_inicio.slice(8, 10), 10)
-            : Number(form.dia_vencimento) || 10,
-        regra_vencimento_texto:
+            : Number(form.dia_vencimento) || 10
+        fd.append('dia_vencimento', String(diaVencNum))
+        fd.append(
+          'regra_vencimento_texto',
           form.regra_repeticao === 'avulso'
             ? 'Único'
             : isParcelado
               ? `${form.dia_vencimento}/m (${totalParcelasNum}x)`
               : `${form.dia_vencimento}/m`,
-        data_inicio: `${form.data_inicio} 00:00:00.000Z`,
-        data_fim_calculada: dataFimIso as unknown as string,
-        valor_estimado: Number(form.valor_estimado),
+        )
+        fd.append('data_inicio', `${form.data_inicio} 00:00:00.000Z`)
+        if (dataFimIso) fd.append('data_fim_calculada', dataFimIso)
+        fd.append('valor_estimado', String(Number(form.valor_estimado)))
 
         // Pagamento
-        conta_padrao: form.conta_padrao || (null as unknown as string),
-        metodo_pagamento: form.metodo_pagamento || (null as unknown as string),
-        link_pagamento: form.link_pagamento || (null as unknown as string),
-        dizimo: form.dizimo,
-        tipo_dizimo:
-          form.dizimo && form.tipo_dizimo ? form.tipo_dizimo : (null as unknown as string),
-        direcionamento: form.direcionamento?.trim() || (null as unknown as string),
-        ativo: form.ativo,
-        observacoes: form.observacoes || (null as unknown as string),
+        if (form.conta_padrao) fd.append('conta_padrao', form.conta_padrao)
+        if (form.metodo_pagamento) fd.append('metodo_pagamento', form.metodo_pagamento)
+        if (form.link_pagamento) fd.append('link_pagamento', form.link_pagamento)
+        fd.append('dizimo', String(form.dizimo))
+        if (form.dizimo && form.tipo_dizimo) fd.append('tipo_dizimo', form.tipo_dizimo)
+        if (form.direcionamento?.trim()) fd.append('direcionamento', form.direcionamento.trim())
+        fd.append('ativo', String(form.ativo))
+        if (form.observacoes) fd.append('observacoes', form.observacoes)
 
-        precisa_revisao: form.precisa_revisao,
-        motivo_revisao: form.motivo_revisao || (null as unknown as string),
+        fd.append('precisa_revisao', String(form.precisa_revisao))
+        if (form.motivo_revisao) fd.append('motivo_revisao', form.motivo_revisao)
+
+        // Anexo da conta
+        if (selectedAnexoConta) {
+          fd.append('anexo_conta', selectedAnexoConta)
+        } else if (removerAnexoConta) {
+          fd.append('anexo_conta', '')
+        }
+
+        saved = await despesasService.saveCompromisso(fd, compromisso?.id)
+      } else {
+        const payload: Partial<DespesaCompromisso> = {
+          descricao: form.descricao.trim(),
+          fornecedor: form.fornecedor.trim() || (null as unknown as string),
+          categoria: form.categoria || (null as unknown as string),
+          tag: form.tag || (null as unknown as string),
+          secao: form.secao,
+
+          // Titular da obrigação
+          titular_tipo: form.titular_tipo,
+          titular_pessoa:
+            form.titular_tipo === 'cpf' && form.titular_pessoa
+              ? form.titular_pessoa
+              : (null as unknown as string),
+          titular_empresa:
+            form.titular_tipo === 'cnpj' && form.titular_empresa
+              ? form.titular_empresa
+              : (null as unknown as string),
+
+          // Contexto_tipo legado para manter filtros e compatibilidade
+          contexto_tipo: form.titular_tipo === 'cnpj' ? 'empresa' : 'pessoal',
+          empresa:
+            form.titular_tipo === 'cnpj' && form.titular_empresa
+              ? form.titular_empresa
+              : (null as unknown as string),
+          pessoa:
+            form.pessoa_responsavel ||
+            (form.titular_tipo === 'cpf' ? form.titular_pessoa : null) ||
+            (null as unknown as string),
+
+          // Cobrança e valores independentes
+          // Se parcelado, regra_repeticao no banco deve ser 'mensal' (enum PB: 'mensal' | 'anual' | 'avulso')
+          regra_repeticao: isParcelado ? 'mensal' : form.regra_repeticao,
+          tipo_valor: form.tipo_valor,
+          modalidade_parcelamento: form.modalidade_parcelamento,
+          total_parcelas: totalParcelasNum,
+          parcela_inicial: parcelaInicialNum,
+          valor_parcela: isParcelado ? Number(form.valor_estimado) : (null as unknown as number),
+          dia_vencimento:
+            form.regra_repeticao === 'avulso'
+              ? parseInt(form.data_inicio.slice(8, 10), 10)
+              : Number(form.dia_vencimento) || 10,
+          regra_vencimento_texto:
+            form.regra_repeticao === 'avulso'
+              ? 'Único'
+              : isParcelado
+                ? `${form.dia_vencimento}/m (${totalParcelasNum}x)`
+                : `${form.dia_vencimento}/m`,
+          data_inicio: `${form.data_inicio} 00:00:00.000Z`,
+          data_fim_calculada: dataFimIso as unknown as string,
+          valor_estimado: Number(form.valor_estimado),
+
+          // Pagamento
+          conta_padrao: form.conta_padrao || (null as unknown as string),
+          metodo_pagamento: form.metodo_pagamento || (null as unknown as string),
+          link_pagamento: form.link_pagamento || (null as unknown as string),
+          dizimo: form.dizimo,
+          tipo_dizimo:
+            form.dizimo && form.tipo_dizimo ? form.tipo_dizimo : (null as unknown as string),
+          direcionamento: form.direcionamento?.trim() || (null as unknown as string),
+          ativo: form.ativo,
+          observacoes: form.observacoes || (null as unknown as string),
+
+          precisa_revisao: form.precisa_revisao,
+          motivo_revisao: form.motivo_revisao || (null as unknown as string),
+        }
+
+        saved = await despesasService.saveCompromisso(payload, compromisso?.id)
       }
-
-      const saved = await despesasService.saveCompromisso(payload, compromisso?.id)
 
       // Se for novo compromisso, gera as primeiras ocorrências automaticamente.
       // Se for edição, sincroniza as ocorrências pendentes (status 'prevista') que não foram ajustadas manualmente.
@@ -1389,6 +1474,25 @@ export function DespesaCompromissoDialog({
                   value={form.link_pagamento}
                   onChange={(e) => setForm({ ...form, link_pagamento: e.target.value })}
                   placeholder="https://..."
+                />
+              </div>
+
+              {/* Anexo da conta a pagar (PDF ou imagem / foto da câmera) */}
+              <div className="sm:col-span-2 pt-1 border-t border-stone-100">
+                <AnexoUploadField
+                  label="Anexo da conta a pagar (Boleto, fatura ou foto da conta)"
+                  helperText="Envie um .PDF ou uma imagem da galeria ou da câmera do seu dispositivo (até 15MB)."
+                  selectedFile={selectedAnexoConta}
+                  onFileSelect={(file) => {
+                    setSelectedAnexoConta(file)
+                    if (file) setRemoverAnexoConta(false)
+                  }}
+                  currentFileName={compromisso?.anexo_conta}
+                  collectionNameOrId="despesas_compromisso"
+                  recordId={compromisso?.id}
+                  isRemovingCurrent={removerAnexoConta}
+                  onRemoveCurrent={() => setRemoverAnexoConta(true)}
+                  disabled={submitting}
                 />
               </div>
             </div>
