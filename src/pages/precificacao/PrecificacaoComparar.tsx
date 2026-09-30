@@ -356,13 +356,18 @@ export default function PrecificacaoComparar() {
 
   // Estado para guardar dados do prec_kits caso o produto seja Kit ou Combo
   const [kitInfoAtual, setKitInfoAtual] = useState<PrecKitRecord | null>(null)
+  const [loadingKitInfo, setLoadingKitInfo] = useState<boolean>(false)
 
   useEffect(() => {
+    // Ao trocar ou limpar o produto, limpa imediatamente o kit anterior para não vazar componentes
+    setKitInfoAtual(null)
+
     if (!produtoAtual || (produtoAtual.tipo !== 'kit' && produtoAtual.tipo !== 'combo')) {
-      setKitInfoAtual(null)
+      setLoadingKitInfo(false)
       return
     }
     let isMounted = true
+    setLoadingKitInfo(true)
     precificacaoService
       .getKitByProdutoPai(produtoAtual.id)
       .then((kitRec) => {
@@ -372,6 +377,9 @@ export default function PrecificacaoComparar() {
         console.warn('Erro ao carregar kitInfo em PrecificacaoComparar:', err)
         if (isMounted) setKitInfoAtual(null)
       })
+      .finally(() => {
+        if (isMounted) setLoadingKitInfo(false)
+      })
     return () => {
       isMounted = false
     }
@@ -380,7 +388,10 @@ export default function PrecificacaoComparar() {
   // Custo base calculado do produto (suporta fabricação própria, revenda, kit e combo)
   const custoBaseAtual = useMemo(() => {
     if (!produtoAtual) return null
-    const itensKitConfig = kitInfoAtual?.itens?.map((it) => ({
+    // Só usa itens do kit se o kitInfoAtual pertencer de fato ao produtoAtual
+    const kitValido =
+      kitInfoAtual && kitInfoAtual.produto_pai === produtoAtual.id ? kitInfoAtual : null
+    const itensKitConfig = kitValido?.itens?.map((it) => ({
       produto_id: it.produto_id,
       nome: it.nome,
       qtd_efetiva: it.qtd_efetiva,
@@ -403,7 +414,7 @@ export default function PrecificacaoComparar() {
       custo_etiqueta: produtoAtual.custo_etiqueta,
       custo_adicional_embalagem: produtoAtual.custo_adicional_embalagem,
       kit_itens: itensKitConfig,
-      kit_custos_adicionais: kitInfoAtual?.custos_adicionais,
+      kit_custos_adicionais: kitValido?.custos_adicionais,
     })
   }, [produtoAtual, kitInfoAtual])
 
@@ -590,18 +601,17 @@ export default function PrecificacaoComparar() {
     const cenarioIdParam = searchParams.get('cenarioId')
     let cenarioAlvoParam: PrecPrecificacaoRecord | undefined
 
+    // Limpar imediatamente preços manuais/anteriores ao trocar de produto
+    setCenariosSalvosAdicionados([])
+    setPrecosPorColuna({})
+    setDescontosPorColuna({})
+
     if (!selectedProdutoId || !precificacoesExistentes.length) {
-      setCenariosSalvosAdicionados([])
-      setPrecosPorColuna({})
-      setDescontosPorColuna({})
       return
     }
 
     const precsProduto = precificacoesExistentes.filter((p) => p.produto === selectedProdutoId)
     if (!precsProduto.length) {
-      setCenariosSalvosAdicionados([])
-      setPrecosPorColuna({})
-      setDescontosPorColuna({})
       return
     }
 
@@ -685,9 +695,62 @@ export default function PrecificacaoComparar() {
       setCenariosSalvosAdicionados([])
     }
 
+    // Recalcular valorPrecoGlobal inicial para o produto
+    // Precedência v0.0.84: aprovado mais recente > simulação de rascunho > sugerido por custo/modo
+    const todasAprovadas = precsProduto
+      .filter(
+        (p) => p.status === 'aprovada' && Boolean(p.preco_aprovado || p.premissas?.preco_venda),
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.updated || b.created || 0).getTime() -
+          new Date(a.updated || a.created || 0).getTime(),
+      )
+    const precoAprovadoRecente =
+      todasAprovadas[0]?.preco_aprovado || todasAprovadas[0]?.premissas?.preco_venda
+
+    const rascunhosRecentes = precsProduto
+      .filter((p) => p.status === 'rascunho' && Boolean(p.premissas?.preco_venda))
+      .sort(
+        (a, b) =>
+          new Date(b.updated || b.created || 0).getTime() -
+          new Date(a.updated || a.created || 0).getTime(),
+      )
+    const precoRascunhoRecente = rascunhosRecentes[0]?.premissas?.preco_venda
+
+    let precoInicial: number
+    if (precoAprovadoRecente && precoAprovadoRecente > 0) {
+      precoInicial = precoAprovadoRecente
+    } else if (precoRascunhoRecente && precoRascunhoRecente > 0) {
+      precoInicial = precoRascunhoRecente
+    } else {
+      const custoTotal = custoBaseAtual?.custo_total ?? 0
+      if (modoCalculo === 'meta_margem') {
+        if (metaMargemPct >= 100) {
+          precoInicial = round2(custoTotal * 1.5)
+        } else {
+          precoInicial = round2(custoTotal / (1 - metaMargemPct / 100))
+        }
+      } else if (modoCalculo === 'meta_lucro') {
+        precoInicial = round2(custoTotal + metaLucroReais)
+      } else {
+        // 'mesmo_preco' ou 'manual'
+        precoInicial = round2(custoTotal > 0 ? custoTotal * 1.4 : 24.9)
+      }
+    }
+
+    setValorPrecoGlobal(precoInicial)
     setPrecosPorColuna(precosRecuperados)
     setDescontosPorColuna(descontosRecuperados)
-  }, [selectedProdutoId, precificacoesExistentes, searchParams])
+  }, [
+    selectedProdutoId,
+    custoBaseAtual,
+    precificacoesExistentes,
+    searchParams,
+    modoCalculo,
+    metaLucroReais,
+    metaMargemPct,
+  ])
 
   // Ordenação e Filtragem por marketplace/canal selecionado
   const colunasModalidade = useMemo(() => {
@@ -894,6 +957,15 @@ export default function PrecificacaoComparar() {
         })
       }
 
+      const kitValido =
+        kitInfoAtual && kitInfoAtual.produto_pai === produtoAtual.id ? kitInfoAtual : null
+      const itensKitConfig = kitValido?.itens?.map((it) => ({
+        produto_id: it.produto_id,
+        nome: it.nome,
+        qtd_efetiva: it.qtd_efetiva,
+        custo_unitario: it.custo_unitario,
+      }))
+
       const cenarioBase = {
         produto: {
           sku: produtoAtual.sku,
@@ -910,7 +982,10 @@ export default function PrecificacaoComparar() {
           despesas_compra: produtoAtual.despesas_compra,
           custo_etiqueta: produtoAtual.custo_etiqueta,
           custo_adicional_embalagem: produtoAtual.custo_adicional_embalagem,
+          kit_itens: itensKitConfig,
+          kit_custos_adicionais: kitValido?.custos_adicionais,
         },
+        sobrescrita_custo_total: custoBaseAtual?.custo_total,
         preco_anunciado: precoColuna,
         descontos: descontosInput,
         taxas: col.taxasDoCanal.map((t) => ({
@@ -985,6 +1060,7 @@ export default function PrecificacaoComparar() {
   }, [
     produtoAtual,
     custoBaseAtual,
+    kitInfoAtual,
     todasColunasComSalvos,
     valorPrecoGlobal,
     modoCalculo,
@@ -1398,6 +1474,11 @@ export default function PrecificacaoComparar() {
                     value={selectedProdutoId}
                     onValueChange={(val) => {
                       setSelectedProdutoId(val)
+                      setKitInfoAtual(null)
+                      setPrecosPorColuna({})
+                      setDescontosPorColuna({})
+                      setCenariosSalvosAdicionados([])
+                      setModoCalculo('mesmo_preco')
                       const p = produtos.find((x) => x.id === val)
                       if (p) setSearchParams({ sku: p.sku })
                     }}
@@ -2051,7 +2132,7 @@ export default function PrecificacaoComparar() {
                     </Button>
                   </div>
 
-                  {/* Composição Resumida de Custos (C0..Cn) */}
+                  {/* Composição Resumida de Custos (C0..Cn ou Itens do Kit/Combo) */}
                   <div className="space-y-2 pt-1 border-t border-border/70">
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-bold text-muted-foreground uppercase text-[10px] tracking-wider flex items-center gap-1">
@@ -2059,12 +2140,57 @@ export default function PrecificacaoComparar() {
                         Composição de Custo
                       </span>
                       <span className="text-[10px] text-muted-foreground">
-                        {produtoAtual.composicao?.length || 0} itens
+                        {produtoAtual.tipo === 'kit' || produtoAtual.tipo === 'combo'
+                          ? `${kitInfoAtual?.itens?.length || 0} itens`
+                          : `${produtoAtual.composicao?.length || 0} itens`}
                       </span>
                     </div>
 
                     <div className="bg-white rounded-lg border border-border/80 p-2 space-y-1.5 text-xs max-h-48 overflow-y-auto">
-                      {produtoAtual.composicao && produtoAtual.composicao.length > 0 ? (
+                      {/* Caso 1: Kit ou Combo */}
+                      {produtoAtual.tipo === 'kit' || produtoAtual.tipo === 'combo' ? (
+                        loadingKitInfo ? (
+                          <div className="flex items-center gap-2 py-3 justify-center text-muted-foreground text-xs">
+                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                            <span>Carregando componentes do {produtoAtual.tipo}...</span>
+                          </div>
+                        ) : kitInfoAtual?.itens && kitInfoAtual.itens.length > 0 ? (
+                          kitInfoAtual.itens.map((item, idx) => {
+                            const subtotal = (item.qtd_efetiva || 0) * (item.custo_unitario || 0)
+                            return (
+                              <div
+                                key={idx}
+                                className="flex items-center justify-between gap-1 text-[11px] leading-tight"
+                              >
+                                <span
+                                  className="text-muted-foreground truncate flex-1"
+                                  title={item.nome}
+                                >
+                                  <span className="font-mono font-semibold text-foreground/80 mr-1">
+                                    {item.qtd_efetiva}x
+                                  </span>
+                                  {item.nome}
+                                  <span className="text-[10px] text-muted-foreground ml-1 font-mono">
+                                    ({formatCurrency(item.custo_unitario || 0)})
+                                  </span>
+                                </span>
+                                <span className="font-mono font-semibold text-foreground shrink-0">
+                                  {formatCurrency(subtotal)}
+                                </span>
+                              </div>
+                            )
+                          })
+                        ) : (
+                          <div className="rounded-md bg-amber-50 border border-amber-200 p-2 text-[11px] text-amber-800 flex items-start gap-1.5">
+                            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5" />
+                            <span>
+                              {produtoAtual.tipo === 'kit' ? 'Kit' : 'Combo'} sem componentes
+                              cadastrados — cadastre os componentes para obter o custo base real.
+                            </span>
+                          </div>
+                        )
+                      ) : produtoAtual.composicao && produtoAtual.composicao.length > 0 ? (
+                        /* Caso 2: Fabricação própria com composição */
                         produtoAtual.composicao.map((item, idx) => {
                           const subtotal =
                             (item.qtd || 0) *
@@ -2091,6 +2217,7 @@ export default function PrecificacaoComparar() {
                           )
                         })
                       ) : produtoAtual.custo_aquisicao_unitario ? (
+                        /* Caso 3: Revenda com aquisição unitária */
                         <div className="flex items-center justify-between text-[11px]">
                           <span className="text-muted-foreground">Aquisição Unitária</span>
                           <span className="font-mono font-semibold text-foreground">
@@ -2098,6 +2225,7 @@ export default function PrecificacaoComparar() {
                           </span>
                         </div>
                       ) : (
+                        /* Caso 4: Vazio */
                         <div className="text-[11px] text-muted-foreground italic py-1">
                           Nenhum componente cadastrado.
                         </div>
@@ -2209,6 +2337,35 @@ export default function PrecificacaoComparar() {
                 >
                   Exibir todos os marketplaces
                 </Button>
+              </div>
+            ) : produtoAtual &&
+              (produtoAtual.tipo === 'kit' || produtoAtual.tipo === 'combo') &&
+              loadingKitInfo ? (
+              <div className="p-16 text-center text-xs text-muted-foreground flex-1 flex flex-col items-center justify-center gap-3">
+                <Loader2 className="h-8 w-8 text-primary animate-spin" />
+                <p className="font-bold text-sm text-foreground">
+                  Carregando composição do {produtoAtual.tipo}...
+                </p>
+                <p className="text-muted-foreground max-w-md">
+                  Buscando componentes e calculando o custo base consolidado para a simulação de
+                  canais.
+                </p>
+              </div>
+            ) : produtoAtual &&
+              (produtoAtual.tipo === 'kit' || produtoAtual.tipo === 'combo') &&
+              !loadingKitInfo &&
+              (!kitInfoAtual?.itens || kitInfoAtual.itens.length === 0) ? (
+              <div className="p-12 text-center text-xs text-muted-foreground flex-1 flex flex-col items-center justify-center gap-3">
+                <div className="h-12 w-12 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
+                  <AlertTriangle className="h-6 w-6" />
+                </div>
+                <p className="font-bold text-sm text-amber-900">
+                  {produtoAtual.tipo === 'kit' ? 'Kit' : 'Combo'} sem componentes cadastrados
+                </p>
+                <p className="text-amber-800 max-w-md bg-amber-50 border border-amber-200 p-3 rounded-lg leading-relaxed">
+                  Cadastre os componentes para obter o custo base real. A simulação de margens e
+                  rentabilidade por canal depende do custo da composição.
+                </p>
               </div>
             ) : (
               todasColunasComSalvos
