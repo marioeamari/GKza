@@ -676,14 +676,16 @@ export default function Despesas() {
   ])
 
   // Função utilitária para ordenação inteligente de ocorrências:
-  // Separa não pagas (previstas) das já pagas.
+  // Separa não pagas (previstas) das já pagas (pagas sempre após as pendentes).
   // - Em 'urgente' (default):
-  //     * Pendentes vencidas e que vencem hoje primeiro em ordem cronológica (a mais atrasada/antiga no topo),
-  //       depois as pendentes futuras em ordem crescente.
-  //     * Pagas ficam agrupadas ao final (ou por data de pagamento/vencimento decrescente).
-  // - Em 'recente':
-  //     * Pendentes com vencimento mais distante no topo (decrescente), vencidas/hoje no fim das pendentes.
-  //     * Pagas após as pendentes.
+  //     * Pendentes vencidas e que vencem hoje no topo em ordem cronológica (mais antiga primeiro),
+  //       seguidas pelas pendentes futuras em ordem cronológica crescente (mais próxima primeiro).
+  //     * Desempate estável: descrição -> ID -> valor decrescente.
+  // - Em 'recente' (mais tarde primeiro):
+  //     * Inversão completa da urgência: pendentes futuras com vencimento mais distante no topo
+  //       (ordem cronológica decrescente), seguidas pelas vencidas/hoje (com vencimento menos atrasado antes do mais antigo).
+  //     * Desempate estável: descrição -> ID -> valor decrescente.
+  // - Pagas: agrupadas ao final em ambas as opções, ordenadas cronologicamente de forma consistente.
   const sortOcorrenciasList = useCallback(
     (list: DespesaOcorrencia[]) => {
       const copy = [...list]
@@ -698,36 +700,54 @@ export default function Despesas() {
           return isPagaA ? 1 : -1
         }
 
-        // Se ambas são pagas: ordena pela data de pagamento decrescente ou vencimento decrescente
+        // Se ambas são pagas: ordena de acordo com sortBy (recente: mais recente primeiro; urgente: mais antiga primeiro)
         if (isPagaA && isPagaB) {
-          const dtA = a.data_pagamento || a.data_vencimento || ''
-          const dtB = b.data_pagamento || b.data_vencimento || ''
-          return dtB.localeCompare(dtA)
+          const dtA = (a.data_pagamento || a.data_vencimento || '').slice(0, 10)
+          const dtB = (b.data_pagamento || b.data_vencimento || '').slice(0, 10)
+          const cmpPago = sortBy === 'recente' ? dtB.localeCompare(dtA) : dtA.localeCompare(dtB)
+          if (cmpPago !== 0) return cmpPago
+          const descA = a.expand?.compromisso?.descricao || a.observacoes || ''
+          const descB = b.expand?.compromisso?.descricao || b.observacoes || ''
+          const cmpDesc = descA.localeCompare(descB)
+          if (cmpDesc !== 0) return cmpDesc
+          return a.id.localeCompare(b.id)
         }
 
         // Se ambas são pendentes (previstas):
         const dueA = a.data_vencimento ? a.data_vencimento.slice(0, 10) : '9999-99-99'
         const dueB = b.data_vencimento ? b.data_vencimento.slice(0, 10) : '9999-99-99'
 
-        if (sortBy === 'urgente') {
-          // Prioriza vencidas (due < today) e vencendo hoje (due === today)
-          const isUrgenteA = dueA <= today
-          const isUrgenteB = dueB <= today
+        const isUrgenteA = dueA <= today
+        const isUrgenteB = dueB <= today
 
+        if (sortBy === 'urgente') {
+          // Mais urgente primeiro: vencidas e hoje no topo
           if (isUrgenteA && !isUrgenteB) return -1
           if (!isUrgenteA && isUrgenteB) return 1
 
-          // Ambas vencidas/hoje OU ambas futuras: ordem crescente de vencimento (mais antiga/urgente primeiro)
+          // Ambas vencidas/hoje OU ambas futuras: ordem crescente de vencimento (mais próxima/urgente primeiro)
           const cmp = dueA.localeCompare(dueB)
           if (cmp !== 0) return cmp
-          // Desempate por valor decrescente
-          return (b.valor_previsto || 0) - (a.valor_previsto || 0)
         } else {
-          // 'recente' (mais tarde primeiro / vencimento decrescente para as pendentes)
+          // 'recente': Mais tarde primeiro — datas mais distantes (futuras) no topo; vencidas/hoje ao final das pendentes
+          if (!isUrgenteA && isUrgenteB) return -1
+          if (isUrgenteA && !isUrgenteB) return 1
+
+          // Ambas futuras OU ambas vencidas/hoje: ordem decrescente de vencimento (data mais distante primeiro)
           const cmp = dueB.localeCompare(dueA)
           if (cmp !== 0) return cmp
-          return (b.valor_previsto || 0) - (a.valor_previsto || 0)
         }
+
+        // Desempate consistente e determinístico
+        const descA = a.expand?.compromisso?.descricao || a.observacoes || ''
+        const descB = b.expand?.compromisso?.descricao || b.observacoes || ''
+        const cmpDesc = descA.localeCompare(descB)
+        if (cmpDesc !== 0) return cmpDesc
+
+        const valDiff = (b.valor_previsto || 0) - (a.valor_previsto || 0)
+        if (valDiff !== 0) return valDiff
+
+        return a.id.localeCompare(b.id)
       })
     },
     [realTodayStr, sortBy],
@@ -772,7 +792,7 @@ export default function Despesas() {
     })
 
     // Ordenação dos compromissos anuais respeitando sortBy
-    const [anoComp, mesComp] = currentCompetencia.split('-').map((v) => parseInt(v, 10))
+    const [anoComp] = currentCompetencia.split('-').map((v) => parseInt(v, 10))
     const today = realTodayStr
 
     return [...filtered].sort((cA, cB) => {
@@ -805,9 +825,24 @@ export default function Despesas() {
           if (isUrgenteA && !isUrgenteB) return -1
           if (!isUrgenteA && isUrgenteB) return 1
         }
-        return dueStrA.localeCompare(dueStrB)
+        const cmp = dueStrA.localeCompare(dueStrB)
+        if (cmp !== 0) return cmp
+        const descCmp = (cA.descricao || '').localeCompare(cB.descricao || '')
+        if (descCmp !== 0) return descCmp
+        return cA.id.localeCompare(cB.id)
       } else {
-        return dueStrB.localeCompare(dueStrA)
+        if (!isPagaA) {
+          const isUrgenteA = dueStrA <= today
+          const isUrgenteB = dueStrB <= today
+          // Em 'recente': datas mais distantes (futuras) no topo; vencidas/hoje ao final das pendentes
+          if (!isUrgenteA && isUrgenteB) return -1
+          if (isUrgenteA && !isUrgenteB) return 1
+        }
+        const cmp = dueStrB.localeCompare(dueStrA)
+        if (cmp !== 0) return cmp
+        const descCmp = (cA.descricao || '').localeCompare(cB.descricao || '')
+        if (descCmp !== 0) return descCmp
+        return cA.id.localeCompare(cB.id)
       }
     })
   }, [
