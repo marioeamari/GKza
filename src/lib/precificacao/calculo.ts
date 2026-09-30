@@ -3,7 +3,7 @@
  * ERP GKza
  */
 
-export type TipoProduto = 'fabricacao_propria' | 'revenda' | 'kit'
+export type TipoProduto = 'fabricacao_propria' | 'revenda' | 'kit' | 'combo'
 
 export type CategoriaCustoLinha =
   | 'material'
@@ -539,20 +539,23 @@ export function calcularCustoBaseProduto(produto: ProdutoCalculoInput): {
         detalhes.push(`Despesa compra (${desp.descricao}): R$ ${(desp.valor || 0).toFixed(2)}`)
       }
     }
-  } else if (produto.tipo === 'kit') {
+  } else if (produto.tipo === 'kit' || produto.tipo === 'combo') {
+    const rotuloTipo = produto.tipo === 'combo' ? 'combo' : 'kit'
     if (produto.kit_itens && produto.kit_itens.length > 0) {
       for (const kItem of produto.kit_itens) {
         const itemCusto = (kItem.custo_unitario || 0) * (kItem.qtd_efetiva || 1)
         custo_direto += itemCusto
         detalhes.push(
-          `Item kit (${kItem.nome || 'SKU'}): ${kItem.qtd_efetiva} un x R$ ${(kItem.custo_unitario || 0).toFixed(2)} = R$ ${itemCusto.toFixed(2)}`,
+          `Item ${rotuloTipo} (${kItem.nome || 'SKU'}): ${kItem.qtd_efetiva} un x R$ ${(kItem.custo_unitario || 0).toFixed(2)} = R$ ${itemCusto.toFixed(2)}`,
         )
       }
     }
     if (produto.kit_custos_adicionais && produto.kit_custos_adicionais.length > 0) {
       for (const cad of produto.kit_custos_adicionais) {
         custo_direto += cad.valor || 0
-        detalhes.push(`Custo adicional kit (${cad.descricao}): R$ ${(cad.valor || 0).toFixed(2)}`)
+        detalhes.push(
+          `Custo adicional ${rotuloTipo} (${cad.descricao}): R$ ${(cad.valor || 0).toFixed(2)}`,
+        )
       }
     }
   }

@@ -104,6 +104,17 @@ export const precificacaoService = {
   },
 
   async deleteProduto(id: string): Promise<boolean> {
+    // 1. Se houver prec_kits associado a este produto como produto_pai, removemos explicitamente antes
+    try {
+      const kitRecord = await precificacaoService.getKitByProdutoPai(id)
+      if (kitRecord) {
+        await pb.collection('prec_kits').delete(kitRecord.id)
+      }
+    } catch (err) {
+      console.warn('[precificacaoService] Erro ao limpar kit associado:', err)
+    }
+
+    // 2. Remove o produto em si (seus prec_precificacoes possuem cascadeDelete no PB)
     return pb.collection('prec_produtos').delete(id)
   },
 

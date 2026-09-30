@@ -580,6 +580,16 @@ export function SaleDialog({
                                         [{produto.sku}]
                                       </span>
                                       <span className="truncate">{produto.nome}</span>
+                                      {produto.tipo === 'kit' && (
+                                        <Badge className="bg-primary hover:bg-primary text-[9px] h-4 px-1 py-0 text-white font-bold border-none">
+                                          Kit
+                                        </Badge>
+                                      )}
+                                      {produto.tipo === 'combo' && (
+                                        <Badge className="bg-purple-600 hover:bg-purple-600 text-[9px] h-4 px-1 py-0 text-white font-bold border-none">
+                                          Combo
+                                        </Badge>
+                                      )}
                                     </span>
                                   }
                                 >

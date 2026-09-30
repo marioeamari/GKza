@@ -650,12 +650,9 @@ export function EmpresaDialog({
                         asChild
                         className="h-8 text-xs font-semibold"
                       >
-                        <Link
-                          to={`/precificacao/produtos?novo=1&empresa=${record.id}`}
-                          target="_blank"
-                        >
+                        <Link to="/precificacao/produtos" target="_blank">
                           <PackagePlus className="mr-1 h-3.5 w-3.5 text-primary" />
-                          Abrir na Precificação
+                          Ver na Precificação
                         </Link>
                       </Button>
                     )}
@@ -696,11 +693,8 @@ export function EmpresaDialog({
                       </Button>
                       {record?.id && (
                         <Button size="sm" variant="outline" asChild>
-                          <Link
-                            to={`/precificacao/produtos?novo=1&empresa=${record.id}`}
-                            target="_blank"
-                          >
-                            Novo produto para Precificação
+                          <Link to="/precificacao/produtos" target="_blank">
+                            Ir para Precificação
                           </Link>
                         </Button>
                       )}

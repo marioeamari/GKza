@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  PackagePlus,
   Edit2,
   Trash2,
   Layers,
@@ -8,11 +7,12 @@ import {
   Calculator,
   Truck,
   Check,
-  Search,
-  Sparkles,
+  Building2,
+  Boxes,
   Camera,
   ImageIcon,
   X,
+  AlertTriangle,
 } from 'lucide-react'
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -29,73 +29,64 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { precificacaoService } from '@/services/precificacao'
 import { cadastrosService } from '@/services/cadastros'
 import { fornecedoresService } from '@/services/fornecedores'
-import { PrecProdutoRecord } from '@/types/precificacao'
-import { Empresa, Fornecedor, FornecedorProduto } from '@/types/domain'
+import { PrecKitRecord, PrecProdutoRecord } from '@/types/precificacao'
+import { Empresa, Fornecedor } from '@/types/domain'
 import {
   calcularCustoBaseProduto,
   ItemComposicaoCusto,
-  TipoProduto,
+  ItemKitConfig,
 } from '@/lib/precificacao/calculo'
 import { formatCurrency } from '@/lib/format'
 import { useToast } from '@/hooks/use-toast'
 import { apiFieldErrors, apiMessage } from '@/lib/api-error'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { Skeleton } from '@/components/ui/skeleton'
+import { KitDialog } from '@/components/precificacao/KitDialog'
+import { ComboDialog } from '@/components/precificacao/ComboDialog'
 
 export default function PrecificacaoProdutos() {
-  const [searchParams, setSearchParams] = useSearchParams()
   const { toast } = useToast()
   const [loading, setLoading] = useState(true)
   const [produtos, setProdutos] = useState<PrecProdutoRecord[]>([])
+  const [kitsMap, setKitsMap] = useState<Record<string, PrecKitRecord>>({})
   const [empresas, setEmpresas] = useState<Empresa[]>([])
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([])
 
-  // Modal de Criação / Edição de Produto
-  const [openDialog, setOpenDialog] = useState(false)
-  const [produtoEditando, setProdutoEditando] = useState<Partial<PrecProdutoRecord> | null>(null)
+  // Modal de EDIÇÃO de Produto Simples (Fabricação Própria ou Revenda)
+  const [openEditDialog, setOpenEditDialog] = useState(false)
+  const [produtoEditando, setProdutoEditando] = useState<PrecProdutoRecord | null>(null)
   const [composicaoTemp, setComposicaoTemp] = useState<ItemComposicaoCusto[]>([])
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
 
-  // Upload próprio de imagem
+  // Upload próprio de imagem na edição simples
   const [imagemFile, setImagemFile] = useState<File | null>(null)
   const [imagemPreview, setImagemPreview] = useState<string | null>(null)
   const [removerImagem, setRemoverImagem] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Controle de Fornecedor & Produto Vinculado para Revenda
-  const [fornecedorSelecionadoId, setFornecedorSelecionadoId] = useState<string>('')
-  const [produtosDoFornecedor, setProdutosDoFornecedor] = useState<FornecedorProduto[]>([])
-  const [loadingProdsForn, setLoadingProdsForn] = useState(false)
-  const [buscaEmpresaText, setBuscaEmpresaText] = useState('')
-  const [produtoFornSelecionadoId, setProdutoFornSelecionadoId] = useState<string>('')
-  const [buscaFornText, setBuscaFornText] = useState('')
-  const [buscaProdFornText, setBuscaProdFornText] = useState('')
+  // Diálogos de Kit e Combo
+  const [openKitDialog, setOpenKitDialog] = useState(false)
+  const [kitEditando, setKitEditando] = useState<PrecProdutoRecord | null>(null)
 
-  // Controle de Fabricação Própria: Produtos cadastrados na Empresa selecionada
-  const [produtosDaEmpresa, setProdutosDaEmpresa] = useState<PrecProdutoRecord[]>([])
-  const [loadingProdsEmpresa, setLoadingProdsEmpresa] = useState(false)
-  const [produtoEmpresaSelecionadoId, setProdutoEmpresaSelecionadoId] = useState<string>('')
-  const [buscaProdEmpresaText, setBuscaProdEmpresaText] = useState('')
+  const [openComboDialog, setOpenComboDialog] = useState(false)
+  const [comboEditando, setComboEditando] = useState<PrecProdutoRecord | null>(null)
 
-  // Rastreamento de quais campos foram preenchidos via fornecedor ou empresa e se foram sobrescritos
-  const [origemValores, setOrigemValores] = useState<{
-    [campo: string]: {
-      herdado: boolean
-      origemTipo?: 'fornecedor' | 'empresa'
-      valorOriginal?: string | number
-      sobrescrito?: boolean
-    }
-  }>({})
+  // Confirmação de exclusão
+  const [produtoParaExcluir, setProdutoParaExcluir] = useState<PrecProdutoRecord | null>(null)
+  const [deletando, setDeletando] = useState(false)
 
   async function carregar() {
     try {
@@ -108,6 +99,25 @@ export default function PrecificacaoProdutos() {
       setProdutos(prods)
       setEmpresas(emps)
       setFornecedores(forns)
+
+      // Carregar prec_kits vinculados para kits e combos
+      const kitsOuCombos = prods.filter((p) => p.tipo === 'kit' || p.tipo === 'combo')
+      if (kitsOuCombos.length > 0) {
+        const mapa: Record<string, PrecKitRecord> = {}
+        await Promise.all(
+          kitsOuCombos.map(async (k) => {
+            try {
+              const kitRec = await precificacaoService.getKitByProdutoPai(k.id)
+              if (kitRec) mapa[k.id] = kitRec
+            } catch (err) {
+              console.warn(`Erro ao carregar prec_kit para ${k.id}:`, err)
+            }
+          }),
+        )
+        setKitsMap(mapa)
+      } else {
+        setKitsMap({})
+      }
     } catch (err) {
       console.error('Erro ao carregar produtos:', err)
     } finally {
@@ -119,117 +129,21 @@ export default function PrecificacaoProdutos() {
     carregar()
   }, [])
 
-  // Suporte a abertura direta via query params (ex: ?novo=1&empresa=XYZ ou ?empresa=XYZ)
-  useEffect(() => {
-    const isNovo = searchParams.get('novo') === '1'
-    const empresaParam = searchParams.get('empresa')
-    if (isNovo && empresas.length > 0) {
-      abrirNovoProduto(empresaParam || undefined)
-      // Limpa os params para evitar reabrir ao salvar ou recarregar
-      const nextParams = new URLSearchParams(searchParams)
-      nextParams.delete('novo')
-      nextParams.delete('empresa')
-      setSearchParams(nextParams, { replace: true })
+  function abrirEdicao(p: PrecProdutoRecord) {
+    if (p.tipo === 'kit') {
+      setKitEditando(p)
+      setOpenKitDialog(true)
+      return
     }
-  }, [searchParams, empresas])
-
-  // Carrega produtos do fornecedor quando o fornecedor selecionado mudar
-  useEffect(() => {
-    if (fornecedorSelecionadoId) {
-      setLoadingProdsForn(true)
-      fornecedoresService
-        .listProdutosPorFornecedor(fornecedorSelecionadoId)
-        .then((items) => {
-          setProdutosDoFornecedor(items)
-        })
-        .catch(() => {
-          setProdutosDoFornecedor([])
-        })
-        .finally(() => {
-          setLoadingProdsForn(false)
-        })
-    } else {
-      setProdutosDoFornecedor([])
-      setProdutoFornSelecionadoId('')
+    if (p.tipo === 'combo') {
+      setComboEditando(p)
+      setOpenComboDialog(true)
+      return
     }
-  }, [fornecedorSelecionadoId])
 
-  // Carrega produtos fabricados da empresa quando a empresa selecionada mudar no fluxo de fabricação própria
-  useEffect(() => {
-    const empresaId = produtoEditando?.empresa
-    if (produtoEditando?.tipo === 'fabricacao_propria' && empresaId) {
-      setLoadingProdsEmpresa(true)
-      precificacaoService
-        .listProdutosPorEmpresa(empresaId)
-        .then((items) => {
-          // Exclui o próprio produto que está sendo editado (se já existir) para evitar auto-referência
-          const filtrados = produtoEditando?.id
-            ? items.filter((it) => it.id !== produtoEditando.id)
-            : items
-          setProdutosDaEmpresa(filtrados)
-        })
-        .catch(() => {
-          setProdutosDaEmpresa([])
-        })
-        .finally(() => {
-          setLoadingProdsEmpresa(false)
-        })
-    } else {
-      setProdutosDaEmpresa([])
-      setProdutoEmpresaSelecionadoId('')
-    }
-  }, [produtoEditando?.tipo, produtoEditando?.empresa, produtoEditando?.id])
-
-  function abrirNovoProduto(empresaPreSelecionadaId?: string) {
-    setProdutoEditando({
-      sku: '',
-      nome: '',
-      tipo: 'fabricacao_propria',
-      status: 'ativo',
-      unidade: 'un',
-      marca: '',
-      categoria: '',
-      codigo_barras: '',
-      embalagem: '',
-      peso_g: 280,
-      dimensao_comprimento_cm: undefined,
-      dimensao_largura_cm: undefined,
-      dimensao_altura_cm: undefined,
-      empresa: empresaPreSelecionadaId || undefined,
-      custo_aquisicao_unitario: 0,
-      custo_adicional_embalagem: 0.1,
-      custo_etiqueta: 0.05,
-      perda_pct: 10,
-    })
-    setComposicaoTemp([
-      {
-        codigo: 'C0',
-        descricao: 'Matéria-prima principal',
-        qtd: 1,
-        custo_unitario: 10.0,
-        categoria_custo: 'material',
-      },
-    ])
-    setImagemFile(null)
-    setImagemPreview(null)
-    setRemoverImagem(false)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-    setFornecedorSelecionadoId('')
-    setProdutoFornSelecionadoId('')
-    setProdutoEmpresaSelecionadoId('')
-    setBuscaEmpresaText('')
-    setBuscaFornText('')
-    setBuscaProdFornText('')
-    setBuscaProdEmpresaText('')
-    setOrigemValores({})
-    setFormErrors({})
-    setOpenDialog(true)
-  }
-
-  function abrirEditarProduto(p: PrecProdutoRecord) {
+    // Fabricação Própria ou Revenda: abrir diálogo de edição completa
     setProdutoEditando(p)
     setComposicaoTemp(p.composicao || [])
-
     setImagemFile(null)
     setRemoverImagem(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -238,38 +152,8 @@ export default function PrecificacaoProdutos() {
     } else {
       setImagemPreview(null)
     }
-
-    // Inicializa seleção de fornecedor e produto vinculado se houver
-    const fornId = p.fornecedor || ''
-    const prodFornId = p.fornecedor_produto || ''
-    setFornecedorSelecionadoId(fornId)
-    setProdutoFornSelecionadoId(prodFornId)
-    setProdutoEmpresaSelecionadoId('')
-    setBuscaEmpresaText('')
-    setBuscaFornText('')
-    setBuscaProdFornText('')
-    setBuscaProdEmpresaText('')
-
-    // Se já havia vínculo salvo, marcar campos que casam como herdados
-    if (prodFornId) {
-      setOrigemValores({
-        sku: { herdado: true, origemTipo: 'fornecedor' },
-        nome: { herdado: true, origemTipo: 'fornecedor' },
-        custo_aquisicao_unitario: { herdado: true, origemTipo: 'fornecedor' },
-        peso_g: { herdado: true, origemTipo: 'fornecedor' },
-        dimensoes: { herdado: true, origemTipo: 'fornecedor' },
-        marca: { herdado: true, origemTipo: 'fornecedor' },
-        categoria: { herdado: true, origemTipo: 'fornecedor' },
-        unidade: { herdado: true, origemTipo: 'fornecedor' },
-        codigo_barras: { herdado: true, origemTipo: 'fornecedor' },
-        embalagem: { herdado: true, origemTipo: 'fornecedor' },
-      })
-    } else {
-      setOrigemValores({})
-    }
-
     setFormErrors({})
-    setOpenDialog(true)
+    setOpenEditDialog(true)
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -306,264 +190,56 @@ export default function PrecificacaoProdutos() {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  // Ao selecionar um produto do fornecedor, preenche automaticamente os campos que casam
-  function handleSelecionarProdutoFornecedor(fp: FornecedorProduto) {
-    setProdutoFornSelecionadoId(fp.id)
-
-    setProdutoEditando((prev) => {
-      const atual = prev || {}
-      return {
-        ...atual,
-        fornecedor: fornecedorSelecionadoId,
-        fornecedor_produto: fp.id,
-        // (a) Descrição / Nome
-        nome: fp.descricao || atual.nome || '',
-        // (b) SKU (sugerir sku_fornecedor se preenchido)
-        sku: fp.sku_fornecedor || atual.sku || '',
-        // (c) Custo de Aquisição Unitário
-        custo_aquisicao_unitario: fp.preco_custo_unitario ?? atual.custo_aquisicao_unitario ?? 0,
-        // (d) Peso (g)
-        peso_g: fp.peso_g ?? atual.peso_g ?? 0,
-        // (e) Dimensões (comprimento / largura / altura em cm)
-        dimensao_comprimento_cm: fp.comprimento_cm ?? atual.dimensao_comprimento_cm,
-        dimensao_largura_cm: fp.largura_cm ?? atual.dimensao_largura_cm,
-        dimensao_altura_cm: fp.altura_cm ?? atual.dimensao_altura_cm,
-        // (f) Marca e Categoria
-        marca: fp.marca || atual.marca || '',
-        categoria: fp.categoria || atual.categoria || '',
-        // (g) Unidade
-        unidade: fp.unidade || atual.unidade || 'un',
-        // (h) Código de barras e Embalagem
-        codigo_barras: fp.codigo_barras || atual.codigo_barras || '',
-        embalagem: fp.embalagem || atual.embalagem || '',
-      }
-    })
-
-    // Se ainda não temos preview próprio e o produto do fornecedor possui imagem, exibir como preview
-    if (!imagemFile && !imagemPreview && !removerImagem && fp.imagem) {
-      setImagemPreview(fornecedoresService.getProdutoImageUrl(fp))
-    }
-
-    // Rastreia campos como herdados do cadastro do fornecedor
-    setOrigemValores({
-      sku: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.sku_fornecedor || '' },
-      nome: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.descricao || '' },
-      custo_aquisicao_unitario: {
-        herdado: true,
-        origemTipo: 'fornecedor',
-        valorOriginal: fp.preco_custo_unitario,
-      },
-      peso_g: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.peso_g ?? 0 },
-      dimensoes: {
-        herdado: true,
-        origemTipo: 'fornecedor',
-        valorOriginal: `${fp.comprimento_cm || 0}x${fp.largura_cm || 0}x${fp.altura_cm || 0}`,
-      },
-      marca: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.marca || '' },
-      categoria: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.categoria || '' },
-      unidade: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.unidade || 'un' },
-      codigo_barras: {
-        herdado: true,
-        origemTipo: 'fornecedor',
-        valorOriginal: fp.codigo_barras || '',
-      },
-      embalagem: { herdado: true, origemTipo: 'fornecedor', valorOriginal: fp.embalagem || '' },
-    })
-
-    toast({
-      title: 'Dados do produto carregados!',
-      description:
-        'Custo, peso, dimensões, SKU, marca e categoria foram preenchidos a partir do cadastro do fornecedor.',
-    })
-  }
-
-  // Ao selecionar um produto já cadastrado na Empresa, herda automaticamente todos os dados e composições analíticas
-  function handleSelecionarProdutoEmpresa(pe: PrecProdutoRecord) {
-    setProdutoEmpresaSelecionadoId(pe.id)
-
-    setProdutoEditando((prev) => {
-      const atual = prev || {}
-      return {
-        ...atual,
-        nome: pe.nome || atual.nome || '',
-        sku: pe.sku || atual.sku || '',
-        marca: pe.marca || atual.marca || '',
-        categoria: pe.categoria || atual.categoria || '',
-        unidade: pe.unidade || atual.unidade || 'un',
-        codigo_barras: pe.codigo_barras || atual.codigo_barras || '',
-        embalagem: pe.embalagem || atual.embalagem || '',
-        peso_g: pe.peso_g ?? atual.peso_g ?? 0,
-        dimensao_comprimento_cm: pe.dimensao_comprimento_cm ?? atual.dimensao_comprimento_cm,
-        dimensao_largura_cm: pe.dimensao_largura_cm ?? atual.dimensao_largura_cm,
-        dimensao_altura_cm: pe.dimensao_altura_cm ?? atual.dimensao_altura_cm,
-        custo_adicional_embalagem:
-          pe.custo_adicional_embalagem ?? atual.custo_adicional_embalagem ?? 0.1,
-        custo_etiqueta: pe.custo_etiqueta ?? atual.custo_etiqueta ?? 0.05,
-        perda_pct: pe.perda_pct ?? atual.perda_pct ?? 10,
-        custo_aquisicao_unitario:
-          pe.custo_aquisicao_unitario ?? atual.custo_aquisicao_unitario ?? 0,
-      }
-    })
-
-    // Herança da Composição Analítica de Custos (C0..C12)
-    if (pe.composicao && pe.composicao.length > 0) {
-      setComposicaoTemp(JSON.parse(JSON.stringify(pe.composicao)))
-    }
-
-    // Se ainda não temos preview próprio e o produto da empresa possui imagem, exibir como preview
-    if (!imagemFile && !imagemPreview && !removerImagem && pe.imagem) {
-      setImagemPreview(precificacaoService.getProdutoImageUrl(pe))
-    }
-
-    // Rastreia campos como herdados do cadastro da empresa
-    setOrigemValores({
-      sku: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.sku || '' },
-      nome: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.nome || '' },
-      peso_g: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.peso_g ?? 0 },
-      dimensoes: {
-        herdado: true,
-        origemTipo: 'empresa',
-        valorOriginal: `${pe.dimensao_comprimento_cm || 0}x${pe.dimensao_largura_cm || 0}x${pe.dimensao_altura_cm || 0}`,
-      },
-      marca: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.marca || '' },
-      categoria: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.categoria || '' },
-      unidade: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.unidade || 'un' },
-      codigo_barras: {
-        herdado: true,
-        origemTipo: 'empresa',
-        valorOriginal: pe.codigo_barras || '',
-      },
-      embalagem: { herdado: true, origemTipo: 'empresa', valorOriginal: pe.embalagem || '' },
-      composicao: { herdado: true, origemTipo: 'empresa' },
-    })
-
-    toast({
-      title: 'Produto fabricado carregado!',
-      description:
-        'Composições analíticas (C0..C12), custos, peso, dimensões, SKU, marca e categoria herdados da empresa.',
-    })
-  }
-
-  // Registra sobrescrita manual pelo usuário caso ele altere um valor herdado
-  function marcarSobrescrita(campo: string) {
-    setOrigemValores((prev) => {
-      if (!prev[campo]?.herdado) return prev
-      return {
-        ...prev,
-        [campo]: {
-          ...prev[campo],
-          sobrescrito: true,
-        },
-      }
-    })
-  }
-
-  async function handleSalvarProduto(e: React.FormEvent) {
+  async function handleSalvarEdicaoSimples(e: React.FormEvent) {
     e.preventDefault()
-    if (!produtoEditando?.sku || !produtoEditando?.nome) return
+    if (!produtoEditando?.id || !produtoEditando?.sku || !produtoEditando?.nome) return
 
     setSaving(true)
     try {
-      // 1. Monta o payload base garantindo que NUNCA enviemos o campo imagem como string herdada
       const payload: Partial<PrecProdutoRecord> = {
         ...produtoEditando,
-        fornecedor:
-          produtoEditando.tipo === 'revenda' ? fornecedorSelecionadoId || undefined : undefined,
-        fornecedor_produto:
-          produtoEditando.tipo === 'revenda' ? produtoFornSelecionadoId || undefined : undefined,
         composicao: composicaoTemp,
       }
-      // Remove qualquer resquício de string no campo imagem para nunca falhar com HTTP 400
       delete payload.imagem
 
-      let savedRecord: PrecProdutoRecord
-
       if (imagemFile) {
-        // Usuário fez upload de arquivo próprio: usamos FormData diretamente
         const formData = new FormData()
         Object.entries(payload).forEach(([key, val]) => {
           if (val !== undefined && val !== null) {
-            if (typeof val === 'object') {
-              formData.append(key, JSON.stringify(val))
-            } else {
-              formData.append(key, String(val))
-            }
+            formData.append(key, typeof val === 'object' ? JSON.stringify(val) : String(val))
           }
         })
         formData.append('imagem', imagemFile)
-
-        if (produtoEditando.id) {
-          savedRecord = await precificacaoService.updateProduto(produtoEditando.id, formData)
-          toast({
-            title: 'Produto atualizado com sucesso!',
-            description:
-              'Cenários de precificação existentes foram marcados como "desatualizados" para conferência.',
-          })
-        } else {
-          savedRecord = await precificacaoService.createProduto(formData)
-          toast({ title: 'Produto cadastrado com sucesso!' })
-        }
-      } else if (removerImagem && produtoEditando.id) {
-        // Usuário removeu a imagem existente
+        await precificacaoService.updateProduto(produtoEditando.id, formData)
+      } else if (removerImagem) {
         const formData = new FormData()
         Object.entries(payload).forEach(([key, val]) => {
           if (val !== undefined && val !== null) {
-            if (typeof val === 'object') {
-              formData.append(key, JSON.stringify(val))
-            } else {
-              formData.append(key, String(val))
-            }
+            formData.append(key, typeof val === 'object' ? JSON.stringify(val) : String(val))
           }
         })
         formData.append('imagem', '')
-
-        savedRecord = await precificacaoService.updateProduto(produtoEditando.id, formData)
-        toast({ title: 'Produto atualizado com sucesso!' })
+        await precificacaoService.updateProduto(produtoEditando.id, formData)
       } else {
-        // Sem arquivo próprio anexado
-        if (produtoEditando.id) {
-          savedRecord = await precificacaoService.updateProduto(produtoEditando.id, payload)
-          toast({
-            title: 'Produto atualizado com sucesso!',
-            description:
-              'Cenários de precificação existentes foram marcados como "desatualizados" para conferência.',
-          })
-        } else {
-          savedRecord = await precificacaoService.createProduto(payload)
-          toast({ title: 'Produto cadastrado com sucesso!' })
-        }
-
-        // Se o produto foi recém-criado (ou ainda não tem imagem própria) e foi vinculado a um produto de fornecedor com imagem:
-        // herdar o arquivo da imagem via download/upload real
-        if (!savedRecord.imagem && produtoEditando.tipo === 'revenda' && produtoFornSelecionadoId) {
-          const prodForn = produtosDoFornecedor.find((item) => item.id === produtoFornSelecionadoId)
-          if (prodForn?.imagem) {
-            try {
-              await precificacaoService.copiarImagemDeFornecedorProduto(savedRecord.id, prodForn)
-            } catch (copyErr) {
-              console.warn(
-                '[handleSalvarProduto] Falha não impeditiva ao herdar imagem do fornecedor:',
-                copyErr,
-              )
-            }
-          }
-        }
+        await precificacaoService.updateProduto(produtoEditando.id, payload)
       }
 
-      setFormErrors({})
-      setOpenDialog(false)
+      toast({
+        title: 'Produto atualizado com sucesso!',
+        description: 'Alterações salvas e cenários marcados como desatualizados para conferência.',
+      })
+      setOpenEditDialog(false)
       carregar()
     } catch (err) {
       const fieldErrs = apiFieldErrors(err)
-      const errorMsg = apiMessage(err, 'Não foi possível salvar o produto.')
+      const errorMsg = apiMessage(err, 'Não foi possível salvar as alterações.')
       if (fieldErrs.sku) {
-        const valorDigitado = (produtoEditando?.sku || '').trim()
-        fieldErrs.sku = `Já existe um produto com o SKU '${valorDigitado}'. Escolha outro SKU.`
+        fieldErrs.sku = `Já existe um produto com o SKU '${produtoEditando.sku}'.`
       }
       setFormErrors({ ...fieldErrs, form: errorMsg })
       toast({
         variant: 'destructive',
-        title: 'Erro ao salvar produto',
+        title: 'Erro ao salvar',
         description: fieldErrs.sku || errorMsg,
       })
     } finally {
@@ -571,69 +247,111 @@ export default function PrecificacaoProdutos() {
     }
   }
 
-  async function handleExcluirProduto(id: string) {
-    if (!confirm('Deseja excluir este produto e suas composições de custo?')) return
+  async function confirmarExclusao() {
+    if (!produtoParaExcluir) return
+    setDeletando(true)
     try {
-      await precificacaoService.deleteProduto(id)
-      toast({ title: 'Produto removido com sucesso' })
+      await precificacaoService.deleteProduto(produtoParaExcluir.id)
+      toast({
+        title: 'Excluído com sucesso',
+        description:
+          produtoParaExcluir.tipo === 'kit' || produtoParaExcluir.tipo === 'combo'
+            ? `${produtoParaExcluir.nome} removido. Os produtos componentes originais permanecem intocados.`
+            : `${produtoParaExcluir.nome} foi removido da precificação.`,
+      })
+      setProdutoParaExcluir(null)
       carregar()
     } catch {
-      toast({ variant: 'destructive', title: 'Erro ao excluir produto' })
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao excluir',
+        description: 'Não foi possível remover o produto.',
+      })
+    } finally {
+      setDeletando(false)
     }
   }
 
-  // Filtragem de empresas, fornecedores e produtos vinculados na busca
-  const empresasFiltradas = empresas.filter((e) => {
-    if (!buscaEmpresaText.trim()) return true
-    const term = buscaEmpresaText.toLocaleLowerCase('pt-BR')
-    return (
-      (e.nome_fantasia && e.nome_fantasia.toLocaleLowerCase('pt-BR').includes(term)) ||
-      (e.razao_social && e.razao_social.toLocaleLowerCase('pt-BR').includes(term)) ||
-      (e.cnpj && e.cnpj.includes(term))
-    )
-  })
+  function renderBadgeTipo(tipo: PrecProdutoRecord['tipo']) {
+    switch (tipo) {
+      case 'fabricacao_propria':
+        return (
+          <Badge className="bg-amber-600 hover:bg-amber-600/90 text-white text-[10px] font-semibold border-none">
+            Fabricação Própria
+          </Badge>
+        )
+      case 'revenda':
+        return (
+          <Badge className="bg-blue-600 hover:bg-blue-600/90 text-white text-[10px] font-semibold border-none">
+            Revenda
+          </Badge>
+        )
+      case 'kit':
+        return (
+          <Badge className="bg-primary hover:bg-primary/90 text-white text-[10px] font-semibold border-none">
+            Kit
+          </Badge>
+        )
+      case 'combo':
+        return (
+          <Badge className="bg-purple-600 hover:bg-purple-600/90 text-white text-[10px] font-semibold border-none">
+            Combo
+          </Badge>
+        )
+      default:
+        return (
+          <Badge variant="outline" className="text-[10px]">
+            {tipo}
+          </Badge>
+        )
+    }
+  }
 
-  const fornecedoresFiltrados = fornecedores.filter((f) => {
-    if (!buscaFornText.trim()) return true
-    const term = buscaFornText.toLocaleLowerCase('pt-BR')
-    return (
-      f.nome_fantasia.toLocaleLowerCase('pt-BR').includes(term) ||
-      f.razao_social.toLocaleLowerCase('pt-BR').includes(term) ||
-      (f.cnpj && f.cnpj.includes(term))
-    )
-  })
-
-  const produtosFornFiltrados = produtosDoFornecedor.filter((p) => {
-    if (!buscaProdFornText.trim()) return true
-    const term = buscaProdFornText.toLocaleLowerCase('pt-BR')
-    return (
-      p.descricao.toLocaleLowerCase('pt-BR').includes(term) ||
-      (p.sku_fornecedor && p.sku_fornecedor.toLocaleLowerCase('pt-BR').includes(term)) ||
-      (p.marca && p.marca.toLocaleLowerCase('pt-BR').includes(term))
-    )
-  })
-
-  const produtosEmpresaFiltrados = produtosDaEmpresa.filter((p) => {
-    if (!buscaProdEmpresaText.trim()) return true
-    const term = buscaProdEmpresaText.toLocaleLowerCase('pt-BR')
-    return (
-      p.nome.toLocaleLowerCase('pt-BR').includes(term) ||
-      p.sku.toLocaleLowerCase('pt-BR').includes(term) ||
-      (p.marca && p.marca.toLocaleLowerCase('pt-BR').includes(term)) ||
-      (p.categoria && p.categoria.toLocaleLowerCase('pt-BR').includes(term))
-    )
-  })
+  function getImagemParaExibir(p: PrecProdutoRecord): string {
+    if (p.imagem) {
+      return precificacaoService.getProdutoImageUrl(p, '100x100')
+    }
+    // Para Kit ou Combo sem imagem própria: tentar herdar visualmente a do primeiro produto componente
+    if (p.tipo === 'kit' || p.tipo === 'combo') {
+      const kitRec = kitsMap[p.id]
+      const primeiroItem = kitRec?.itens?.[0]
+      if (primeiroItem?.produto_id) {
+        const prodComponente = produtos.find((item) => item.id === primeiroItem.produto_id)
+        if (prodComponente?.imagem) {
+          return precificacaoService.getProdutoImageUrl(prodComponente, '100x100')
+        }
+      }
+    }
+    return ''
+  }
 
   return (
     <div className="space-y-6">
       <PrecHeader
-        titulo="Cadastro de Produtos, Custos & Kits"
-        subtitulo="Gestão das composições analíticas (C0..C12), produtos de revenda com fornecedor e kits"
+        titulo="Gestão de Produtos, Kits & Combos"
+        subtitulo="Edição e exclusão de produtos de fabricação própria e revenda, além da criação ágil de Kits e Combos"
         acoes={
-          <Button className="bg-primary text-white font-bold" onClick={() => abrirNovoProduto()}>
-            <PackagePlus className="mr-1.5 h-4 w-4" />
-            Novo Produto / Custo
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              className="bg-primary text-white font-bold text-xs"
+              onClick={() => {
+                setKitEditando(null)
+                setOpenKitDialog(true)
+              }}
+            >
+              <Boxes className="mr-1.5 h-4 w-4" />+ Novo Kit
+            </Button>
+            <Button
+              variant="outline"
+              className="border-primary/40 text-primary hover:bg-primary/10 font-bold text-xs"
+              onClick={() => {
+                setComboEditando(null)
+                setOpenComboDialog(true)
+              }}
+            >
+              <Layers className="mr-1.5 h-4 w-4" />+ Novo Combo
+            </Button>
+          </div>
         }
       />
 
@@ -642,11 +360,11 @@ export default function PrecificacaoProdutos() {
           <div>
             <CardTitle className="text-base font-bold">Catálogo de Produtos & SKUs</CardTitle>
             <CardDescription className="text-xs">
-              Produtos cadastrados e seus custos diretos calculados
+              Cadastros individuais (criados em /fornecedores ou /empresas) e Kits/Combos agrupados
             </CardDescription>
           </div>
           <span className="text-xs font-semibold text-muted-foreground">
-            {produtos.length} produtos
+            {produtos.length} produtos / kits cadastrados
           </span>
         </CardHeader>
 
@@ -655,21 +373,60 @@ export default function PrecificacaoProdutos() {
             <div className="space-y-2 p-4">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
             </div>
           ) : produtos.length === 0 ? (
-            <div className="text-center py-10 text-muted-foreground">
-              <Layers className="h-10 w-10 mx-auto text-muted-foreground/40 mb-2" />
-              <p className="font-semibold">Nenhum produto cadastrado</p>
-              <p className="text-xs mt-1">
-                Cadastre produtos de fabricação própria, revenda ou kits para iniciar simulações.
-              </p>
-              <Button
-                onClick={() => abrirNovoProduto()}
-                className="mt-4 bg-primary text-white"
-                size="sm"
-              >
-                Cadastrar Primeiro Produto
-              </Button>
+            <div className="text-center py-12 px-4 text-muted-foreground max-w-lg mx-auto space-y-4">
+              <div className="h-12 w-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto">
+                <Layers className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="font-bold text-foreground text-sm">Nenhum produto encontrado</p>
+                <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                  Todos os cadastros de produtos simples devem ser realizados em{' '}
+                  <strong className="text-foreground">Fornecedores</strong> (para itens de revenda)
+                  ou em <strong className="text-foreground">Empresas</strong> (para itens de
+                  fabricação própria). Aqui em Precificação você pode editar, excluir ou criar Kits
+                  e Combos.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                <Button asChild size="sm" variant="outline" className="text-xs">
+                  <Link to="/fornecedores">
+                    <Truck className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                    Cadastrar em /fornecedores
+                  </Link>
+                </Button>
+                <Button asChild size="sm" variant="outline" className="text-xs">
+                  <Link to="/empresas">
+                    <Building2 className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                    Cadastrar em /empresas
+                  </Link>
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-primary text-white text-xs font-bold"
+                  onClick={() => {
+                    setKitEditando(null)
+                    setOpenKitDialog(true)
+                  }}
+                >
+                  <Boxes className="mr-1.5 h-3.5 w-3.5" />
+                  Criar Kit
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="text-xs font-bold text-primary"
+                  onClick={() => {
+                    setComboEditando(null)
+                    setOpenComboDialog(true)
+                  }}
+                >
+                  <Layers className="mr-1.5 h-3.5 w-3.5" />
+                  Criar Combo
+                </Button>
+              </div>
             </div>
           ) : (
             <table className="w-full text-left text-xs border-collapse">
@@ -677,7 +434,7 @@ export default function PrecificacaoProdutos() {
                 <tr className="border-y border-border bg-secondary/30 text-muted-foreground uppercase text-[10px] tracking-wider">
                   <th className="py-2.5 px-4 font-bold">Produto / SKU</th>
                   <th className="py-2.5 px-3 font-bold">Tipo</th>
-                  <th className="py-2.5 px-3 font-bold">Origem / Fornecedor</th>
+                  <th className="py-2.5 px-3 font-bold">Origem / Componentes</th>
                   <th className="py-2.5 px-3 font-bold">Peso / Medidas</th>
                   <th className="py-2.5 px-3 font-bold text-right">Custo Direto</th>
                   <th className="py-2.5 px-3 font-bold text-right">Custo Total</th>
@@ -686,6 +443,16 @@ export default function PrecificacaoProdutos() {
               </thead>
               <tbody className="divide-y divide-border/60">
                 {produtos.map((p) => {
+                  const kitRecord = kitsMap[p.id]
+                  const itensKitConfig: ItemKitConfig[] | undefined = kitRecord?.itens?.map(
+                    (it) => ({
+                      produto_id: it.produto_id,
+                      nome: it.nome,
+                      qtd_efetiva: it.qtd_efetiva,
+                      custo_unitario: it.custo_unitario,
+                    }),
+                  )
+
                   const custoCalc = calcularCustoBaseProduto({
                     sku: p.sku,
                     nome: p.nome,
@@ -697,20 +464,24 @@ export default function PrecificacaoProdutos() {
                     despesas_compra: p.despesas_compra,
                     custo_etiqueta: p.custo_etiqueta,
                     custo_adicional_embalagem: p.custo_adicional_embalagem,
+                    kit_itens: itensKitConfig,
+                    kit_custos_adicionais: kitRecord?.custos_adicionais,
                   })
 
                   const nomeFornecedor =
                     p.expand?.fornecedor?.nome_fantasia ||
                     fornecedores.find((f) => f.id === p.fornecedor)?.nome_fantasia
 
+                  const imagemSrc = getImagemParaExibir(p)
+
                   return (
                     <tr key={p.id} className="hover:bg-secondary/20 transition-colors">
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2.5">
                           <div className="h-9 w-9 rounded-lg bg-secondary flex items-center justify-center font-bold text-xs text-muted-foreground shrink-0 overflow-hidden">
-                            {p.imagem ? (
+                            {imagemSrc ? (
                               <img
-                                src={precificacaoService.getProdutoImageUrl(p, '100x100')}
+                                src={imagemSrc}
                                 alt={p.nome}
                                 className="h-full w-full object-cover"
                               />
@@ -734,20 +505,43 @@ export default function PrecificacaoProdutos() {
                         </div>
                       </td>
 
-                      <td className="py-3 px-3">
-                        <Badge variant="outline" className="text-[10px] capitalize">
-                          {p.tipo.replace('_', ' ')}
-                        </Badge>
-                      </td>
+                      <td className="py-3 px-3">{renderBadgeTipo(p.tipo)}</td>
 
                       <td className="py-3 px-3 text-muted-foreground">
-                        {p.tipo === 'revenda' && nomeFornecedor ? (
+                        {p.tipo === 'revenda' && (
                           <div className="flex items-center gap-1.5">
-                            <Truck className="h-3.5 w-3.5 text-primary shrink-0" />
-                            <span className="font-medium text-foreground">{nomeFornecedor}</span>
+                            <Truck className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                            <span className="font-medium text-foreground">
+                              {nomeFornecedor || 'Fornecedor cadastrado'}
+                            </span>
                           </div>
-                        ) : (
-                          <span>{p.expand?.empresa?.nome_fantasia || 'Sem empresa'}</span>
+                        )}
+                        {p.tipo === 'fabricacao_propria' && (
+                          <div className="flex items-center gap-1.5">
+                            <Building2 className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                            <span className="font-medium text-foreground">
+                              {p.expand?.empresa?.nome_fantasia ||
+                                empresas.find((e) => e.id === p.empresa)?.nome_fantasia ||
+                                'Empresa própria'}
+                            </span>
+                          </div>
+                        )}
+                        {p.tipo === 'kit' && (
+                          <div className="flex items-center gap-1.5">
+                            <Boxes className="h-3.5 w-3.5 text-primary shrink-0" />
+                            <span className="font-medium text-foreground">
+                              {p.qtd_por_kit || kitRecord?.itens?.[0]?.qtd_efetiva || 2} un do
+                              produto base
+                            </span>
+                          </div>
+                        )}
+                        {p.tipo === 'combo' && (
+                          <div className="flex items-center gap-1.5">
+                            <Layers className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                            <span className="font-medium text-foreground">
+                              {kitRecord?.itens?.length || 2} produtos combinados
+                            </span>
+                          </div>
                         )}
                       </td>
 
@@ -788,7 +582,8 @@ export default function PrecificacaoProdutos() {
                             size="icon"
                             variant="ghost"
                             className="h-7 w-7"
-                            onClick={() => abrirEditarProduto(p)}
+                            onClick={() => abrirEdicao(p)}
+                            title="Editar"
                           >
                             <Edit2 className="h-3.5 w-3.5 text-muted-foreground" />
                           </Button>
@@ -796,7 +591,8 @@ export default function PrecificacaoProdutos() {
                             size="icon"
                             variant="ghost"
                             className="h-7 w-7 text-destructive"
-                            onClick={() => handleExcluirProduto(p.id)}
+                            onClick={() => setProdutoParaExcluir(p)}
+                            title="Excluir"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
@@ -811,976 +607,478 @@ export default function PrecificacaoProdutos() {
         </CardContent>
       </Card>
 
-      {/* DIALOG DE CRIAÇÃO / EDIÇÃO DE PRODUTO */}
-      <Dialog open={openDialog} onOpenChange={setOpenDialog}>
+      {/* DIÁLOGO DE EDIÇÃO COMPLETA DE PRODUTO SIMPLES (FABRICAÇÃO OU REVENDA) */}
+      <Dialog open={openEditDialog} onOpenChange={setOpenEditDialog}>
         <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-          <form onSubmit={handleSalvarProduto}>
-            <DialogHeader>
-              <DialogTitle>
-                {produtoEditando?.id ? 'Editar Produto / Custo' : 'Novo Produto para Precificação'}
-              </DialogTitle>
-              <DialogDescription>
-                Informe o SKU, categoria e o modelo analítico de custos (fabricação, revenda ou
-                kit).
-              </DialogDescription>
-            </DialogHeader>
-
-            {(formErrors.sku || formErrors.form) && (
-              <div className="mt-3 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
-                <p className="font-semibold">{formErrors.sku || formErrors.form}</p>
-                {formErrors.sku && formErrors.form && formErrors.form !== formErrors.sku && (
-                  <p className="mt-1 text-[11px] opacity-90">{formErrors.form}</p>
-                )}
-              </div>
-            )}
-
-            <div className="space-y-4 py-3 text-xs">
-              {/* Upload e Imagem do Produto */}
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold">Imagem do Produto</Label>
-                <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-secondary/20">
-                  <div className="relative h-16 w-16 rounded-lg border border-border bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
-                    {imagemPreview ? (
-                      <img
-                        src={imagemPreview}
-                        alt="Preview do produto"
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <ImageIcon className="h-6 w-6 text-muted-foreground/40" />
-                    )}
+          {produtoEditando && (
+            <form onSubmit={handleSalvarEdicaoSimples}>
+              <DialogHeader>
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold">
+                    <Edit2 className="h-4 w-4" />
                   </div>
-                  <div className="flex-1 space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs font-semibold"
-                        onClick={() => fileInputRef.current?.click()}
-                      >
-                        <Camera className="mr-1.5 h-3.5 w-3.5 text-primary" />
-                        {imagemPreview ? 'Alterar Imagem' : 'Anexar Imagem'}
-                      </Button>
-                      {imagemPreview && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 text-xs text-destructive hover:bg-destructive/10"
-                          onClick={handleRemoverImagem}
-                        >
-                          <X className="mr-1 h-3.5 w-3.5" />
-                          Remover
-                        </Button>
+                  <div>
+                    <DialogTitle>Editar Produto / Custo</DialogTitle>
+                    <DialogDescription className="text-xs">
+                      {produtoEditando.tipo === 'fabricacao_propria'
+                        ? 'Produto de Fabricação Própria — ajuste os dados cadastrais e a Composição Analítica (C0..C12).'
+                        : 'Produto de Revenda — ajuste custo de aquisição, despesas e dados físicos.'}
+                    </DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+
+              {(formErrors.sku || formErrors.form) && (
+                <div className="mt-3 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
+                  <p className="font-semibold">{formErrors.sku || formErrors.form}</p>
+                </div>
+              )}
+
+              <div className="space-y-4 py-3 text-xs">
+                {/* Imagem do Produto */}
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold">Imagem do Produto</Label>
+                  <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-secondary/20">
+                    <div className="relative h-14 w-14 rounded-lg border border-border bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
+                      {imagemPreview ? (
+                        <img
+                          src={imagemPreview}
+                          alt="Preview do produto"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <ImageIcon className="h-6 w-6 text-muted-foreground/40" />
                       )}
                     </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      PNG, JPG, WEBP até 5MB. Se for produto de revenda, a foto do fornecedor é
-                      sugerida automaticamente.
-                    </p>
-                  </div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleFileChange}
-                  />
-                </div>
-              </div>
-
-              {/* Seleção do Tipo de Custo e Empresa Fabricante / Fornecedor */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold">Tipo de Custo / Origem *</Label>
-                  <Select
-                    value={produtoEditando?.tipo || 'fabricacao_propria'}
-                    onValueChange={(v) =>
-                      setProdutoEditando((prev) => ({ ...prev, tipo: v as TipoProduto }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="fabricacao_propria">
-                        Fabricação Própria (Empresa)
-                      </SelectItem>
-                      <SelectItem value="revenda">Revenda (Fornecedor)</SelectItem>
-                      <SelectItem value="kit">Kit / Combo</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1 sm:col-span-2">
-                  <Label className="text-xs font-semibold flex items-center justify-between">
-                    <span>
-                      {produtoEditando?.tipo === 'fabricacao_propria'
-                        ? 'Empresa Fabricante (Fabricação Própria) *'
-                        : 'Empresa do Sistema (Titular)'}
-                    </span>
-                    <Link
-                      to="/empresas"
-                      target="_blank"
-                      className="text-[10px] text-primary hover:underline font-normal"
-                    >
-                      + Gerenciar empresas
-                    </Link>
-                  </Label>
-                  <Select
-                    value={produtoEditando?.empresa || 'nenhuma'}
-                    onValueChange={(v) =>
-                      setProdutoEditando((prev) => ({
-                        ...prev,
-                        empresa: v === 'nenhuma' ? undefined : v,
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="bg-white">
-                      <SelectValue placeholder="Selecione a empresa cadastrada..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <div className="p-1 border-b border-border">
-                        <div className="relative">
-                          <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-                          <Input
-                            placeholder="Filtrar empresa..."
-                            value={buscaEmpresaText}
-                            onChange={(e) => setBuscaEmpresaText(e.target.value)}
-                            className="h-8 pl-8 text-xs"
-                            onKeyDown={(e) => e.stopPropagation()}
-                          />
-                        </div>
-                      </div>
-                      <SelectItem value="nenhuma">Nenhuma (Geral do sistema)</SelectItem>
-                      {empresasFiltradas.map((e) => (
-                        <SelectItem key={e.id} value={e.id}>
-                          {e.nome_fantasia || e.razao_social} {e.cnpj ? `(${e.cnpj})` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* SEÇÃO ESPECÍFICA: BUSCADOR DE PRODUTOS DE FABRICAÇÃO PRÓPRIA DA EMPRESA */}
-              {produtoEditando?.tipo === 'fabricacao_propria' && produtoEditando?.empresa && (
-                <div className="rounded-2xl border-2 border-primary/20 bg-primary/5 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Layers className="h-4 w-4 text-primary" />
-                      <span className="font-bold text-xs uppercase tracking-wider text-primary">
-                        Auto-Preenchimento via Empresa Fabricante
-                      </span>
-                    </div>
-                    {produtoEmpresaSelecionadoId && (
-                      <Badge className="bg-primary text-white text-[10px] font-bold">
-                        Produto herdado
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Selecione um produto já cadastrado na empresa para herdar automaticamente:
-                    composições analíticas (C0..C12), custos, peso, dimensões, SKU, marca e foto.
-                  </p>
-
-                  <div className="space-y-1.5 pt-1">
-                    <Label className="text-xs font-semibold flex items-center justify-between">
-                      <span>
-                        Produto Fabricado da Empresa ({produtosDaEmpresa.length})
-                        {loadingProdsEmpresa && ' (carregando...)'}
-                      </span>
-                      <Link
-                        to="/empresas"
-                        target="_blank"
-                        className="text-[10px] text-primary hover:underline font-normal"
-                      >
-                        + Gerenciar produtos da empresa
-                      </Link>
-                    </Label>
-
-                    <Select
-                      disabled={loadingProdsEmpresa}
-                      value={produtoEmpresaSelecionadoId || 'nenhum'}
-                      onValueChange={(v) => {
-                        if (v === 'nenhum') {
-                          setProdutoEmpresaSelecionadoId('')
-                          return
-                        }
-                        const prodEmp = produtosDaEmpresa.find((item) => item.id === v)
-                        if (prodEmp) handleSelecionarProdutoEmpresa(prodEmp)
-                      }}
-                    >
-                      <SelectTrigger className="bg-white">
-                        <SelectValue
-                          placeholder={
-                            produtosDaEmpresa.length === 0
-                              ? 'Empresa sem produtos fabricados cadastrados'
-                              : 'Escolha o produto para herdar composições e dados...'
-                          }
-                        />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <div className="p-1 border-b border-border">
-                          <div className="relative">
-                            <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-                            <Input
-                              placeholder="Filtrar por nome ou SKU..."
-                              value={buscaProdEmpresaText}
-                              onChange={(e) => setBuscaProdEmpresaText(e.target.value)}
-                              className="h-8 pl-8 text-xs"
-                              onKeyDown={(e) => e.stopPropagation()}
-                            />
-                          </div>
-                        </div>
-                        <SelectItem value="nenhum">Nenhum / Novo Produto em Branco</SelectItem>
-                        {produtosEmpresaFiltrados.map((pe) => {
-                          const cCalc = calcularCustoBaseProduto({
-                            sku: pe.sku,
-                            nome: pe.nome,
-                            tipo: pe.tipo,
-                            peso_g: pe.peso_g,
-                            composicao: pe.composicao,
-                            perda_pct: pe.perda_pct,
-                            custo_etiqueta: pe.custo_etiqueta,
-                            custo_adicional_embalagem: pe.custo_adicional_embalagem,
-                          })
-                          return (
-                            <SelectItem key={pe.id} value={pe.id}>
-                              {pe.nome} [SKU: {pe.sku}] — Custo: {formatCurrency(cCalc.custo_total)}
-                              {pe.composicao?.length ? ` (${pe.composicao.length} insumos)` : ''}
-                            </SelectItem>
-                          )
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {produtosDaEmpresa.length === 0 && !loadingProdsEmpresa && (
-                    <div className="p-2.5 rounded-xl border border-dashed border-primary/30 bg-white/60 text-center">
-                      <p className="text-[11px] text-muted-foreground">
-                        Esta empresa ainda não possui produtos de fabricação própria cadastrados em
-                        sua ficha.
-                      </p>
-                      <Button
-                        asChild
-                        size="sm"
-                        variant="link"
-                        className="h-6 text-xs text-primary p-0 mt-1"
-                      >
-                        <Link to="/empresas" target="_blank">
-                          Abrir /empresas e cadastrar produtos com ficha detalhada
-                        </Link>
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* SEÇÃO ESPECÍFICA: BUSCADOR DE FORNECEDOR E PRODUTO FORNECIDO (APENAS PARA REVENDA) */}
-              {produtoEditando?.tipo === 'revenda' && (
-                <div className="rounded-2xl border-2 border-primary/20 bg-primary/5 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Truck className="h-4 w-4 text-primary" />
-                      <span className="font-bold text-xs uppercase tracking-wider text-primary">
-                        Auto-Preenchimento via Fornecedor
-                      </span>
-                    </div>
-                    {produtoFornSelecionadoId && (
-                      <Badge className="bg-primary text-white text-[10px] font-bold">
-                        Vínculo ativo
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Selecione o fornecedor e o produto cadastrado para herdar automaticamente: custo
-                    de aquisição, dimensões, peso, descrição, SKU e embalagem.
-                  </p>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                    {/* (a) Busca de Fornecedor */}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold flex items-center justify-between">
-                        <span>(a) Fornecedor Parceiro</span>
-                        <Link
-                          to="/fornecedores"
-                          target="_blank"
-                          className="text-[10px] text-primary hover:underline font-normal"
-                        >
-                          + Gerenciar fornecedores
-                        </Link>
-                      </Label>
-
-                      <Select
-                        value={fornecedorSelecionadoId || 'nenhum'}
-                        onValueChange={(v) => {
-                          const val = v === 'nenhum' ? '' : v
-                          setFornecedorSelecionadoId(val)
-                          setProdutoFornSelecionadoId('')
-                          setBuscaProdFornText('')
-                        }}
-                      >
-                        <SelectTrigger className="bg-white">
-                          <SelectValue placeholder="Escolha um fornecedor..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <div className="p-1 border-b border-border">
-                            <div className="relative">
-                              <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-                              <Input
-                                placeholder="Filtrar fornecedor..."
-                                value={buscaFornText}
-                                onChange={(e) => setBuscaFornText(e.target.value)}
-                                className="h-8 pl-8 text-xs"
-                                onKeyDown={(e) => e.stopPropagation()}
-                              />
-                            </div>
-                          </div>
-                          <SelectItem value="nenhum">Nenhum / Entrada Manual</SelectItem>
-                          {fornecedoresFiltrados.map((f) => (
-                            <SelectItem key={f.id} value={f.id}>
-                              {f.nome_fantasia} {f.cnpj ? `(${f.cnpj})` : ''}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* (b) Busca de Produtos Vinculados ao Fornecedor */}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold">
-                        (b) Produto do Fornecedor
-                        {loadingProdsForn && ' (carregando...)'}
-                      </Label>
-
-                      <Select
-                        disabled={!fornecedorSelecionadoId || loadingProdsForn}
-                        value={produtoFornSelecionadoId || 'nenhum'}
-                        onValueChange={(v) => {
-                          if (v === 'nenhum') {
-                            setProdutoFornSelecionadoId('')
-                            return
-                          }
-                          const prodForn = produtosDoFornecedor.find((item) => item.id === v)
-                          if (prodForn) handleSelecionarProdutoFornecedor(prodForn)
-                        }}
-                      >
-                        <SelectTrigger className="bg-white">
-                          <SelectValue
-                            placeholder={
-                              !fornecedorSelecionadoId
-                                ? 'Selecione primeiro o fornecedor...'
-                                : produtosDoFornecedor.length === 0
-                                  ? 'Fornecedor sem produtos'
-                                  : 'Escolha o produto para herdar...'
-                            }
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <div className="p-1 border-b border-border">
-                            <div className="relative">
-                              <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-                              <Input
-                                placeholder="Filtrar por nome ou SKU..."
-                                value={buscaProdFornText}
-                                onChange={(e) => setBuscaProdFornText(e.target.value)}
-                                className="h-8 pl-8 text-xs"
-                                onKeyDown={(e) => e.stopPropagation()}
-                              />
-                            </div>
-                          </div>
-                          <SelectItem value="nenhum">Selecione para auto-preencher</SelectItem>
-                          {produtosFornFiltrados.map((fp) => (
-                            <SelectItem key={fp.id} value={fp.id}>
-                              {fp.descricao} — {formatCurrency(fp.preco_custo_unitario)}
-                              {fp.sku_fornecedor ? ` [SKU: ${fp.sku_fornecedor}]` : ''}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  {fornecedorSelecionadoId &&
-                    produtosDoFornecedor.length === 0 &&
-                    !loadingProdsForn && (
-                      <div className="p-2.5 rounded-xl border border-dashed border-primary/30 bg-white/60 text-center">
-                        <p className="text-[11px] text-muted-foreground">
-                          Este fornecedor ainda não tem produtos cadastrados.
-                        </p>
-                        <Button
-                          asChild
-                          size="sm"
-                          variant="link"
-                          className="h-6 text-xs text-primary p-0 mt-1"
-                        >
-                          <Link to="/fornecedores" target="_blank">
-                            Abrir /fornecedores e cadastrar produtos deste parceiro
-                          </Link>
-                        </Button>
-                      </div>
-                    )}
-                </div>
-              )}
-
-              {/* Identificação Geral do Produto */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <Label>SKU Único *</Label>
-                    {origemValores.sku?.herdado && (
-                      <span className="text-[10px] text-primary flex items-center gap-1 font-semibold">
-                        <Sparkles className="h-3 w-3" />
-                        {origemValores.sku.sobrescrito
-                          ? 'Sobrescrito'
-                          : origemValores.sku.origemTipo === 'empresa'
-                            ? 'Herdado da empresa'
-                            : 'Herdado do fornecedor'}
-                      </span>
-                    )}
-                  </div>
-                  <Input
-                    required
-                    placeholder="Ex: BLeve?, PA-03..."
-                    className={
-                      formErrors.sku
-                        ? 'border-destructive focus-visible:ring-destructive'
-                        : origemValores.sku?.herdado
-                          ? origemValores.sku.sobrescrito
-                            ? 'border-amber-400 bg-amber-50/30'
-                            : 'border-primary/40 bg-primary/5'
-                          : ''
-                    }
-                    value={produtoEditando?.sku || ''}
-                    onChange={(e) => {
-                      marcarSobrescrita('sku')
-                      if (formErrors.sku) {
-                        setFormErrors((prev) => {
-                          const next = { ...prev }
-                          delete next.sku
-                          return next
-                        })
-                      }
-                      setProdutoEditando((prev) => ({ ...prev, sku: e.target.value }))
-                    }}
-                  />
-                  {formErrors.sku && (
-                    <p className="text-[11px] text-destructive font-medium mt-1">
-                      {formErrors.sku}
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <Label>Nome do Produto *</Label>
-                    {origemValores.nome?.herdado && (
-                      <span className="text-[10px] text-primary flex items-center gap-1 font-semibold">
-                        <Sparkles className="h-3 w-3" />
-                        {origemValores.nome.sobrescrito
-                          ? 'Sobrescrito'
-                          : origemValores.nome.origemTipo === 'empresa'
-                            ? 'Herdado da empresa'
-                            : 'Herdado do fornecedor'}
-                      </span>
-                    )}
-                  </div>
-                  <Input
-                    required
-                    placeholder="Ex: Toalhas (leve) Banho Infantil"
-                    className={
-                      origemValores.nome?.herdado
-                        ? origemValores.nome.sobrescrito
-                          ? 'border-amber-400 bg-amber-50/30'
-                          : 'border-primary/40 bg-primary/5'
-                        : ''
-                    }
-                    value={produtoEditando?.nome || ''}
-                    onChange={(e) => {
-                      marcarSobrescrita('nome')
-                      setProdutoEditando((prev) => ({ ...prev, nome: e.target.value }))
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Marca, Categoria e Unidade */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <Label>Marca</Label>
-                    {origemValores.marca?.herdado && (
-                      <span className="text-[9px] text-primary font-semibold">
-                        {origemValores.marca.sobrescrito ? 'Editado' : 'Herdado'}
-                      </span>
-                    )}
-                  </div>
-                  <Input
-                    placeholder="Ex: Karsten"
-                    className={
-                      origemValores.marca?.herdado
-                        ? origemValores.marca.sobrescrito
-                          ? 'border-amber-400 bg-amber-50/30'
-                          : 'border-primary/40 bg-primary/5'
-                        : ''
-                    }
-                    value={produtoEditando?.marca || ''}
-                    onChange={(e) => {
-                      marcarSobrescrita('marca')
-                      setProdutoEditando((prev) => ({ ...prev, marca: e.target.value }))
-                    }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <Label>Categoria</Label>
-                    {origemValores.categoria?.herdado && (
-                      <span className="text-[9px] text-primary font-semibold">
-                        {origemValores.categoria.sobrescrito ? 'Editado' : 'Herdado'}
-                      </span>
-                    )}
-                  </div>
-                  <Input
-                    placeholder="Ex: Cama, Mesa e Banho"
-                    className={
-                      origemValores.categoria?.herdado
-                        ? origemValores.categoria.sobrescrito
-                          ? 'border-amber-400 bg-amber-50/30'
-                          : 'border-primary/40 bg-primary/5'
-                        : ''
-                    }
-                    value={produtoEditando?.categoria || ''}
-                    onChange={(e) => {
-                      marcarSobrescrita('categoria')
-                      setProdutoEditando((prev) => ({ ...prev, categoria: e.target.value }))
-                    }}
-                  />
-                  {!produtoEditando?.categoria?.trim() && (
-                    <span className="text-[10px] text-muted-foreground block leading-tight">
-                      Recomendado: canais como SHEIN usam a categoria para aplicar alíquotas de
-                      comissão.
-                    </span>
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <Label>Unidade de Medida</Label>
-                    {origemValores.unidade?.herdado && (
-                      <span className="text-[9px] text-primary font-semibold">
-                        {origemValores.unidade.sobrescrito ? 'Editado' : 'Herdado'}
-                      </span>
-                    )}
-                  </div>
-                  <Input
-                    placeholder="un, cx, kg..."
-                    className={
-                      origemValores.unidade?.herdado
-                        ? origemValores.unidade.sobrescrito
-                          ? 'border-amber-400 bg-amber-50/30'
-                          : 'border-primary/40 bg-primary/5'
-                        : ''
-                    }
-                    value={produtoEditando?.unidade || 'un'}
-                    onChange={(e) => {
-                      marcarSobrescrita('unidade')
-                      setProdutoEditando((prev) => ({ ...prev, unidade: e.target.value }))
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Código de barras e Embalagem */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <Label>Código de Barras (EAN)</Label>
-                    {origemValores.codigo_barras?.herdado && (
-                      <span className="text-[9px] text-primary font-semibold">
-                        {origemValores.codigo_barras.sobrescrito ? 'Editado' : 'Herdado'}
-                      </span>
-                    )}
-                  </div>
-                  <Input
-                    placeholder="789..."
-                    className={
-                      origemValores.codigo_barras?.herdado
-                        ? origemValores.codigo_barras.sobrescrito
-                          ? 'border-amber-400 bg-amber-50/30'
-                          : 'border-primary/40 bg-primary/5'
-                        : ''
-                    }
-                    value={produtoEditando?.codigo_barras || ''}
-                    onChange={(e) => {
-                      marcarSobrescrita('codigo_barras')
-                      setProdutoEditando((prev) => ({ ...prev, codigo_barras: e.target.value }))
-                    }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <Label>Embalagem Padrão</Label>
-                    {origemValores.embalagem?.herdado && (
-                      <span className="text-[9px] text-primary font-semibold">
-                        {origemValores.embalagem.sobrescrito ? 'Editado' : 'Herdado'}
-                      </span>
-                    )}
-                  </div>
-                  <Input
-                    placeholder="Caixa, saco plástico..."
-                    className={
-                      origemValores.embalagem?.herdado
-                        ? origemValores.embalagem.sobrescrito
-                          ? 'border-amber-400 bg-amber-50/30'
-                          : 'border-primary/40 bg-primary/5'
-                        : ''
-                    }
-                    value={produtoEditando?.embalagem || ''}
-                    onChange={(e) => {
-                      marcarSobrescrita('embalagem')
-                      setProdutoEditando((prev) => ({ ...prev, embalagem: e.target.value }))
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Peso e Dimensões */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <Label>Peso (gramas)</Label>
-                    {origemValores.peso_g?.herdado && (
-                      <span className="text-[9px] text-primary font-semibold">
-                        {origemValores.peso_g.sobrescrito ? 'Editado' : 'Herdado'}
-                      </span>
-                    )}
-                  </div>
-                  <Input
-                    type="number"
-                    min="0"
-                    placeholder="Ex: 280"
-                    className={
-                      origemValores.peso_g?.herdado
-                        ? origemValores.peso_g.sobrescrito
-                          ? 'border-amber-400 bg-amber-50/30'
-                          : 'border-primary/40 bg-primary/5'
-                        : ''
-                    }
-                    value={produtoEditando?.peso_g ?? ''}
-                    onChange={(e) => {
-                      marcarSobrescrita('peso_g')
-                      setProdutoEditando((prev) => ({
-                        ...prev,
-                        peso_g: parseFloat(e.target.value) || 0,
-                      }))
-                    }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label>Comprimento (cm)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    placeholder="Ex: 20"
-                    className={
-                      origemValores.dimensoes?.herdado
-                        ? origemValores.dimensoes.sobrescrito
-                          ? 'border-amber-400 bg-amber-50/30'
-                          : 'border-primary/40 bg-primary/5'
-                        : ''
-                    }
-                    value={produtoEditando?.dimensao_comprimento_cm ?? ''}
-                    onChange={(e) => {
-                      marcarSobrescrita('dimensoes')
-                      setProdutoEditando((prev) => ({
-                        ...prev,
-                        dimensao_comprimento_cm: parseFloat(e.target.value) || 0,
-                      }))
-                    }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label>Largura (cm)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    placeholder="Ex: 15"
-                    className={
-                      origemValores.dimensoes?.herdado
-                        ? origemValores.dimensoes.sobrescrito
-                          ? 'border-amber-400 bg-amber-50/30'
-                          : 'border-primary/40 bg-primary/5'
-                        : ''
-                    }
-                    value={produtoEditando?.dimensao_largura_cm ?? ''}
-                    onChange={(e) => {
-                      marcarSobrescrita('dimensoes')
-                      setProdutoEditando((prev) => ({
-                        ...prev,
-                        dimensao_largura_cm: parseFloat(e.target.value) || 0,
-                      }))
-                    }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label>Altura (cm)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    placeholder="Ex: 8"
-                    className={
-                      origemValores.dimensoes?.herdado
-                        ? origemValores.dimensoes.sobrescrito
-                          ? 'border-amber-400 bg-amber-50/30'
-                          : 'border-primary/40 bg-primary/5'
-                        : ''
-                    }
-                    value={produtoEditando?.dimensao_altura_cm ?? ''}
-                    onChange={(e) => {
-                      marcarSobrescrita('dimensoes')
-                      setProdutoEditando((prev) => ({
-                        ...prev,
-                        dimensao_altura_cm: parseFloat(e.target.value) || 0,
-                      }))
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Seção Específica: Fabricação Própria (C0..C12) */}
-              {produtoEditando?.tipo === 'fabricacao_propria' && (
-                <div className="rounded-xl border border-border p-3 space-y-3 bg-secondary/10">
-                  <div className="flex justify-between items-center">
-                    <div>
+                    <div className="flex-1 space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-xs uppercase tracking-wider text-muted-foreground">
-                          Composição de Custo / Insumos (C0..C12)
-                        </span>
-                        {origemValores.composicao?.herdado && (
-                          <span className="text-[10px] text-primary flex items-center gap-1 font-semibold">
-                            <Sparkles className="h-3 w-3" />
-                            {origemValores.composicao.sobrescrito
-                              ? 'Editado manualmente'
-                              : 'Estrutura herdada da empresa'}
-                          </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs font-semibold"
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          <Camera className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                          {imagemPreview ? 'Alterar Imagem' : 'Anexar Imagem'}
+                        </Button>
+                        {imagemPreview && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-destructive hover:bg-destructive/10"
+                            onClick={handleRemoverImagem}
+                          >
+                            <X className="mr-1 h-3.5 w-3.5" />
+                            Remover
+                          </Button>
                         )}
                       </div>
+                      <p className="text-[11px] text-muted-foreground">PNG, JPG, WEBP até 5MB.</p>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-[11px]"
-                      onClick={() => {
-                        marcarSobrescrita('composicao')
-                        const nextIdx = composicaoTemp.length
-                        setComposicaoTemp([
-                          ...composicaoTemp,
-                          {
-                            codigo: `C${nextIdx}`,
-                            descricao: '',
-                            qtd: 1,
-                            custo_unitario: 0,
-                            categoria_custo: 'material',
-                          },
-                        ])
-                      }}
-                    >
-                      <Plus className="mr-1 h-3 w-3" />
-                      Adicionar Linha (C{composicaoTemp.length})
-                    </Button>
-                  </div>
-
-                  <div className="space-y-2">
-                    {composicaoTemp.map((item, idx) => (
-                      <div key={idx} className="flex items-center gap-2">
-                        <Input
-                          className="w-16 h-8 text-xs font-mono font-bold"
-                          placeholder="C0"
-                          value={item.codigo || `C${idx}`}
-                          onChange={(e) => {
-                            marcarSobrescrita('composicao')
-                            const arr = [...composicaoTemp]
-                            arr[idx].codigo = e.target.value
-                            setComposicaoTemp(arr)
-                          }}
-                        />
-                        <Input
-                          className="flex-1 h-8 text-xs"
-                          placeholder="Descrição do insumo ou serviço..."
-                          value={item.descricao}
-                          onChange={(e) => {
-                            marcarSobrescrita('composicao')
-                            const arr = [...composicaoTemp]
-                            arr[idx].descricao = e.target.value
-                            setComposicaoTemp(arr)
-                          }}
-                        />
-                        <div className="w-20">
-                          <Input
-                            type="number"
-                            step="0.01"
-                            className="h-8 text-xs font-mono"
-                            placeholder="Qtd"
-                            value={item.qtd}
-                            onChange={(e) => {
-                              marcarSobrescrita('composicao')
-                              const arr = [...composicaoTemp]
-                              arr[idx].qtd = parseFloat(e.target.value) || 0
-                              setComposicaoTemp(arr)
-                            }}
-                          />
-                        </div>
-                        <div className="w-24">
-                          <Input
-                            type="number"
-                            step="0.01"
-                            className="h-8 text-xs font-mono"
-                            placeholder="R$ Unit"
-                            value={item.custo_unitario}
-                            onChange={(e) => {
-                              marcarSobrescrita('composicao')
-                              const arr = [...composicaoTemp]
-                              arr[idx].custo_unitario = parseFloat(e.target.value) || 0
-                              setComposicaoTemp(arr)
-                            }}
-                          />
-                        </div>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-destructive"
-                          onClick={() => {
-                            marcarSobrescrita('composicao')
-                            setComposicaoTemp(composicaoTemp.filter((_, i) => i !== idx))
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Seção Específica: Revenda (Custo de Aquisição) */}
-              {produtoEditando?.tipo === 'revenda' && (
-                <div className="rounded-xl border border-border p-3 space-y-3 bg-secondary/10">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <Label className="font-bold">Custo de Aquisição Unitário (R$) *</Label>
-                      {origemValores.custo_aquisicao_unitario?.herdado && (
-                        <span className="text-[10px] text-primary flex items-center gap-1 font-semibold">
-                          <Sparkles className="h-3 w-3" />
-                          {origemValores.custo_aquisicao_unitario.sobrescrito
-                            ? 'Valor sobrescrito pelo usuário'
-                            : 'Herdado do cadastro do fornecedor'}
-                        </span>
-                      )}
-                    </div>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      placeholder="0.00"
-                      className={
-                        origemValores.custo_aquisicao_unitario?.herdado
-                          ? origemValores.custo_aquisicao_unitario.sobrescrito
-                            ? 'border-amber-400 bg-amber-50/30'
-                            : 'border-primary/40 bg-primary/5 font-bold'
-                          : ''
-                      }
-                      value={produtoEditando?.custo_aquisicao_unitario ?? 0}
-                      onChange={(e) => {
-                        marcarSobrescrita('custo_aquisicao_unitario')
-                        setProdutoEditando((prev) => ({
-                          ...prev,
-                          custo_aquisicao_unitario: parseFloat(e.target.value) || 0,
-                        }))
-                      }}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleFileChange}
                     />
                   </div>
                 </div>
-              )}
 
-              {/* Custos Adicionais Globais: Embalagem, Etiqueta e Perda */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-t border-border pt-3">
-                <div className="space-y-1">
-                  <Label>Embalagem Adicional (R$)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.10"
-                    value={produtoEditando?.custo_adicional_embalagem ?? 0}
-                    onChange={(e) =>
-                      setProdutoEditando((prev) => ({
-                        ...prev,
-                        custo_adicional_embalagem: parseFloat(e.target.value) || 0,
-                      }))
-                    }
-                  />
+                {/* Identificação Geral */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">SKU Único *</Label>
+                    <Input
+                      required
+                      value={produtoEditando.sku}
+                      onChange={(e) =>
+                        setProdutoEditando({ ...produtoEditando, sku: e.target.value })
+                      }
+                      className={formErrors.sku ? 'border-destructive' : ''}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Nome do Produto *</Label>
+                    <Input
+                      required
+                      value={produtoEditando.nome}
+                      onChange={(e) =>
+                        setProdutoEditando({ ...produtoEditando, nome: e.target.value })
+                      }
+                    />
+                  </div>
                 </div>
 
-                <div className="space-y-1">
-                  <Label>Etiqueta (R$)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.05"
-                    value={produtoEditando?.custo_etiqueta ?? 0}
-                    onChange={(e) =>
-                      setProdutoEditando((prev) => ({
-                        ...prev,
-                        custo_etiqueta: parseFloat(e.target.value) || 0,
-                      }))
-                    }
-                  />
+                {/* Marca, Categoria e Unidade */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Marca</Label>
+                    <Input
+                      value={produtoEditando.marca || ''}
+                      onChange={(e) =>
+                        setProdutoEditando({ ...produtoEditando, marca: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Categoria</Label>
+                    <Input
+                      value={produtoEditando.categoria || ''}
+                      onChange={(e) =>
+                        setProdutoEditando({ ...produtoEditando, categoria: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Unidade</Label>
+                    <Input
+                      value={produtoEditando.unidade || 'un'}
+                      onChange={(e) =>
+                        setProdutoEditando({ ...produtoEditando, unidade: e.target.value })
+                      }
+                    />
+                  </div>
                 </div>
 
-                <div className="space-y-1">
-                  <Label>Perda Estimada (%)</Label>
-                  <Input
-                    type="number"
-                    step="0.5"
-                    placeholder="10"
-                    value={produtoEditando?.perda_pct ?? 0}
-                    onChange={(e) =>
-                      setProdutoEditando((prev) => ({
-                        ...prev,
-                        perda_pct: parseFloat(e.target.value) || 0,
-                      }))
-                    }
-                  />
+                {/* Código de barras e Embalagem */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Código de Barras (EAN)</Label>
+                    <Input
+                      value={produtoEditando.codigo_barras || ''}
+                      onChange={(e) =>
+                        setProdutoEditando({ ...produtoEditando, codigo_barras: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Embalagem Padrão</Label>
+                    <Input
+                      value={produtoEditando.embalagem || ''}
+                      onChange={(e) =>
+                        setProdutoEditando({ ...produtoEditando, embalagem: e.target.value })
+                      }
+                    />
+                  </div>
+                </div>
+
+                {/* Peso e Dimensões */}
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Peso (g)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={produtoEditando.peso_g ?? ''}
+                      onChange={(e) =>
+                        setProdutoEditando({
+                          ...produtoEditando,
+                          peso_g: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Compr. (cm)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={produtoEditando.dimensao_comprimento_cm ?? ''}
+                      onChange={(e) =>
+                        setProdutoEditando({
+                          ...produtoEditando,
+                          dimensao_comprimento_cm: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Larg. (cm)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={produtoEditando.dimensao_largura_cm ?? ''}
+                      onChange={(e) =>
+                        setProdutoEditando({
+                          ...produtoEditando,
+                          dimensao_largura_cm: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Altura (cm)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={produtoEditando.dimensao_altura_cm ?? ''}
+                      onChange={(e) =>
+                        setProdutoEditando({
+                          ...produtoEditando,
+                          dimensao_altura_cm: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+
+                {/* Seção Específica: Fabricação Própria (C0..C12) */}
+                {produtoEditando.tipo === 'fabricacao_propria' && (
+                  <div className="rounded-xl border border-border p-3 space-y-3 bg-secondary/10">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-xs uppercase tracking-wider text-muted-foreground">
+                        Composição Analítica de Custos (C0..C12)
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[11px]"
+                        onClick={() => {
+                          const nextIdx = composicaoTemp.length
+                          setComposicaoTemp([
+                            ...composicaoTemp,
+                            {
+                              codigo: `C${nextIdx}`,
+                              descricao: '',
+                              qtd: 1,
+                              custo_unitario: 0,
+                              categoria_custo: 'material',
+                            },
+                          ])
+                        }}
+                      >
+                        <Plus className="mr-1 h-3 w-3" />
+                        Adicionar Linha (C{composicaoTemp.length})
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {composicaoTemp.map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <Input
+                            className="w-16 h-8 text-xs font-mono font-bold"
+                            value={item.codigo || `C${idx}`}
+                            onChange={(e) => {
+                              const arr = [...composicaoTemp]
+                              arr[idx].codigo = e.target.value
+                              setComposicaoTemp(arr)
+                            }}
+                          />
+                          <Input
+                            className="flex-1 h-8 text-xs"
+                            placeholder="Descrição do insumo ou serviço..."
+                            value={item.descricao}
+                            onChange={(e) => {
+                              const arr = [...composicaoTemp]
+                              arr[idx].descricao = e.target.value
+                              setComposicaoTemp(arr)
+                            }}
+                          />
+                          <div className="w-20">
+                            <Input
+                              type="number"
+                              step="0.01"
+                              className="h-8 text-xs font-mono"
+                              placeholder="Qtd"
+                              value={item.qtd}
+                              onChange={(e) => {
+                                const arr = [...composicaoTemp]
+                                arr[idx].qtd = parseFloat(e.target.value) || 0
+                                setComposicaoTemp(arr)
+                              }}
+                            />
+                          </div>
+                          <div className="w-24">
+                            <Input
+                              type="number"
+                              step="0.01"
+                              className="h-8 text-xs font-mono"
+                              placeholder="R$ Unit"
+                              value={item.custo_unitario}
+                              onChange={(e) => {
+                                const arr = [...composicaoTemp]
+                                arr[idx].custo_unitario = parseFloat(e.target.value) || 0
+                                setComposicaoTemp(arr)
+                              }}
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-destructive"
+                            onClick={() =>
+                              setComposicaoTemp(composicaoTemp.filter((_, i) => i !== idx))
+                            }
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Seção Específica: Revenda (Custo de Aquisição) */}
+                {produtoEditando.tipo === 'revenda' && (
+                  <div className="rounded-xl border border-border p-3 space-y-3 bg-secondary/10">
+                    <div className="space-y-1">
+                      <Label className="font-bold text-xs">
+                        Custo de Aquisição Unitário (R$) *
+                      </Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        required
+                        value={produtoEditando.custo_aquisicao_unitario ?? 0}
+                        onChange={(e) =>
+                          setProdutoEditando({
+                            ...produtoEditando,
+                            custo_aquisicao_unitario: parseFloat(e.target.value) || 0,
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Custos Adicionais Globais: Embalagem, Etiqueta e Perda */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-t border-border pt-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Embalagem Adicional (R$)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={produtoEditando.custo_adicional_embalagem ?? 0}
+                      onChange={(e) =>
+                        setProdutoEditando({
+                          ...produtoEditando,
+                          custo_adicional_embalagem: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Etiqueta (R$)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={produtoEditando.custo_etiqueta ?? 0}
+                      onChange={(e) =>
+                        setProdutoEditando({
+                          ...produtoEditando,
+                          custo_etiqueta: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Perda Estimada (%)</Label>
+                    <Input
+                      type="number"
+                      step="0.5"
+                      value={produtoEditando.perda_pct ?? 0}
+                      onChange={(e) =>
+                        setProdutoEditando({
+                          ...produtoEditando,
+                          perda_pct: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={saving}
-                onClick={() => setOpenDialog(false)}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={saving} className="bg-primary text-white font-bold">
-                <Check className="mr-1.5 h-4 w-4" />
-                {saving ? 'Salvando...' : 'Salvar Produto'}
-              </Button>
-            </DialogFooter>
-          </form>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={saving}
+                  onClick={() => setOpenEditDialog(false)}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={saving} className="bg-primary text-white font-bold">
+                  <Check className="mr-1.5 h-4 w-4" />
+                  {saving ? 'Salvando...' : 'Salvar Alterações'}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
+
+      {/* MODAL DE CRIAÇÃO/EDIÇÃO DE KIT */}
+      <KitDialog
+        open={openKitDialog}
+        onOpenChange={setOpenKitDialog}
+        kitParaEditar={kitEditando}
+        produtosDisponiveis={produtos}
+        onSuccess={carregar}
+      />
+
+      {/* MODAL DE CRIAÇÃO/EDIÇÃO DE COMBO */}
+      <ComboDialog
+        open={openComboDialog}
+        onOpenChange={setOpenComboDialog}
+        comboParaEditar={comboEditando}
+        produtosDisponiveis={produtos}
+        onSuccess={carregar}
+      />
+
+      {/* DIALOG DE CONFIRMAÇÃO DE EXCLUSÃO LIMPA */}
+      <AlertDialog
+        open={Boolean(produtoParaExcluir)}
+        onOpenChange={(op) => {
+          if (!op) setProdutoParaExcluir(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-xs leading-relaxed space-y-2 pt-2">
+              <p>
+                Tem certeza que deseja excluir{' '}
+                <strong className="text-foreground">{produtoParaExcluir?.nome}</strong> (SKU:{' '}
+                {produtoParaExcluir?.sku})?
+              </p>
+              {produtoParaExcluir?.tipo === 'kit' || produtoParaExcluir?.tipo === 'combo' ? (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-foreground">
+                  <strong>Aviso de integridade:</strong> A exclusão deste{' '}
+                  {produtoParaExcluir.tipo === 'kit' ? 'Kit' : 'Combo'} removerá apenas a composição
+                  agrupada e o registro do kit/combo. Os{' '}
+                  <strong>produtos componentes originais NÃO serão excluídos</strong> nem alterados.
+                </div>
+              ) : (
+                <p className="text-muted-foreground">
+                  Esta ação removerá o produto e suas simulações de precificação associadas.
+                </p>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletando}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmarExclusao}
+              disabled={deletando}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 font-bold"
+            >
+              {deletando ? 'Excluindo...' : 'Sim, Excluir'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

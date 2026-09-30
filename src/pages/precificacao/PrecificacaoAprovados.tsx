@@ -714,9 +714,26 @@ export default function PrecificacaoAprovados() {
                         >
                           {produto.sku}
                         </Badge>
-                        <Badge variant="secondary" className="text-[10px] capitalize">
-                          {produto.tipo.replace('_', ' ')}
-                        </Badge>
+                        {produto.tipo === 'kit' && (
+                          <Badge className="bg-primary hover:bg-primary text-white text-[10px] font-semibold border-none">
+                            Kit
+                          </Badge>
+                        )}
+                        {produto.tipo === 'combo' && (
+                          <Badge className="bg-purple-600 hover:bg-purple-600 text-white text-[10px] font-semibold border-none">
+                            Combo
+                          </Badge>
+                        )}
+                        {produto.tipo === 'fabricacao_propria' && (
+                          <Badge className="bg-amber-600 hover:bg-amber-600 text-white text-[10px] font-semibold border-none">
+                            Fabricação Própria
+                          </Badge>
+                        )}
+                        {produto.tipo === 'revenda' && (
+                          <Badge className="bg-blue-600 hover:bg-blue-600 text-white text-[10px] font-semibold border-none">
+                            Revenda
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         {cenarios.length} cenário(s) registrado(s) •{' '}

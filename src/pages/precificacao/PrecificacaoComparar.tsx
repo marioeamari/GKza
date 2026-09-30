@@ -78,6 +78,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import {
   PrecCanalModalidadeRecord,
   PrecCanalRecord,
+  PrecKitRecord,
   PrecPerfilTributarioRecord,
   PrecPrecificacaoRecord,
   PrecProdutoRecord,
@@ -353,9 +354,39 @@ export default function PrecificacaoComparar() {
     return produtos.find((p) => p.id === selectedProdutoId) || null
   }, [produtos, selectedProdutoId])
 
-  // Custo base calculado do produto
+  // Estado para guardar dados do prec_kits caso o produto seja Kit ou Combo
+  const [kitInfoAtual, setKitInfoAtual] = useState<PrecKitRecord | null>(null)
+
+  useEffect(() => {
+    if (!produtoAtual || (produtoAtual.tipo !== 'kit' && produtoAtual.tipo !== 'combo')) {
+      setKitInfoAtual(null)
+      return
+    }
+    let isMounted = true
+    precificacaoService
+      .getKitByProdutoPai(produtoAtual.id)
+      .then((kitRec) => {
+        if (isMounted) setKitInfoAtual(kitRec)
+      })
+      .catch((err) => {
+        console.warn('Erro ao carregar kitInfo em PrecificacaoComparar:', err)
+        if (isMounted) setKitInfoAtual(null)
+      })
+    return () => {
+      isMounted = false
+    }
+  }, [produtoAtual])
+
+  // Custo base calculado do produto (suporta fabricação própria, revenda, kit e combo)
   const custoBaseAtual = useMemo(() => {
     if (!produtoAtual) return null
+    const itensKitConfig = kitInfoAtual?.itens?.map((it) => ({
+      produto_id: it.produto_id,
+      nome: it.nome,
+      qtd_efetiva: it.qtd_efetiva,
+      custo_unitario: it.custo_unitario,
+    }))
+
     return calcularCustoBaseProduto({
       sku: produtoAtual.sku,
       nome: produtoAtual.nome,
@@ -371,8 +402,10 @@ export default function PrecificacaoComparar() {
       despesas_compra: produtoAtual.despesas_compra,
       custo_etiqueta: produtoAtual.custo_etiqueta,
       custo_adicional_embalagem: produtoAtual.custo_adicional_embalagem,
+      kit_itens: itensKitConfig,
+      kit_custos_adicionais: kitInfoAtual?.custos_adicionais,
     })
-  }, [produtoAtual])
+  }, [produtoAtual, kitInfoAtual])
 
   // Salvar preferências em localStorage
   useEffect(() => {
@@ -1384,12 +1417,28 @@ export default function PrecificacaoComparar() {
                 </div>
 
                 {produtoAtual && (
-                  <Badge
-                    variant="outline"
-                    className="h-9 px-3.5 text-xs font-mono font-semibold shrink-0 bg-white border-border text-foreground rounded-lg"
-                  >
-                    {produtoAtual.tipo.replace('_', ' ')}
-                  </Badge>
+                  <>
+                    {produtoAtual.tipo === 'kit' && (
+                      <Badge className="h-9 px-3.5 text-xs font-semibold shrink-0 bg-primary text-white border-none rounded-lg">
+                        Kit
+                      </Badge>
+                    )}
+                    {produtoAtual.tipo === 'combo' && (
+                      <Badge className="h-9 px-3.5 text-xs font-semibold shrink-0 bg-purple-600 text-white border-none rounded-lg">
+                        Combo
+                      </Badge>
+                    )}
+                    {produtoAtual.tipo === 'fabricacao_propria' && (
+                      <Badge className="h-9 px-3.5 text-xs font-semibold shrink-0 bg-amber-600 text-white border-none rounded-lg">
+                        Fabricação Própria
+                      </Badge>
+                    )}
+                    {produtoAtual.tipo === 'revenda' && (
+                      <Badge className="h-9 px-3.5 text-xs font-semibold shrink-0 bg-blue-600 text-white border-none rounded-lg">
+                        Revenda
+                      </Badge>
+                    )}
+                  </>
                 )}
               </div>
             </div>
