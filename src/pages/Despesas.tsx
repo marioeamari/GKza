@@ -95,6 +95,7 @@ function formatCompetenciaDisplay(comp: string) {
 interface CompromissoAnualRowProps {
   compromisso: DespesaCompromisso
   ocorrenciaMes?: DespesaOcorrencia
+  ultimaOcorrenciaPaga?: DespesaOcorrencia
   competencia: string
   onBaixarOcorrencia: (oc: DespesaOcorrencia) => void
   onRegistrarPagamentoRetroativo: () => void
@@ -109,6 +110,7 @@ interface CompromissoAnualRowProps {
 function CompromissoAnualRow({
   compromisso,
   ocorrenciaMes,
+  ultimaOcorrenciaPaga,
   competencia,
   onBaixarOcorrencia,
   onRegistrarPagamentoRetroativo,
@@ -137,14 +139,31 @@ function CompromissoAnualRow({
   const valor =
     ocorrenciaMes?.valor_pago ||
     ocorrenciaMes?.valor_previsto ||
+    ultimaOcorrenciaPaga?.valor_pago ||
     compromisso.valor_estimado ||
     compromisso.valor_parcela ||
     0
 
-  // Cálculo da data do vencimento no ano correspondente
+  // Cálculo do mês e dia de renovação do ciclo anual
   const startDate = compromisso.data_inicio ? new Date(compromisso.data_inicio) : new Date()
   const diaVenc = compromisso.dia_vencimento || startDate.getUTCDate() || 10
   const mesVenc = !isNaN(startDate.getTime()) ? startDate.getUTCMonth() + 1 : 1
+
+  // Determina se a competência em exibição coincide com o mês da renovação
+  const mesCompetenciaNum = parseInt(competencia.slice(5, 7), 10)
+  const isMesDeRenovacao = mesCompetenciaNum === mesVenc
+
+  // Identifica se o ciclo anual já foi quitado
+  // Critério: já paga no mês OU há ocorrência paga recente e não estamos com ocorrência pendente no mês de renovação
+  const dataPagamentoFormatada = isPagaNoMes
+    ? ocorrenciaMes?.data_pagamento
+      ? formatDate(ocorrenciaMes.data_pagamento)
+      : ''
+    : ultimaOcorrenciaPaga?.data_pagamento
+      ? formatDate(ultimaOcorrenciaPaga.data_pagamento)
+      : ''
+
+  const cicloPagoSemRenovacaoPendente = isPagaNoMes || (!isMesDeRenovacao && !!ultimaOcorrenciaPaga)
 
   return (
     <div className="group flex flex-col gap-3 p-3.5 transition hover:bg-secondary/40 sm:flex-row sm:items-center sm:justify-between sm:p-4">
@@ -194,14 +213,23 @@ function CompromissoAnualRow({
             {/* Status no ciclo atual */}
             {isPagaNoMes ? (
               <Badge className="bg-success/15 text-success border-success/30 text-[10px] font-bold">
-                <CheckCircle2 className="mr-1 h-3 w-3" /> Paga no ciclo ({competencia})
+                <CheckCircle2 className="mr-1 h-3 w-3" /> Paga nesta competência ({competencia})
               </Badge>
-            ) : ocorrenciaMes ? (
+            ) : isMesDeRenovacao ? (
               <Badge
                 variant="outline"
-                className="text-[10px] font-semibold border-amber-400 bg-amber-50 text-amber-700"
+                className="text-[10px] font-bold border-amber-500 bg-amber-50 text-amber-800 animate-pulse"
               >
-                Pendente neste mês
+                Mês de renovação anual ({String(diaVenc).padStart(2, '0')}/
+                {String(mesVenc).padStart(2, '0')})
+              </Badge>
+            ) : cicloPagoSemRenovacaoPendente ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-semibold border-success/40 bg-success/10 text-success"
+              >
+                <CheckCircle2 className="mr-1 h-3 w-3" /> Pagamento realizado em{' '}
+                {dataPagamentoFormatada || 'ciclo anterior'}
               </Badge>
             ) : (
               <Badge variant="outline" className="text-[10px] font-medium text-muted-foreground">
@@ -230,11 +258,16 @@ function CompromissoAnualRow({
               </strong>
             </span>
 
-            {isPagaNoMes && ocorrenciaMes?.data_pagamento && (
+            {isPagaNoMes && ocorrenciaMes?.data_pagamento ? (
               <span className="text-success font-medium">
                 Pago em: {formatDate(ocorrenciaMes.data_pagamento)}
               </span>
-            )}
+            ) : !isMesDeRenovacao && ultimaOcorrenciaPaga?.data_pagamento ? (
+              <span className="text-success font-medium flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3 inline text-success" />
+                Pagamento realizado em {formatDate(ultimaOcorrenciaPaga.data_pagamento)}
+              </span>
+            ) : null}
 
             {compromisso.link_pagamento && (
               <a
@@ -314,25 +347,41 @@ function CompromissoAnualRow({
                 >
                   <Undo2 className="mr-1 h-3.5 w-3.5" /> Estornar
                 </Button>
-              ) : ocorrenciaMes ? (
+              ) : isMesDeRenovacao ? (
+                ocorrenciaMes ? (
+                  <Button
+                    size="sm"
+                    className="h-8 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-sm"
+                    onClick={() => onBaixarOcorrencia(ocorrenciaMes)}
+                    title="Dar baixa na renovação anual"
+                  >
+                    <RefreshCw className="mr-1 h-3.5 w-3.5" /> Atualizar / Pagar renovação
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    className="h-8 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-sm"
+                    onClick={onRegistrarPagamentoRetroativo}
+                    title="Registrar renovação anual da assinatura"
+                  >
+                    <RefreshCw className="mr-1 h-3.5 w-3.5" /> Atualizar / Pagar renovação
+                  </Button>
+                )
+              ) : !cicloPagoSemRenovacaoPendente ? (
+                // Fora do mês de renovação mas sem quitação do ciclo vigente
                 <Button
                   size="sm"
-                  className="h-8 bg-success hover:bg-success/90 text-xs font-bold"
-                  onClick={() => onBaixarOcorrencia(ocorrenciaMes)}
+                  className="h-8 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-sm"
+                  onClick={
+                    ocorrenciaMes
+                      ? () => onBaixarOcorrencia(ocorrenciaMes)
+                      : onRegistrarPagamentoRetroativo
+                  }
+                  title="Atualizar pagamento pendente da assinatura"
                 >
-                  <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Baixar
+                  <RefreshCw className="mr-1 h-3.5 w-3.5" /> Atualizar / Pagar renovação
                 </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 border-success/40 text-success hover:bg-success/10 text-xs font-bold"
-                  onClick={onRegistrarPagamentoRetroativo}
-                  title="Registrar pagamento deste ciclo anual com data específica"
-                >
-                  <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Registrar pagamento
-                </Button>
-              )}
+              ) : null}
 
               <Button
                 variant="ghost"
@@ -398,6 +447,9 @@ export default function Despesas() {
   const [ocorrencias, setOcorrencias] = useState<DespesaOcorrencia[]>([])
   const [compromissos, setCompromissos] = useState<DespesaCompromisso[]>([])
   const [cartaoOcorrenciasAll, setCartaoOcorrenciasAll] = useState<DespesaOcorrencia[]>([])
+  const [assinaturasOcorrenciasAll, setAssinaturasOcorrenciasAll] = useState<DespesaOcorrencia[]>(
+    [],
+  )
 
   // Modo de visualização de cartões: 'mes' (mês selecionado) ou 'historico' (todas as compras / histórico completo)
   const [cartaoViewMode, setCartaoViewMode] = useState<Record<string, 'mes' | 'historico'>>({})
@@ -427,6 +479,30 @@ export default function Despesas() {
   const [filterCategoria, setFilterCategoria] = useState('all') // Categoria financeira (finalidade)
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterSecao, setFilterSecao] = useState('all') // Seção do painel: 'all' | 'contas_mensais_pix_boleto' | 'assinaturas_anuais' | 'cartoes_credito'
+
+  // Filtro de Competência de Apuração: 'vencimento' (padrão) | 'pagamento'
+  const [filtroDataCompetencia, setFiltroDataCompetencia] = useState<'vencimento' | 'pagamento'>(
+    () => {
+      try {
+        const saved = localStorage.getItem('despesas_filtro_data_competencia')
+        if (saved === 'vencimento' || saved === 'pagamento') {
+          return saved
+        }
+      } catch (e) {
+        console.warn('Erro ao ler filtro de data de competência do localStorage:', e)
+      }
+      return 'vencimento'
+    },
+  )
+
+  const handleFiltroDataCompetenciaChange = (value: 'vencimento' | 'pagamento') => {
+    setFiltroDataCompetencia(value)
+    try {
+      localStorage.setItem('despesas_filtro_data_competencia', value)
+    } catch (e) {
+      console.warn('Erro ao salvar filtro de data de competência no localStorage:', e)
+    }
+  }
 
   // Ordenação: 'urgente' (mais urgente primeiro: pendentes vencidas/hoje/futuras no topo) | 'recente' (mais tarde primeiro)
   const [sortBy, setSortBy] = useState<'urgente' | 'recente'>(() => {
@@ -479,16 +555,28 @@ export default function Despesas() {
       const realTodayStr = getLocalDateStr() // 'YYYY-MM-DD'
       const realCurrentComp = realTodayStr.slice(0, 7) // 'YYYY-MM'
 
-      // 2. Carrega compromissos e ocorrências da competência atual (as mais prioritárias para renderização)
+      // 2. Carrega compromissos e ocorrências da competência atual (respeitando o modo vencimento vs pagamento)
+      const isModoPagamento = filtroDataCompetencia === 'pagamento'
+      const [anoC, mesC] = currentCompetencia.split('-').map((v) => parseInt(v, 10))
+      const ultimoDiaMes = new Date(Date.UTC(anoC, mesC, 0)).getUTCDate()
+      const dataInicioMes = `${currentCompetencia}-01`
+      const dataFimMes = `${currentCompetencia}-${String(ultimoDiaMes).padStart(2, '0')} 23:59:59`
+
+      // Se filtroDataCompetencia === 'pagamento':
+      // Busca ocorrências pagas no mês pela data_pagamento E previstas cuja competência = currentCompetencia
+      const filterOcorrencias = isModoPagamento
+        ? `(status = 'paga' && data_pagamento >= '${dataInicioMes}' && data_pagamento <= '${dataFimMes}') || (status = 'prevista' && competencia = '${currentCompetencia}')`
+        : `competencia = '${currentCompetencia}'`
+
       const [allComps, allOcs] = await Promise.all([
         despesasService.listCompromissos(),
         despesasService.listOcorrencias({
-          filter: `competencia = '${currentCompetencia}'`,
+          filter: filterOcorrencias,
         }),
       ])
 
-      // 3. Carrega consultas secundárias (cartões e atrasadas) escalonadas para evitar disparos em rajada contra o backend
-      const [allOcsCartao, allOcsAtrasadas] = await Promise.all([
+      // 3. Carrega consultas secundárias (cartões, assinaturas anuais e atrasadas) escalonadas para evitar rajada
+      const [allOcsCartao, allOcsAtrasadas, allOcsAssinaturas] = await Promise.all([
         despesasService.listOcorrencias({
           filter: `secao = 'cartoes_credito'`,
           sort: '-data_vencimento',
@@ -496,6 +584,10 @@ export default function Despesas() {
         despesasService.listOcorrencias({
           filter: `status = 'prevista' && (competencia < '${realCurrentComp}' || (competencia = '${realCurrentComp}' && data_vencimento < '${realTodayStr} 23:59:59'))`,
           sort: 'data_vencimento',
+        }),
+        despesasService.listOcorrencias({
+          filter: `secao = 'assinaturas_anuais'`,
+          sort: '-data_pagamento',
         }),
       ])
 
@@ -556,11 +648,13 @@ export default function Despesas() {
       const ocs = allOcs.filter(isOcorrenciaInContext)
       const ocsCartaoAll = allOcsCartao.filter(isOcorrenciaInContext)
       const ocsAtrasadas = allOcsAtrasadas.filter(isOcorrenciaInContext)
+      const ocsAssinaturasAll = allOcsAssinaturas.filter(isOcorrenciaInContext)
 
       setCompromissos(comps)
       setOcorrencias(ocs)
       setCartaoOcorrenciasAll(ocsCartaoAll)
       setOcorrenciasAtrasadas(ocsAtrasadas)
+      setAssinaturasOcorrenciasAll(ocsAssinaturasAll)
     } catch (err) {
       toast({
         variant: 'destructive',
@@ -571,7 +665,7 @@ export default function Despesas() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [activeContext, currentCompetencia, toast])
+  }, [activeContext, currentCompetencia, filtroDataCompetencia, toast])
 
   useEffect(() => {
     loadData()
@@ -1198,35 +1292,77 @@ export default function Despesas() {
       {/* SELETOR DE MÊS / COMPETÊNCIA & RESUMO DOS TOTAIS */}
       <div className="space-y-4">
         <div className="flex flex-col gap-3 rounded-2xl border border-border bg-white p-4 shadow-soft sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
-              <CalendarDays className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="micro-label">Competência de Apuração</p>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => changeMonth(-1)}
-                  aria-label="Mês anterior"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <span className="text-base font-extrabold capitalize text-foreground sm:text-lg">
-                  {formatCompetenciaDisplay(currentCompetencia)}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => changeMonth(1)}
-                  aria-label="Próximo mês"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+            <div className="flex items-center gap-2">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
+                <CalendarDays className="h-5 w-5" />
+              </span>
+              <div>
+                <p className="micro-label">Competência de Apuração</p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => changeMonth(-1)}
+                    aria-label="Mês anterior"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-base font-extrabold capitalize text-foreground sm:text-lg">
+                    {formatCompetenciaDisplay(currentCompetencia)}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => changeMonth(1)}
+                    aria-label="Próximo mês"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
+            </div>
+
+            {/* Dropdown Data de vencimento vs Data de pagamento */}
+            <div className="sm:border-l sm:border-border sm:pl-4">
+              <p className="micro-label mb-1">Filtrar competência por</p>
+              <Select
+                value={filtroDataCompetencia}
+                onValueChange={(val) =>
+                  handleFiltroDataCompetenciaChange(val as 'vencimento' | 'pagamento')
+                }
+              >
+                <SelectTrigger
+                  className="h-8 w-48 text-xs font-semibold border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 transition"
+                  title="Defina se as despesas são apuradas pela data de vencimento ou pagamento"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="vencimento">
+                    <div className="flex flex-col py-0.5">
+                      <span className="font-semibold text-xs text-foreground">
+                        Data de vencimento
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        Padrão: vencimento no mês
+                      </span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="pagamento">
+                    <div className="flex flex-col py-0.5">
+                      <span className="font-semibold text-xs text-foreground">
+                        Data de pagamento
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        Pagas no mês + previstas
+                      </span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -1520,6 +1656,7 @@ export default function Despesas() {
                       <OcorrenciaRow
                         key={oc.id}
                         ocorrencia={oc}
+                        isModoPagamento={filtroDataCompetencia === 'pagamento'}
                         compromissoFallback={compObj}
                         onBaixar={() => handleOpenBaixa(oc)}
                         onEstornar={() => setEstornando(oc)}
@@ -1580,11 +1717,17 @@ export default function Despesas() {
                       (o) => o.compromisso === comp.id,
                     )
 
+                    // Busca a última ocorrência paga deste compromisso no histórico geral
+                    const ultimaPaga = assinaturasOcorrenciasAll.find(
+                      (o) => o.compromisso === comp.id && o.status === 'paga',
+                    )
+
                     return (
                       <CompromissoAnualRow
                         key={comp.id}
                         compromisso={comp}
                         ocorrenciaMes={ocorrenciaDoMes}
+                        ultimaOcorrenciaPaga={ultimaPaga}
                         competencia={currentCompetencia}
                         onBaixarOcorrencia={(oc) => handleOpenBaixa(oc)}
                         onRegistrarPagamentoRetroativo={() => handleOpenBaixaCompromisso(comp)}
@@ -1781,6 +1924,7 @@ export default function Despesas() {
                               <OcorrenciaRow
                                 key={oc.id}
                                 ocorrencia={oc}
+                                isModoPagamento={filtroDataCompetencia === 'pagamento'}
                                 compromissoFallback={compObj}
                                 onBaixar={() => handleOpenBaixa(oc)}
                                 onEstornar={() => setEstornando(oc)}
@@ -1934,6 +2078,7 @@ export default function Despesas() {
 interface OcorrenciaRowProps {
   ocorrencia: DespesaOcorrencia
   isAtrasada?: boolean
+  isModoPagamento?: boolean
   compromissoFallback?: DespesaCompromisso
   onBaixar: () => void
   onEstornar: () => void
@@ -1947,6 +2092,7 @@ interface OcorrenciaRowProps {
 function OcorrenciaRow({
   ocorrencia,
   isAtrasada = false,
+  isModoPagamento = false,
   compromissoFallback,
   onBaixar,
   onEstornar,
@@ -2092,6 +2238,12 @@ function OcorrenciaRow({
             {isValorVariavel && (
               <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
                 Variável
+              </span>
+            )}
+
+            {isModoPagamento && !isPaga && (
+              <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                Prevista para esta competência (vencimento)
               </span>
             )}
 

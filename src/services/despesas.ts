@@ -1,5 +1,6 @@
 import type { RecordListOptions, RecordOptions } from 'pocketbase'
 import pb from '@/lib/pocketbase/client'
+import { calcularFaturaCartao } from '@/lib/cartao-fatura'
 import type {
   Conta,
   ContextoTipo,
@@ -182,7 +183,6 @@ export const despesasService = {
       // Para cartão de crédito: a despesa entra na fatura do cartão referente ao ciclo.
       // O lançamento financeiro é criado como pendente de fatura (sem saída imediata de caixa)
       // até que a fatura inteira seja baixada/paga.
-      const { calcularFaturaCartao } = await import('@/lib/cartao-fatura')
       const ciclo = calcularFaturaCartao(contaObj, params.dataPagamento)
 
       if (params.comprovanteArquivo) {
@@ -482,6 +482,46 @@ export const despesasService = {
   },
 
   /**
+   * Helper para obter a conta do tipo cartão vinculada a um compromisso,
+   * checando primeiro compromisso.conta_padrao e, secundariamente, via compromisso.metodo_pagamento.
+   */
+  obterContaCartaoCompromisso: async (
+    compromisso: Pick<DespesaCompromisso, 'conta_padrao' | 'metodo_pagamento'>,
+  ): Promise<Conta | null> => {
+    if (compromisso.conta_padrao) {
+      try {
+        const c = await pb.collection<Conta>('contas').getOne(compromisso.conta_padrao)
+        if (c.tipo === 'cartao') {
+          return c
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (compromisso.metodo_pagamento) {
+      try {
+        const mp = await pb
+          .collection<MetodoPagamento>('metodos_pagamento')
+          .getOne(compromisso.metodo_pagamento, { expand: 'conta_padrao' })
+        if (mp.expand?.conta_padrao && mp.expand.conta_padrao.tipo === 'cartao') {
+          return mp.expand.conta_padrao
+        }
+        if (mp.conta_padrao) {
+          const c = await pb.collection<Conta>('contas').getOne(mp.conta_padrao)
+          if (c.tipo === 'cartao') {
+            return c
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return null
+  },
+
+  /**
    * Gerador automático de ocorrências para um compromisso recém-criado ou para uma competência específica
    */
   /**
@@ -515,6 +555,9 @@ export const despesasService = {
 
     const diaVencimentoCompromisso = compromisso.dia_vencimento
 
+    // Identifica se há conta de cartão associada (direta ou por método de pagamento)
+    const contaCartaoObj = await despesasService.obterContaCartaoCompromisso(compromisso)
+
     for (const oc of ocorrenciasPrevistas) {
       const updates: Partial<DespesaOcorrencia> = {}
 
@@ -525,8 +568,9 @@ export const despesasService = {
       }
 
       // Sincroniza dados estruturais com o compromisso atualizado
-      if (compromisso.conta_padrao && oc.conta !== compromisso.conta_padrao) {
-        updates.conta = compromisso.conta_padrao
+      const contaEfetivaId = compromisso.conta_padrao || (contaCartaoObj ? contaCartaoObj.id : null)
+      if (contaEfetivaId && oc.conta !== contaEfetivaId) {
+        updates.conta = contaEfetivaId
       }
       if (compromisso.secao && oc.secao !== compromisso.secao) {
         updates.secao = compromisso.secao
@@ -553,8 +597,44 @@ export const despesasService = {
         updates.link_pagamento = compromisso.link_pagamento || null
       }
 
-      // Se houver dia_vencimento e a ocorrência tiver competência, verifica se a data de vencimento precisa alinhar
-      if (diaVencimentoCompromisso && oc.competencia && oc.competencia.includes('-')) {
+      // Se for despesa de cartão de crédito, o vencimento e competência seguem o ciclo da fatura
+      if (contaCartaoObj) {
+        const dataCompraStr = compromisso.data_inicio
+          ? compromisso.data_inicio.slice(0, 10)
+          : compromisso.created
+            ? compromisso.created.slice(0, 10)
+            : new Date().toISOString().slice(0, 10)
+
+        const [anoStr, mesStr, diaStr] = dataCompraStr.split('-')
+        const cAno = parseInt(anoStr, 10)
+        const cMesZero = parseInt(mesStr, 10) - 1
+        const cDia = parseInt(diaStr, 10)
+
+        const pNum = oc.numero_parcela && oc.numero_parcela > 0 ? oc.numero_parcela : 1
+        const pInicial = compromisso.parcela_inicial || 1
+        const offset = isParcelado ? pNum - pInicial : 0
+
+        const parcelaDate = despesasService.calcularDataVencimentoNoMes(
+          cAno,
+          cMesZero + offset,
+          cDia,
+        )
+        const parcelaDataIso = `${parcelaDate.getUTCFullYear()}-${String(
+          parcelaDate.getUTCMonth() + 1,
+        ).padStart(2, '0')}-${String(parcelaDate.getUTCDate()).padStart(2, '0')}`
+
+        const ciclo = calcularFaturaCartao(contaCartaoObj, parcelaDataIso)
+        const expectedDueIso = `${ciclo.dataVencimento}T12:00:00.000Z`
+
+        if (oc.competencia !== ciclo.competencia) {
+          updates.competencia = ciclo.competencia
+        }
+        const currentDueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
+        if (currentDueStr !== ciclo.dataVencimento) {
+          updates.data_vencimento = expectedDueIso
+        }
+      } else if (diaVencimentoCompromisso && oc.competencia && oc.competencia.includes('-')) {
+        // Se houver dia_vencimento e a ocorrência tiver competência, verifica se a data de vencimento precisa alinhar
         const [yStr, mStr] = oc.competencia.split('-')
         const y = parseInt(yStr, 10)
         const m = parseInt(mStr, 10) - 1
@@ -596,34 +676,29 @@ export const despesasService = {
         : compromisso.valor_estimado
 
     // Verifica se a conta vinculada é cartão de crédito para alinhar ao ciclo da fatura
-    let contaCartaoObj: Conta | null = null
-    if (compromisso.conta_padrao) {
-      try {
-        const c = await pb.collection<Conta>('contas').getOne(compromisso.conta_padrao)
-        if (c.tipo === 'cartao') {
-          contaCartaoObj = c
-        }
-      } catch {
-        /* ignore */
-      }
-    }
+    // (checando conta_padrao e metodo_pagamento)
+    const contaCartaoObj = await despesasService.obterContaCartaoCompromisso(compromisso)
+    const contaIdEfetiva = compromisso.conta_padrao || (contaCartaoObj ? contaCartaoObj.id : null)
 
     // 1. Pagamento Avulso / Pontual (à vista, uma única ocorrência)
     if (isAvulso) {
       const dataCompraStr = compromisso.data_inicio
         ? compromisso.data_inicio.slice(0, 10)
-        : new Date().toISOString().slice(0, 10)
+        : compromisso.created
+          ? compromisso.created.slice(0, 10)
+          : new Date().toISOString().slice(0, 10)
 
       let compStr: string
       let dueDateIso: string
 
       if (contaCartaoObj) {
-        // Para cartão: competência no mês da compra e vencimento na data da compra.
-        // A vinculação à fatura é calculada em tempo real na exibição e consolidada na baixa.
-        compStr = dataCompraStr.slice(0, 7)
-        dueDateIso = `${dataCompraStr}T12:00:00.000Z`
+        // Alinhado ao ciclo da fatura do cartão
+        const ciclo = calcularFaturaCartao(contaCartaoObj, dataCompraStr)
+        compStr = ciclo.competencia
+        dueDateIso = `${ciclo.dataVencimento}T12:00:00.000Z`
       } else {
-        const startDate = new Date(compromisso.data_inicio)
+        const rawDate = compromisso.data_inicio || compromisso.created
+        const startDate = rawDate ? new Date(rawDate) : new Date()
         compStr = `${startDate.getUTCFullYear()}-${(startDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
         dueDateIso = startDate.toISOString()
       }
@@ -637,7 +712,7 @@ export const despesasService = {
           contexto_tipo: compromisso.contexto_tipo,
           empresa: compromisso.empresa || null,
           secao: compromisso.secao,
-          conta: compromisso.conta_padrao || null,
+          conta: contaIdEfetiva,
           competencia: compStr,
           data_vencimento: dueDateIso,
           valor_previsto: compromisso.valor_estimado,
@@ -660,11 +735,12 @@ export const despesasService = {
       const inicial = compromisso.parcela_inicial || 1
       const dataCompraStr = compromisso.data_inicio
         ? compromisso.data_inicio.slice(0, 10)
-        : new Date().toISOString().slice(0, 10)
+        : compromisso.created
+          ? compromisso.created.slice(0, 10)
+          : new Date().toISOString().slice(0, 10)
 
       if (contaCartaoObj) {
-        // Parcela 1 com competência no mês da compra e vencimento na data da compra;
-        // parcelas seguintes mensais sequenciais na mesma data do mês.
+        // Para cartão: cada parcela avança um mês em relação à compra e calcula o ciclo da fatura
         const [anoStr, mesStr, diaStr] = dataCompraStr.split('-')
         const cAno = parseInt(anoStr, 10)
         const cMesZero = parseInt(mesStr, 10) - 1
@@ -680,8 +756,11 @@ export const despesasService = {
           const pYear = parcelaDate.getUTCFullYear()
           const pMonth = parcelaDate.getUTCMonth()
           const pDay = parcelaDate.getUTCDate()
-          const compStr = `${pYear}-${String(pMonth + 1).padStart(2, '0')}`
-          const dueDateIso = `${pYear}-${String(pMonth + 1).padStart(2, '0')}-${String(pDay).padStart(2, '0')}T12:00:00.000Z`
+          const parcelaDataIso = `${pYear}-${String(pMonth + 1).padStart(2, '0')}-${String(pDay).padStart(2, '0')}`
+
+          const ciclo = calcularFaturaCartao(contaCartaoObj, parcelaDataIso)
+          const compStr = ciclo.competencia
+          const dueDateIso = `${ciclo.dataVencimento}T12:00:00.000Z`
 
           const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
             filter: `compromisso = '${compromisso.id}' && numero_parcela = ${p}`,
@@ -693,7 +772,7 @@ export const despesasService = {
               contexto_tipo: compromisso.contexto_tipo,
               empresa: compromisso.empresa || null,
               secao: compromisso.secao,
-              conta: compromisso.conta_padrao || null,
+              conta: contaIdEfetiva,
               competencia: compStr,
               numero_parcela: p,
               total_parcelas: total,
@@ -712,7 +791,8 @@ export const despesasService = {
         }
       } else {
         // Contas não-cartão: lógica padrão com dia_vencimento
-        const startDate = new Date(compromisso.data_inicio)
+        const rawDate = compromisso.data_inicio || compromisso.created
+        const startDate = rawDate ? new Date(rawDate) : new Date()
         const day = compromisso.dia_vencimento || startDate.getUTCDate() || 10
 
         for (let p = inicial; p <= total; p++) {
