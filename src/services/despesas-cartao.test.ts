@@ -208,4 +208,127 @@ describe('despesasService - gerarOcorrenciasParaCompromisso em cartão', () => {
     expect(p3.competencia).toBe('2026-11')
     expect(p3.data_vencimento).toBe('2026-11-20T12:00:00.000Z')
   })
+
+  it('gera ocorrências mensais de cartão a partir do ciclo inicial da fatura até meses futuros', async () => {
+    const mockContaCartao: Conta = {
+      id: 'cartao_nu',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: '[CPF]NuBank Cred.',
+      tipo: 'cartao',
+      saldo_inicial: 0,
+      cor: '#8A05BE',
+      ativa: true,
+      dia_fechamento: 13,
+      dia_vencimento: 20,
+    }
+
+    const mockCreate = vi.fn().mockResolvedValue({ id: 'ocorr_nova_mensal' })
+    const mockGetList = vi.fn().mockResolvedValue({ items: [], totalItems: 0 })
+    const mockGetOneConta = vi.fn().mockResolvedValue(mockContaCartao)
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: mockGetOneConta } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getList: mockGetList,
+          create: mockCreate,
+        } as any
+      }
+      return {} as any
+    })
+
+    const compromissoMensal: DespesaCompromisso = {
+      id: 'comp_mensal_nu',
+      collectionId: 'despesas_compromisso',
+      collectionName: 'despesas_compromisso',
+      created: '2026-08-23T12:00:00.000Z',
+      updated: '2026-08-23T12:00:00.000Z',
+      descricao: 'Nubank Ultravioleta',
+      secao: 'cartoes_credito',
+      regra_repeticao: 'mensal',
+      modalidade_parcelamento: 'a_vista',
+      data_inicio: '2026-08-23 00:00:00.000Z',
+      dia_vencimento: 20,
+      valor_estimado: 49,
+      conta_padrao: 'cartao_nu',
+      contexto_tipo: 'pessoal',
+      ativo: true,
+    }
+
+    await despesasService.gerarOcorrenciasParaCompromisso(compromissoMensal)
+
+    // A primeira ocorrência deve ter competência 2026-09 (fechamento 13, compra 23/08)
+    expect(mockCreate).toHaveBeenCalled()
+    const primeira = mockCreate.mock.calls[0][0]
+    expect(primeira.competencia).toBe('2026-09')
+    expect(primeira.data_vencimento).toBe('2026-09-20T12:00:00.000Z')
+    expect(primeira.valor_previsto).toBe(49)
+  })
+
+  it('sincronizarOcorrenciasCompromisso cria ocorrência do ciclo inicial de cartão se faltar', async () => {
+    const mockContaCartao: Conta = {
+      id: 'cartao_nu',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: '[CPF]NuBank Cred.',
+      tipo: 'cartao',
+      saldo_inicial: 0,
+      cor: '#8A05BE',
+      ativa: true,
+      dia_fechamento: 13,
+      dia_vencimento: 20,
+    }
+
+    const mockCreate = vi.fn().mockResolvedValue({ id: 'ocorr_inicial_criada' })
+    const mockGetList = vi.fn().mockResolvedValue({ items: [], totalItems: 0 })
+    const mockGetOneConta = vi.fn().mockResolvedValue(mockContaCartao)
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: mockGetOneConta } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getList: mockGetList,
+          create: mockCreate,
+          getFullList: vi.fn().mockResolvedValue([]),
+        } as any
+      }
+      return {} as any
+    })
+
+    const compromisso: DespesaCompromisso = {
+      id: 'comp_sinc_nu',
+      collectionId: 'despesas_compromisso',
+      collectionName: 'despesas_compromisso',
+      created: '2026-08-23T12:00:00.000Z',
+      updated: '2026-08-23T12:00:00.000Z',
+      descricao: 'Nubank Ultravioleta',
+      secao: 'cartoes_credito',
+      regra_repeticao: 'mensal',
+      modalidade_parcelamento: 'a_vista',
+      data_inicio: '2026-08-23 00:00:00.000Z',
+      dia_vencimento: 20,
+      valor_estimado: 49,
+      conta_padrao: 'cartao_nu',
+      contexto_tipo: 'pessoal',
+      ativo: true,
+    }
+
+    await despesasService.sincronizarOcorrenciasCompromisso(compromisso)
+
+    // Deve ter chamado create para a ocorrência inicial faltante em 2026-09
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+    const callArg = mockCreate.mock.calls[0][0]
+    expect(callArg.competencia).toBe('2026-09')
+    expect(callArg.data_vencimento).toBe('2026-09-20T12:00:00.000Z')
+    expect(callArg.valor_previsto).toBe(49)
+  })
 })

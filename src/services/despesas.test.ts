@@ -144,4 +144,72 @@ describe('despesasService - baixaOcorrencia data de pagamento', () => {
     const updateCallArg = mockOcorrenciaUpdate.mock.calls[0][1]
     expect(updateCallArg.data_pagamento).toBe(`${dataPagamentoEscolhida} 12:00:00`)
   })
+
+  it('no caso de cartão de crédito, realinha competencia e data_vencimento se data de pagamento apontar para ciclo diferente', async () => {
+    const mockContaGetOne = vi.fn().mockResolvedValue({
+      id: 'cartao_nubank',
+      nome: '[CPF]NuBank Cred.',
+      tipo: 'cartao',
+      dia_fechamento: 13,
+      dia_vencimento: 20,
+    })
+
+    const mockLancamentosCreate = vi.fn().mockResolvedValue({
+      id: 'lanc_cartao_retro',
+    })
+
+    const mockOcorrenciaGetOne = vi.fn().mockResolvedValue({
+      id: 'ocorr_cartao_retro',
+      compromisso: 'comp_123',
+      valor_previsto: 49,
+      secao: 'cartoes_credito',
+      competencia: '2026-10',
+    })
+
+    const mockOcorrenciaUpdate = vi.fn().mockResolvedValue({
+      id: 'ocorr_cartao_retro',
+      status: 'paga',
+      valor_pago: 49,
+      competencia: '2026-09',
+      data_vencimento: '2026-09-20T12:00:00.000Z',
+      data_pagamento: '2026-08-23 12:00:00',
+    })
+
+    const mockGetListOcorr = vi.fn().mockResolvedValue({
+      items: [],
+      totalItems: 0,
+    })
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: mockContaGetOne } as any
+      }
+      if (name === 'lancamentos') {
+        return { create: mockLancamentosCreate } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getOne: mockOcorrenciaGetOne,
+          update: mockOcorrenciaUpdate,
+          getList: mockGetListOcorr,
+        } as any
+      }
+      return {} as any
+    })
+
+    await despesasService.baixarOcorrencia({
+      ocorrenciaId: 'ocorr_cartao_retro',
+      valorPago: 49,
+      dataPagamento: '2026-08-23',
+      contaId: 'cartao_nubank',
+      descricao: 'Nubank Ultravioleta',
+    })
+
+    expect(mockOcorrenciaUpdate).toHaveBeenCalledTimes(1)
+    const updateCallArg = mockOcorrenciaUpdate.mock.calls[0][1]
+    expect(updateCallArg.competencia).toBe('2026-09')
+    expect(updateCallArg.data_vencimento).toBe('2026-09-20T12:00:00.000Z')
+    expect(updateCallArg.data_pagamento).toBe('2026-08-23 12:00:00')
+    expect(updateCallArg.status).toBe('paga')
+  })
 })
