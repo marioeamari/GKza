@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { LoaderCircle, Save } from 'lucide-react'
+import { Link2, LoaderCircle, Save } from 'lucide-react'
+import { getFileUrl } from '@/lib/pocketbase/files'
+import type { DespesaCompromisso } from '@/types/domain'
 
 import { MoneyInput } from '@/components/MoneyInput'
 import { Button } from '@/components/ui/button'
@@ -374,7 +376,7 @@ export function LancamentoDialog({
                 placeholder="Detalhes adicionais..."
               />
             </div>
-            <div className="sm:col-span-2 pt-1 border-t border-border">
+            <div className="sm:col-span-2 pt-1 border-t border-border space-y-3">
               <AnexoUploadField
                 label="Comprovante da transação (opcional)"
                 helperText="Aceita PDF ou imagem do dispositivo/câmera (até 15MB)"
@@ -393,6 +395,42 @@ export function LancamentoDialog({
                 }}
                 disabled={saving}
               />
+
+              {(() => {
+                if (!lancamento) return null
+                const rawOcorrencia = lancamento.expand?.despesas_ocorrencias_via_lancamento as any
+                const ocorrencia = Array.isArray(rawOcorrencia) ? rawOcorrencia[0] : rawOcorrencia
+                const compromisso = (ocorrencia?.expand?.compromisso || ocorrencia?.compromisso) as
+                  | DespesaCompromisso
+                  | undefined
+                if (compromisso?.id && compromisso?.anexo_conta) {
+                  return (
+                    <div className="flex items-center justify-between rounded-xl border border-border bg-secondary/30 px-3.5 py-2.5 text-xs">
+                      <div className="flex items-center gap-2">
+                        <Link2 className="h-4 w-4 text-primary" />
+                        <span className="text-muted-foreground">
+                          Conta a pagar de origem vinculada a este lançamento:
+                        </span>
+                      </div>
+                      <a
+                        href={getFileUrl(
+                          'despesas_compromisso',
+                          compromisso.id,
+                          compromisso.anexo_conta,
+                        )}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
+                        title="Ver conta vinculada"
+                      >
+                        <Link2 className="h-3 w-3" />
+                        Ver conta vinculada
+                      </a>
+                    </div>
+                  )
+                }
+                return null
+              })()}
             </div>
           </div>
           {errors.form && (

@@ -255,6 +255,38 @@ export interface Lancamento extends RecordModel {
     empresa?: Empresa
     pessoa?: Pessoa
     cartao_fatura_conta?: Conta
+    despesas_ocorrencias_via_lancamento?:
+      | (DespesaOcorrencia & {
+          expand?: {
+            compromisso?: DespesaCompromisso
+            [key: string]: unknown
+          }
+        })
+      | Array<
+          DespesaOcorrencia & {
+            expand?: {
+              compromisso?: DespesaCompromisso
+              [key: string]: unknown
+            }
+          }
+        >
+      | {
+          compromisso?: DespesaCompromisso
+          expand?: {
+            compromisso?: DespesaCompromisso
+            [key: string]: unknown
+          }
+          [key: string]: unknown
+        }
+      | Array<{
+          compromisso?: DespesaCompromisso
+          expand?: {
+            compromisso?: DespesaCompromisso
+            [key: string]: unknown
+          }
+          [key: string]: unknown
+        }>
+    [key: string]: unknown
   }
 }
 

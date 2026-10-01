@@ -10,13 +10,15 @@ export const financeService = {
   listLancamentos: (options?: RecordListOptions) =>
     listAll<Lancamento>('lancamentos', {
       sort: '-data,-created',
-      expand: 'conta,categoria,empresa,pessoa',
+      expand:
+        'conta,categoria,empresa,pessoa,cartao_fatura_conta,despesas_ocorrencias_via_lancamento.compromisso',
       ...options,
     }),
   pageLancamentos: (page: number, perPage = 25, options?: RecordListOptions) =>
     pb.collection<Lancamento>('lancamentos').getList(page, perPage, {
       sort: '-data,-created',
-      expand: 'conta,categoria,empresa,pessoa',
+      expand:
+        'conta,categoria,empresa,pessoa,cartao_fatura_conta,despesas_ocorrencias_via_lancamento.compromisso',
       ...options,
     }),
   saveLancamento: (data: Partial<Lancamento> | FormData, id?: string, options?: RecordOptions) =>

@@ -7,6 +7,7 @@ import {
   Undo2,
   Calendar,
   FileText,
+  Link2,
   Pencil,
   Trash2,
 } from 'lucide-react'
@@ -17,7 +18,21 @@ import { Button } from '@/components/ui/button'
 import { TitularBadge } from '@/components/TitularBadge'
 import { calcularFaturaCartao, type FaturaCartaoGroup } from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
-import type { Lancamento } from '@/types/domain'
+import type { DespesaCompromisso, Lancamento } from '@/types/domain'
+
+function getCompromissoOrigemAnexoConta(
+  item: Lancamento,
+): { id: string; anexo_conta: string } | null {
+  const rawOcorrencia = item.expand?.despesas_ocorrencias_via_lancamento as any
+  const ocorrencia = Array.isArray(rawOcorrencia) ? rawOcorrencia[0] : rawOcorrencia
+  const compromisso = (ocorrencia?.expand?.compromisso || ocorrencia?.compromisso) as
+    | DespesaCompromisso
+    | undefined
+  if (compromisso?.id && compromisso?.anexo_conta) {
+    return { id: compromisso.id, anexo_conta: compromisso.anexo_conta }
+  }
+  return null
+}
 
 interface FaturaCardGroupRowProps {
   fatura: FaturaCartaoGroup
@@ -214,6 +229,32 @@ export function FaturaCardGroupRow({
                         </a>
                       </>
                     )}
+                    {(() => {
+                      const anexoContaOrigem = getCompromissoOrigemAnexoConta(item)
+                      if (anexoContaOrigem) {
+                        return (
+                          <>
+                            <span>•</span>
+                            <a
+                              href={getFileUrl(
+                                'despesas_compromisso',
+                                anexoContaOrigem.id,
+                                anexoContaOrigem.anexo_conta,
+                              )}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
+                              title="Ver conta vinculada"
+                            >
+                              <Link2 className="h-3 w-3" />
+                              Ver conta vinculada
+                            </a>
+                          </>
+                        )
+                      }
+                      return null
+                    })()}
                     {item.observacoes && (
                       <>
                         <span>•</span>

@@ -42,12 +42,14 @@ import { apiMessage } from '@/lib/api-error'
 import { calcularFaturaCartao, getAvisoFaturaCartao } from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { despesasService } from '@/services/despesas'
+import { financeService } from '@/services/finance'
 import { ContaContextoWarning } from '@/components/ContaContextoWarning'
 import { AnexoUploadField } from '@/components/despesas/AnexoUploadField'
 import type {
   Categoria,
   Conta,
   DespesaCompromisso,
+  DespesaOcorrencia,
   Empresa,
   MetodoPagamento,
   ModalidadeParcelamento,
@@ -105,6 +107,15 @@ export function DespesaCompromissoDialog({
   const [selectedAnexoConta, setSelectedAnexoConta] = useState<File | null>(null)
   const [removerAnexoConta, setRemoverAnexoConta] = useState(false)
 
+  // Ocorrências pagas do compromisso (para carregar o comprovante de pagamento)
+  const [ocorrenciasPagas, setOcorrenciasPagas] = useState<DespesaOcorrencia[]>([])
+  const [loadingOcorrenciasPagas, setLoadingOcorrenciasPagas] = useState(false)
+  // Comprovante da ocorrência paga selecionada (mais recente ou específica)
+  const [selectedComprovanteOcorrencia, setSelectedComprovanteOcorrencia] = useState<File | null>(
+    null,
+  )
+  const [removerComprovanteOcorrencia, setRemoverComprovanteOcorrencia] = useState(false)
+
   useEffect(() => {
     setLocalTags(tags)
   }, [tags])
@@ -148,6 +159,34 @@ export function DespesaCompromissoDialog({
     precisa_revisao: false,
     motivo_revisao: '',
   })
+
+  // Carrega as ocorrências pagas do compromisso em edição
+  useEffect(() => {
+    if (open && compromisso?.id) {
+      setLoadingOcorrenciasPagas(true)
+      setSelectedComprovanteOcorrencia(null)
+      setRemoverComprovanteOcorrencia(false)
+      despesasService
+        .listOcorrencias({
+          filter: `compromisso = '${compromisso.id}' && status = 'paga'`,
+          sort: '-data_pagamento',
+        })
+        .then((items) => {
+          setOcorrenciasPagas(items)
+        })
+        .catch((err) => {
+          console.warn('Erro ao carregar ocorrências pagas para o modal de despesa:', err)
+          setOcorrenciasPagas([])
+        })
+        .finally(() => {
+          setLoadingOcorrenciasPagas(false)
+        })
+    } else {
+      setOcorrenciasPagas([])
+      setSelectedComprovanteOcorrencia(null)
+      setRemoverComprovanteOcorrencia(false)
+    }
+  }, [open, compromisso?.id])
 
   // Popula o formulário ao abrir
   useEffect(() => {
@@ -296,6 +335,11 @@ export function DespesaCompromissoDialog({
     pessoas,
     empresas,
   ])
+
+  // Ocorrência paga mais recente (ou selecionada)
+  const ocorrenciaPagaMaisRecente = useMemo(() => {
+    return ocorrenciasPagas[0] || null
+  }, [ocorrenciasPagas])
 
   // Identificação do Titular da Despesa selecionado
   const titularSelecionado = useMemo(() => {
@@ -740,6 +784,47 @@ export function DespesaCompromissoDialog({
         }
 
         saved = await despesasService.saveCompromisso(payload, compromisso?.id)
+      }
+
+      // Se for edição e o comprovante da ocorrência paga mudou, atualiza a ocorrência e sincroniza o lançamento
+      if (compromisso && ocorrenciaPagaMaisRecente) {
+        if (selectedComprovanteOcorrencia) {
+          const fdOcorr = new FormData()
+          fdOcorr.append('comprovante_pagamento', selectedComprovanteOcorrencia)
+          const updatedOcorr = await despesasService.atualizarOcorrencia(
+            ocorrenciaPagaMaisRecente.id,
+            fdOcorr as any,
+          )
+
+          // Se houver lançamento financeiro vinculado à ocorrência, sincroniza o comprovante nele também
+          if (ocorrenciaPagaMaisRecente.lancamento) {
+            try {
+              const fdLanc = new FormData()
+              fdLanc.append('comprovante', selectedComprovanteOcorrencia)
+              await financeService.saveLancamento(fdLanc, ocorrenciaPagaMaisRecente.lancamento)
+            } catch (errLanc) {
+              console.warn('Erro ao sincronizar comprovante no lançamento vinculado:', errLanc)
+            }
+          }
+        } else if (removerComprovanteOcorrencia) {
+          const fdOcorr = new FormData()
+          fdOcorr.append('comprovante_pagamento', '')
+          await despesasService.atualizarOcorrencia(ocorrenciaPagaMaisRecente.id, fdOcorr as any)
+
+          // Sincroniza remoção no lançamento vinculado
+          if (ocorrenciaPagaMaisRecente.lancamento) {
+            try {
+              const fdLanc = new FormData()
+              fdLanc.append('comprovante', '')
+              await financeService.saveLancamento(fdLanc, ocorrenciaPagaMaisRecente.lancamento)
+            } catch (errLanc) {
+              console.warn(
+                'Erro ao sincronizar remoção do comprovante no lançamento vinculado:',
+                errLanc,
+              )
+            }
+          }
+        }
       }
 
       // Se for novo compromisso, gera as primeiras ocorrências automaticamente.
@@ -1477,23 +1562,97 @@ export function DespesaCompromissoDialog({
                 />
               </div>
 
-              {/* Anexo da conta a pagar (PDF ou imagem / foto da câmera) */}
-              <div className="sm:col-span-2 pt-1 border-t border-stone-100">
-                <AnexoUploadField
-                  label="Anexo da conta a pagar (Boleto, fatura ou foto da conta)"
-                  helperText="Envie um .PDF ou uma imagem da galeria ou da câmera do seu dispositivo (até 15MB)."
-                  selectedFile={selectedAnexoConta}
-                  onFileSelect={(file) => {
-                    setSelectedAnexoConta(file)
-                    if (file) setRemoverAnexoConta(false)
-                  }}
-                  currentFileName={compromisso?.anexo_conta}
-                  collectionNameOrId="despesas_compromisso"
-                  recordId={compromisso?.id}
-                  isRemovingCurrent={removerAnexoConta}
-                  onRemoveCurrent={() => setRemoverAnexoConta(true)}
-                  disabled={submitting}
-                />
+              {/* Anexos: Conta a pagar e Comprovante de pagamento */}
+              <div className="sm:col-span-2 pt-2 border-t border-border space-y-4">
+                <div className="rounded-xl border border-border/80 bg-stone-50/50 p-3.5 space-y-3">
+                  <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                    <span className="text-xs font-bold text-foreground">
+                      Anexos do compromisso e pagamento
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      Conta a pagar e comprovante de quitação
+                    </span>
+                  </div>
+
+                  {/* 1. Conta a pagar (despesas_compromisso.anexo_conta) */}
+                  <div className="space-y-1">
+                    <AnexoUploadField
+                      label="Conta a pagar (Boleto, fatura ou foto da conta)"
+                      helperText="Envie um .PDF ou uma imagem da galeria ou da câmera do seu dispositivo (até 15MB)."
+                      selectedFile={selectedAnexoConta}
+                      onFileSelect={(file) => {
+                        setSelectedAnexoConta(file)
+                        if (file) setRemoverAnexoConta(false)
+                      }}
+                      currentFileName={compromisso?.anexo_conta}
+                      collectionNameOrId="despesas_compromisso"
+                      recordId={compromisso?.id}
+                      isRemovingCurrent={removerAnexoConta}
+                      onRemoveCurrent={() => {
+                        setRemoverAnexoConta(true)
+                        setSelectedAnexoConta(null)
+                      }}
+                      disabled={submitting}
+                    />
+                  </div>
+
+                  {/* 2. Comprovante de pagamento (despesas_ocorrencias.comprovante_pagamento) */}
+                  {compromisso && (
+                    <div className="pt-2 border-t border-border/60 space-y-1.5">
+                      {loadingOcorrenciasPagas ? (
+                        <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
+                          <LoaderCircle className="h-4 w-4 animate-spin text-primary" />
+                          <span>Carregando comprovantes de pagamento...</span>
+                        </div>
+                      ) : ocorrenciaPagaMaisRecente ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-foreground">
+                              Comprovante de pagamento vinculado{' '}
+                              {ocorrenciaPagaMaisRecente.data_pagamento && (
+                                <span className="text-muted-foreground font-normal">
+                                  (Pago em {formatDate(ocorrenciaPagaMaisRecente.data_pagamento)})
+                                </span>
+                              )}
+                            </span>
+                            {ocorrenciasPagas.length > 1 && (
+                              <span className="text-[10px] rounded bg-secondary px-1.5 py-0.5 text-muted-foreground">
+                                {ocorrenciasPagas.length} pagamentos realizados
+                              </span>
+                            )}
+                          </div>
+
+                          <AnexoUploadField
+                            label="Comprovante de pagamento"
+                            helperText="Comprovante da quitação bancária ou Pix (PDF ou imagem, até 15MB)."
+                            selectedFile={selectedComprovanteOcorrencia}
+                            onFileSelect={(file) => {
+                              setSelectedComprovanteOcorrencia(file)
+                              if (file) setRemoverComprovanteOcorrencia(false)
+                            }}
+                            currentFileName={ocorrenciaPagaMaisRecente.comprovante_pagamento}
+                            collectionNameOrId="despesas_ocorrencias"
+                            recordId={ocorrenciaPagaMaisRecente.id}
+                            isRemovingCurrent={removerComprovanteOcorrencia}
+                            onRemoveCurrent={() => {
+                              setRemoverComprovanteOcorrencia(true)
+                              setSelectedComprovanteOcorrencia(null)
+                            }}
+                            disabled={submitting}
+                          />
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-border/80 bg-secondary/20 p-3 text-xs text-muted-foreground flex items-center justify-between">
+                          <span>
+                            <strong>Comprovante de pagamento:</strong> Nenhuma ocorrência paga
+                            registrada ainda para este compromisso. O comprovante poderá ser anexado
+                            ao dar baixa ou registrar o pagamento.
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
