@@ -1,4 +1,4 @@
-import type { RecordListOptions, RecordOptions } from 'pocketbase'
+import { ClientResponseError, type RecordListOptions, type RecordOptions } from 'pocketbase'
 import pb from '@/lib/pocketbase/client'
 import { calcularFaturaCartao } from '@/lib/cartao-fatura'
 import type {
@@ -15,8 +15,20 @@ import type {
   TipoCalculoDizimo,
 } from '@/types/domain'
 
-const listAll = <T>(collection: string, options?: RecordListOptions) =>
-  pb.collection<T>(collection).getFullList({ batch: 200, ...options })
+const listAll = async <T>(collection: string, options?: RecordListOptions): Promise<T[]> => {
+  try {
+    return await pb.collection<T>(collection).getFullList<T>({ batch: 200, ...options })
+  } catch (err) {
+    if (err instanceof ClientResponseError && err.status === 429) {
+      console.warn(
+        `[despesasService.listAll] HTTP 429 detectado em "${collection}". Retornando fallback seguro [].`,
+        err,
+      )
+      return []
+    }
+    throw err
+  }
+}
 
 export const despesasService = {
   // Tags

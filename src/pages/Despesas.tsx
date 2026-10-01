@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   ArrowUpDown,
@@ -19,7 +19,9 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  RotateCcw,
   Search,
+  ServerCrash,
   SlidersHorizontal,
   Trash2,
   Undo2,
@@ -28,6 +30,7 @@ import {
   X,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { ClientResponseError } from 'pocketbase'
 
 import { LoadingState } from '@/components/LoadingState'
 import { PageHeader } from '@/components/PageHeader'
@@ -432,6 +435,19 @@ export default function Despesas() {
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [isOverloaded, setIsOverloaded] = useState(false)
+
+  // Cache de módulo/sessão para as tabelas de apoio fixas
+  const apoioCacheRef = useRef<{
+    contas: Conta[]
+    categorias: Categoria[]
+    tags: TagItem[]
+    tiposDespesa: TipoDespesa[]
+    metodosPagamento: MetodoPagamento[]
+    tiposDizimo: TipoDizimo[]
+    empresas: Empresa[]
+    pessoas: Pessoa[]
+  } | null>(null)
 
   // Dados auxiliares
   const [contas, setContas] = useState<Conta[]>([])
@@ -531,25 +547,41 @@ export default function Despesas() {
 
   const loadData = useCallback(async () => {
     try {
-      // 1. Carrega dados de apoio essenciais (contas, categorias, cadastros)
-      const [cts, cats, tgs, tps, mts, dzs, emps, pess] = await Promise.all([
-        financeService.listContas(),
-        financeService.listCategorias(),
-        despesasService.listTags(),
-        despesasService.listTiposDespesa(),
-        despesasService.listMetodosPagamento(),
-        despesasService.listTiposDizimo(),
-        cadastrosService.listEmpresas(),
-        cadastrosService.listPessoas(),
-      ])
-      setContas(cts)
-      setCategorias(cats)
-      setTags(tgs)
-      setTiposDespesa(tps)
-      setMetodosPagamento(mts)
-      setTiposDizimo(dzs)
-      setEmpresas(emps)
-      setPessoas(pess)
+      // 1. Carrega dados de apoio essenciais (contas, categorias, cadastros) com cache de módulo/sessão
+      if (!apoioCacheRef.current) {
+        const [cts, cats, tgs, tps, mts, dzs, emps, pess] = await Promise.all([
+          financeService.listContas(),
+          financeService.listCategorias(),
+          despesasService.listTags(),
+          despesasService.listTiposDespesa(),
+          despesasService.listMetodosPagamento(),
+          despesasService.listTiposDizimo(),
+          cadastrosService.listEmpresas(),
+          cadastrosService.listPessoas(),
+        ])
+        apoioCacheRef.current = {
+          contas: cts,
+          categorias: cats,
+          tags: tgs,
+          tiposDespesa: tps,
+          metodosPagamento: mts,
+          tiposDizimo: dzs,
+          empresas: emps,
+          pessoas: pess,
+        }
+      }
+
+      setContas(apoioCacheRef.current.contas)
+      setCategorias(apoioCacheRef.current.categorias)
+      setTags(apoioCacheRef.current.tags)
+      setTiposDespesa(apoioCacheRef.current.tiposDespesa)
+      setMetodosPagamento(apoioCacheRef.current.metodosPagamento)
+      setTiposDizimo(apoioCacheRef.current.tiposDizimo)
+      setEmpresas(apoioCacheRef.current.empresas)
+      setPessoas(apoioCacheRef.current.pessoas)
+
+      // Pequeno atraso para escalonar e não colidir com as consultas seguintes
+      await new Promise((r) => setTimeout(r, 60))
 
       // Data REAL de hoje no fuso oficial America/Sao_Paulo (independente da competência que o usuário estiver navegando)
       const realTodayStr = getLocalDateStr() // 'YYYY-MM-DD'
@@ -575,21 +607,26 @@ export default function Despesas() {
         }),
       ])
 
+      // Pequeno atraso para escalonar antes das 3 consultas pesadas
+      await new Promise((r) => setTimeout(r, 80))
+
       // 3. Carrega consultas secundárias (cartões, assinaturas anuais e atrasadas) escalonadas para evitar rajada
-      const [allOcsCartao, allOcsAtrasadas, allOcsAssinaturas] = await Promise.all([
-        despesasService.listOcorrencias({
-          filter: `secao = 'cartoes_credito'`,
-          sort: '-data_vencimento',
-        }),
-        despesasService.listOcorrencias({
-          filter: `status = 'prevista' && (competencia < '${realCurrentComp}' || (competencia = '${realCurrentComp}' && data_vencimento < '${realTodayStr} 23:59:59'))`,
-          sort: 'data_vencimento',
-        }),
-        despesasService.listOcorrencias({
-          filter: `secao = 'assinaturas_anuais'`,
-          sort: '-data_pagamento',
-        }),
-      ])
+      const allOcsCartao = await despesasService.listOcorrencias({
+        filter: `secao = 'cartoes_credito'`,
+        sort: '-data_vencimento',
+      })
+      await new Promise((r) => setTimeout(r, 60))
+
+      const allOcsAtrasadas = await despesasService.listOcorrencias({
+        filter: `status = 'prevista' && (competencia < '${realCurrentComp}' || (competencia = '${realCurrentComp}' && data_vencimento < '${realTodayStr} 23:59:59'))`,
+        sort: 'data_vencimento',
+      })
+      await new Promise((r) => setTimeout(r, 60))
+
+      const allOcsAssinaturas = await despesasService.listOcorrencias({
+        filter: `secao = 'assinaturas_anuais'`,
+        sort: '-data_pagamento',
+      })
 
       // Função de correspondência ao grupo de contexto ativo
       const isCompromissoInContext = (comp: DespesaCompromisso): boolean => {
@@ -655,12 +692,22 @@ export default function Despesas() {
       setCartaoOcorrenciasAll(ocsCartaoAll)
       setOcorrenciasAtrasadas(ocsAtrasadas)
       setAssinaturasOcorrenciasAll(ocsAssinaturasAll)
-    } catch (err) {
-      toast({
-        variant: 'destructive',
-        title: 'Erro ao carregar despesas',
-        description: apiMessage(err),
-      })
+      setIsOverloaded(false)
+    } catch (err: any) {
+      const is429 =
+        (err instanceof ClientResponseError && err.status === 429) ||
+        err?.status === 429 ||
+        String(err?.message || '').includes('429')
+
+      if (is429) {
+        setIsOverloaded(true)
+      } else {
+        toast({
+          variant: 'destructive',
+          title: 'Erro ao carregar despesas',
+          description: apiMessage(err),
+        })
+      }
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -1257,6 +1304,34 @@ export default function Despesas() {
     } finally {
       setDeletandoOcorrencia(null)
     }
+  }
+
+  if (isOverloaded) {
+    return (
+      <div className="flex min-h-[420px] flex-col items-center justify-center rounded-2xl border border-dashed border-amber-300 bg-amber-50/50 p-8 text-center shadow-soft">
+        <span className="mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-amber-100 text-amber-700">
+          <ServerCrash className="h-7 w-7" />
+        </span>
+        <h3 className="text-lg font-bold text-foreground">
+          Sobrecarga temporária, tente novamente
+        </h3>
+        <p className="mt-2 max-w-md text-sm text-muted-foreground">
+          O servidor está processando muitas solicitações simultâneas no momento. Aguarde alguns
+          instantes e tente recarregar os dados.
+        </p>
+        <div className="mt-6 flex items-center gap-3">
+          <Button
+            onClick={() => {
+              setLoading(true)
+              loadData()
+            }}
+            className="gap-2"
+          >
+            <RotateCcw className="h-4 w-4" /> Recarregar agora
+          </Button>
+        </div>
+      </div>
+    )
   }
 
   if (loading) return <LoadingState label="Carregando módulo de despesas e compromissos..." />
