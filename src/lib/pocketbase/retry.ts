@@ -4,11 +4,20 @@
  * em requisições de leitura (GET/HEAD), respeitando o cabeçalho Retry-After quando presente.
  */
 
+export interface RetryAttemptInfo {
+  attempt: number
+  maxRetries: number
+  waitTime: number
+  status?: number
+  url?: string
+}
+
 export interface RetryOptions {
   maxRetries?: number
   baseDelayMs?: number
   maxDelayMs?: number
   delays?: number[]
+  onRetry?: (info: RetryAttemptInfo) => void
 }
 
 const DEFAULT_DELAYS = [500, 1000, 2000]
@@ -110,14 +119,32 @@ export function createRetryFetch(
           const waitTime = Math.min(retryAfterMs ?? defaultDelay, maxDelayMs)
 
           attempt++
+          const urlStr =
+            typeof input === 'string'
+              ? input
+              : input instanceof URL
+                ? input.toString()
+                : (input as Request)?.url
           console.warn(
             `[PocketBase Retry] HTTP ${response.status} detectado na tentativa ${attempt}/${maxRetries}. Aguardando ${waitTime}ms antes de tentar novamente...`,
           )
 
           try {
+            retryOptions?.onRetry?.({
+              attempt,
+              maxRetries,
+              waitTime,
+              status: response.status,
+              url: urlStr,
+            })
+          } catch {
+            /* ignore callback errors */
+          }
+
+          try {
             await sleep(waitTime, init?.signal)
             continue
-          } catch (abortErr) {
+          } catch {
             // Se foi abortado durante a espera, retorna a própria resposta recebida ou relança o erro
             return response
           }

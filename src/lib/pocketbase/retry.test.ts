@@ -100,6 +100,42 @@ describe('PocketBase Retry Utility', () => {
     expect(calls).toBe(2)
   })
 
+  it('notifica callback onRetry ao disparar tentativa de repetição', async () => {
+    let calls = 0
+    const onRetryMock = vi.fn()
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      calls++
+      if (calls === 1) {
+        return new Response(JSON.stringify({ message: 'Rate limited' }), {
+          status: 429,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const retryFetch = createRetryFetch(mockFetch as unknown as typeof fetch, {
+      delays: [10, 20],
+      maxRetries: 2,
+      onRetry: onRetryMock,
+    })
+
+    const response = await retryFetch('https://example.com/api/test', { method: 'GET' })
+    expect(response.status).toBe(200)
+    expect(calls).toBe(2)
+    expect(onRetryMock).toHaveBeenCalledTimes(1)
+    expect(onRetryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attempt: 1,
+        status: 429,
+        maxRetries: 2,
+      }),
+    )
+  })
+
   it('não faz retry em operações mutantes (POST, PATCH, DELETE) para evitar duplicações', async () => {
     let calls = 0
     const mockFetch = vi.fn().mockImplementation(async () => {

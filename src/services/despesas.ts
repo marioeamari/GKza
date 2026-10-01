@@ -15,7 +15,7 @@ import type {
 } from '@/types/domain'
 
 const listAll = <T>(collection: string, options?: RecordListOptions) =>
-  pb.collection<T>(collection).getFullList({ ...options })
+  pb.collection<T>(collection).getFullList({ batch: 200, ...options })
 
 export const despesasService = {
   // Tags

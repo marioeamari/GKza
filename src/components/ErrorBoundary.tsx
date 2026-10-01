@@ -35,6 +35,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public override render() {
     if (this.state.hasError) {
+      const errMsg = this.state.error?.message || ''
+      const isRateLimited =
+        errMsg.includes('429') ||
+        errMsg.toLowerCase().includes('too many requests') ||
+        (this.state.error as any)?.status === 429
+
       return (
         <div className="grid min-h-screen place-items-center bg-background p-4">
           <div className="w-full max-w-lg rounded-2xl border border-border bg-white p-6 sm:p-8 shadow-sm text-center">
@@ -43,15 +49,16 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
 
             <h1 className="text-xl font-black tracking-tight text-foreground sm:text-2xl">
-              Algo inesperado aconteceu
+              {isRateLimited ? 'Muitas requisições simultâneas' : 'Algo inesperado aconteceu'}
             </h1>
 
             <p className="mt-2 text-xs sm:text-sm text-muted-foreground leading-relaxed">
-              Ocorreu uma falha ao renderizar esta tela. Você pode recarregar a página para
-              restaurar o estado ou voltar à tela inicial do ERP GKza.
+              {isRateLimited
+                ? 'Muitas requisições, tentando novamente... O servidor limitou as consultas temporariamente para manter a estabilidade. Aguarde alguns instantes e tente novamente.'
+                : 'Ocorreu uma falha ao renderizar esta tela. Você pode recarregar a página para restaurar o estado ou voltar à tela inicial do ERP GKza.'}
             </p>
 
-            {this.state.error?.message && (
+            {this.state.error?.message && !isRateLimited && (
               <div className="mt-4 rounded-lg bg-secondary/50 p-3 text-left font-mono text-[11px] text-muted-foreground break-words max-h-24 overflow-y-auto">
                 {this.state.error.message}
               </div>

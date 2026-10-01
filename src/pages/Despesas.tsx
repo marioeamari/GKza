@@ -441,6 +441,7 @@ export default function Despesas() {
 
   const loadData = useCallback(async () => {
     try {
+      // 1. Carrega dados de apoio essenciais (contas, categorias, cadastros)
       const [cts, cats, tgs, tps, mts, dzs, emps, pess] = await Promise.all([
         financeService.listContas(),
         financeService.listCategorias(),
@@ -464,12 +465,16 @@ export default function Despesas() {
       const realTodayStr = getLocalDateStr() // 'YYYY-MM-DD'
       const realCurrentComp = realTodayStr.slice(0, 7) // 'YYYY-MM'
 
-      // Carregar compromissos, ocorrências da competência visualizada, cartões e ocorrências atrasadas reais
-      const [allComps, allOcs, allOcsCartao, allOcsAtrasadas] = await Promise.all([
+      // 2. Carrega compromissos e ocorrências da competência atual (as mais prioritárias para renderização)
+      const [allComps, allOcs] = await Promise.all([
         despesasService.listCompromissos(),
         despesasService.listOcorrencias({
           filter: `competencia = '${currentCompetencia}'`,
         }),
+      ])
+
+      // 3. Carrega consultas secundárias (cartões e atrasadas) escalonadas para evitar disparos em rajada contra o backend
+      const [allOcsCartao, allOcsAtrasadas] = await Promise.all([
         despesasService.listOcorrencias({
           filter: `secao = 'cartoes_credito'`,
           sort: '-data_vencimento',
