@@ -28,6 +28,7 @@ import { getAvisoFaturaCartao, calcularFaturaCartao } from '@/lib/cartao-fatura'
 import { dateOnly, toPocketBaseDate } from '@/lib/format'
 import { financeService } from '@/services/finance'
 import { ContaContextoWarning } from '@/components/ContaContextoWarning'
+import { AnexoUploadField } from '@/components/despesas/AnexoUploadField'
 import type {
   Categoria,
   Conta,
@@ -77,11 +78,15 @@ export function LancamentoDialog({
   const [form, setForm] = useState(initial)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
+  const [selectedComprovante, setSelectedComprovante] = useState<File | null>(null)
+  const [removerComprovante, setRemoverComprovante] = useState(false)
   const { toast } = useToast()
 
   useEffect(() => {
     if (!open) return
     setErrors({})
+    setSelectedComprovante(null)
+    setRemoverComprovante(false)
     setForm(
       lancamento
         ? {
@@ -135,18 +140,42 @@ export function LancamentoDialog({
         }
       }
 
-      const record = await financeService.saveLancamento(
-        {
-          ...form,
-          descricao: form.descricao.trim(),
-          data: toPocketBaseDate(form.data),
-          empresa: form.empresa || null,
-          pessoa: form.pessoa || null,
-          ...extraData,
-        } as Partial<Lancamento>,
-        lancamento?.id,
-        { expand: 'conta,categoria,empresa,pessoa' },
-      )
+      let record: Lancamento
+      const payloadData = {
+        ...form,
+        descricao: form.descricao.trim(),
+        data: toPocketBaseDate(form.data),
+        empresa: form.empresa || '',
+        pessoa: form.pessoa || '',
+        ...extraData,
+      }
+
+      if (selectedComprovante || removerComprovante) {
+        const fd = new FormData()
+        Object.entries(payloadData).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            fd.append(key, String(value))
+          }
+        })
+        if (selectedComprovante) {
+          fd.append('comprovante', selectedComprovante)
+        } else if (removerComprovante) {
+          fd.append('comprovante', '')
+        }
+        record = await financeService.saveLancamento(fd, lancamento?.id, {
+          expand: 'conta,categoria,empresa,pessoa',
+        })
+      } else {
+        record = await financeService.saveLancamento(
+          {
+            ...payloadData,
+            empresa: form.empresa || null,
+            pessoa: form.pessoa || null,
+          } as Partial<Lancamento>,
+          lancamento?.id,
+          { expand: 'conta,categoria,empresa,pessoa' },
+        )
+      }
       toast({
         title: 'Lançamento salvo',
         description: 'O saldo e os relatórios já foram atualizados.',
@@ -343,6 +372,23 @@ export function LancamentoDialog({
                 value={form.observacoes}
                 onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
                 placeholder="Detalhes adicionais..."
+              />
+            </div>
+            <div className="sm:col-span-2 pt-1 border-t border-border">
+              <AnexoUploadField
+                label="Comprovante da transação (opcional)"
+                helperText="Aceita PDF ou imagem do dispositivo/câmera (até 15MB)"
+                selectedFile={selectedComprovante}
+                onFileSelect={(file) => {
+                  setSelectedComprovante(file)
+                  if (file) setRemoverComprovante(false)
+                }}
+                currentFileName={lancamento?.comprovante}
+                collectionNameOrId="lancamentos"
+                recordId={lancamento?.id}
+                isRemovingCurrent={removerComprovante}
+                onRemoveCurrent={() => setRemoverComprovante(true)}
+                disabled={saving}
               />
             </div>
           </div>

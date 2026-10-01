@@ -19,7 +19,7 @@ export const financeService = {
       expand: 'conta,categoria,empresa,pessoa',
       ...options,
     }),
-  saveLancamento: (data: Partial<Lancamento>, id?: string, options?: RecordOptions) =>
+  saveLancamento: (data: Partial<Lancamento> | FormData, id?: string, options?: RecordOptions) =>
     id
       ? pb.collection<Lancamento>('lancamentos').update(id, data, options)
       : pb.collection<Lancamento>('lancamentos').create(data, options),

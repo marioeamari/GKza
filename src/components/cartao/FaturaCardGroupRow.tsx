@@ -6,9 +6,11 @@ import {
   CheckCircle2,
   Undo2,
   Calendar,
+  FileText,
   Pencil,
   Trash2,
 } from 'lucide-react'
+import { pb } from '@/lib/pocketbase/client'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -194,6 +196,25 @@ export function FaturaCardGroupRow({
                         <span className="font-medium text-foreground">
                           {item.expand.categoria.nome}
                         </span>
+                      </>
+                    )}
+                    {item.comprovante && (
+                      <>
+                        <span>•</span>
+                        <a
+                          href={pb.files.getURL(
+                            { id: item.id, collectionName: 'lancamentos' } as any,
+                            item.comprovante,
+                          )}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 font-semibold text-[#DF5830] hover:underline"
+                          title="Ver comprovante"
+                        >
+                          <FileText className="h-3 w-3" />
+                          Comprovante
+                        </a>
                       </>
                     )}
                     {item.observacoes && (
