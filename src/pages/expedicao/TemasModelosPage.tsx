@@ -201,7 +201,7 @@ export default function TemasModelosPage() {
     setModeloAtivo(m.ativo)
     setModeloFoto(null)
     if (m.foto) {
-      const url = pb.files.getURL(m, m.foto, { thumb: '200x200' })
+      const url = pb.files.getURL(m, m.foto)
       setFotoPreview(url)
     } else {
       setFotoPreview(null)
@@ -455,9 +455,7 @@ export default function TemasModelosPage() {
                 ) : (
                   <div className="space-y-2.5">
                     {modelosDoTema.map((mod, index) => {
-                      const fotoUrl = mod.foto
-                        ? pb.files.getURL(mod, mod.foto, { thumb: '150x150' })
-                        : null
+                      const fotoUrl = mod.foto ? pb.files.getURL(mod, mod.foto) : null
 
                       return (
                         <div
@@ -488,12 +486,12 @@ export default function TemasModelosPage() {
                           </div>
 
                           {/* Foto Miniatura */}
-                          <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/80 bg-muted">
+                          <div className="flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-stone-200 bg-stone-50 p-0.5 dark:border-stone-800 dark:bg-stone-900">
                             {fotoUrl ? (
                               <img
                                 src={fotoUrl}
                                 alt={mod.nome}
-                                className="h-full w-full object-cover"
+                                className="h-full w-full object-contain"
                               />
                             ) : (
                               <ImageIcon className="h-5 w-5 text-muted-foreground" />
@@ -657,9 +655,9 @@ export default function TemasModelosPage() {
             <div className="space-y-1.5">
               <Label>Foto do Modelo / Personagem</Label>
               <div className="flex items-center gap-4">
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-muted">
+                <div className="flex h-20 w-32 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-stone-200 bg-stone-50 p-1 dark:border-stone-800 dark:bg-stone-900">
                   {fotoPreview ? (
-                    <img src={fotoPreview} alt="Preview" className="h-full w-full object-cover" />
+                    <img src={fotoPreview} alt="Preview" className="h-full w-full object-contain" />
                   ) : (
                     <ImageIcon className="h-8 w-8 text-muted-foreground/60" />
                   )}

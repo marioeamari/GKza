@@ -19,9 +19,7 @@ export function ModeloSeparacaoCard({
 }: ModeloSeparacaoCardProps) {
   const isSeparado = item.separado
   const fotoUrl = item.foto
-    ? pb.files.getURL({ collectionName: 'kit_modelos', id: item.modelo_id || '' }, item.foto, {
-        thumb: '300x300',
-      })
+    ? pb.files.getURL({ collectionName: 'kit_modelos', id: item.modelo_id || '' }, item.foto)
     : null
 
   return (
@@ -80,12 +78,12 @@ export function ModeloSeparacaoCard({
       {/* Corpo do Card: Imagem e Destaque da Quantidade */}
       <div className="flex flex-1 flex-col p-4 sm:flex-row sm:items-center sm:gap-4">
         {/* Imagem do modelo */}
-        <div className="relative mb-3 flex h-36 w-full shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/60 bg-muted/30 sm:mb-0 sm:h-28 sm:w-28">
+        <div className="relative mb-3 flex h-36 w-full shrink-0 items-center justify-center overflow-hidden rounded-xl border border-stone-200/80 bg-stone-50/80 p-1.5 sm:mb-0 sm:h-28 sm:w-40 dark:border-stone-800 dark:bg-stone-900/60">
           {fotoUrl ? (
             <img
               src={fotoUrl}
               alt={item.nome}
-              className="h-full w-full object-cover transition duration-200 group-hover:scale-105"
+              className="h-full w-full object-contain transition duration-200 group-hover:scale-105"
               loading="lazy"
             />
           ) : (
