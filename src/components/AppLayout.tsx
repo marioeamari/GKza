@@ -32,6 +32,9 @@ import {
   LayoutDashboard,
   PackageCheck,
   BookmarkCheck,
+  Boxes,
+  FileSpreadsheet,
+  History,
 } from 'lucide-react'
 import { ContextSelector } from '@/components/ContextSelector'
 
@@ -101,6 +104,7 @@ export function AppLayout() {
   const [openSubmenus, setOpenSubmenus] = useState<Record<string, boolean>>(() => {
     return {
       '/precificacao': location.pathname.startsWith('/precificacao'),
+      '/expedicao': location.pathname.startsWith('/expedicao'),
     }
   })
 
@@ -108,6 +112,9 @@ export function AppLayout() {
   useEffect(() => {
     if (location.pathname.startsWith('/precificacao')) {
       setOpenSubmenus((prev) => ({ ...prev, '/precificacao': true }))
+    }
+    if (location.pathname.startsWith('/expedicao')) {
+      setOpenSubmenus((prev) => ({ ...prev, '/expedicao': true }))
     }
   }, [location.pathname])
 
@@ -192,8 +199,23 @@ export function AppLayout() {
     { to: '/precificacao/canais', label: 'Canais & Taxas', icon: Store },
   ]
 
+  const expedicaoChildren: SubItem[] = [
+    { to: '/expedicao/separacao', label: 'Separação de Kits', icon: Boxes },
+    { to: '/expedicao/temas-modelos', label: 'Temas e Modelos', icon: Layers },
+    { to: '/expedicao/regras', label: 'Regras de Composição', icon: SlidersHorizontal },
+    { to: '/expedicao/pedidos', label: 'Pedidos / Personalizações', icon: FileSpreadsheet },
+    { to: '/expedicao/historico', label: 'Histórico de Separação', icon: History },
+  ]
+
   const desktopItems: NavItemConfig[] = [
     { to: '/', label: 'Dashboard', icon: Grid2X2, end: true },
+    {
+      to: '/expedicao/separacao',
+      label: 'Expedição',
+      icon: Boxes,
+      highlight: true,
+      children: expedicaoChildren,
+    },
     {
       to: '/pendentes',
       label: 'Triagem',
@@ -225,6 +247,7 @@ export function AppLayout() {
 
   const mobileItems = [
     { to: '/', label: 'Início', icon: Home, end: true },
+    { to: '/expedicao/separacao', label: 'Separação', icon: Boxes },
     {
       to: '/pendentes',
       label: 'Triagem',
@@ -232,7 +255,6 @@ export function AppLayout() {
       badge: pendentesCount,
     },
     { to: '/despesas', label: 'Despesas', icon: Receipt },
-    { to: '/lancamentos', label: 'Caixa', icon: BadgeDollarSign },
   ]
 
   return (
@@ -725,6 +747,11 @@ export function AppLayout() {
               </SheetHeader>
               <div className="mt-6 grid gap-2">
                 {[
+                  ['/expedicao/separacao', 'Expedição: Separação de Kits', Boxes],
+                  ['/expedicao/temas-modelos', 'Expedição: Temas e Modelos', Layers],
+                  ['/expedicao/regras', 'Expedição: Regras de Composição', SlidersHorizontal],
+                  ['/expedicao/pedidos', 'Expedição: Pedidos / Personalizações', FileSpreadsheet],
+                  ['/expedicao/historico', 'Expedição: Histórico de Separações', History],
                   ['/precificacao', 'Precificação & Margens (Hub)', Calculator],
                   ['/precificacao/comparar', 'Precificação: Comparador Lado a Lado', Calculator],
                   [

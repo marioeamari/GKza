@@ -26,6 +26,11 @@ import PrecificacaoComparar from '@/pages/precificacao/PrecificacaoComparar'
 import PrecificacaoCanais from '@/pages/precificacao/PrecificacaoCanais'
 import PrecificacaoProdutos from '@/pages/precificacao/PrecificacaoProdutos'
 import PrecificacaoAprovados from '@/pages/precificacao/PrecificacaoAprovados'
+import SeparacaoKitsPage from '@/pages/expedicao/SeparacaoKitsPage'
+import TemasModelosPage from '@/pages/expedicao/TemasModelosPage'
+import RegrasComposicaoPage from '@/pages/expedicao/RegrasComposicaoPage'
+import PedidosPersonalizadosPage from '@/pages/expedicao/PedidosPersonalizadosPage'
+import HistoricoSeparacaoPage from '@/pages/expedicao/HistoricoSeparacaoPage'
 import ConfirmEmail from '@/pages/auth/ConfirmEmail'
 import ForgotPassword from '@/pages/auth/ForgotPassword'
 import Login from '@/pages/auth/Login'
@@ -77,6 +82,12 @@ export default function App() {
           <Route path="/precificacao/aprovados" element={<PrecificacaoAprovados />} />
           <Route path="/precificacao/canais" element={<PrecificacaoCanais />} />
           <Route path="/precificacao/produtos" element={<PrecificacaoProdutos />} />
+          <Route path="/expedicao" element={<Navigate to="/expedicao/separacao" replace />} />
+          <Route path="/expedicao/separacao" element={<SeparacaoKitsPage />} />
+          <Route path="/expedicao/temas-modelos" element={<TemasModelosPage />} />
+          <Route path="/expedicao/regras" element={<RegrasComposicaoPage />} />
+          <Route path="/expedicao/pedidos" element={<PedidosPersonalizadosPage />} />
+          <Route path="/expedicao/historico" element={<HistoricoSeparacaoPage />} />
           <Route path="/metas-agenda" element={<MetasAgendaHub />} />
           <Route path="/habitos" element={<HabitosRotinas />} />
           <Route path="/agenda" element={<Agenda />} />

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-01T12:54:31.667Z",
+  "generatedAt": "2026-10-01T15:23:25.391Z",
   "collections": [
     {
       "name": "users",
@@ -3764,6 +3764,456 @@
         "CREATE INDEX idx_forn_prod_fornecedor ON fornecedores_produtos (fornecedor)",
         "CREATE INDEX idx_forn_prod_sku ON fornecedores_produtos (sku_fornecedor)",
         "CREATE INDEX idx_forn_prod_descricao ON fornecedores_produtos (descricao)"
+      ]
+    },
+    {
+      "name": "kit_temas",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'",
+        "update": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ativo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ordem",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_kit_temas_nome ON kit_temas (nome)",
+        "CREATE INDEX idx_kit_temas_ativo ON kit_temas (ativo)"
+      ]
+    },
+    {
+      "name": "kit_modelos",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'",
+        "update": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "tema",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "kit_temas"
+        },
+        {
+          "name": "codigo",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "foto",
+          "type": "file",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ordem",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ativo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_kit_modelos_tema ON kit_modelos (tema)",
+        "CREATE INDEX idx_kit_modelos_ordem ON kit_modelos (ordem)",
+        "CREATE INDEX idx_kit_modelos_ativo ON kit_modelos (ativo)",
+        "CREATE UNIQUE INDEX idx_kit_modelos_tema_codigo ON kit_modelos (tema, codigo)"
+      ]
+    },
+    {
+      "name": "kit_regras",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'",
+        "update": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "tema",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "kit_temas"
+        },
+        {
+          "name": "tipo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["automatica", "manual"]
+        },
+        {
+          "name": "quantidade_kit",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "composicao",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ativo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_kit_regras_tema ON kit_regras (tema)",
+        "CREATE INDEX idx_kit_regras_tipo ON kit_regras (tipo)",
+        "CREATE INDEX idx_kit_regras_qtd ON kit_regras (quantidade_kit)"
+      ]
+    },
+    {
+      "name": "kit_pedidos",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "numero_pedido",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "marketplace",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "produto_nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "sku",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "tema",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "kit_temas"
+        },
+        {
+          "name": "quantidade_total",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "tipo_composicao",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["padrao", "personalizada"]
+        },
+        {
+          "name": "composicao_personalizada",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "status_separacao",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["aguardando", "em_separacao", "finalizado", "cancelado"]
+        },
+        {
+          "name": "cliente_nome",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "separador_atual",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_kit_pedidos_num ON kit_pedidos (numero_pedido)",
+        "CREATE INDEX idx_kit_pedidos_sku ON kit_pedidos (sku)",
+        "CREATE INDEX idx_kit_pedidos_status ON kit_pedidos (status_separacao)",
+        "CREATE INDEX idx_kit_pedidos_tema ON kit_pedidos (tema)"
+      ]
+    },
+    {
+      "name": "kit_historico_separacao",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "pedido",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "kit_pedidos"
+        },
+        {
+          "name": "numero_pedido",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "marketplace",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "produto_nome",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "sku",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "tema",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "kit_temas"
+        },
+        {
+          "name": "tema_nome",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "quantidade_total",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "tipo_composicao",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["padrao", "personalizada"]
+        },
+        {
+          "name": "regra_origem",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["personalizada", "manual", "automatica"]
+        },
+        {
+          "name": "composicao_utilizada",
+          "type": "json",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "funcionario",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "funcionario_nome",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "data_inicio",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "data_fim",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["aguardando", "em_separacao", "finalizado"]
+        },
+        {
+          "name": "observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_kit_hist_num ON kit_historico_separacao (numero_pedido)",
+        "CREATE INDEX idx_kit_hist_status ON kit_historico_separacao (status)",
+        "CREATE INDEX idx_kit_hist_func ON kit_historico_separacao (funcionario)"
       ]
     }
   ]
