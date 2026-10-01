@@ -387,7 +387,10 @@ export function LancamentoDialog({
                 collectionNameOrId="lancamentos"
                 recordId={lancamento?.id}
                 isRemovingCurrent={removerComprovante}
-                onRemoveCurrent={() => setRemoverComprovante(true)}
+                onRemoveCurrent={() => {
+                  setRemoverComprovante(true)
+                  setSelectedComprovante(null)
+                }}
                 disabled={saving}
               />
             </div>

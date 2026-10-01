@@ -50,6 +50,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
 import { apiMessage } from '@/lib/api-error'
 import { formatCurrency, formatDate } from '@/lib/format'
+import { getFileUrl } from '@/lib/pocketbase/files'
 import { can } from '@/lib/permissions'
 import pb from '@/lib/pocketbase/client'
 import { cadastrosService } from '@/services/cadastros'
@@ -370,7 +371,7 @@ export default function Pendentes() {
         <div className="space-y-3.5">
           {filteredPendentes.map((item) => {
             const foto = item.comprovante_foto
-              ? pb.files.getURL(item, item.comprovante_foto)
+              ? getFileUrl(item, item.comprovante_foto)
               : item.comprovante_foto_url || ''
 
             const isOpenFinance =

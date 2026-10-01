@@ -45,7 +45,7 @@ import { PagarFaturaDialog } from '@/components/cartao/PagarFaturaDialog'
 import { apiMessage } from '@/lib/api-error'
 import { calcularFaturaCartao, type FaturaCartaoGroup } from '@/lib/cartao-fatura'
 import { escapeFilter, formatCurrency, formatDate, monthParam } from '@/lib/format'
-import { pb } from '@/lib/pocketbase/client'
+import { getFileUrl } from '@/lib/pocketbase/files'
 import { can } from '@/lib/permissions'
 import { cadastrosService } from '@/services/cadastros'
 import { financeService } from '@/services/finance'
@@ -511,14 +511,11 @@ export default function Lancamentos() {
                           <TitularBadge lancamento={item} />
                           {item.comprovante && (
                             <a
-                              href={pb.files.getURL(
-                                { id: item.id, collectionName: 'lancamentos' } as any,
-                                item.comprovante,
-                              )}
+                              href={getFileUrl('lancamentos', item.id, item.comprovante)}
                               target="_blank"
                               rel="noreferrer"
                               onClick={(e) => e.stopPropagation()}
-                              className="inline-flex items-center gap-1 font-semibold text-[#DF5830] hover:underline"
+                              className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
                               title="Ver comprovante"
                             >
                               <FileText className="h-3 w-3" />

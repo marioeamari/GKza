@@ -57,7 +57,7 @@ import {
 import { useAppContext } from '@/contexts/AppContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
-import { pb } from '@/lib/pocketbase/client'
+import { getFileUrl } from '@/lib/pocketbase/files'
 import { apiMessage } from '@/lib/api-error'
 import { formatCurrency, formatDate, getLocalDateStr } from '@/lib/format'
 import { calcularFaturaCartao } from '@/lib/cartao-fatura'
@@ -247,29 +247,27 @@ function CompromissoAnualRow({
 
             {compromisso.anexo_conta && (
               <a
-                href={pb.files.getURL(
-                  { id: compromisso.id, collectionName: 'despesas_compromisso' } as any,
-                  compromisso.anexo_conta,
-                )}
+                href={getFileUrl('despesas_compromisso', compromisso.id, compromisso.anexo_conta)}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 font-semibold text-[#DF5830] hover:underline"
+                className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
                 title="Ver anexo / conta a pagar"
               >
                 <FileText className="h-3 w-3" />
-                Ver conta/fatura
+                Ver conta
               </a>
             )}
 
             {ocorrenciaMes?.comprovante_pagamento && (
               <a
-                href={pb.files.getURL(
-                  { id: ocorrenciaMes.id, collectionName: 'despesas_ocorrencias' } as any,
+                href={getFileUrl(
+                  'despesas_ocorrencias',
+                  ocorrenciaMes.id,
                   ocorrenciaMes.comprovante_pagamento,
                 )}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 font-semibold text-success hover:underline"
+                className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
                 title="Ver comprovante de pagamento"
               >
                 <FileText className="h-3 w-3" />
@@ -786,6 +784,10 @@ export default function Despesas() {
     },
     [realTodayStr, sortBy],
   )
+
+  const compromissosMap = useMemo(() => {
+    return new Map<string, DespesaCompromisso>(compromissos.map((c) => [c.id, c]))
+  }, [compromissos])
 
   // Seção 1: Boletos & Contas Mensais Pix
   const secaoBoletosPix = useMemo(() => {
@@ -1415,23 +1417,25 @@ export default function Despesas() {
 
           <div className="overflow-hidden rounded-xl border border-destructive/20 bg-white">
             <div className="divide-y divide-border">
-              {filteredOcorrenciasAtrasadas.map((oc) => (
-                <OcorrenciaRow
-                  key={oc.id}
-                  ocorrencia={oc}
-                  isAtrasada
-                  onBaixar={() => handleOpenBaixa(oc)}
-                  onEstornar={() => setEstornando(oc)}
-                  onEditarCompromisso={() =>
-                    oc.expand?.compromisso && handleOpenEditarCompromisso(oc.expand.compromisso)
-                  }
-                  onExcluirCompromisso={() =>
-                    oc.expand?.compromisso && setDeletandoCompromisso(oc.expand.compromisso)
-                  }
-                  onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
-                  canEdit={can(user?.role, 'writeFinance')}
-                />
-              ))}
+              {filteredOcorrenciasAtrasadas.map((oc) => {
+                const compObj =
+                  oc.expand?.compromisso ||
+                  (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
+                return (
+                  <OcorrenciaRow
+                    key={oc.id}
+                    ocorrencia={oc}
+                    isAtrasada
+                    compromissoFallback={compObj}
+                    onBaixar={() => handleOpenBaixa(oc)}
+                    onEstornar={() => setEstornando(oc)}
+                    onEditarCompromisso={() => compObj && handleOpenEditarCompromisso(compObj)}
+                    onExcluirCompromisso={() => compObj && setDeletandoCompromisso(compObj)}
+                    onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
+                    canEdit={can(user?.role, 'writeFinance')}
+                  />
+                )
+              })}
             </div>
           </div>
         </div>
@@ -1479,22 +1483,24 @@ export default function Despesas() {
                 </div>
               ) : (
                 <div className="divide-y divide-border">
-                  {secaoBoletosPix.map((oc) => (
-                    <OcorrenciaRow
-                      key={oc.id}
-                      ocorrencia={oc}
-                      onBaixar={() => handleOpenBaixa(oc)}
-                      onEstornar={() => setEstornando(oc)}
-                      onEditarCompromisso={() =>
-                        oc.expand?.compromisso && handleOpenEditarCompromisso(oc.expand.compromisso)
-                      }
-                      onExcluirCompromisso={() =>
-                        oc.expand?.compromisso && setDeletandoCompromisso(oc.expand.compromisso)
-                      }
-                      onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
-                      canEdit={can(user?.role, 'writeFinance')}
-                    />
-                  ))}
+                  {secaoBoletosPix.map((oc) => {
+                    const compObj =
+                      oc.expand?.compromisso ||
+                      (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
+                    return (
+                      <OcorrenciaRow
+                        key={oc.id}
+                        ocorrencia={oc}
+                        compromissoFallback={compObj}
+                        onBaixar={() => handleOpenBaixa(oc)}
+                        onEstornar={() => setEstornando(oc)}
+                        onEditarCompromisso={() => compObj && handleOpenEditarCompromisso(compObj)}
+                        onExcluirCompromisso={() => compObj && setDeletandoCompromisso(compObj)}
+                        onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
+                        canEdit={can(user?.role, 'writeFinance')}
+                      />
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -1734,24 +1740,28 @@ export default function Despesas() {
                         </div>
                       ) : (
                         <div className="divide-y divide-border">
-                          {displayOcorrencias.map((oc) => (
-                            <OcorrenciaRow
-                              key={oc.id}
-                              ocorrencia={oc}
-                              onBaixar={() => handleOpenBaixa(oc)}
-                              onEstornar={() => setEstornando(oc)}
-                              onEditarCompromisso={() =>
-                                oc.expand?.compromisso &&
-                                handleOpenEditarCompromisso(oc.expand.compromisso)
-                              }
-                              onExcluirCompromisso={() =>
-                                oc.expand?.compromisso &&
-                                setDeletandoCompromisso(oc.expand.compromisso)
-                              }
-                              onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
-                              canEdit={can(user?.role, 'writeFinance')}
-                            />
-                          ))}
+                          {displayOcorrencias.map((oc) => {
+                            const compObj =
+                              oc.expand?.compromisso ||
+                              (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
+                            return (
+                              <OcorrenciaRow
+                                key={oc.id}
+                                ocorrencia={oc}
+                                compromissoFallback={compObj}
+                                onBaixar={() => handleOpenBaixa(oc)}
+                                onEstornar={() => setEstornando(oc)}
+                                onEditarCompromisso={() =>
+                                  compObj && handleOpenEditarCompromisso(compObj)
+                                }
+                                onExcluirCompromisso={() =>
+                                  compObj && setDeletandoCompromisso(compObj)
+                                }
+                                onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
+                                canEdit={can(user?.role, 'writeFinance')}
+                              />
+                            )
+                          })}
                         </div>
                       )}
                     </div>
@@ -1882,6 +1892,7 @@ export default function Despesas() {
 interface OcorrenciaRowProps {
   ocorrencia: DespesaOcorrencia
   isAtrasada?: boolean
+  compromissoFallback?: DespesaCompromisso
   onBaixar: () => void
   onEstornar: () => void
   onEditarCompromisso: () => void
@@ -1893,6 +1904,7 @@ interface OcorrenciaRowProps {
 function OcorrenciaRow({
   ocorrencia,
   isAtrasada = false,
+  compromissoFallback,
   onBaixar,
   onEstornar,
   onEditarCompromisso,
@@ -1900,7 +1912,7 @@ function OcorrenciaRow({
   onExcluirOcorrencia,
   canEdit,
 }: OcorrenciaRowProps) {
-  const comp = ocorrencia.expand?.compromisso
+  const comp = ocorrencia.expand?.compromisso || compromissoFallback
   const isPaga = ocorrencia.status === 'paga'
 
   const tag = comp?.expand?.tag // Destino da despesa / Centro de custo
@@ -2105,16 +2117,13 @@ function OcorrenciaRow({
               </a>
             )}
 
-            {/* Anexo da conta a pagar (compromisso) */}
+            {/* Anexo da conta a pagar (compromisso) - visível tanto para pendentes quanto pagas */}
             {comp?.anexo_conta && (
               <a
-                href={pb.files.getURL(
-                  { id: comp.id, collectionName: 'despesas_compromisso' } as any,
-                  comp.anexo_conta,
-                )}
+                href={getFileUrl('despesas_compromisso', comp.id, comp.anexo_conta)}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 font-semibold text-[#DF5830] hover:underline"
+                className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
                 title="Ver fatura / conta a pagar anexada"
               >
                 <FileText className="h-3 w-3" />
@@ -2122,20 +2131,21 @@ function OcorrenciaRow({
               </a>
             )}
 
-            {/* Comprovante da baixa de pagamento */}
+            {/* Comprovante da baixa de pagamento - visível quando anexado */}
             {ocorrencia.comprovante_pagamento && (
               <a
-                href={pb.files.getURL(
-                  { id: ocorrencia.id, collectionName: 'despesas_ocorrencias' } as any,
+                href={getFileUrl(
+                  'despesas_ocorrencias',
+                  ocorrencia.id,
                   ocorrencia.comprovante_pagamento,
                 )}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 font-semibold text-success hover:underline"
+                className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
                 title="Ver comprovante de pagamento"
               >
                 <FileText className="h-3 w-3" />
-                Ver comprovante
+                Comprovante
               </a>
             )}
           </div>

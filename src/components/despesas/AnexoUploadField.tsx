@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect } from 'react'
 import { Camera, Upload, FileText, Image as ImageIcon, X, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { pb } from '@/lib/pocketbase/client'
+import { getFileUrl } from '@/lib/pocketbase/files'
 
 export interface AnexoUploadFieldProps {
   label?: string
@@ -58,10 +58,7 @@ export function AnexoUploadField({
   const existingFileUrl =
     currentFileUrl ||
     (collectionNameOrId && recordId && currentFileName
-      ? pb.files.getURL(
-          { id: recordId, collectionName: collectionNameOrId } as any,
-          currentFileName,
-        )
+      ? getFileUrl(collectionNameOrId, recordId, currentFileName)
       : null)
 
   const isExistingImage =

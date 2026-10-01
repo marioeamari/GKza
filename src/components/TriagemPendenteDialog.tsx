@@ -51,7 +51,7 @@ import { useToast } from '@/hooks/use-toast'
 import { apiMessage } from '@/lib/api-error'
 import { calcularFaturaCartao } from '@/lib/cartao-fatura'
 import { dateOnly, formatCurrency, formatDate, toPocketBaseDate } from '@/lib/format'
-import pb from '@/lib/pocketbase/client'
+import { getFileUrl } from '@/lib/pocketbase/files'
 import { despesasService } from '@/services/despesas'
 import {
   telegramPendentesService,
@@ -508,7 +508,7 @@ export function TriagemPendenteDialog({
   const fotoUrl = useMemo(() => {
     if (!item) return ''
     if (item.comprovante_foto) {
-      return pb.files.getURL(item, item.comprovante_foto)
+      return getFileUrl(item, item.comprovante_foto)
     }
     if (item.comprovante_foto_url) {
       return item.comprovante_foto_url

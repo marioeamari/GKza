@@ -10,7 +10,7 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-react'
-import { pb } from '@/lib/pocketbase/client'
+import { getFileUrl } from '@/lib/pocketbase/files'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -202,14 +202,11 @@ export function FaturaCardGroupRow({
                       <>
                         <span>•</span>
                         <a
-                          href={pb.files.getURL(
-                            { id: item.id, collectionName: 'lancamentos' } as any,
-                            item.comprovante,
-                          )}
+                          href={getFileUrl('lancamentos', item.id, item.comprovante)}
                           target="_blank"
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center gap-1 font-semibold text-[#DF5830] hover:underline"
+                          className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
                           title="Ver comprovante"
                         >
                           <FileText className="h-3 w-3" />
