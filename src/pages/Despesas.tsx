@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Copy,
   CreditCard,
   ExternalLink,
   FileText,
@@ -99,6 +100,7 @@ interface CompromissoAnualRowProps {
   onRegistrarPagamentoRetroativo: () => void
   onEstornarOcorrencia: (oc: DespesaOcorrencia) => void
   onEditarCompromisso: () => void
+  onDuplicarCompromisso?: () => void
   onExcluirCompromisso: () => void
   onExcluirOcorrencia: (oc: DespesaOcorrencia) => void
   canEdit: boolean
@@ -112,6 +114,7 @@ function CompromissoAnualRow({
   onRegistrarPagamentoRetroativo,
   onEstornarOcorrencia,
   onEditarCompromisso,
+  onDuplicarCompromisso,
   onExcluirCompromisso,
   onExcluirOcorrencia,
   canEdit,
@@ -334,6 +337,16 @@ function CompromissoAnualRow({
               <Button
                 variant="ghost"
                 size="icon"
+                className="h-8 w-8 text-muted-foreground hover:text-primary sm:opacity-0 sm:group-hover:opacity-100"
+                onClick={onDuplicarCompromisso}
+                title="Duplicar despesa (criar nova a partir desta)"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
                 className="h-8 w-8 text-muted-foreground sm:opacity-0 sm:group-hover:opacity-100"
                 onClick={onEditarCompromisso}
                 title="Editar compromisso anual"
@@ -398,6 +411,7 @@ export default function Despesas() {
 
   const [compromissoModal, setCompromissoModal] = useState(false)
   const [compromissoEditando, setCompromissoEditando] = useState<DespesaCompromisso | null>(null)
+  const [isDuplicandoCompromisso, setIsDuplicandoCompromisso] = useState(false)
   const [defaultSecaoCompromisso, setDefaultSecaoCompromisso] = useState<SecaoDespesa>(
     'contas_mensais_pix_boleto',
   )
@@ -1092,13 +1106,22 @@ export default function Despesas() {
   }
 
   const handleOpenNovoCompromisso = (secao: SecaoDespesa = 'contas_mensais_pix_boleto') => {
+    setIsDuplicandoCompromisso(false)
     setCompromissoEditando(null)
     setDefaultSecaoCompromisso(secao)
     setCompromissoModal(true)
   }
 
   const handleOpenEditarCompromisso = (comp: DespesaCompromisso) => {
+    setIsDuplicandoCompromisso(false)
     setCompromissoEditando(comp)
+    setCompromissoModal(true)
+  }
+
+  const handleOpenDuplicarCompromisso = (comp: DespesaCompromisso) => {
+    setIsDuplicandoCompromisso(true)
+    setCompromissoEditando(comp)
+    setDefaultSecaoCompromisso(comp.secao || 'contas_mensais_pix_boleto')
     setCompromissoModal(true)
   }
 
@@ -1435,6 +1458,7 @@ export default function Despesas() {
                     onBaixar={() => handleOpenBaixa(oc)}
                     onEstornar={() => setEstornando(oc)}
                     onEditarCompromisso={() => compObj && handleOpenEditarCompromisso(compObj)}
+                    onDuplicarCompromisso={() => compObj && handleOpenDuplicarCompromisso(compObj)}
                     onExcluirCompromisso={() => compObj && setDeletandoCompromisso(compObj)}
                     onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
                     canEdit={can(user?.role, 'writeFinance')}
@@ -1500,6 +1524,9 @@ export default function Despesas() {
                         onBaixar={() => handleOpenBaixa(oc)}
                         onEstornar={() => setEstornando(oc)}
                         onEditarCompromisso={() => compObj && handleOpenEditarCompromisso(compObj)}
+                        onDuplicarCompromisso={() =>
+                          compObj && handleOpenDuplicarCompromisso(compObj)
+                        }
                         onExcluirCompromisso={() => compObj && setDeletandoCompromisso(compObj)}
                         onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
                         canEdit={can(user?.role, 'writeFinance')}
@@ -1563,6 +1590,7 @@ export default function Despesas() {
                         onRegistrarPagamentoRetroativo={() => handleOpenBaixaCompromisso(comp)}
                         onEstornarOcorrencia={(oc) => setEstornando(oc)}
                         onEditarCompromisso={() => handleOpenEditarCompromisso(comp)}
+                        onDuplicarCompromisso={() => handleOpenDuplicarCompromisso(comp)}
                         onExcluirCompromisso={() => setDeletandoCompromisso(comp)}
                         onExcluirOcorrencia={(oc) => setDeletandoOcorrencia(oc)}
                         canEdit={can(user?.role, 'writeFinance')}
@@ -1759,6 +1787,9 @@ export default function Despesas() {
                                 onEditarCompromisso={() =>
                                   compObj && handleOpenEditarCompromisso(compObj)
                                 }
+                                onDuplicarCompromisso={() =>
+                                  compObj && handleOpenDuplicarCompromisso(compObj)
+                                }
                                 onExcluirCompromisso={() =>
                                   compObj && setDeletandoCompromisso(compObj)
                                 }
@@ -1790,8 +1821,14 @@ export default function Despesas() {
 
       <DespesaCompromissoDialog
         open={compromissoModal}
-        onOpenChange={setCompromissoModal}
+        onOpenChange={(open) => {
+          setCompromissoModal(open)
+          if (!open) {
+            setIsDuplicandoCompromisso(false)
+          }
+        }}
         compromisso={compromissoEditando}
+        isDuplicating={isDuplicandoCompromisso}
         categorias={categorias}
         tags={tags}
         tiposDespesa={tiposDespesa}
@@ -1901,6 +1938,7 @@ interface OcorrenciaRowProps {
   onBaixar: () => void
   onEstornar: () => void
   onEditarCompromisso: () => void
+  onDuplicarCompromisso?: () => void
   onExcluirCompromisso: () => void
   onExcluirOcorrencia?: () => void
   canEdit: boolean
@@ -1913,6 +1951,7 @@ function OcorrenciaRow({
   onBaixar,
   onEstornar,
   onEditarCompromisso,
+  onDuplicarCompromisso,
   onExcluirCompromisso,
   onExcluirOcorrencia,
   canEdit,
@@ -2214,6 +2253,16 @@ function OcorrenciaRow({
                   <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Baixar
                 </Button>
               )}
+
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground hover:text-primary sm:opacity-0 sm:group-hover:opacity-100"
+                onClick={onDuplicarCompromisso}
+                title="Duplicar despesa (criar nova a partir desta)"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
 
               <Button
                 variant="ghost"

@@ -67,6 +67,7 @@ interface DespesaCompromissoDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   compromisso?: DespesaCompromisso | null
+  isDuplicating?: boolean
   categorias: Categoria[]
   tags: TagItem[]
   tiposDespesa: TipoDespesa[]
@@ -83,6 +84,7 @@ export function DespesaCompromissoDialog({
   open,
   onOpenChange,
   compromisso,
+  isDuplicating = false,
   categorias,
   tags,
   tiposDespesa,
@@ -160,9 +162,9 @@ export function DespesaCompromissoDialog({
     motivo_revisao: '',
   })
 
-  // Carrega as ocorrências pagas do compromisso em edição
+  // Carrega as ocorrências pagas do compromisso em edição (apenas em edição real, nunca ao duplicar)
   useEffect(() => {
-    if (open && compromisso?.id) {
+    if (open && compromisso?.id && !isDuplicating) {
       setLoadingOcorrenciasPagas(true)
       setSelectedComprovanteOcorrencia(null)
       setRemoverComprovanteOcorrencia(false)
@@ -186,7 +188,7 @@ export function DespesaCompromissoDialog({
       setSelectedComprovanteOcorrencia(null)
       setRemoverComprovanteOcorrencia(false)
     }
-  }, [open, compromisso?.id])
+  }, [open, compromisso?.id, isDuplicating])
 
   // Popula o formulário ao abrir
   useEffect(() => {
@@ -234,8 +236,16 @@ export function DespesaCompromissoDialog({
           }
         }
 
+        // Se for duplicação, adiciona o sufixo "(cópia)" se já não contiver
+        let descricaoFinal = compromisso.descricao || ''
+        if (isDuplicating && descricaoFinal.trim()) {
+          descricaoFinal = descricaoFinal.includes('(cópia)')
+            ? descricaoFinal
+            : `${descricaoFinal} (cópia)`
+        }
+
         setForm({
-          descricao: compromisso.descricao,
+          descricao: descricaoFinal,
           fornecedor: compromisso.fornecedor || '',
           categoria: compromisso.categoria || '',
           tag: compromisso.tag || '',
@@ -264,11 +274,11 @@ export function DespesaCompromissoDialog({
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || '',
           direcionamento: compromisso.direcionamento || '',
-          ativo: compromisso.ativo !== false,
+          ativo: true,
           observacoes: compromisso.observacoes || '',
 
-          precisa_revisao: compromisso.precisa_revisao || false,
-          motivo_revisao: compromisso.motivo_revisao || '',
+          precisa_revisao: isDuplicating ? false : compromisso.precisa_revisao || false,
+          motivo_revisao: isDuplicating ? '' : compromisso.motivo_revisao || '',
         })
       } else {
         // Defaults inteligentes para criação
@@ -327,6 +337,7 @@ export function DespesaCompromissoDialog({
   }, [
     compromisso,
     defaultSecao,
+    isDuplicating,
     open,
     contas,
     metodosPagamento,
@@ -715,7 +726,10 @@ export function DespesaCompromissoDialog({
           fd.append('anexo_conta', '')
         }
 
-        saved = await despesasService.saveCompromisso(fd, compromisso?.id)
+        saved = await despesasService.saveCompromisso(
+          fd,
+          isDuplicating ? undefined : compromisso?.id,
+        )
       } else {
         const payload: Partial<DespesaCompromisso> = {
           descricao: form.descricao.trim(),
@@ -783,11 +797,14 @@ export function DespesaCompromissoDialog({
           motivo_revisao: form.motivo_revisao || (null as unknown as string),
         }
 
-        saved = await despesasService.saveCompromisso(payload, compromisso?.id)
+        saved = await despesasService.saveCompromisso(
+          payload,
+          isDuplicating ? undefined : compromisso?.id,
+        )
       }
 
       // Se for edição e o comprovante da ocorrência paga mudou, atualiza a ocorrência e sincroniza o lançamento
-      if (compromisso && ocorrenciaPagaMaisRecente) {
+      if (!isDuplicating && compromisso && ocorrenciaPagaMaisRecente) {
         if (selectedComprovanteOcorrencia) {
           const fdOcorr = new FormData()
           fdOcorr.append('comprovante_pagamento', selectedComprovanteOcorrencia)
@@ -827,19 +844,25 @@ export function DespesaCompromissoDialog({
         }
       }
 
-      // Se for novo compromisso, gera as primeiras ocorrências automaticamente.
+      // Se for novo compromisso ou duplicação, gera as primeiras ocorrências automaticamente.
       // Se for edição, sincroniza as ocorrências pendentes (status 'prevista') que não foram ajustadas manualmente.
-      if (!compromisso) {
+      if (!compromisso || isDuplicating) {
         await despesasService.gerarOcorrenciasParaCompromisso(saved)
       } else {
         await despesasService.sincronizarOcorrenciasCompromisso(saved)
       }
 
       toast({
-        title: compromisso ? 'Compromisso atualizado' : 'Compromisso cadastrado!',
-        description: compromisso
-          ? 'Compromisso atualizado e ocorrências pendentes sincronizadas com sucesso.'
-          : 'Os dados da despesa e as ocorrências foram organizados com sucesso.',
+        title: isDuplicating
+          ? 'Despesa duplicada com sucesso!'
+          : compromisso
+            ? 'Compromisso atualizado'
+            : 'Compromisso cadastrado!',
+        description: isDuplicating
+          ? 'A nova despesa foi cadastrada e suas ocorrências previstas foram geradas.'
+          : compromisso
+            ? 'Compromisso atualizado e ocorrências pendentes sincronizadas com sucesso.'
+            : 'Os dados da despesa e as ocorrências foram organizados com sucesso.',
       })
 
       onOpenChange(false)
@@ -862,7 +885,11 @@ export function DespesaCompromissoDialog({
         <DialogHeader>
           <div className="flex items-center justify-between gap-2">
             <DialogTitle className="text-xl font-extrabold text-foreground">
-              {compromisso ? 'Editar compromisso de despesa' : 'Novo compromisso de despesa'}
+              {isDuplicating
+                ? 'Duplicar compromisso de despesa'
+                : compromisso
+                  ? 'Editar compromisso de despesa'
+                  : 'Novo compromisso de despesa'}
             </DialogTitle>
             {form.precisa_revisao && (
               <Badge variant="outline" className="border-amber-400 bg-amber-50 text-amber-700">
@@ -1584,9 +1611,9 @@ export function DespesaCompromissoDialog({
                         setSelectedAnexoConta(file)
                         if (file) setRemoverAnexoConta(false)
                       }}
-                      currentFileName={compromisso?.anexo_conta}
-                      collectionNameOrId="despesas_compromisso"
-                      recordId={compromisso?.id}
+                      currentFileName={isDuplicating ? undefined : compromisso?.anexo_conta}
+                      collectionNameOrId={isDuplicating ? undefined : 'despesas_compromisso'}
+                      recordId={isDuplicating ? undefined : compromisso?.id}
                       isRemovingCurrent={removerAnexoConta}
                       onRemoveCurrent={() => {
                         setRemoverAnexoConta(true)
@@ -1594,10 +1621,16 @@ export function DespesaCompromissoDialog({
                       }}
                       disabled={submitting}
                     />
+                    {isDuplicating && compromisso?.anexo_conta && (
+                      <p className="text-[11px] text-amber-700 bg-amber-500/10 border border-amber-300/40 rounded-lg p-2 mt-1">
+                        A despesa original possui um anexo ({compromisso.anexo_conta}). Por
+                        segurança, selecione o novo boleto/documento acima para esta cópia.
+                      </p>
+                    )}
                   </div>
 
                   {/* 2. Comprovante de pagamento (despesas_ocorrencias.comprovante_pagamento) */}
-                  {compromisso && (
+                  {!isDuplicating && compromisso && (
                     <div className="pt-2 border-t border-border/60 space-y-1.5">
                       {loadingOcorrenciasPagas ? (
                         <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
@@ -1746,7 +1779,7 @@ export function DespesaCompromissoDialog({
               ) : (
                 <Save className="mr-2 h-4 w-4" />
               )}
-              Salvar compromisso
+              {isDuplicating ? 'Cadastrar cópia' : 'Salvar compromisso'}
             </Button>
           </DialogFooter>
         </form>
