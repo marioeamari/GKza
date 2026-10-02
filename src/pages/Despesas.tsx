@@ -1186,46 +1186,23 @@ export default function Despesas() {
       }
     }
 
-    // Ocorrências do mês
-    // Preserva o histórico: se houver ocorrência já gravada em conta de cartão inativa, exibe o cartão para não ocultar a despesa
+    // Ocorrências do mês: somente aloca nos grupos de cartões ativos
     filteredOcorrencias
       .filter((oc) => oc.secao === 'cartoes_credito')
       .forEach((oc) => {
-        const contaId =
-          oc.conta || oc.expand?.compromisso?.conta_padrao || cartaoContas[0]?.id || 'unknown'
-        if (!map.has(contaId)) {
-          const found =
-            contas.find((c) => c.id === contaId) ||
-            ({
-              id: contaId,
-              nome: 'Outro Cartão',
-              tipo: 'cartao',
-              saldo_inicial: 0,
-              cor: '#DF5830',
-              ativa: true,
-            } as Conta)
-          map.set(contaId, createCartaoEntry(found))
+        const contaId = oc.conta || oc.expand?.compromisso?.conta_padrao || ''
+        // Cartão inativo/arquivado não gera grupo em cartões; suas ocorrências caem na rede de segurança "Sem Conta Definida"
+        if (!contaId || !map.has(contaId)) {
+          return
         }
         alocarEmAba(map.get(contaId)!, oc, 'mes')
       })
 
-    // Todas as ocorrências do cartão (histórico geral)
-    // Preserva o histórico: ocorrências já vinculadas continuam visíveis
+    // Todas as ocorrências do cartão (histórico geral): somente cartões ativos
     filteredCartaoOcorrenciasAll.forEach((oc) => {
-      const contaId =
-        oc.conta || oc.expand?.compromisso?.conta_padrao || cartaoContas[0]?.id || 'unknown'
-      if (!map.has(contaId)) {
-        const found =
-          contas.find((c) => c.id === contaId) ||
-          ({
-            id: contaId,
-            nome: 'Outro Cartão',
-            tipo: 'cartao',
-            saldo_inicial: 0,
-            cor: '#DF5830',
-            ativa: true,
-          } as Conta)
-        map.set(contaId, createCartaoEntry(found))
+      const contaId = oc.conta || oc.expand?.compromisso?.conta_padrao || ''
+      if (!contaId || !map.has(contaId)) {
+        return
       }
       alocarEmAba(map.get(contaId)!, oc, 'todas')
     })

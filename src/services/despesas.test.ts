@@ -791,5 +791,115 @@ describe('despesasService - Agrupador de Despesas e Helpers', () => {
       expect(portoGroup.abas[2].ocorrencias).toHaveLength(1)
       expect(portoGroup.abas[2].ocorrencias[0].id).toBe('oc_c3')
     })
+
+    it('cartão inativo/arquivado não gera grupo próprio e suas ocorrências são alocadas em semConta', () => {
+      const cartaoAtivo: Conta = {
+        id: 'cartao_nu_dest',
+        nome: 'NuBank',
+        tipo: 'cartao',
+        tipos_pagamento: ['credito'],
+        ativa: true,
+      } as Conta
+
+      const cartaoInativo: Conta = {
+        id: 'cartao_antigo_arq',
+        nome: '0',
+        tipo: 'cartao',
+        tipos_pagamento: ['credito'],
+        ativa: false,
+      } as Conta
+
+      const compAtivo: DespesaCompromisso = {
+        id: 'comp_ativo',
+        descricao: 'Compra Ativa',
+        secao: 'cartoes_credito',
+        conta_padrao: 'cartao_nu_dest',
+        ativo: true,
+      } as DespesaCompromisso
+
+      const compArquivado: DespesaCompromisso = {
+        id: 'comp_arq',
+        descricao: 'Compra Antiga Arquivada',
+        secao: 'cartoes_credito',
+        conta_padrao: 'cartao_antigo_arq',
+        ativo: true,
+      } as DespesaCompromisso
+
+      const ocAtiva: DespesaOcorrencia = {
+        id: 'oc_ativa',
+        compromisso: 'comp_ativo',
+        conta: 'cartao_nu_dest',
+        secao: 'cartoes_credito',
+        valor_previsto: 100,
+        status: 'paga',
+      } as DespesaOcorrencia
+
+      const ocArquivada: DespesaOcorrencia = {
+        id: 'oc_arq',
+        compromisso: 'comp_arq',
+        conta: 'cartao_antigo_arq',
+        secao: 'cartoes_credito',
+        valor_previsto: 200,
+        status: 'paga',
+      } as DespesaOcorrencia
+
+      const resultado = despesasService.agruparDespesasParaVisualizacao({
+        ocorrencias: [ocAtiva, ocArquivada],
+        contas: [cartaoAtivo, cartaoInativo],
+        compromissos: [compAtivo, compArquivado],
+        metodosPagamento: [],
+      })
+
+      // Apenas o cartão ativo deve ter grupo gerado
+      expect(resultado.cartoes).toHaveLength(1)
+      expect(resultado.cartoes[0].conta.id).toBe('cartao_nu_dest')
+      expect(resultado.cartoes[0].ocorrencias).toHaveLength(1)
+      expect(resultado.cartoes[0].ocorrencias[0].id).toBe('oc_ativa')
+
+      // Ocorrência do cartão arquivado não sumiu: foi para semConta
+      expect(resultado.semConta).toHaveLength(1)
+      expect(resultado.semConta[0].id).toBe('oc_arq')
+    })
+
+    it('todas as despesas migradas de NuBank t para NuBank aparecem no grupo NuBank', () => {
+      const contaDestino: Conta = {
+        id: 'sglo7dfsqvgfsni',
+        nome: 'NuBank',
+        tipo: 'cartao',
+        tipos_pagamento: ['debito', 'transferencia', 'boletos', 'pix', 'credito'],
+        ativa: true,
+      } as Conta
+
+      const compMigrado: DespesaCompromisso = {
+        id: 'comp_migrado',
+        descricao: 'Supermercado Pão de Açúcar',
+        secao: 'cartoes_credito',
+        conta_padrao: 'sglo7dfsqvgfsni',
+        ativo: true,
+      } as DespesaCompromisso
+
+      const ocMigrada: DespesaOcorrencia = {
+        id: 'oc_migrada_1',
+        compromisso: 'comp_migrado',
+        conta: 'sglo7dfsqvgfsni',
+        secao: 'cartoes_credito',
+        valor_previsto: 684.2,
+        status: 'paga',
+      } as DespesaOcorrencia
+
+      const resultado = despesasService.agruparDespesasParaVisualizacao({
+        ocorrencias: [ocMigrada],
+        contas: [contaDestino],
+        compromissos: [compMigrado],
+        metodosPagamento: [],
+      })
+
+      expect(resultado.cartoes).toHaveLength(1)
+      expect(resultado.cartoes[0].conta.id).toBe('sglo7dfsqvgfsni')
+      expect(resultado.cartoes[0].conta.nome).toBe('NuBank')
+      expect(resultado.cartoes[0].ocorrencias).toHaveLength(1)
+      expect(resultado.cartoes[0].ocorrencias[0].id).toBe('oc_migrada_1')
+      expect(resultado.semConta).toHaveLength(0)
+    })
   })
 })

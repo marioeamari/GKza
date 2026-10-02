@@ -1363,9 +1363,22 @@ export const despesasService = {
       // Regra 3: Seção explicitamente Cartões de Crédito ou Conta do tipo cartão
       const isCartao = oc.secao === 'cartoes_credito' || contaObj?.tipo === 'cartao'
       if (isCartao) {
+        // Se a conta for inativa (arquivada), NÃO deve gerar grupo de cartão próprio:
+        // move as ocorrências para a rede de segurança "Sem Conta Definida"
+        if (contaObj && contaObj.ativa === false) {
+          ocorrenciasSemConta.push(oc)
+          continue
+        }
+
         const cId = contaObj?.id || contaId || 'cartao_desconhecido'
         let cartaoEntry = cartoesMap.get(cId)
         if (!cartaoEntry) {
+          // Se a conta não estava no mapa de cartões ativos, verifica se é uma conta existente inativa
+          if (contaObj && !contaObj.ativa) {
+            ocorrenciasSemConta.push(oc)
+            continue
+          }
+
           const fallbackConta: Conta =
             contaObj ||
             ({
@@ -1400,6 +1413,12 @@ export const despesasService = {
 
       // Regra 4: Conta Não-Cartão (bancaria, caixa, marketplace ou outra)
       if (contaObj) {
+        // Se a conta for inativa (arquivada), também não gera grupo próprio
+        if (contaObj.ativa === false) {
+          ocorrenciasSemConta.push(oc)
+          continue
+        }
+
         const contaGroup = getOrCreateContaNaoCartao(contaObj)
         const tipos = despesasService.getTiposPagamentoConta(contaObj)
         const metodoObj =
