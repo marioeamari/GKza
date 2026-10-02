@@ -639,6 +639,11 @@ describe('despesasService - Agrupador de Despesas e Helpers', () => {
       expect(resultado.cartoes[0].conta.id).toBe('cartao_nu')
       expect(resultado.cartoes[0].ocorrencias).toHaveLength(1)
       expect(resultado.cartoes[0].ocorrencias[0].id).toBe('oc_card')
+      expect(resultado.cartoes[0].abas).toBeDefined()
+      expect(resultado.cartoes[0].abas).toHaveLength(1)
+      expect(resultado.cartoes[0].abas[0].tipo).toBe('credito')
+      expect(resultado.cartoes[0].abas[0].ocorrencias).toHaveLength(1)
+      expect(resultado.cartoes[0].abas[0].ocorrencias[0].id).toBe('oc_card')
 
       // 5. Conta Não-Cartão (Itaú) e suas abas
       expect(resultado.contasNaoCartao).toHaveLength(1)
@@ -656,6 +661,135 @@ describe('despesasService - Agrupador de Despesas e Helpers', () => {
       expect(abaBoletos).toBeDefined()
       expect(abaBoletos!.ocorrencias).toHaveLength(1)
       expect(abaBoletos!.ocorrencias[0].id).toBe('oc_luz')
+    })
+
+    it('particiona ocorrências do cartão nas abas de acordo com os tipos de pagamento cadastrados (ex: crédito, boletos, pix)', () => {
+      const cartaoPorto: Conta = {
+        id: 'cartao_porto',
+        nome: 'Porto Seguro',
+        tipo: 'cartao',
+        tipos_pagamento: ['credito', 'boletos', 'pix'],
+        ativa: true,
+      } as Conta
+
+      const metodoPix: MetodoPagamento = {
+        id: 'm_pix',
+        nome: 'Pix',
+        tipo: 'pix',
+        ativo: true,
+      } as MetodoPagamento
+
+      const metodoBoleto: MetodoPagamento = {
+        id: 'm_bol',
+        nome: 'Boleto Bancário',
+        tipo: 'boleto',
+        ativo: true,
+      } as MetodoPagamento
+
+      const metodoCredito: MetodoPagamento = {
+        id: 'm_cred',
+        nome: 'Cartão de Crédito',
+        tipo: 'cartao',
+        ativo: true,
+      } as MetodoPagamento
+
+      const compCredito: DespesaCompromisso = {
+        id: 'comp_c1',
+        descricao: 'Compra Mercado Crédito',
+        secao: 'cartoes_credito',
+        conta_padrao: 'cartao_porto',
+        metodo_pagamento: 'm_cred',
+        ativo: true,
+      } as DespesaCompromisso
+
+      const compBoleto: DespesaCompromisso = {
+        id: 'comp_c2',
+        descricao: 'Fatura Boleto Seguro',
+        secao: 'cartoes_credito',
+        conta_padrao: 'cartao_porto',
+        metodo_pagamento: 'm_bol',
+        ativo: true,
+      } as DespesaCompromisso
+
+      const compPix: DespesaCompromisso = {
+        id: 'comp_c3',
+        descricao: 'Pagamento Pix no Cartão',
+        secao: 'cartoes_credito',
+        conta_padrao: 'cartao_porto',
+        metodo_pagamento: 'm_pix',
+        ativo: true,
+      } as DespesaCompromisso
+
+      const compSemMetodo: DespesaCompromisso = {
+        id: 'comp_c4',
+        descricao: 'Compra Sem Método (Cai no primeiro tipo: crédito)',
+        secao: 'cartoes_credito',
+        conta_padrao: 'cartao_porto',
+        ativo: true,
+      } as DespesaCompromisso
+
+      const ocCredito: DespesaOcorrencia = {
+        id: 'oc_c1',
+        compromisso: 'comp_c1',
+        conta: 'cartao_porto',
+        secao: 'cartoes_credito',
+        valor_previsto: 150,
+      } as DespesaOcorrencia
+
+      const ocBoleto: DespesaOcorrencia = {
+        id: 'oc_c2',
+        compromisso: 'comp_c2',
+        conta: 'cartao_porto',
+        secao: 'cartoes_credito',
+        valor_previsto: 200,
+      } as DespesaOcorrencia
+
+      const ocPix: DespesaOcorrencia = {
+        id: 'oc_c3',
+        compromisso: 'comp_c3',
+        conta: 'cartao_porto',
+        secao: 'cartoes_credito',
+        valor_previsto: 50,
+      } as DespesaOcorrencia
+
+      const ocSemMetodo: DespesaOcorrencia = {
+        id: 'oc_c4',
+        compromisso: 'comp_c4',
+        conta: 'cartao_porto',
+        secao: 'cartoes_credito',
+        valor_previsto: 80,
+      } as DespesaOcorrencia
+
+      const resultado = despesasService.agruparDespesasParaVisualizacao({
+        ocorrencias: [ocCredito, ocBoleto, ocPix, ocSemMetodo],
+        contas: [cartaoPorto],
+        compromissos: [compCredito, compBoleto, compPix, compSemMetodo],
+        metodosPagamento: [metodoPix, metodoBoleto, metodoCredito],
+      })
+
+      expect(resultado.cartoes).toHaveLength(1)
+      const portoGroup = resultado.cartoes[0]
+      expect(portoGroup.conta.id).toBe('cartao_porto')
+      expect(portoGroup.ocorrencias).toHaveLength(4)
+
+      // Deve ter 3 abas na mesma ordem do cadastro: credito, boletos, pix
+      expect(portoGroup.abas).toHaveLength(3)
+      expect(portoGroup.abas[0].tipo).toBe('credito')
+      expect(portoGroup.abas[1].tipo).toBe('boletos')
+      expect(portoGroup.abas[2].tipo).toBe('pix')
+
+      // Crédito deve conter ocCredito e ocSemMetodo (fallback para o primeiro tipo)
+      expect(portoGroup.abas[0].ocorrencias).toHaveLength(2)
+      expect(portoGroup.abas[0].ocorrencias.map((o) => o.id)).toContain('oc_c1')
+      expect(portoGroup.abas[0].ocorrencias.map((o) => o.id)).toContain('oc_c4')
+
+      // Boletos
+      expect(portoGroup.abas[1].ocorrencias).toHaveLength(1)
+      expect(portoGroup.abas[1].ocorrencias[0].id).toBe('oc_c2')
+
+      // Pix
+      expect(portoGroup.abas[2].ocorrencias).toHaveLength(1)
+      expect(portoGroup.abas[2].ocorrencias[0].id).toBe('oc_c3')
     })
   })
 })

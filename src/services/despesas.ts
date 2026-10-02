@@ -1282,13 +1282,23 @@ export const despesasService = {
     const ocorrenciasAssinaturas: DespesaOcorrencia[] = []
     const ocorrenciasSemConta: DespesaOcorrencia[] = []
 
-    // Agrupamento de Cartões: map de contaId -> { conta, ocorrencias }
-    const cartoesMap = new Map<string, { conta: Conta; ocorrencias: DespesaOcorrencia[] }>()
+    // Agrupamento de Cartões: map de contaId -> { conta, ocorrencias, abas: Map<ContaTipoPagamento, DespesaOcorrencia[]> }
+    const cartoesMap = new Map<
+      string,
+      {
+        conta: Conta
+        ocorrencias: DespesaOcorrencia[]
+        abas: Map<ContaTipoPagamento, DespesaOcorrencia[]>
+      }
+    >()
     // Inicializa cartões ativos
     contas
       .filter((c) => c.tipo === 'cartao' && c.ativa)
       .forEach((c) => {
-        cartoesMap.set(c.id, { conta: c, ocorrencias: [] })
+        const tipos = despesasService.getTiposPagamentoConta(c)
+        const abas = new Map<ContaTipoPagamento, DespesaOcorrencia[]>()
+        tipos.forEach((t) => abas.set(t, []))
+        cartoesMap.set(c.id, { conta: c, ocorrencias: [], abas })
       })
 
     // Agrupamento de Contas não-cartão: map de contaId -> { conta, abas: Map<ContaTipoPagamento, DespesaOcorrencia[]> }
@@ -1366,10 +1376,25 @@ export const despesasService = {
               cor: '#8A05BE',
               ativa: true,
             } as Conta)
-          cartaoEntry = { conta: fallbackConta, ocorrencias: [] }
+          const fallbackTipos = despesasService.getTiposPagamentoConta(fallbackConta)
+          const fallbackAbas = new Map<ContaTipoPagamento, DespesaOcorrencia[]>()
+          fallbackTipos.forEach((t) => fallbackAbas.set(t, []))
+          cartaoEntry = { conta: fallbackConta, ocorrencias: [], abas: fallbackAbas }
           cartoesMap.set(cId, cartaoEntry)
         }
         cartaoEntry.ocorrencias.push(oc)
+
+        // Particiona nas abas de tipo de pagamento do cartão
+        const tipos = despesasService.getTiposPagamentoConta(cartaoEntry.conta)
+        const metodoObj =
+          comp?.expand?.metodo_pagamento ||
+          (comp?.metodo_pagamento ? metodosMap.get(comp.metodo_pagamento) : null)
+        const tipoAlocado = despesasService.mapearMetodoParaTipoPagamento(metodoObj, tipos)
+        if (!cartaoEntry.abas.has(tipoAlocado)) {
+          cartaoEntry.abas.set(tipoAlocado, [])
+        }
+        cartaoEntry.abas.get(tipoAlocado)!.push(oc)
+
         continue
       }
 
@@ -1433,10 +1458,33 @@ export const despesasService = {
 
     // Formatar grupos de cartões
     const cartoesList = Array.from(cartoesMap.values())
-      .map((item) => ({
-        conta: item.conta,
-        ocorrencias: sorter(item.ocorrencias),
-      }))
+      .map((item) => {
+        const tipos = despesasService.getTiposPagamentoConta(item.conta)
+        const abasObj: { tipo: ContaTipoPagamento; ocorrencias: DespesaOcorrencia[] }[] = []
+
+        tipos.forEach((t) => {
+          const ocs = item.abas.get(t) || []
+          abasObj.push({
+            tipo: t,
+            ocorrencias: sorter(ocs),
+          })
+        })
+
+        item.abas.forEach((ocs, t) => {
+          if (!tipos.includes(t)) {
+            abasObj.push({
+              tipo: t,
+              ocorrencias: sorter(ocs),
+            })
+          }
+        })
+
+        return {
+          conta: item.conta,
+          ocorrencias: sorter(item.ocorrencias),
+          abas: abasObj,
+        }
+      })
       .sort((a, b) => a.conta.nome.localeCompare(b.conta.nome, 'pt-BR', { sensitivity: 'base' }))
 
     return {

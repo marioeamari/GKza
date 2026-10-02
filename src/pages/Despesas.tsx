@@ -1130,13 +1130,61 @@ export default function Despesas() {
         conta: Conta
         ocorrenciasMes: DespesaOcorrencia[]
         ocorrenciasTodas: DespesaOcorrencia[]
+        abasMes: Map<ContaTipoPagamento, DespesaOcorrencia[]>
+        abasTodas: Map<ContaTipoPagamento, DespesaOcorrencia[]>
       }
     >()
 
+    const createCartaoEntry = (conta: Conta) => {
+      const tipos = despesasService.getTiposPagamentoConta(conta)
+      const abasMes = new Map<ContaTipoPagamento, DespesaOcorrencia[]>()
+      const abasTodas = new Map<ContaTipoPagamento, DespesaOcorrencia[]>()
+      tipos.forEach((t) => {
+        abasMes.set(t, [])
+        abasTodas.set(t, [])
+      })
+      return {
+        conta,
+        ocorrenciasMes: [] as DespesaOcorrencia[],
+        ocorrenciasTodas: [] as DespesaOcorrencia[],
+        abasMes,
+        abasTodas,
+      }
+    }
+
     // Inicializa todos os cartões cadastrados ativos
     cartaoContas.forEach((conta) => {
-      map.set(conta.id, { conta, ocorrenciasMes: [], ocorrenciasTodas: [] })
+      map.set(conta.id, createCartaoEntry(conta))
     })
+
+    const alocarEmAba = (
+      entry: ReturnType<typeof createCartaoEntry>,
+      oc: DespesaOcorrencia,
+      target: 'mes' | 'todas',
+    ) => {
+      const comp =
+        oc.expand?.compromisso || (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
+      const metodoObj =
+        comp?.expand?.metodo_pagamento ||
+        (comp?.metodo_pagamento
+          ? metodosPagamento.find((m) => m.id === comp.metodo_pagamento)
+          : null)
+
+      const tipos = despesasService.getTiposPagamentoConta(entry.conta)
+      const tipoAlocado = despesasService.mapearMetodoParaTipoPagamento(metodoObj, tipos)
+
+      const abasMap = target === 'mes' ? entry.abasMes : entry.abasTodas
+      if (!abasMap.has(tipoAlocado)) {
+        abasMap.set(tipoAlocado, [])
+      }
+      abasMap.get(tipoAlocado)!.push(oc)
+
+      if (target === 'mes') {
+        entry.ocorrenciasMes.push(oc)
+      } else {
+        entry.ocorrenciasTodas.push(oc)
+      }
+    }
 
     // Ocorrências do mês
     // Preserva o histórico: se houver ocorrência já gravada em conta de cartão inativa, exibe o cartão para não ocultar a despesa
@@ -1146,7 +1194,6 @@ export default function Despesas() {
         const contaId =
           oc.conta || oc.expand?.compromisso?.conta_padrao || cartaoContas[0]?.id || 'unknown'
         if (!map.has(contaId)) {
-          // Se for uma conta conhecida (mesmo que inativa, pois há ocorrência vinculada) ou placeholder
           const found =
             contas.find((c) => c.id === contaId) ||
             ({
@@ -1157,9 +1204,9 @@ export default function Despesas() {
               cor: '#DF5830',
               ativa: true,
             } as Conta)
-          map.set(contaId, { conta: found, ocorrenciasMes: [], ocorrenciasTodas: [] })
+          map.set(contaId, createCartaoEntry(found))
         }
-        map.get(contaId)!.ocorrenciasMes.push(oc)
+        alocarEmAba(map.get(contaId)!, oc, 'mes')
       })
 
     // Todas as ocorrências do cartão (histórico geral)
@@ -1178,17 +1225,55 @@ export default function Despesas() {
             cor: '#DF5830',
             ativa: true,
           } as Conta)
-        map.set(contaId, { conta: found, ocorrenciasMes: [], ocorrenciasTodas: [] })
+        map.set(contaId, createCartaoEntry(found))
       }
-      map.get(contaId)!.ocorrenciasTodas.push(oc)
+      alocarEmAba(map.get(contaId)!, oc, 'todas')
     })
 
-    return Array.from(map.values()).map((item) => ({
-      ...item,
-      ocorrenciasMes: sortOcorrenciasList(item.ocorrenciasMes),
-      ocorrenciasTodas: sortOcorrenciasList(item.ocorrenciasTodas),
-    }))
-  }, [cartaoContas, filteredOcorrencias, filteredCartaoOcorrenciasAll, contas, sortOcorrenciasList])
+    return Array.from(map.values()).map((item) => {
+      const tipos = despesasService.getTiposPagamentoConta(item.conta)
+      const abasObj: {
+        tipo: ContaTipoPagamento
+        ocorrenciasMes: DespesaOcorrencia[]
+        ocorrenciasTodas: DespesaOcorrencia[]
+      }[] = []
+
+      tipos.forEach((t) => {
+        abasObj.push({
+          tipo: t,
+          ocorrenciasMes: sortOcorrenciasList(item.abasMes.get(t) || []),
+          ocorrenciasTodas: sortOcorrenciasList(item.abasTodas.get(t) || []),
+        })
+      })
+
+      // Se houver tipos extras dinâmicos
+      item.abasMes.forEach((_, t) => {
+        if (!tipos.includes(t)) {
+          abasObj.push({
+            tipo: t,
+            ocorrenciasMes: sortOcorrenciasList(item.abasMes.get(t) || []),
+            ocorrenciasTodas: sortOcorrenciasList(item.abasTodas.get(t) || []),
+          })
+        }
+      })
+
+      return {
+        conta: item.conta,
+        tipos,
+        abas: abasObj,
+        ocorrenciasMes: sortOcorrenciasList(item.ocorrenciasMes),
+        ocorrenciasTodas: sortOcorrenciasList(item.ocorrenciasTodas),
+      }
+    })
+  }, [
+    cartaoContas,
+    filteredOcorrencias,
+    filteredCartaoOcorrenciasAll,
+    contas,
+    sortOcorrenciasList,
+    compromissosMap,
+    metodosPagamento,
+  ])
 
   // Totais do Período
   const totalPrevistoGeral = useMemo(
@@ -2136,26 +2221,86 @@ export default function Despesas() {
                   Nenhum cartão cadastrado. Vá em "Contas" para cadastrar seus cartões.
                 </div>
               ) : (
-                cartoesGrouped.map(({ conta, ocorrenciasMes, ocorrenciasTodas }) => {
+                cartoesGrouped.map(({ conta, abas, ocorrenciasMes, ocorrenciasTodas }) => {
                   const currentMode = cartaoViewMode[conta.id] || 'mes'
                   const isHist = currentMode === 'historico'
-                  const displayOcorrencias = isHist ? ocorrenciasTodas : ocorrenciasMes
 
-                  const totalMes = ocorrenciasMes.reduce(
+                  // Totais do cartão no modo selecionado (usado no header)
+                  const totalHeaderMes = ocorrenciasMes.reduce(
                     (sum, o) => sum + (o.valor_previsto || 0),
                     0,
                   )
-                  const totalPagoMes = ocorrenciasMes
+                  const totalPagoHeaderMes = ocorrenciasMes
                     .filter((o) => o.status === 'paga')
                     .reduce((sum, o) => sum + (o.valor_pago || o.valor_previsto || 0), 0)
 
-                  const totalTodas = ocorrenciasTodas.reduce(
+                  const totalHeaderTodas = ocorrenciasTodas.reduce(
                     (sum, o) => sum + (o.valor_previsto || 0),
                     0,
                   )
-                  const totalPagoTodas = ocorrenciasTodas
+                  const totalPagoHeaderTodas = ocorrenciasTodas
                     .filter((o) => o.status === 'paga')
                     .reduce((sum, o) => sum + (o.valor_pago || o.valor_previsto || 0), 0)
+
+                  // Se o cartão tem apenas 1 tipo de pagamento (ex: apenas 'credito'), omite a barra de abas
+                  const hasSingleTab = abas.length <= 1
+
+                  // Aba padrão: a primeira com ocorrências no modo ativo, senão a primeira do cadastro
+                  const abasComOcorrencias = abas.filter((aba) =>
+                    isHist ? aba.ocorrenciasTodas.length > 0 : aba.ocorrenciasMes.length > 0,
+                  )
+                  const defaultTab = abasComOcorrencias[0]?.tipo || abas[0]?.tipo || 'credito'
+
+                  const renderOcorrenciasList = (
+                    list: DespesaOcorrencia[],
+                    tipoAba?: ContaTipoPagamento,
+                  ) => {
+                    if (list.length === 0) {
+                      const tipoLabel = tipoAba
+                        ? CONTA_TIPO_PAGAMENTO_LABELS[tipoAba] || tipoAba
+                        : 'cartão'
+                      return (
+                        <div className="p-8 text-center text-xs text-muted-foreground">
+                          {isHist
+                            ? `Nenhuma compra ou pagamento via ${tipoLabel} realizada com este cartão.`
+                            : `Nenhum pagamento via ${tipoLabel} cadastrado neste cartão para ${formatCompetenciaDisplay(
+                                currentCompetencia,
+                              )}. Clique em "Todas as compras" para ver o histórico geral.`}
+                        </div>
+                      )
+                    }
+
+                    return (
+                      <div className="divide-y divide-border">
+                        {list.map((oc) => {
+                          const compObj =
+                            oc.expand?.compromisso ||
+                            (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
+                          return (
+                            <OcorrenciaRow
+                              key={oc.id}
+                              ocorrencia={oc}
+                              isModoPagamento={filtroDataCompetencia === 'pagamento'}
+                              compromissoFallback={compObj}
+                              onBaixar={() => handleOpenBaixa(oc)}
+                              onEstornar={() => setEstornando(oc)}
+                              onEditarCompromisso={() =>
+                                compObj && handleOpenEditarCompromisso(compObj)
+                              }
+                              onDuplicarCompromisso={() =>
+                                compObj && handleOpenDuplicarCompromisso(compObj)
+                              }
+                              onExcluirCompromisso={() =>
+                                compObj && setDeletandoCompromisso(compObj)
+                              }
+                              onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
+                              canEdit={can(user?.role, 'writeFinance')}
+                            />
+                          )
+                        })}
+                      </div>
+                    )
+                  }
 
                   return (
                     <div
@@ -2245,14 +2390,16 @@ export default function Despesas() {
                                 {isHist ? 'Total Compras' : 'Fatura do Mês'}
                               </p>
                               <p className="text-sm font-extrabold tabular-nums text-foreground">
-                                {formatCurrency(isHist ? totalTodas : totalMes)}
+                                {formatCurrency(isHist ? totalHeaderTodas : totalHeaderMes)}
                               </p>
                             </div>
-                            {(isHist ? totalPagoTodas : totalPagoMes) > 0 && (
+                            {(isHist ? totalPagoHeaderTodas : totalPagoHeaderMes) > 0 && (
                               <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-1 text-right">
                                 <p className="micro-label text-success">Baixado</p>
                                 <p className="text-xs font-bold tabular-nums text-success">
-                                  {formatCurrency(isHist ? totalPagoTodas : totalPagoMes)}
+                                  {formatCurrency(
+                                    isHist ? totalPagoHeaderTodas : totalPagoHeaderMes,
+                                  )}
                                 </p>
                               </div>
                             )}
@@ -2260,42 +2407,62 @@ export default function Despesas() {
                         </div>
                       </header>
 
-                      {displayOcorrencias.length === 0 ? (
-                        <div className="p-8 text-center text-xs text-muted-foreground">
-                          {isHist
-                            ? 'Nenhuma compra realizada com este cartão de crédito.'
-                            : `Nenhuma compra ou parcela neste cartão para ${formatCompetenciaDisplay(
-                                currentCompetencia,
-                              )}. Clique em "Todas as compras" para ver o histórico geral.`}
-                        </div>
+                      {hasSingleTab ? (
+                        // Cartões com apenas 1 tipo de pagamento (ex: ["credito"]): exibe direto sem poluir com abas
+                        renderOcorrenciasList(
+                          isHist ? ocorrenciasTodas : ocorrenciasMes,
+                          abas[0]?.tipo,
+                        )
                       ) : (
-                        <div className="divide-y divide-border">
-                          {displayOcorrencias.map((oc) => {
-                            const compObj =
-                              oc.expand?.compromisso ||
-                              (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
-                            return (
-                              <OcorrenciaRow
-                                key={oc.id}
-                                ocorrencia={oc}
-                                isModoPagamento={filtroDataCompetencia === 'pagamento'}
-                                compromissoFallback={compObj}
-                                onBaixar={() => handleOpenBaixa(oc)}
-                                onEstornar={() => setEstornando(oc)}
-                                onEditarCompromisso={() =>
-                                  compObj && handleOpenEditarCompromisso(compObj)
-                                }
-                                onDuplicarCompromisso={() =>
-                                  compObj && handleOpenDuplicarCompromisso(compObj)
-                                }
-                                onExcluirCompromisso={() =>
-                                  compObj && setDeletandoCompromisso(compObj)
-                                }
-                                onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
-                                canEdit={can(user?.role, 'writeFinance')}
-                              />
-                            )
-                          })}
+                        // Cartões com múltiplos tipos de pagamento (ex: NuBank com Crédito, Débito, Boleto, Pix, etc.)
+                        <div className="p-4 sm:p-5">
+                          <Tabs defaultValue={defaultTab} className="w-full">
+                            <TabsList className="mb-4 flex h-auto flex-wrap gap-1 bg-muted/60 p-1">
+                              {abas.map((aba) => {
+                                const list = isHist ? aba.ocorrenciasTodas : aba.ocorrenciasMes
+                                const qtd = list.length
+                                const totalAba = list.reduce(
+                                  (s, o) => s + (o.valor_previsto || 0),
+                                  0,
+                                )
+                                const label = CONTA_TIPO_PAGAMENTO_LABELS[aba.tipo] || aba.tipo
+
+                                return (
+                                  <TabsTrigger
+                                    key={aba.tipo}
+                                    value={aba.tipo}
+                                    className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-xs"
+                                  >
+                                    <span>{label}</span>
+                                    <Badge
+                                      variant={qtd > 0 ? 'secondary' : 'outline'}
+                                      className="h-5 px-1.5 text-[10px] font-bold"
+                                    >
+                                      {qtd}
+                                    </Badge>
+                                    {qtd > 0 && (
+                                      <span className="hidden text-[11px] font-normal text-muted-foreground sm:inline">
+                                        ({formatCompactCurrency(totalAba)})
+                                      </span>
+                                    )}
+                                  </TabsTrigger>
+                                )
+                              })}
+                            </TabsList>
+
+                            {abas.map((aba) => {
+                              const list = isHist ? aba.ocorrenciasTodas : aba.ocorrenciasMes
+                              return (
+                                <TabsContent
+                                  key={aba.tipo}
+                                  value={aba.tipo}
+                                  className="m-0 focus-visible:outline-none"
+                                >
+                                  {renderOcorrenciasList(list, aba.tipo)}
+                                </TabsContent>
+                              )
+                            })}
+                          </Tabs>
                         </div>
                       )}
                     </div>
