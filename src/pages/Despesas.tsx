@@ -748,24 +748,78 @@ export default function Despesas() {
     setParams(next, { replace: true })
   }
 
-  // Sincronizar ocorrências pendentes do mês se necessário
+  // Sincronizar ocorrências pendentes do mês se necessário com throttle, lote e tratamento amigável de 429
   const handleGerarOcorrenciasMes = async () => {
     setRefreshing(true)
     try {
-      for (const comp of compromissos.filter((c) => c.ativo !== false)) {
-        await despesasService.gerarOcorrenciasParaCompromisso(comp, [currentCompetencia])
+      const ativos = compromissos.filter((c) => c.ativo !== false)
+      // Carrega ocorrências existentes da competência em memória para evitar N GETs redundantes
+      let existingByCompromisso: Map<string, DespesaOcorrencia[]> | null = null
+      try {
+        const ocsComp = await despesasService.listOcorrencias({
+          filter: `competencia = '${currentCompetencia}'`,
+        })
+        existingByCompromisso = new Map()
+        for (const oc of ocsComp) {
+          const cId =
+            typeof oc.compromisso === 'object' && oc.compromisso
+              ? (oc.compromisso as any).id
+              : oc.compromisso
+          if (!cId) continue
+          const list = existingByCompromisso.get(cId) || []
+          list.push(oc)
+          existingByCompromisso.set(cId, list)
+        }
+      } catch (errPre) {
+        console.warn(
+          'Fallback: consulta prévia de ocorrências não concluída, prosseguindo com controle individual:',
+          errPre,
+        )
       }
+
+      const batchSize = 3
+      for (let i = 0; i < ativos.length; i += batchSize) {
+        const batch = ativos.slice(i, i + batchSize)
+        await Promise.all(
+          batch.map(async (comp) => {
+            // Se já temos ocorrência para este compromisso na competência e ele é mensal comum ou anual, não dispara request
+            const jaTemNaComp = existingByCompromisso
+              ?.get(comp.id)
+              ?.some((o) => o.competencia === currentCompetencia)
+            const isAvulsoOuParcelado =
+              comp.regra_repeticao === 'avulso' ||
+              comp.regra_repeticao === 'parcelado' ||
+              comp.modalidade_parcelamento === 'parcelado'
+            if (jaTemNaComp && !isAvulsoOuParcelado) {
+              return
+            }
+            await despesasService.gerarOcorrenciasParaCompromisso(comp, [currentCompetencia])
+          }),
+        )
+        if (i + batchSize < ativos.length) {
+          await new Promise((resolve) => setTimeout(resolve, 300))
+        }
+      }
+
       toast({
         title: 'Ocorrências sincronizadas',
         description: `Compromissos ativos gerados para ${formatCompetenciaDisplay(currentCompetencia)}.`,
       })
       await loadData()
-    } catch (e) {
+    } catch (e: any) {
+      const is429 =
+        (e instanceof ClientResponseError && e.status === 429) ||
+        e?.status === 429 ||
+        String(e?.message || '').includes('429')
+
       toast({
         variant: 'destructive',
-        title: 'Erro ao sincronizar',
-        description: apiMessage(e),
+        title: is429 ? 'Sobrecarga temporária' : 'Erro ao sincronizar',
+        description: is429
+          ? 'Sobrecarga temporária, tente novamente em alguns instantes.'
+          : apiMessage(e),
       })
+    } finally {
       setRefreshing(false)
     }
   }

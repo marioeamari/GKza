@@ -958,28 +958,37 @@ export const despesasService = {
       }
 
       const compStr = `${dueDate.getUTCFullYear()}-${(dueDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
-      const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-        filter: `compromisso = '${compromisso.id}' && competencia = '${compStr}'`,
-      })
-      if (existing.totalItems === 0) {
-        await pb.collection('despesas_ocorrencias').create({
-          compromisso: compromisso.id,
-          contexto_tipo: compromisso.contexto_tipo,
-          empresa: compromisso.empresa || null,
-          secao: compromisso.secao,
-          conta: compromisso.conta_padrao || null,
-          competencia: compStr,
-          data_vencimento: dueDate.toISOString(),
-          valor_previsto: compromisso.valor_estimado,
-          valor_estimado_original: compromisso.valor_estimado,
-          valor_ajustado_manualmente: false,
-          status: 'prevista',
-          dizimo: compromisso.dizimo || false,
-          tipo_dizimo: compromisso.tipo_dizimo || null,
-          direcionamento: compromisso.direcionamento || null,
-          link_pagamento: compromisso.link_pagamento || null,
-          observacoes: compromisso.observacoes || 'Assinatura anual',
+      try {
+        const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
+          filter: `compromisso = '${compromisso.id}' && competencia = '${compStr}'`,
         })
+        if (existing.totalItems === 0) {
+          await pb.collection('despesas_ocorrencias').create({
+            compromisso: compromisso.id,
+            contexto_tipo: compromisso.contexto_tipo,
+            empresa: compromisso.empresa || null,
+            secao: compromisso.secao,
+            conta: compromisso.conta_padrao || null,
+            competencia: compStr,
+            data_vencimento: dueDate.toISOString(),
+            valor_previsto: compromisso.valor_estimado,
+            valor_estimado_original: compromisso.valor_estimado,
+            valor_ajustado_manualmente: false,
+            status: 'prevista',
+            dizimo: compromisso.dizimo || false,
+            tipo_dizimo: compromisso.tipo_dizimo || null,
+            direcionamento: compromisso.direcionamento || null,
+            link_pagamento: compromisso.link_pagamento || null,
+            observacoes: compromisso.observacoes || 'Assinatura anual',
+          })
+        }
+      } catch (err: any) {
+        if (err instanceof ClientResponseError && err.status === 429) {
+          console.warn(
+            `[gerarOcorrenciasParaCompromisso] 429 detectado para compromisso ${compromisso.id}`,
+          )
+        }
+        throw err
       }
       return
     }
@@ -1113,33 +1122,42 @@ export const despesasService = {
         continue
       }
 
-      const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-        filter: `compromisso = '${compromisso.id}' && competencia = '${compStr}'`,
-      })
-      if (existing.totalItems === 0) {
-        const [yStr, mStr] = compStr.split('-')
-        const y = parseInt(yStr, 10)
-        const m = parseInt(mStr, 10) - 1
-        const dueDate = despesasService.calcularDataVencimentoNoMes(y, m, day)
-
-        await pb.collection('despesas_ocorrencias').create({
-          compromisso: compromisso.id,
-          contexto_tipo: compromisso.contexto_tipo,
-          empresa: compromisso.empresa || null,
-          secao: compromisso.secao,
-          conta: compromisso.conta_padrao || null,
-          competencia: compStr,
-          data_vencimento: dueDate.toISOString(),
-          valor_previsto: compromisso.valor_estimado,
-          valor_estimado_original: compromisso.valor_estimado,
-          valor_ajustado_manualmente: false,
-          status: 'prevista',
-          dizimo: compromisso.dizimo || false,
-          tipo_dizimo: compromisso.tipo_dizimo || null,
-          direcionamento: compromisso.direcionamento || null,
-          link_pagamento: compromisso.link_pagamento || null,
-          observacoes: compromisso.observacoes || null,
+      try {
+        const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
+          filter: `compromisso = '${compromisso.id}' && competencia = '${compStr}'`,
         })
+        if (existing.totalItems === 0) {
+          const [yStr, mStr] = compStr.split('-')
+          const y = parseInt(yStr, 10)
+          const m = parseInt(mStr, 10) - 1
+          const dueDate = despesasService.calcularDataVencimentoNoMes(y, m, day)
+
+          await pb.collection('despesas_ocorrencias').create({
+            compromisso: compromisso.id,
+            contexto_tipo: compromisso.contexto_tipo,
+            empresa: compromisso.empresa || null,
+            secao: compromisso.secao,
+            conta: compromisso.conta_padrao || null,
+            competencia: compStr,
+            data_vencimento: dueDate.toISOString(),
+            valor_previsto: compromisso.valor_estimado,
+            valor_estimado_original: compromisso.valor_estimado,
+            valor_ajustado_manualmente: false,
+            status: 'prevista',
+            dizimo: compromisso.dizimo || false,
+            tipo_dizimo: compromisso.tipo_dizimo || null,
+            direcionamento: compromisso.direcionamento || null,
+            link_pagamento: compromisso.link_pagamento || null,
+            observacoes: compromisso.observacoes || null,
+          })
+        }
+      } catch (err: any) {
+        if (err instanceof ClientResponseError && err.status === 429) {
+          console.warn(
+            `[gerarOcorrenciasParaCompromisso] 429 detectado para compromisso ${compromisso.id} na competência ${compStr}`,
+          )
+        }
+        throw err
       }
     }
   },
