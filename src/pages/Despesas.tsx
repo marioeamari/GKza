@@ -31,9 +31,14 @@ import {
   Undo2,
   UserRound,
   WalletCards,
+  Receipt,
+  Wallet,
   X,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { PagarFaturaDialog } from '@/components/cartao/PagarFaturaDialog'
+import type { FaturaCartaoGroup } from '@/lib/cartao-fatura'
+import { contaAceitaCredito } from '@/services/despesas'
 import { ClientResponseError } from 'pocketbase'
 
 import { LoadingState } from '@/components/LoadingState'
@@ -469,14 +474,7 @@ export default function Despesas() {
   // Ocorrências e compromissos
   const [ocorrencias, setOcorrencias] = useState<DespesaOcorrencia[]>([])
   const [compromissos, setCompromissos] = useState<DespesaCompromisso[]>([])
-  const [cartaoOcorrenciasAll, setCartaoOcorrenciasAll] = useState<DespesaOcorrencia[]>([])
-  const [assinaturasOcorrenciasAll, setAssinaturasOcorrenciasAll] = useState<DespesaOcorrencia[]>(
-    [],
-  )
 
-  // Modo de visualização de cartões: 'mes' (mês selecionado) ou 'historico' (todas as compras / histórico completo)
-  const [cartaoViewMode, setCartaoViewMode] = useState<Record<string, 'mes' | 'historico'>>({})
-  const [cartaoExpanded, setCartaoExpanded] = useState<Record<string, boolean>>({})
   const [contaExpanded, setContaExpanded] = useState<Record<string, boolean>>({})
   const [dinheiroExpanded, setDinheiroExpanded] = useState(true)
 
@@ -506,7 +504,9 @@ export default function Despesas() {
   const [filterTitular, setFilterTitular] = useState('all') // Titular da despesa (CPF ou CNPJ)
   const [filterCategoria, setFilterCategoria] = useState('all') // Categoria financeira (finalidade)
   const [filterStatus, setFilterStatus] = useState('all')
-  const [filterSecao, setFilterSecao] = useState('all') // Seção do painel: 'all' | 'contas_mensais_pix_boleto' | 'assinaturas_anuais' | 'cartoes_credito'
+  const [filterSecao, setFilterSecao] = useState('all') // Seção do painel: 'all' | contaId | 'dinheiro_especie' | 'sem_conta'
+  const [faturaToPay, setFaturaToPay] = useState<FaturaCartaoGroup | null>(null)
+  const [payFaturaOpen, setPayFaturaOpen] = useState(false)
 
   // Filtro de Competência de Apuração: 'vencimento' (padrão) | 'pagamento'
   const [filtroDataCompetencia, setFiltroDataCompetencia] = useState<'vencimento' | 'pagamento'>(
@@ -622,23 +622,12 @@ export default function Despesas() {
       // Pequeno atraso para escalonar antes das 3 consultas pesadas
       await new Promise((r) => setTimeout(r, 80))
 
-      // 3. Carrega consultas secundárias (cartões, assinaturas anuais e atrasadas) escalonadas para evitar rajada
-      const allOcsCartao = await despesasService.listOcorrencias({
-        filter: `secao = 'cartoes_credito'`,
-        sort: '-data_vencimento',
-      })
-      await new Promise((r) => setTimeout(r, 60))
-
+      // 3. Carrega consultas secundárias (atrasadas) escalonadas para evitar rajada
       const allOcsAtrasadas = await despesasService.listOcorrencias({
         filter: `status = 'prevista' && (competencia < '${realCurrentComp}' || (competencia = '${realCurrentComp}' && data_vencimento < '${realTodayStr} 23:59:59'))`,
         sort: 'data_vencimento',
       })
       await new Promise((r) => setTimeout(r, 60))
-
-      const allOcsAssinaturas = await despesasService.listOcorrencias({
-        filter: `secao = 'assinaturas_anuais'`,
-        sort: '-data_pagamento',
-      })
 
       // Função de correspondência ao grupo de contexto ativo
       const isCompromissoInContext = (comp: DespesaCompromisso): boolean => {
@@ -695,15 +684,10 @@ export default function Despesas() {
 
       const comps = allComps.filter(isCompromissoInContext)
       const ocs = allOcs.filter(isOcorrenciaInContext)
-      const ocsCartaoAll = allOcsCartao.filter(isOcorrenciaInContext)
       const ocsAtrasadas = allOcsAtrasadas.filter(isOcorrenciaInContext)
-      const ocsAssinaturasAll = allOcsAssinaturas.filter(isOcorrenciaInContext)
-
       setCompromissos(comps)
       setOcorrencias(ocs)
-      setCartaoOcorrenciasAll(ocsCartaoAll)
       setOcorrenciasAtrasadas(ocsAtrasadas)
-      setAssinaturasOcorrenciasAll(ocsAssinaturasAll)
       setIsOverloaded(false)
     } catch (err: any) {
       const is429 =
@@ -785,6 +769,10 @@ export default function Despesas() {
     }
   }
 
+  const metodosMap = useMemo(() => {
+    return new Map<string, MetodoPagamento>(metodosPagamento.map((m) => [m.id, m]))
+  }, [metodosPagamento])
+
   // Filtragem das ocorrências
   const filteredOcorrencias = useMemo(() => {
     return ocorrencias.filter((oc) => {
@@ -811,7 +799,25 @@ export default function Despesas() {
         (filterTitular === 'cnpj' &&
           (comp?.titular_tipo === 'cnpj' || comp?.contexto_tipo === 'empresa'))
 
-      const matchesSecao = filterSecao === 'all' || oc.secao === filterSecao
+      const matchesSecao = (() => {
+        if (filterSecao === 'all') return true
+        if (filterSecao === 'dinheiro_especie') {
+          return despesasService.isDespesaDinheiro(oc, comp, metodosMap)
+        }
+        if (filterSecao === 'sem_conta') {
+          const isDinheiro = despesasService.isDespesaDinheiro(oc, comp, metodosMap)
+          if (isDinheiro) return false
+          const contaId = oc.conta || comp?.conta_padrao
+          if (!contaId) return true
+          const c = contas.find((item) => item.id === contaId)
+          return !c || c.ativa === false
+        }
+        // Filtro por ID específico de conta
+        const isDinheiro = despesasService.isDespesaDinheiro(oc, comp, metodosMap)
+        if (isDinheiro) return false
+        const contaId = oc.conta || comp?.conta_padrao
+        return contaId === filterSecao
+      })()
 
       const matchesStatus = filterStatus === 'all' || oc.status === filterStatus
 
@@ -824,7 +830,17 @@ export default function Despesas() {
         matchesStatus
       )
     })
-  }, [ocorrencias, search, filterTag, filterCategoria, filterTitular, filterSecao, filterStatus])
+  }, [
+    ocorrencias,
+    search,
+    filterTag,
+    filterCategoria,
+    filterTitular,
+    filterSecao,
+    filterStatus,
+    metodosPagamento,
+    contas,
+  ])
 
   // Data real de hoje em America/Sao_Paulo para cálculo de vencimento/atraso
   const realTodayStr = getLocalDateStr() // 'YYYY-MM-DD'
@@ -871,7 +887,25 @@ export default function Despesas() {
         (filterTitular === 'cnpj' &&
           (comp?.titular_tipo === 'cnpj' || comp?.contexto_tipo === 'empresa'))
 
-      const matchesSecao = filterSecao === 'all' || oc.secao === filterSecao
+      const matchesSecao = (() => {
+        if (filterSecao === 'all') return true
+        if (filterSecao === 'dinheiro_especie') {
+          return despesasService.isDespesaDinheiro(oc, comp, metodosMap)
+        }
+        if (filterSecao === 'sem_conta') {
+          const isDinheiro = despesasService.isDespesaDinheiro(oc, comp, metodosMap)
+          if (isDinheiro) return false
+          const contaId = oc.conta || comp?.conta_padrao
+          if (!contaId) return true
+          const c = contas.find((item) => item.id === contaId)
+          return !c || c.ativa === false
+        }
+        // Filtro por ID específico de conta
+        const isDinheiro = despesasService.isDespesaDinheiro(oc, comp, metodosMap)
+        if (isDinheiro) return false
+        const contaId = oc.conta || comp?.conta_padrao
+        return contaId === filterSecao
+      })()
 
       const matchesStatus = filterStatus === 'all' || oc.status === filterStatus
 
@@ -892,6 +926,8 @@ export default function Despesas() {
     filterTitular,
     filterSecao,
     filterStatus,
+    metodosPagamento,
+    contas,
   ])
 
   // Função utilitária para ordenação inteligente de ocorrências:
@@ -986,301 +1022,6 @@ export default function Despesas() {
       sortFn: sortOcorrenciasList,
     })
   }, [filteredOcorrencias, contas, compromissos, metodosPagamento, sortOcorrenciasList])
-
-  // Seção: Compromissos anuais ativos (visíveis em qualquer competência) + ocorrências do mês
-  const compromissosAnuais = useMemo(() => {
-    const filtered = compromissos.filter((c) => {
-      const isAnual = c.secao === 'assinaturas_anuais' || c.regra_repeticao === 'anual'
-      if (!isAnual || c.ativo === false) return false
-
-      const desc = c.descricao || ''
-      const forn = c.fornecedor || ''
-      const matchesSearch =
-        !search ||
-        desc.toLowerCase().includes(search.toLowerCase()) ||
-        forn.toLowerCase().includes(search.toLowerCase())
-
-      const matchesTag = filterTag === 'all' || c.tag === filterTag
-      const matchesCategoria = filterCategoria === 'all' || c.categoria === filterCategoria
-      const matchesTitular =
-        filterTitular === 'all' ||
-        (filterTitular === 'cpf' && (c.titular_tipo === 'cpf' || c.contexto_tipo === 'pessoal')) ||
-        (filterTitular === 'cnpj' && (c.titular_tipo === 'cnpj' || c.contexto_tipo === 'empresa'))
-
-      // Se filtro de status foi selecionado, verifica compatibilidade com o status deste ciclo
-      if (filterStatus !== 'all') {
-        const oc = ocorrencias.find((o) => o.compromisso === c.id)
-        const st = oc?.status || 'prevista'
-        if (st !== filterStatus) return false
-      }
-
-      return matchesSearch && matchesTag && matchesCategoria && matchesTitular
-    })
-
-    // Ordenação dos compromissos anuais respeitando sortBy
-    const [anoComp] = currentCompetencia.split('-').map((v) => parseInt(v, 10))
-    const today = realTodayStr
-
-    return [...filtered].sort((cA, cB) => {
-      const ocA = ocorrencias.find((o) => o.compromisso === cA.id)
-      const ocB = ocorrencias.find((o) => o.compromisso === cB.id)
-
-      const isPagaA = ocA?.status === 'paga'
-      const isPagaB = ocB?.status === 'paga'
-
-      // Não pagas sobem
-      if (isPagaA !== isPagaB) {
-        return isPagaA ? 1 : -1
-      }
-
-      // Calcula data de renovação/vencimento
-      const dateA = cA.data_inicio ? new Date(cA.data_inicio) : new Date()
-      const diaA = cA.dia_vencimento || dateA.getUTCDate() || 10
-      const mesA = !isNaN(dateA.getTime()) ? dateA.getUTCMonth() + 1 : 1
-      const dueStrA = `${anoComp || 2025}-${String(mesA).padStart(2, '0')}-${String(diaA).padStart(2, '0')}`
-
-      const dateB = cB.data_inicio ? new Date(cB.data_inicio) : new Date()
-      const diaB = cB.dia_vencimento || dateB.getUTCDate() || 10
-      const mesB = !isNaN(dateB.getTime()) ? dateB.getUTCMonth() + 1 : 1
-      const dueStrB = `${anoComp || 2025}-${String(mesB).padStart(2, '0')}-${String(diaB).padStart(2, '0')}`
-
-      if (sortBy === 'urgente') {
-        if (!isPagaA) {
-          const isUrgenteA = dueStrA <= today
-          const isUrgenteB = dueStrB <= today
-          if (isUrgenteA && !isUrgenteB) return -1
-          if (!isUrgenteA && isUrgenteB) return 1
-        }
-        const cmp = dueStrA.localeCompare(dueStrB)
-        if (cmp !== 0) return cmp
-        const descCmp = (cA.descricao || '').localeCompare(cB.descricao || '')
-        if (descCmp !== 0) return descCmp
-        return cA.id.localeCompare(cB.id)
-      } else {
-        if (!isPagaA) {
-          const isUrgenteA = dueStrA <= today
-          const isUrgenteB = dueStrB <= today
-          // Em 'recente': datas mais distantes (futuras) no topo; vencidas/hoje ao final das pendentes
-          if (!isUrgenteA && isUrgenteB) return -1
-          if (isUrgenteA && !isUrgenteB) return 1
-        }
-        const cmp = dueStrB.localeCompare(dueStrA)
-        if (cmp !== 0) return cmp
-        const descCmp = (cA.descricao || '').localeCompare(cB.descricao || '')
-        if (descCmp !== 0) return descCmp
-        return cA.id.localeCompare(cB.id)
-      }
-    })
-  }, [
-    compromissos,
-    search,
-    filterTag,
-    filterCategoria,
-    filterTitular,
-    filterStatus,
-    ocorrencias,
-    currentCompetencia,
-    realTodayStr,
-    sortBy,
-  ])
-
-  // Ocorrências da seção de assinaturas anuais na competência atual
-  const secaoAssinaturasOcorrencias = useMemo(
-    () => filteredOcorrencias.filter((oc) => oc.secao === 'assinaturas_anuais'),
-    [filteredOcorrencias],
-  )
-
-  // Seção 3: Cartões de Crédito (Agrupados por Cartão) — somente cartões ativos
-  const cartaoContas = useMemo(
-    () =>
-      contas
-        .filter((c) => c.tipo === 'cartao' && c.ativa)
-        .sort((a, b) => {
-          const ordemA = a.ordem ?? 999999
-          const ordemB = b.ordem ?? 999999
-          if (ordemA !== ordemB) return ordemA - ordemB
-          return (a.nome || '').localeCompare(b.nome || '')
-        }),
-    [contas],
-  )
-
-  // Filtragem de todas as ocorrências de cartões (para histórico completo)
-  const filteredCartaoOcorrenciasAll = useMemo(() => {
-    return cartaoOcorrenciasAll.filter((oc) => {
-      const comp = oc.expand?.compromisso
-      const desc = comp?.descricao || ''
-      const forn = comp?.fornecedor || ''
-      const matchesSearch =
-        !search ||
-        desc.toLowerCase().includes(search.toLowerCase()) ||
-        forn.toLowerCase().includes(search.toLowerCase())
-
-      const matchesTag =
-        filterTag === 'all' || comp?.tag === filterTag || oc.expand?.compromisso?.tag === filterTag
-
-      const matchesCategoria =
-        filterCategoria === 'all' ||
-        comp?.categoria === filterCategoria ||
-        oc.expand?.compromisso?.categoria === filterCategoria
-
-      const matchesTitular =
-        filterTitular === 'all' ||
-        (filterTitular === 'cpf' &&
-          (comp?.titular_tipo === 'cpf' || comp?.contexto_tipo === 'pessoal')) ||
-        (filterTitular === 'cnpj' &&
-          (comp?.titular_tipo === 'cnpj' || comp?.contexto_tipo === 'empresa'))
-
-      const matchesSecao = filterSecao === 'all' || oc.secao === filterSecao
-
-      const matchesStatus = filterStatus === 'all' || oc.status === filterStatus
-
-      return (
-        matchesSearch &&
-        matchesTag &&
-        matchesCategoria &&
-        matchesTitular &&
-        matchesSecao &&
-        matchesStatus
-      )
-    })
-  }, [
-    cartaoOcorrenciasAll,
-    search,
-    filterTag,
-    filterCategoria,
-    filterTitular,
-    filterSecao,
-    filterStatus,
-  ])
-
-  const cartoesGrouped = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        conta: Conta
-        ocorrenciasMes: DespesaOcorrencia[]
-        ocorrenciasTodas: DespesaOcorrencia[]
-        abasMes: Map<ContaTipoPagamento, DespesaOcorrencia[]>
-        abasTodas: Map<ContaTipoPagamento, DespesaOcorrencia[]>
-      }
-    >()
-
-    const createCartaoEntry = (conta: Conta) => {
-      const tipos = despesasService.getTiposPagamentoConta(conta)
-      const abasMes = new Map<ContaTipoPagamento, DespesaOcorrencia[]>()
-      const abasTodas = new Map<ContaTipoPagamento, DespesaOcorrencia[]>()
-      tipos.forEach((t) => {
-        abasMes.set(t, [])
-        abasTodas.set(t, [])
-      })
-      return {
-        conta,
-        ocorrenciasMes: [] as DespesaOcorrencia[],
-        ocorrenciasTodas: [] as DespesaOcorrencia[],
-        abasMes,
-        abasTodas,
-      }
-    }
-
-    // Inicializa todos os cartões cadastrados ativos
-    cartaoContas.forEach((conta) => {
-      map.set(conta.id, createCartaoEntry(conta))
-    })
-
-    const alocarEmAba = (
-      entry: ReturnType<typeof createCartaoEntry>,
-      oc: DespesaOcorrencia,
-      target: 'mes' | 'todas',
-    ) => {
-      const comp =
-        oc.expand?.compromisso || (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
-      const metodoObj =
-        comp?.expand?.metodo_pagamento ||
-        (comp?.metodo_pagamento
-          ? metodosPagamento.find((m) => m.id === comp.metodo_pagamento)
-          : null)
-
-      const tipos = despesasService.getTiposPagamentoConta(entry.conta)
-      const tipoAlocado = despesasService.mapearMetodoParaTipoPagamento(metodoObj, tipos)
-
-      const abasMap = target === 'mes' ? entry.abasMes : entry.abasTodas
-      if (!abasMap.has(tipoAlocado)) {
-        abasMap.set(tipoAlocado, [])
-      }
-      abasMap.get(tipoAlocado)!.push(oc)
-
-      if (target === 'mes') {
-        entry.ocorrenciasMes.push(oc)
-      } else {
-        entry.ocorrenciasTodas.push(oc)
-      }
-    }
-
-    // Ocorrências do mês: somente aloca nos grupos de cartões ativos
-    filteredOcorrencias
-      .filter((oc) => oc.secao === 'cartoes_credito')
-      .forEach((oc) => {
-        const contaId = oc.conta || oc.expand?.compromisso?.conta_padrao || ''
-        // Cartão inativo/arquivado não gera grupo em cartões; suas ocorrências caem na rede de segurança "Sem Conta Definida"
-        if (!contaId || !map.has(contaId)) {
-          return
-        }
-        alocarEmAba(map.get(contaId)!, oc, 'mes')
-      })
-
-    // Todas as ocorrências do cartão (histórico geral): somente cartões ativos
-    filteredCartaoOcorrenciasAll.forEach((oc) => {
-      const contaId = oc.conta || oc.expand?.compromisso?.conta_padrao || ''
-      if (!contaId || !map.has(contaId)) {
-        return
-      }
-      alocarEmAba(map.get(contaId)!, oc, 'todas')
-    })
-
-    return Array.from(map.values()).map((item) => {
-      const tipos = despesasService.getTiposPagamentoConta(item.conta)
-      const abasObj: {
-        tipo: ContaTipoPagamento
-        ocorrenciasMes: DespesaOcorrencia[]
-        ocorrenciasTodas: DespesaOcorrencia[]
-      }[] = []
-
-      tipos.forEach((t) => {
-        abasObj.push({
-          tipo: t,
-          ocorrenciasMes: sortOcorrenciasList(item.abasMes.get(t) || []),
-          ocorrenciasTodas: sortOcorrenciasList(item.abasTodas.get(t) || []),
-        })
-      })
-
-      // Se houver tipos extras dinâmicos
-      item.abasMes.forEach((_, t) => {
-        if (!tipos.includes(t)) {
-          abasObj.push({
-            tipo: t,
-            ocorrenciasMes: sortOcorrenciasList(item.abasMes.get(t) || []),
-            ocorrenciasTodas: sortOcorrenciasList(item.abasTodas.get(t) || []),
-          })
-        }
-      })
-
-      return {
-        conta: item.conta,
-        tipos,
-        abas: abasObj,
-        ocorrenciasMes: sortOcorrenciasList(item.ocorrenciasMes),
-        ocorrenciasTodas: sortOcorrenciasList(item.ocorrenciasTodas),
-      }
-    })
-  }, [
-    cartaoContas,
-    filteredOcorrencias,
-    filteredCartaoOcorrenciasAll,
-    contas,
-    sortOcorrenciasList,
-    compromissosMap,
-    metodosPagamento,
-  ])
 
   // Totais do Período
   const totalPrevistoGeral = useMemo(
@@ -1633,19 +1374,30 @@ export default function Despesas() {
             </SelectContent>
           </Select>
 
-          {/* Seção */}
+          {/* Filtro de Seção / Lista Única de Contas */}
           <Select value={filterSecao} onValueChange={setFilterSecao}>
-            <SelectTrigger className="h-9 w-44 text-xs">
-              <SelectValue placeholder="Todas as Seções" />
+            <SelectTrigger className="h-9 w-48 text-xs">
+              <SelectValue placeholder="Todas as Contas" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Todas as Seções</SelectItem>
-              <SelectItem value="contas_mensais_pix_boleto">
-                Contas & Métodos de Pagamento
-              </SelectItem>
-              <SelectItem value="cartoes_credito">Cartões de Crédito</SelectItem>
+              <SelectItem value="all">Todas as Contas</SelectItem>
+              {contas
+                .filter((c) => c.ativa)
+                .sort((a, b) => {
+                  const ordemA = a.ordem ?? 999999
+                  const ordemB = b.ordem ?? 999999
+                  if (ordemA !== ordemB) return ordemA - ordemB
+                  return (a.nome || '').localeCompare(b.nome || '', 'pt-BR', {
+                    sensitivity: 'base',
+                  })
+                })
+                .map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.nome}
+                  </SelectItem>
+                ))}
               <SelectItem value="dinheiro_especie">Pagamentos em Dinheiro (Espécie)</SelectItem>
-              <SelectItem value="assinaturas_anuais">Assinaturas Anuais</SelectItem>
+              <SelectItem value="sem_conta">Sem conta definida</SelectItem>
             </SelectContent>
           </Select>
 
@@ -1790,11 +1542,11 @@ export default function Despesas() {
       )}
 
       {/* ========================================================
-          AS 3 SEÇÕES PRINCIPAIS CONFORME A PLANILHA DO USUÁRIO
+          LISTA ÚNICA DE CONTAS E SEÇÕES RESIDUAIS
          ======================================================== */}
       <div className="mt-8 space-y-8">
-        {/* SEÇÃO 1: Contas Bancárias e Caixas (Agrupadas por Conta com Abas por Tipo de Pagamento) */}
-        {(filterSecao === 'all' || filterSecao === 'contas_mensais_pix_boleto') && (
+        {/* 1. LISTA ÚNICA DE CONTAS (ordem já devolvida pelo agrupador) */}
+        {(filterSecao === 'all' || !['dinheiro_especie', 'sem_conta'].includes(filterSecao)) && (
           <section className="space-y-6">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -1802,583 +1554,365 @@ export default function Despesas() {
                   Contas & Métodos de Pagamento
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Despesas e compromissos organizados por conta bancária e divididos em abas por
-                  método (Pix, Boletos, Débito, Transferência).
-                </p>
-              </div>
-            </div>
-
-            {despesasAgrupadas.contasNaoCartao.length === 0 ? (
-              <div className="overflow-hidden rounded-2xl border border-border bg-white p-8 text-center text-sm text-muted-foreground shadow-soft">
-                Nenhuma conta bancária possui despesas nesta competência.
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {despesasAgrupadas.contasNaoCartao.map(({ conta, totalOcorrencias, abas }) => {
-                  const isExpanded = contaExpanded[conta.id] !== false
-                  const abasComDespesas = abas.filter((aba) => aba.ocorrencias.length > 0)
-                  const defaultTab = abasComDespesas[0]?.tipo || abas[0]?.tipo || 'pix'
-                  const totalPrevistoConta = abas.reduce(
-                    (sumAba, aba) =>
-                      sumAba + aba.ocorrencias.reduce((s, o) => s + (o.valor_previsto || 0), 0),
-                    0,
-                  )
-                  const totalPagoConta = abas.reduce(
-                    (sumAba, aba) =>
-                      sumAba +
-                      aba.ocorrencias
-                        .filter((o) => o.status === 'paga')
-                        .reduce((s, o) => s + (o.valor_pago || o.valor_previsto || 0), 0),
-                    0,
-                  )
-
-                  return (
-                    <div
-                      key={conta.id}
-                      className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft transition-all"
-                    >
-                      <header
-                        className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-secondary/25 p-4 sm:p-5 cursor-pointer hover:bg-secondary/35 transition"
-                        onClick={() =>
-                          setContaExpanded((prev) => ({
-                            ...prev,
-                            [conta.id]: prev[conta.id] === undefined ? false : !prev[conta.id],
-                          }))
-                        }
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <button
-                            type="button"
-                            className="grid h-8 w-8 place-items-center rounded-lg bg-white border border-border text-muted-foreground hover:text-foreground shrink-0 shadow-xs"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setContaExpanded((prev) => ({
-                                ...prev,
-                                [conta.id]: prev[conta.id] === undefined ? false : !prev[conta.id],
-                              }))
-                            }}
-                            title={isExpanded ? 'Recolher conta' : 'Expandir conta'}
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
-                          </button>
-
-                          <span
-                            className="grid h-11 w-11 place-items-center rounded-xl text-white shadow-xs shrink-0"
-                            style={{ background: conta.cor || '#1E40AF' }}
-                          >
-                            <Building2 className="h-6 w-6" />
-                          </span>
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="text-base font-extrabold text-foreground sm:text-lg truncate">
-                                {conta.nome}
-                              </h3>
-                              {conta.natureza && (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[10px] uppercase font-semibold py-0 px-1.5 h-4 text-muted-foreground"
-                                >
-                                  {conta.natureza === 'fisica'
-                                    ? 'Pessoa Física'
-                                    : 'Pessoa Jurídica'}
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                              <span className="font-medium text-foreground">
-                                {totalOcorrencias}{' '}
-                                {totalOcorrencias === 1 ? 'lançamento' : 'lançamentos'} no mês
-                              </span>
-                              <span>•</span>
-                              <span>
-                                {conta.tipo === 'caixa'
-                                  ? 'Conta Caixa / Espécie'
-                                  : 'Conta Corrente / Bancária'}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div
-                          className="flex flex-wrap items-center gap-3 ml-auto"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <div className="rounded-xl border border-border bg-white px-3 py-1 text-right">
-                            <p className="micro-label">Total Previsto</p>
-                            <p className="text-sm font-extrabold tabular-nums text-foreground">
-                              {formatCurrency(totalPrevistoConta)}
-                            </p>
-                          </div>
-                          {totalPagoConta > 0 && (
-                            <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-1 text-right">
-                              <p className="micro-label text-success">Total Pago</p>
-                              <p className="text-xs font-bold tabular-nums text-success">
-                                {formatCurrency(totalPagoConta)}
-                              </p>
-                            </div>
-                          )}
-                          <PermissionButton
-                            size="sm"
-                            variant="outline"
-                            allowed={can(user?.role, 'writeFinance')}
-                            onClick={() =>
-                              handleOpenNovoCompromisso('contas_mensais_pix_boleto', {
-                                contaId: conta.id,
-                              })
-                            }
-                            className="h-8 gap-1 text-xs"
-                          >
-                            <Plus className="h-3 w-3" /> Adicionar nesta conta
-                          </PermissionButton>
-                        </div>
-                      </header>
-
-                      {isExpanded && (
-                        <div className="p-4 sm:p-5">
-                          <Tabs defaultValue={defaultTab} className="w-full">
-                            <TabsList className="mb-4 flex h-auto flex-wrap gap-1 bg-muted/60 p-1">
-                              {abas.map((aba) => {
-                                const qtd = aba.ocorrencias.length
-                                const totalAba = aba.ocorrencias.reduce(
-                                  (s, o) => s + (o.valor_previsto || 0),
-                                  0,
-                                )
-                                const label = CONTA_TIPO_PAGAMENTO_LABELS[aba.tipo] || aba.tipo
-
-                                return (
-                                  <TabsTrigger
-                                    key={aba.tipo}
-                                    value={aba.tipo}
-                                    className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-xs"
-                                  >
-                                    <span>{label}</span>
-                                    <Badge
-                                      variant={qtd > 0 ? 'secondary' : 'outline'}
-                                      className="h-5 px-1.5 text-[10px] font-bold"
-                                    >
-                                      {qtd}
-                                    </Badge>
-                                    {qtd > 0 && (
-                                      <span className="hidden text-[11px] font-normal text-muted-foreground sm:inline">
-                                        ({formatCompactCurrency(totalAba)})
-                                      </span>
-                                    )}
-                                  </TabsTrigger>
-                                )
-                              })}
-                            </TabsList>
-
-                            {abas.map((aba) => (
-                              <TabsContent
-                                key={aba.tipo}
-                                value={aba.tipo}
-                                className="m-0 focus-visible:outline-none"
-                              >
-                                {aba.ocorrencias.length === 0 ? (
-                                  <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
-                                    Nenhum pagamento via{' '}
-                                    {CONTA_TIPO_PAGAMENTO_LABELS[aba.tipo] || aba.tipo} cadastrado
-                                    nesta conta para este mês.
-                                  </div>
-                                ) : (
-                                  <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-white shadow-2xs">
-                                    {aba.ocorrencias.map((oc) => {
-                                      const compObj =
-                                        oc.expand?.compromisso ||
-                                        (oc.compromisso
-                                          ? compromissosMap.get(oc.compromisso)
-                                          : undefined)
-                                      return (
-                                        <OcorrenciaRow
-                                          key={oc.id}
-                                          ocorrencia={oc}
-                                          isModoPagamento={filtroDataCompetencia === 'pagamento'}
-                                          compromissoFallback={compObj}
-                                          onBaixar={() => handleOpenBaixa(oc)}
-                                          onEstornar={() => setEstornando(oc)}
-                                          onEditarCompromisso={() =>
-                                            compObj && handleOpenEditarCompromisso(compObj)
-                                          }
-                                          onDuplicarCompromisso={() =>
-                                            compObj && handleOpenDuplicarCompromisso(compObj)
-                                          }
-                                          onExcluirCompromisso={() =>
-                                            compObj && setDeletandoCompromisso(compObj)
-                                          }
-                                          onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
-                                          canEdit={can(user?.role, 'writeFinance')}
-                                        />
-                                      )
-                                    })}
-                                  </div>
-                                )}
-                              </TabsContent>
-                            ))}
-                          </Tabs>
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {/* Subseção: Sem Conta Definida (Órfãs ou Contas Excluídas) */}
-            {despesasAgrupadas.semConta.length > 0 && (
-              <div className="overflow-hidden rounded-2xl border border-amber-300 bg-white shadow-soft">
-                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-200 bg-amber-50/70 p-4 sm:p-5">
-                  <div className="flex items-center gap-3">
-                    <span className="grid h-10 w-10 place-items-center rounded-xl bg-amber-500 text-white shadow-xs">
-                      <HelpCircle className="h-5 w-5" />
-                    </span>
-                    <div>
-                      <h3 className="text-base font-extrabold text-foreground">
-                        Sem Conta Definida
-                      </h3>
-                      <p className="text-xs text-muted-foreground">
-                        Despesas sem conta bancária associada ou cuja conta vinculada foi removida
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-xl border border-amber-200 bg-white px-3 py-1 text-right">
-                      <p className="micro-label">Total</p>
-                      <p className="text-sm font-extrabold tabular-nums text-foreground">
-                        {formatCurrency(
-                          despesasAgrupadas.semConta.reduce(
-                            (s, o) => s + (o.valor_previsto || 0),
-                            0,
-                          ),
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                </header>
-                <div className="divide-y divide-border">
-                  {despesasAgrupadas.semConta.map((oc) => {
-                    const compObj =
-                      oc.expand?.compromisso ||
-                      (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
-                    return (
-                      <OcorrenciaRow
-                        key={oc.id}
-                        ocorrencia={oc}
-                        isModoPagamento={filtroDataCompetencia === 'pagamento'}
-                        compromissoFallback={compObj}
-                        onBaixar={() => handleOpenBaixa(oc)}
-                        onEstornar={() => setEstornando(oc)}
-                        onEditarCompromisso={() => compObj && handleOpenEditarCompromisso(compObj)}
-                        onDuplicarCompromisso={() =>
-                          compObj && handleOpenDuplicarCompromisso(compObj)
-                        }
-                        onExcluirCompromisso={() => compObj && setDeletandoCompromisso(compObj)}
-                        onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
-                        canEdit={can(user?.role, 'writeFinance')}
-                      />
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* SEÇÃO 2: Cartões de Crédito (cadastráveis) */}
-        {(filterSecao === 'all' || filterSecao === 'cartoes_credito') && (
-          <section className="space-y-4">
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
-                  Cartões de Crédito
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  Compras parceladas e rotativas separadas por cartão com controle da fatura, dia de
-                  fechamento e vencimento.
+                  Todas as contas ativas com seus respectivos métodos de pagamento, cartões de
+                  crédito e assinaturas alocadas.
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <PermissionButton
-                  size="sm"
-                  variant="outline"
-                  allowed={can(user?.role, 'writeFinance')}
-                  onClick={() => handleOpenNovoCompromisso('cartoes_credito')}
-                >
-                  <Plus className="mr-1 h-3.5 w-3.5" /> Nova compra parcelada
-                </PermissionButton>
                 <Button size="sm" variant="ghost" asChild>
                   <Link to="/contas">
-                    <CreditCard className="mr-1 h-3.5 w-3.5" /> Gerenciar cartões
+                    <CreditCard className="mr-1 h-3.5 w-3.5" /> Gerenciar contas
                   </Link>
                 </Button>
               </div>
             </div>
 
-            <div className="space-y-5">
-              {cartoesGrouped.length === 0 ? (
-                <div className="rounded-2xl border border-border bg-white p-8 text-center text-sm text-muted-foreground shadow-soft">
-                  Nenhum cartão cadastrado. Vá em "Contas" para cadastrar seus cartões.
-                </div>
-              ) : (
-                cartoesGrouped.map(({ conta, abas, ocorrenciasMes, ocorrenciasTodas }) => {
-                  const currentMode = cartaoViewMode[conta.id] || 'mes'
-                  const isHist = currentMode === 'historico'
-                  // Toggle aberto por padrão
-                  const isExpanded = cartaoExpanded[conta.id] !== false
+            {despesasAgrupadas.contas.filter(
+              ({ conta }) => filterSecao === 'all' || conta.id === filterSecao,
+            ).length === 0 ? (
+              <div className="overflow-hidden rounded-2xl border border-border bg-white p-8 text-center text-sm text-muted-foreground shadow-soft">
+                Nenhuma conta possui despesas nesta competência ou filtro selecionado.
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {despesasAgrupadas.contas
+                  .filter(({ conta }) => filterSecao === 'all' || conta.id === filterSecao)
+                  .map(({ conta, totalOcorrencias, ocorrencias: todasOcorrenciasConta, abas }) => {
+                    const isExpanded = contaExpanded[conta.id] !== false
+                    const aceitaCredito = contaAceitaCredito(conta)
 
-                  // Totais do cartão no modo selecionado (usado no header)
-                  const totalHeaderMes = ocorrenciasMes.reduce(
-                    (sum, o) => sum + (o.valor_previsto || 0),
-                    0,
-                  )
-                  const totalPagoHeaderMes = ocorrenciasMes
-                    .filter((o) => o.status === 'paga')
-                    .reduce((sum, o) => sum + (o.valor_pago || o.valor_previsto || 0), 0)
+                    // Totais do mês
+                    const totalPrevistoMes = abas.reduce(
+                      (sumAba, aba) =>
+                        sumAba + aba.ocorrencias.reduce((s, o) => s + (o.valor_previsto || 0), 0),
+                      0,
+                    )
+                    const totalPagoMes = abas.reduce(
+                      (sumAba, aba) =>
+                        sumAba +
+                        aba.ocorrencias
+                          .filter((o) => o.status === 'paga')
+                          .reduce((s, o) => s + (o.valor_pago || o.valor_previsto || 0), 0),
+                      0,
+                    )
 
-                  const totalHeaderTodas = ocorrenciasTodas.reduce(
-                    (sum, o) => sum + (o.valor_previsto || 0),
-                    0,
-                  )
-                  const totalPagoHeaderTodas = ocorrenciasTodas
-                    .filter((o) => o.status === 'paga')
-                    .reduce((sum, o) => sum + (o.valor_pago || o.valor_previsto || 0), 0)
+                    // Dados do ciclo de fatura para a competência visualizada
+                    const cicloFatura = aceitaCredito
+                      ? calcularFaturaCartao(conta, `${currentCompetencia}-01`)
+                      : null
 
-                  // Se o cartão tem apenas 1 tipo de pagamento (ex: apenas 'credito'), omite a barra de abas
-                  const hasSingleTab = abas.length <= 1
+                    // Itens de crédito da fatura do mês atual da conta (itens na aba crédito)
+                    const ocorrenciasCredito =
+                      abas.find((a) => a.tipo === 'credito')?.ocorrencias || []
+                    const totalCreditoFatura = ocorrenciasCredito.reduce(
+                      (s, o) => s + (o.valor_previsto || 0),
+                      0,
+                    )
+                    const totalCreditoPago = ocorrenciasCredito
+                      .filter((o) => o.status === 'paga')
+                      .reduce((s, o) => s + (o.valor_pago || o.valor_previsto || 0), 0)
 
-                  // Aba padrão: a primeira com ocorrências no modo ativo, senão a primeira do cadastro
-                  const abasComOcorrencias = abas.filter((aba) =>
-                    isHist ? aba.ocorrenciasTodas.length > 0 : aba.ocorrenciasMes.length > 0,
-                  )
-                  const defaultTab = abasComOcorrencias[0]?.tipo || abas[0]?.tipo || 'credito'
+                    const faturaGroupRow: FaturaCartaoGroup | null =
+                      aceitaCredito && cicloFatura && conta.dia_fechamento
+                        ? {
+                            id: `${conta.id}_${currentCompetencia}`,
+                            conta,
+                            competencia: currentCompetencia,
+                            dataFechamento: cicloFatura.dataFechamento,
+                            dataVencimento: cicloFatura.dataVencimento,
+                            totalFatura:
+                              totalCreditoFatura > 0 ? totalCreditoFatura : totalPrevistoMes,
+                            paga:
+                              (totalCreditoFatura > 0 ? totalCreditoFatura : totalPrevistoMes) >
+                                0 &&
+                              (totalCreditoPago >= totalCreditoFatura ||
+                                totalPagoMes >= totalPrevistoMes),
+                            itens: (ocorrenciasCredito.length > 0
+                              ? ocorrenciasCredito
+                              : todasOcorrenciasConta
+                            ).map(
+                              (oc) =>
+                                ({
+                                  id: oc.id,
+                                  descricao:
+                                    oc.expand?.compromisso?.descricao ||
+                                    oc.observacoes ||
+                                    'Despesa',
+                                  valor: oc.valor_previsto || 0,
+                                  data: oc.data_vencimento
+                                    ? oc.data_vencimento.slice(0, 10)
+                                    : `${currentCompetencia}-01`,
+                                  conta: conta.id,
+                                  status: (oc.status === 'paga' ? 'pago' : 'pendente') as any,
+                                  tipo: 'despesa' as any,
+                                  created: oc.created || '',
+                                  updated: oc.updated || '',
+                                }) as any,
+                            ),
+                          }
+                        : null
 
-                  const countComprasExibidas = isHist
-                    ? ocorrenciasTodas.length
-                    : ocorrenciasMes.length
+                    // Abas com ocorrências
+                    const abasComDespesas = abas.filter((aba) => aba.ocorrencias.length > 0)
+                    const defaultTab = abasComDespesas[0]?.tipo || abas[0]?.tipo || 'credito'
+                    const hasMultipleTabs = abas.length > 1
 
-                  const renderOcorrenciasList = (
-                    list: DespesaOcorrencia[],
-                    tipoAba?: ContaTipoPagamento,
-                  ) => {
-                    if (list.length === 0) {
-                      const tipoLabel = tipoAba
-                        ? CONTA_TIPO_PAGAMENTO_LABELS[tipoAba] || tipoAba
-                        : 'cartão'
+                    // Renderizador da lista de ocorrências por aba
+                    const renderOcorrenciasConta = (
+                      list: DespesaOcorrencia[],
+                      tipoAba?: ContaTipoPagamento,
+                    ) => {
+                      if (list.length === 0) {
+                        const tipoLabel = tipoAba
+                          ? CONTA_TIPO_PAGAMENTO_LABELS[tipoAba] || tipoAba
+                          : 'esta conta'
+                        return (
+                          <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+                            Nenhum pagamento via {tipoLabel} cadastrado nesta conta para{' '}
+                            {formatCompetenciaDisplay(currentCompetencia)}.
+                          </div>
+                        )
+                      }
+
                       return (
-                        <div className="p-8 text-center text-xs text-muted-foreground">
-                          {isHist
-                            ? `Nenhuma compra ou pagamento via ${tipoLabel} realizada com este cartão.`
-                            : `Nenhum pagamento via ${tipoLabel} cadastrado neste cartão para ${formatCompetenciaDisplay(
-                                currentCompetencia,
-                              )}. Clique em "Todas as compras" para ver o histórico geral.`}
+                        <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-white shadow-2xs">
+                          {list.map((oc) => {
+                            const compObj =
+                              oc.expand?.compromisso ||
+                              (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
+                            return (
+                              <OcorrenciaRow
+                                key={oc.id}
+                                ocorrencia={oc}
+                                isModoPagamento={filtroDataCompetencia === 'pagamento'}
+                                compromissoFallback={compObj}
+                                onBaixar={() => handleOpenBaixa(oc)}
+                                onEstornar={() => setEstornando(oc)}
+                                onEditarCompromisso={() =>
+                                  compObj && handleOpenEditarCompromisso(compObj)
+                                }
+                                onDuplicarCompromisso={() =>
+                                  compObj && handleOpenDuplicarCompromisso(compObj)
+                                }
+                                onExcluirCompromisso={() =>
+                                  compObj && setDeletandoCompromisso(compObj)
+                                }
+                                onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
+                                canEdit={can(user?.role, 'writeFinance')}
+                              />
+                            )
+                          })}
                         </div>
                       )
                     }
 
                     return (
-                      <div className="divide-y divide-border">
-                        {list.map((oc) => {
-                          const compObj =
-                            oc.expand?.compromisso ||
-                            (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
-                          return (
-                            <OcorrenciaRow
-                              key={oc.id}
-                              ocorrencia={oc}
-                              isModoPagamento={filtroDataCompetencia === 'pagamento'}
-                              compromissoFallback={compObj}
-                              onBaixar={() => handleOpenBaixa(oc)}
-                              onEstornar={() => setEstornando(oc)}
-                              onEditarCompromisso={() =>
-                                compObj && handleOpenEditarCompromisso(compObj)
-                              }
-                              onDuplicarCompromisso={() =>
-                                compObj && handleOpenDuplicarCompromisso(compObj)
-                              }
-                              onExcluirCompromisso={() =>
-                                compObj && setDeletandoCompromisso(compObj)
-                              }
-                              onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
-                              canEdit={can(user?.role, 'writeFinance')}
-                            />
-                          )
-                        })}
-                      </div>
-                    )
-                  }
-
-                  return (
-                    <div
-                      key={conta.id}
-                      className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft transition-all"
-                    >
-                      <header
-                        className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-secondary/25 p-4 sm:p-5 cursor-pointer hover:bg-secondary/35 transition"
-                        onClick={() =>
-                          setCartaoExpanded((prev) => ({
-                            ...prev,
-                            [conta.id]: prev[conta.id] === undefined ? false : !prev[conta.id],
-                          }))
-                        }
+                      <div
+                        key={conta.id}
+                        className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft transition-all"
                       >
-                        {/* Dados do Cartão: Chevron toggle, Ícone, Nome, Bandeira, Fechamento e Vencimento */}
-                        <div className="flex items-center gap-3 min-w-0">
-                          <button
-                            type="button"
-                            className="grid h-8 w-8 place-items-center rounded-lg bg-white border border-border text-muted-foreground hover:text-foreground shrink-0 shadow-xs"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setCartaoExpanded((prev) => ({
-                                ...prev,
-                                [conta.id]: prev[conta.id] === undefined ? false : !prev[conta.id],
-                              }))
-                            }}
-                            title={isExpanded ? 'Recolher cartão' : 'Expandir cartão'}
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
-                          </button>
-
-                          <span
-                            className="grid h-11 w-11 place-items-center rounded-xl text-white shadow-xs shrink-0"
-                            style={{ background: conta.cor || '#4C3A8C' }}
-                          >
-                            <CreditCard className="h-6 w-6" />
-                          </span>
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="text-base font-extrabold text-foreground sm:text-lg truncate">
-                                {conta.nome}
-                              </h3>
-                              {conta.bandeira && (
-                                <Badge variant="outline" className="font-semibold text-[10px]">
-                                  {conta.bandeira}
-                                </Badge>
-                              )}
-                              {conta.natureza && (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[10px] uppercase font-semibold py-0 px-1.5 h-4 text-muted-foreground"
-                                >
-                                  {conta.natureza === 'fisica'
-                                    ? 'Pessoa Física'
-                                    : 'Pessoa Jurídica'}
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                              <span className="font-medium text-foreground">
-                                {countComprasExibidas}{' '}
-                                {countComprasExibidas === 1 ? 'lançamento' : 'lançamentos'}
-                                {!isHist ? ' no mês' : ' no histórico'}
-                              </span>
-                              <span>•</span>
-                              <span>
-                                {conta.dia_fechamento ? (
-                                  <>
-                                    Fechamento dia <strong>{conta.dia_fechamento}</strong>
-                                  </>
-                                ) : (
-                                  'Fechamento não informado'
-                                )}
-                              </span>
-                              <span>•</span>
-                              <span className="font-semibold text-foreground flex items-center gap-1">
-                                <Calendar className="h-3 w-3 text-primary" />
-                                {conta.dia_vencimento ? (
-                                  <>
-                                    Vencimento dia <strong>{conta.dia_vencimento}</strong>
-                                  </>
-                                ) : (
-                                  'Vencimento não informado'
-                                )}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Valores e Alternador Mês vs Histórico Completo */}
-                        <div
-                          className="flex flex-wrap items-center gap-3 ml-auto"
-                          onClick={(e) => e.stopPropagation()}
+                        <header
+                          className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-secondary/25 p-4 sm:p-5 cursor-pointer hover:bg-secondary/35 transition"
+                          onClick={() =>
+                            setContaExpanded((prev) => ({
+                              ...prev,
+                              [conta.id]: prev[conta.id] === undefined ? false : !prev[conta.id],
+                            }))
+                          }
                         >
-                          {/* Seletor de visualização */}
-                          <div className="flex rounded-lg border border-border bg-background p-0.5 text-xs">
+                          {/* Cabeçalho da Conta */}
+                          <div className="flex items-center gap-3 min-w-0">
                             <button
                               type="button"
-                              onClick={() =>
-                                setCartaoViewMode((prev) => ({ ...prev, [conta.id]: 'mes' }))
-                              }
-                              className={`rounded-md px-2.5 py-1 font-medium transition ${
-                                !isHist
-                                  ? 'bg-primary text-white shadow-xs'
-                                  : 'text-muted-foreground hover:text-foreground'
-                              }`}
+                              className="grid h-8 w-8 place-items-center rounded-lg bg-white border border-border text-muted-foreground hover:text-foreground shrink-0 shadow-xs"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setContaExpanded((prev) => ({
+                                  ...prev,
+                                  [conta.id]:
+                                    prev[conta.id] === undefined ? false : !prev[conta.id],
+                                }))
+                              }}
+                              title={isExpanded ? 'Recolher conta' : 'Expandir conta'}
                             >
-                              Mês atual ({formatCompetenciaDisplay(currentCompetencia)})
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
                             </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setCartaoViewMode((prev) => ({ ...prev, [conta.id]: 'historico' }))
-                              }
-                              className={`rounded-md px-2.5 py-1 font-medium transition ${
-                                isHist
-                                  ? 'bg-primary text-white shadow-xs'
-                                  : 'text-muted-foreground hover:text-foreground'
-                              }`}
+
+                            <span
+                              className="grid h-11 w-11 place-items-center rounded-xl text-white shadow-xs shrink-0"
+                              style={{ background: conta.cor || '#1E40AF' }}
                             >
-                              Todas as compras ({ocorrenciasTodas.length})
-                            </button>
+                              {aceitaCredito ? (
+                                <CreditCard className="h-6 w-6" />
+                              ) : (
+                                <Building2 className="h-6 w-6" />
+                              )}
+                            </span>
+
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-base font-extrabold text-foreground sm:text-lg truncate">
+                                  {conta.nome}
+                                </h3>
+                                {conta.bandeira && (
+                                  <Badge variant="outline" className="font-semibold text-[10px]">
+                                    {conta.bandeira}
+                                  </Badge>
+                                )}
+                                {conta.natureza && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] uppercase font-semibold py-0 px-1.5 h-4 text-muted-foreground"
+                                  >
+                                    {conta.natureza === 'fisica'
+                                      ? 'Pessoa Física'
+                                      : 'Pessoa Jurídica'}
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                                <span className="font-medium text-foreground">
+                                  {totalOcorrencias}{' '}
+                                  {totalOcorrencias === 1 ? 'lançamento' : 'lançamentos'} no mês
+                                </span>
+                                {aceitaCredito && (
+                                  <>
+                                    <span>•</span>
+                                    <span>
+                                      Fecha dia <strong>{conta.dia_fechamento || 10}</strong> ·
+                                      Vence dia <strong>{conta.dia_vencimento || 20}</strong>                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
                           </div>
 
-                          {/* Indicadores financeiros */}
-                          <div className="flex items-center gap-3">
+                          {/* Valores e Ações */}
+                          <div
+                            className="flex flex-wrap items-center gap-3 ml-auto"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {/* Indicadores financeiros */}
                             <div className="rounded-xl border border-border bg-white px-3 py-1 text-right">
-                              <p className="micro-label">
-                                {isHist ? 'Total Compras' : 'Fatura do Mês'}
-                              </p>
+                              <p className="micro-label">Total Previsto</p>
                               <p className="text-sm font-extrabold tabular-nums text-foreground">
-                                {formatCurrency(isHist ? totalHeaderTodas : totalHeaderMes)}
+                                {formatCurrency(totalPrevistoMes)}
                               </p>
                             </div>
-                            {(isHist ? totalPagoHeaderTodas : totalPagoHeaderMes) > 0 && (
+
+                            {totalPagoMes > 0 && (
                               <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-1 text-right">
-                                <p className="micro-label text-success">Baixado</p>
+                                <p className="micro-label text-success">Total Pago</p>
                                 <p className="text-xs font-bold tabular-nums text-success">
-                                  {formatCurrency(
-                                    isHist ? totalPagoHeaderTodas : totalPagoHeaderMes,
-                                  )}
+                                  {formatCurrency(totalPagoMes)}
                                 </p>
                               </div>
                             )}
-                          </div>
-                        </div>
-                      </header>
 
-                      {isExpanded && (
-                        <>
-                          {hasSingleTab ? (
-                            // Cartões com apenas 1 tipo de pagamento (ex: ["credito"]): exibe direto sem poluir com abas
-                            renderOcorrenciasList(
-                              isHist ? ocorrenciasTodas : ocorrenciasMes,
-                              abas[0]?.tipo,
-                            )
-                          ) : (
-                            // Cartões com múltiplos tipos de pagamento (ex: NuBank com Crédito, Débito, Boleto, Pix, etc.)
-                            <div className="p-4 sm:p-5">
+                            {/* Botão de pagamento de fatura para contas que aceitam crédito */}
+                            {aceitaCredito && faturaGroupRow && (
+                              <PermissionButton
+                                size="sm"
+                                variant="default"
+                                allowed={can(user?.role, 'writeFinance')}
+                                onClick={() => {
+                                  setFaturaToPay(faturaGroupRow)
+                                  setPayFaturaOpen(true)
+                                }}
+                                className="h-8 gap-1 text-xs bg-primary hover:bg-primary/90 text-white"
+                              >
+                                <Receipt className="h-3.5 w-3.5" /> Gerar pagamento da fatura
+                              </PermissionButton>
+                            )}
+
+                            {/* Botão + Adicionar nesta conta (em TODAS as contas ativas) */}
+                            <PermissionButton
+                              size="sm"
+                              variant="outline"
+                              allowed={can(user?.role, 'writeFinance')}
+                              onClick={() => {
+                                const primeiroMetodo = metodosPagamento.find(
+                                  (m) =>
+                                    m.conta_padrao === conta.id ||
+                                    (aceitaCredito && m.tipo === 'cartao'),
+                                )
+                                handleOpenNovoCompromisso(
+                                  aceitaCredito ? 'cartoes_credito' : 'contas_mensais_pix_boleto',
+                                  {
+                                    contaId: conta.id,
+                                    metodoId: primeiroMetodo?.id,
+                                  },
+                                )
+                              }}
+                              className="h-8 gap-1 text-xs"
+                            >
+                              <Plus className="h-3 w-3" /> Adicionar nesta conta
+                            </PermissionButton>
+                          </div>
+                        </header>
+
+                        {/* Conteúdo expandido da conta */}
+                        {isExpanded && (
+                          <div className="p-4 sm:p-5">
+                            {/* Se a conta aceita crédito: exibir aviso do ciclo e vencimento */}
+                            {aceitaCredito && (
+                              <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-2.5 text-xs">
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+                                  <span className="font-semibold text-foreground flex items-center gap-1">
+                                    <CreditCard className="h-3.5 w-3.5 text-primary" />
+                                    Ciclo da Fatura:
+                                  </span>
+                                  <span>
+                                    Fechamento dia <strong>{conta.dia_fechamento || 10}</strong>
+                                  </span>
+                                  <span>•</span>
+                                  <span className="font-semibold text-foreground flex items-center gap-1">
+                                    <Calendar className="h-3.5 w-3.5 text-primary" />
+                                    Vencimento dia <strong>{conta.dia_vencimento || 20}</strong>
+                                  </span>
+                                  {conta.bandeira && (
+                                    <>
+                                      <span>•</span>
+                                      <span>
+                                        Bandeira: <strong>{conta.bandeira}</strong>
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+
+                                {faturaGroupRow && (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 text-xs font-bold text-primary hover:text-primary/80 p-0"
+                                    onClick={() => {
+                                      setFaturaToPay(faturaGroupRow)
+                                      setPayFaturaOpen(true)
+                                    }}
+                                  >
+                                    <Receipt className="mr-1 h-3.5 w-3.5" /> Quitar ciclo atual
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Renderização com Abas (2+ tipos) ou Direta (1 tipo) */}
+                            {!hasMultipleTabs ? (
+                              renderOcorrenciasConta(
+                                abas[0]?.ocorrencias || todasOcorrenciasConta,
+                                abas[0]?.tipo,
+                              )
+                            ) : (
                               <Tabs defaultValue={defaultTab} className="w-full">
                                 <TabsList className="mb-4 flex h-auto flex-wrap gap-1 bg-muted/60 p-1">
                                   {abas.map((aba) => {
-                                    const list = isHist ? aba.ocorrenciasTodas : aba.ocorrenciasMes
-                                    const qtd = list.length
-                                    const totalAba = list.reduce(
+                                    const ocsAba = aba.ocorrencias
+                                    const qtd = ocsAba.length
+                                    const totalAba = ocsAba.reduce(
                                       (s, o) => s + (o.valor_previsto || 0),
                                       0,
                                     )
@@ -2407,32 +1941,28 @@ export default function Despesas() {
                                   })}
                                 </TabsList>
 
-                                {abas.map((aba) => {
-                                  const list = isHist ? aba.ocorrenciasTodas : aba.ocorrenciasMes
-                                  return (
-                                    <TabsContent
-                                      key={aba.tipo}
-                                      value={aba.tipo}
-                                      className="m-0 focus-visible:outline-none"
-                                    >
-                                      {renderOcorrenciasList(list, aba.tipo)}
-                                    </TabsContent>
-                                  )
-                                })}
+                                {abas.map((aba) => (
+                                  <TabsContent
+                                    key={aba.tipo}
+                                    value={aba.tipo}
+                                    className="m-0 focus-visible:outline-none"
+                                  >
+                                    {renderOcorrenciasConta(aba.ocorrencias, aba.tipo)}
+                                  </TabsContent>
+                                ))}
                               </Tabs>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )
-                })
-              )}
-            </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+              </div>
+            )}
           </section>
         )}
 
-        {/* SEÇÃO 3: Pagamentos em Dinheiro (Espécie) */}
+        {/* 2. PAGAMENTOS EM DINHEIRO (ESPÉCIE) */}
         {(filterSecao === 'all' || filterSecao === 'dinheiro_especie') && (
           <section className="space-y-4">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -2441,7 +1971,8 @@ export default function Despesas() {
                   Pagamentos em Dinheiro (Espécie)
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Despesas liquidadas ou previstas em moeda física / espécie.
+                  Despesas liquidadas ou previstas em moeda física / espécie fora de contas
+                  bancárias.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -2626,75 +2157,67 @@ export default function Despesas() {
           </section>
         )}
 
-        {/* SEÇÃO 4: Assinaturas anuais */}
-        {(filterSecao === 'all' || filterSecao === 'assinaturas_anuais') && (
-          <section className="space-y-3">
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
-                  Assinaturas anuais
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  Domínios, ferramentas, softwares e renovações de ciclo anual ativos em qualquer
-                  competência.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-muted-foreground">
-                  Ativas: {compromissosAnuais.length}
-                </span>
-                <PermissionButton
-                  size="sm"
-                  variant="outline"
-                  allowed={can(user?.role, 'writeFinance')}
-                  onClick={() => handleOpenNovoCompromisso('assinaturas_anuais')}
-                >
-                  <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
-                </PermissionButton>
-              </div>
-            </div>
-
-            <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft">
-              {compromissosAnuais.length === 0 ? (
-                <div className="p-8 text-center text-sm text-muted-foreground">
-                  Nenhuma assinatura anual cadastrada.
-                </div>
-              ) : (
+        {/* 3. SEM CONTA DEFINIDA (só exibe se houver itens) */}
+        {(filterSecao === 'all' || filterSecao === 'sem_conta') &&
+          despesasAgrupadas.semConta.length > 0 && (
+            <section className="space-y-4">
+              <div className="overflow-hidden rounded-2xl border border-amber-300 bg-white shadow-soft">
+                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-200 bg-amber-50/70 p-4 sm:p-5">
+                  <div className="flex items-center gap-3">
+                    <span className="grid h-10 w-10 place-items-center rounded-xl bg-amber-500 text-white shadow-xs">
+                      <HelpCircle className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <h3 className="text-base font-extrabold text-foreground">
+                        Sem Conta Definida ({despesasAgrupadas.semConta.length})
+                      </h3>
+                      <p className="text-xs text-muted-foreground">
+                        Despesas sem conta bancária associada ou cuja conta vinculada foi
+                        arquivada/removida
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-xl border border-amber-200 bg-white px-3 py-1 text-right">
+                      <p className="micro-label">Total</p>
+                      <p className="text-sm font-extrabold tabular-nums text-foreground">
+                        {formatCurrency(
+                          despesasAgrupadas.semConta.reduce(
+                            (s, o) => s + (o.valor_previsto || 0),
+                            0,
+                          ),
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </header>
                 <div className="divide-y divide-border">
-                  {compromissosAnuais.map((comp) => {
-                    // Verifica se existe ocorrência deste compromisso na competência visualizada
-                    const ocorrenciaDoMes = secaoAssinaturasOcorrencias.find(
-                      (o) => o.compromisso === comp.id,
-                    )
-
-                    // Busca a última ocorrência paga deste compromisso no histórico geral
-                    const ultimaPaga = assinaturasOcorrenciasAll.find(
-                      (o) => o.compromisso === comp.id && o.status === 'paga',
-                    )
-
+                  {despesasAgrupadas.semConta.map((oc) => {
+                    const compObj =
+                      oc.expand?.compromisso ||
+                      (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
                     return (
-                      <CompromissoAnualRow
-                        key={comp.id}
-                        compromisso={comp}
-                        ocorrenciaMes={ocorrenciaDoMes}
-                        ultimaOcorrenciaPaga={ultimaPaga}
-                        competencia={currentCompetencia}
-                        onBaixarOcorrencia={(oc) => handleOpenBaixa(oc)}
-                        onRegistrarPagamentoRetroativo={() => handleOpenBaixaCompromisso(comp)}
-                        onEstornarOcorrencia={(oc) => setEstornando(oc)}
-                        onEditarCompromisso={() => handleOpenEditarCompromisso(comp)}
-                        onDuplicarCompromisso={() => handleOpenDuplicarCompromisso(comp)}
-                        onExcluirCompromisso={() => setDeletandoCompromisso(comp)}
-                        onExcluirOcorrencia={(oc) => setDeletandoOcorrencia(oc)}
+                      <OcorrenciaRow
+                        key={oc.id}
+                        ocorrencia={oc}
+                        isModoPagamento={filtroDataCompetencia === 'pagamento'}
+                        compromissoFallback={compObj}
+                        onBaixar={() => handleOpenBaixa(oc)}
+                        onEstornar={() => setEstornando(oc)}
+                        onEditarCompromisso={() => compObj && handleOpenEditarCompromisso(compObj)}
+                        onDuplicarCompromisso={() =>
+                          compObj && handleOpenDuplicarCompromisso(compObj)
+                        }
+                        onExcluirCompromisso={() => compObj && setDeletandoCompromisso(compObj)}
+                        onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
                         canEdit={can(user?.role, 'writeFinance')}
                       />
                     )
                   })}
                 </div>
-              )}
-            </div>
-          </section>
-        )}
+              </div>
+            </section>
+          )}
       </div>
 
       {/* MODAIS */}
@@ -2705,6 +2228,19 @@ export default function Despesas() {
         compromisso={compromissoParaBaixar}
         contas={contas}
         onSuccess={loadData}
+      />
+
+      {/* Diálogo de Pagamento de Fatura de Cartão */}
+      <PagarFaturaDialog
+        open={payFaturaOpen}
+        onOpenChange={setPayFaturaOpen}
+        fatura={faturaToPay}
+        contas={contas}
+        categorias={categorias}
+        onSuccess={() => {
+          loadData()
+          setFaturaToPay(null)
+        }}
       />
 
       <DespesaCompromissoDialog

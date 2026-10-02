@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import pb from '@/lib/pocketbase/client'
-import { despesasService } from './despesas'
+import { despesasService, contaAceitaCredito } from './despesas'
 import type { Conta, DespesaCompromisso, DespesaOcorrencia, MetodoPagamento } from '@/types/domain'
 
 vi.mock('@/lib/pocketbase/client', () => {
@@ -9,6 +9,230 @@ vi.mock('@/lib/pocketbase/client', () => {
       collection: vi.fn(),
     },
   }
+})
+
+describe('despesasService - Agrupador de Despesas para Visualização (Nova Arquitetura)', () => {
+  const contaNubank = {
+    id: 'c_nubank',
+    nome: 'Nubank PF',
+    tipo: 'bancaria',
+    natureza: 'fisica',
+    tipos_pagamento: ['credito', 'debito', 'pix'],
+    dia_fechamento: 5,
+    dia_vencimento: 12,
+    ordem: 1,
+    ativa: true,
+    saldo_atual: 500,
+    created: '',
+    updated: '',
+  } as unknown as Conta
+
+  const contaSicredi = {
+    id: 'c_sicredi',
+    nome: 'Sicredi PJ',
+    tipo: 'bancaria',
+    natureza: 'juridica',
+    tipos_pagamento: ['boletos', 'pix', 'transferencia'],
+    ordem: 2,
+    ativa: true,
+    saldo_atual: 1000,
+    created: '',
+    updated: '',
+  } as unknown as Conta
+
+  const contaInativa = {
+    id: 'c_inativa',
+    nome: 'Banco Velho Inativo',
+    tipo: 'bancaria',
+    ordem: 99,
+    ativa: false,
+    saldo_atual: 0,
+    created: '',
+    updated: '',
+  } as unknown as Conta
+
+  const metodos = [
+    {
+      id: 'm_credito',
+      nome: 'Cartão de Crédito',
+      tipo: 'cartao',
+      ativo: true,
+      created: '',
+      updated: '',
+    },
+    { id: 'm_pix', nome: 'Pix', tipo: 'pix', ativo: true, created: '', updated: '' },
+    {
+      id: 'm_boleto',
+      nome: 'Boleto Bancário',
+      tipo: 'boleto',
+      ativo: true,
+      created: '',
+      updated: '',
+    },
+    {
+      id: 'm_dinheiro',
+      nome: 'Dinheiro em Espécie',
+      tipo: 'dinheiro',
+      ativo: true,
+      created: '',
+      updated: '',
+    },
+  ] as unknown as MetodoPagamento[]
+
+  it('ordena a lista única de contas ativas estritamente por conta.ordem', () => {
+    const contasDesordenadas = [
+      { ...contaSicredi, ordem: 10 },
+      { ...contaNubank, ordem: 2 },
+    ]
+
+    const resultado = despesasService.agruparDespesasParaVisualizacao({
+      ocorrencias: [],
+      contas: contasDesordenadas,
+      compromissos: [],
+      metodosPagamento: metodos,
+    })
+
+    expect(resultado.contas).toHaveLength(2)
+    expect(resultado.contas[0].conta.id).toBe('c_nubank')
+    expect(resultado.contas[1].conta.id).toBe('c_sicredi')
+  })
+
+  it('gera abas derivadas exatamente de tipos_pagamento da conta', () => {
+    const resultado = despesasService.agruparDespesasParaVisualizacao({
+      ocorrencias: [],
+      contas: [contaNubank, contaSicredi],
+      compromissos: [],
+      metodosPagamento: metodos,
+    })
+
+    const grupoNubank = resultado.contas.find((g) => g.conta.id === 'c_nubank')!
+    expect(grupoNubank.abas.map((a) => a.tipo)).toEqual(['credito', 'debito', 'pix'])
+
+    const grupoSicredi = resultado.contas.find((g) => g.conta.id === 'c_sicredi')!
+    expect(grupoSicredi.abas.map((a) => a.tipo)).toEqual(['boletos', 'pix', 'transferencia'])
+  })
+
+  it('identifica corretamente contaAceitaCredito e informações de ciclo de fatura', () => {
+    expect(contaAceitaCredito(contaNubank)).toBe(true)
+    expect(contaNubank.dia_fechamento).toBe(5)
+    expect(contaNubank.dia_vencimento).toBe(12)
+
+    expect(contaAceitaCredito(contaSicredi)).toBe(false)
+  })
+
+  it('aloca assinaturas anuais DENTRO do grupo da respectiva conta na aba do método', () => {
+    const compAssinatura = {
+      id: 'comp_anual_1',
+      descricao: 'Assinatura Software Anual',
+      secao: 'assinaturas_anuais',
+      regra_repeticao: 'anual',
+      conta_padrao: 'c_nubank',
+      metodo_pagamento: 'm_credito',
+      ativo: true,
+      created: '',
+      updated: '',
+    } as unknown as DespesaCompromisso
+
+    const ocAssinatura = {
+      id: 'oc_anual_1',
+      compromisso: 'comp_anual_1',
+      conta: 'c_nubank',
+      secao: 'assinaturas_anuais',
+      valor_previsto: 1200,
+      competencia: '2025-05',
+      status: 'prevista',
+      created: '',
+      updated: '',
+    } as unknown as DespesaOcorrencia
+
+    const resultado = despesasService.agruparDespesasParaVisualizacao({
+      ocorrencias: [ocAssinatura],
+      contas: [contaNubank],
+      compromissos: [compAssinatura],
+      metodosPagamento: metodos,
+    })
+
+    const grupoNubank = resultado.contas.find((g) => g.conta.id === 'c_nubank')!
+    expect(grupoNubank.totalOcorrencias).toBe(1)
+    const abaCredito = grupoNubank.abas.find((a) => a.tipo === 'credito')!
+    expect(abaCredito.ocorrencias).toHaveLength(1)
+    expect(abaCredito.ocorrencias[0].id).toBe('oc_anual_1')
+    expect(resultado.assinaturas).toEqual([])
+  })
+
+  it('aloca despesas em dinheiro físico no grupo dinheiro', () => {
+    const compDinheiro = {
+      id: 'comp_dinheiro',
+      descricao: 'Café da manhã na padaria',
+      metodo_pagamento: 'm_dinheiro',
+      ativo: true,
+      created: '',
+      updated: '',
+    } as unknown as DespesaCompromisso
+
+    const ocDinheiro = {
+      id: 'oc_dinheiro',
+      compromisso: 'comp_dinheiro',
+      valor_previsto: 25,
+      competencia: '2025-05',
+      status: 'prevista',
+      created: '',
+      updated: '',
+    } as unknown as DespesaOcorrencia
+
+    const resultado = despesasService.agruparDespesasParaVisualizacao({
+      ocorrencias: [ocDinheiro],
+      contas: [contaNubank],
+      compromissos: [compDinheiro],
+      metodosPagamento: metodos,
+    })
+
+    expect(resultado.dinheiro).toHaveLength(1)
+    expect(resultado.dinheiro[0].id).toBe('oc_dinheiro')
+    expect(resultado.contas[0].totalOcorrencias).toBe(0)
+  })
+
+  it('aloca despesas sem conta ou vinculadas a conta inativa no grupo semConta', () => {
+    const ocSemConta = {
+      id: 'oc_orfa',
+      valor_previsto: 100,
+      competencia: '2025-05',
+      status: 'prevista',
+      created: '',
+      updated: '',
+    } as unknown as DespesaOcorrencia
+
+    const compContaInativa = {
+      id: 'comp_inativa',
+      descricao: 'Despesa Antiga',
+      conta_padrao: 'c_inativa',
+      ativo: true,
+      created: '',
+      updated: '',
+    } as unknown as DespesaCompromisso
+
+    const ocContaInativa = {
+      id: 'oc_inativa',
+      compromisso: 'comp_inativa',
+      conta: 'c_inativa',
+      valor_previsto: 200,
+      competencia: '2025-05',
+      status: 'prevista',
+      created: '',
+      updated: '',
+    } as unknown as DespesaOcorrencia
+
+    const resultado = despesasService.agruparDespesasParaVisualizacao({
+      ocorrencias: [ocSemConta, ocContaInativa],
+      contas: [contaNubank, contaInativa],
+      compromissos: [compContaInativa],
+      metodosPagamento: metodos,
+    })
+
+    expect(resultado.semConta).toHaveLength(2)
+    expect(resultado.semConta.map((o) => o.id)).toContain('oc_orfa')
+    expect(resultado.semConta.map((o) => o.id)).toContain('oc_inativa')
+  })
 })
 
 describe('despesasService - baixaOcorrencia data de pagamento', () => {
