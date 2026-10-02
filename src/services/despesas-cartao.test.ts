@@ -331,4 +331,91 @@ describe('despesasService - gerarOcorrenciasParaCompromisso em cartão', () => {
     expect(callArg.data_vencimento).toBe('2026-09-20T12:00:00.000Z')
     expect(callArg.valor_previsto).toBe(49)
   })
+
+  it('gerarOcorrenciasParaCompromissosLote evita N+1 usando ocorrências em cache e respeita throttling', async () => {
+    const mockContaCartao: Conta = {
+      id: 'cartao_nu',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: '[CPF]NuBank Cred.',
+      tipo: 'cartao',
+      saldo_inicial: 0,
+      cor: '#8A05BE',
+      ativa: true,
+      dia_fechamento: 13,
+      dia_vencimento: 20,
+    }
+
+    const mockCreate = vi
+      .fn()
+      .mockImplementation((payload) => Promise.resolve({ id: 'ocorr_nova', ...payload }))
+    const mockGetList = vi.fn().mockResolvedValue({ items: [], totalItems: 0 })
+    const mockGetFullList = vi.fn().mockResolvedValue([
+      {
+        id: 'ocorr_existente_1',
+        compromisso: 'comp_1',
+        competencia: '2026-09',
+        status: 'prevista',
+      },
+    ])
+    const mockGetOneConta = vi.fn().mockResolvedValue(mockContaCartao)
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: mockGetOneConta } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getList: mockGetList,
+          getFullList: mockGetFullList,
+          create: mockCreate,
+        } as any
+      }
+      return {} as any
+    })
+
+    const compromissos: DespesaCompromisso[] = [
+      {
+        id: 'comp_1',
+        descricao: 'Compromisso 1 Já Existente',
+        regra_repeticao: 'mensal',
+        modalidade_parcelamento: 'a_vista',
+        data_inicio: '2026-08-01',
+        dia_vencimento: 10,
+        valor_estimado: 100,
+        conta_padrao: null,
+        contexto_tipo: 'pessoal',
+        ativo: true,
+      } as DespesaCompromisso,
+      {
+        id: 'comp_2',
+        descricao: 'Compromisso 2 Novo',
+        regra_repeticao: 'mensal',
+        modalidade_parcelamento: 'a_vista',
+        data_inicio: '2026-08-01',
+        dia_vencimento: 15,
+        valor_estimado: 250,
+        conta_padrao: null,
+        contexto_tipo: 'pessoal',
+        ativo: true,
+      } as DespesaCompromisso,
+    ]
+
+    await despesasService.gerarOcorrenciasParaCompromissosLote({
+      compromissos,
+      competencias: ['2026-09'],
+      batchSize: 2,
+      batchDelayMs: 10,
+    })
+
+    // Deve ter consultado a collection em lote (getFullList)
+    expect(mockGetFullList).toHaveBeenCalledTimes(1)
+    // Não deve chamar getList individual porque usou o cache em memória
+    expect(mockGetList).not.toHaveBeenCalled()
+    // Criou apenas para comp_2 (já que comp_1 já tinha ocorrência em 2026-09)
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+    expect(mockCreate.mock.calls[0][0].compromisso).toBe('comp_2')
+  })
 })

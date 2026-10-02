@@ -751,7 +751,54 @@ export const despesasService = {
   gerarOcorrenciasParaCompromisso: async (
     compromisso: DespesaCompromisso,
     targetCompetencias?: string[],
+    cachedOcorrencias?: DespesaOcorrencia[],
   ) => {
+    // Helper para verificar se já existe ocorrência em memória ou via PocketBase
+    const hasExistingOcorrencia = async (matcher: {
+      competencia?: string
+      numero_parcela?: number
+      onlyCompromisso?: boolean
+    }): Promise<boolean> => {
+      if (cachedOcorrencias !== undefined) {
+        return cachedOcorrencias.some((oc) => {
+          const compId =
+            typeof oc.compromisso === 'object' && oc.compromisso
+              ? (oc.compromisso as any).id
+              : oc.compromisso
+          if (compId !== compromisso.id) return false
+          if (matcher.onlyCompromisso) return true
+          if (matcher.competencia !== undefined && oc.competencia !== matcher.competencia) {
+            return false
+          }
+          if (
+            matcher.numero_parcela !== undefined &&
+            oc.numero_parcela !== matcher.numero_parcela
+          ) {
+            return false
+          }
+          return true
+        })
+      }
+
+      let filter = `compromisso = '${compromisso.id}'`
+      if (matcher.competencia !== undefined) {
+        filter += ` && competencia = '${matcher.competencia}'`
+      }
+      if (matcher.numero_parcela !== undefined) {
+        filter += ` && numero_parcela = ${matcher.numero_parcela}`
+      }
+      try {
+        const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, { filter })
+        return existing.totalItems > 0
+      } catch (err: any) {
+        if (err instanceof ClientResponseError && err.status === 429) {
+          console.warn(
+            `[gerarOcorrenciasParaCompromisso] 429 detectado ao checar ocorrências do compromisso ${compromisso.id}`,
+          )
+        }
+        throw err
+      }
+    }
     const isParcelado =
       compromisso.modalidade_parcelamento === 'parcelado' ||
       compromisso.regra_repeticao === 'parcelado'
@@ -791,11 +838,9 @@ export const despesasService = {
         dueDateIso = startDate.toISOString()
       }
 
-      const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-        filter: `compromisso = '${compromisso.id}'`,
-      })
-      if (existing.totalItems === 0) {
-        await pb.collection('despesas_ocorrencias').create({
+      const exists = await hasExistingOcorrencia({ onlyCompromisso: true })
+      if (!exists) {
+        const newRecord = await pb.collection<DespesaOcorrencia>('despesas_ocorrencias').create({
           compromisso: compromisso.id,
           contexto_tipo: compromisso.contexto_tipo,
           empresa: compromisso.empresa || null,
@@ -813,6 +858,9 @@ export const despesasService = {
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || 'Pagamento único / avulso',
         })
+        if (cachedOcorrencias) {
+          cachedOcorrencias.push(newRecord)
+        }
       }
       return
     }
@@ -850,31 +898,34 @@ export const despesasService = {
           const compStr = ciclo.competencia
           const dueDateIso = `${ciclo.dataVencimento}T12:00:00.000Z`
 
-          const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-            filter: `compromisso = '${compromisso.id}' && numero_parcela = ${p}`,
-          })
+          const exists = await hasExistingOcorrencia({ numero_parcela: p })
 
-          if (existing.totalItems === 0) {
-            await pb.collection('despesas_ocorrencias').create({
-              compromisso: compromisso.id,
-              contexto_tipo: compromisso.contexto_tipo,
-              empresa: compromisso.empresa || null,
-              secao: compromisso.secao,
-              conta: contaIdEfetiva,
-              competencia: compStr,
-              numero_parcela: p,
-              total_parcelas: total,
-              data_vencimento: dueDateIso,
-              valor_previsto: valorUnitario,
-              valor_estimado_original: valorUnitario,
-              valor_ajustado_manualmente: false,
-              status: 'prevista',
-              dizimo: compromisso.dizimo || false,
-              tipo_dizimo: compromisso.tipo_dizimo || null,
-              direcionamento: compromisso.direcionamento || null,
-              link_pagamento: compromisso.link_pagamento || null,
-              observacoes: `Parcela ${p}/${total}`,
-            })
+          if (!exists) {
+            const newRecord = await pb
+              .collection<DespesaOcorrencia>('despesas_ocorrencias')
+              .create({
+                compromisso: compromisso.id,
+                contexto_tipo: compromisso.contexto_tipo,
+                empresa: compromisso.empresa || null,
+                secao: compromisso.secao,
+                conta: contaIdEfetiva,
+                competencia: compStr,
+                numero_parcela: p,
+                total_parcelas: total,
+                data_vencimento: dueDateIso,
+                valor_previsto: valorUnitario,
+                valor_estimado_original: valorUnitario,
+                valor_ajustado_manualmente: false,
+                status: 'prevista',
+                dizimo: compromisso.dizimo || false,
+                tipo_dizimo: compromisso.tipo_dizimo || null,
+                direcionamento: compromisso.direcionamento || null,
+                link_pagamento: compromisso.link_pagamento || null,
+                observacoes: `Parcela ${p}/${total}`,
+              })
+            if (cachedOcorrencias) {
+              cachedOcorrencias.push(newRecord)
+            }
           }
         }
       } else {
@@ -890,31 +941,34 @@ export const despesasService = {
           const dueDate = despesasService.calcularDataVencimentoNoMes(ano, mes, day)
           const compStr = `${dueDate.getUTCFullYear()}-${(dueDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
 
-          const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-            filter: `compromisso = '${compromisso.id}' && numero_parcela = ${p}`,
-          })
+          const exists = await hasExistingOcorrencia({ numero_parcela: p })
 
-          if (existing.totalItems === 0) {
-            await pb.collection('despesas_ocorrencias').create({
-              compromisso: compromisso.id,
-              contexto_tipo: compromisso.contexto_tipo,
-              empresa: compromisso.empresa || null,
-              secao: compromisso.secao,
-              conta: compromisso.conta_padrao || null,
-              competencia: compStr,
-              numero_parcela: p,
-              total_parcelas: total,
-              data_vencimento: dueDate.toISOString(),
-              valor_previsto: valorUnitario,
-              valor_estimado_original: valorUnitario,
-              valor_ajustado_manualmente: false,
-              status: 'prevista',
-              dizimo: compromisso.dizimo || false,
-              tipo_dizimo: compromisso.tipo_dizimo || null,
-              direcionamento: compromisso.direcionamento || null,
-              link_pagamento: compromisso.link_pagamento || null,
-              observacoes: `Parcela ${p}/${total}`,
-            })
+          if (!exists) {
+            const newRecord = await pb
+              .collection<DespesaOcorrencia>('despesas_ocorrencias')
+              .create({
+                compromisso: compromisso.id,
+                contexto_tipo: compromisso.contexto_tipo,
+                empresa: compromisso.empresa || null,
+                secao: compromisso.secao,
+                conta: compromisso.conta_padrao || null,
+                competencia: compStr,
+                numero_parcela: p,
+                total_parcelas: total,
+                data_vencimento: dueDate.toISOString(),
+                valor_previsto: valorUnitario,
+                valor_estimado_original: valorUnitario,
+                valor_ajustado_manualmente: false,
+                status: 'prevista',
+                dizimo: compromisso.dizimo || false,
+                tipo_dizimo: compromisso.tipo_dizimo || null,
+                direcionamento: compromisso.direcionamento || null,
+                link_pagamento: compromisso.link_pagamento || null,
+                observacoes: `Parcela ${p}/${total}`,
+              })
+            if (cachedOcorrencias) {
+              cachedOcorrencias.push(newRecord)
+            }
           }
         }
       }
@@ -958,37 +1012,29 @@ export const despesasService = {
       }
 
       const compStr = `${dueDate.getUTCFullYear()}-${(dueDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
-      try {
-        const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-          filter: `compromisso = '${compromisso.id}' && competencia = '${compStr}'`,
+      const exists = await hasExistingOcorrencia({ competencia: compStr })
+      if (!exists) {
+        const newRecord = await pb.collection<DespesaOcorrencia>('despesas_ocorrencias').create({
+          compromisso: compromisso.id,
+          contexto_tipo: compromisso.contexto_tipo,
+          empresa: compromisso.empresa || null,
+          secao: compromisso.secao,
+          conta: compromisso.conta_padrao || null,
+          competencia: compStr,
+          data_vencimento: dueDate.toISOString(),
+          valor_previsto: compromisso.valor_estimado,
+          valor_estimado_original: compromisso.valor_estimado,
+          valor_ajustado_manualmente: false,
+          status: 'prevista',
+          dizimo: compromisso.dizimo || false,
+          tipo_dizimo: compromisso.tipo_dizimo || null,
+          direcionamento: compromisso.direcionamento || null,
+          link_pagamento: compromisso.link_pagamento || null,
+          observacoes: compromisso.observacoes || 'Assinatura anual',
         })
-        if (existing.totalItems === 0) {
-          await pb.collection('despesas_ocorrencias').create({
-            compromisso: compromisso.id,
-            contexto_tipo: compromisso.contexto_tipo,
-            empresa: compromisso.empresa || null,
-            secao: compromisso.secao,
-            conta: compromisso.conta_padrao || null,
-            competencia: compStr,
-            data_vencimento: dueDate.toISOString(),
-            valor_previsto: compromisso.valor_estimado,
-            valor_estimado_original: compromisso.valor_estimado,
-            valor_ajustado_manualmente: false,
-            status: 'prevista',
-            dizimo: compromisso.dizimo || false,
-            tipo_dizimo: compromisso.tipo_dizimo || null,
-            direcionamento: compromisso.direcionamento || null,
-            link_pagamento: compromisso.link_pagamento || null,
-            observacoes: compromisso.observacoes || 'Assinatura anual',
-          })
+        if (cachedOcorrencias) {
+          cachedOcorrencias.push(newRecord)
         }
-      } catch (err: any) {
-        if (err instanceof ClientResponseError && err.status === 429) {
-          console.warn(
-            `[gerarOcorrenciasParaCompromisso] 429 detectado para compromisso ${compromisso.id}`,
-          )
-        }
-        throw err
       }
       return
     }
@@ -1039,10 +1085,8 @@ export const despesasService = {
           continue
         }
 
-        const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-          filter: `compromisso = '${compromisso.id}' && competencia = '${compStr}'`,
-        })
-        if (existing.totalItems === 0) {
+        const exists = await hasExistingOcorrencia({ competencia: compStr })
+        if (!exists) {
           // Calcula data_vencimento do ciclo do cartão para a competência alvo
           // Cria uma data representativa no ciclo da competência (ex: dia 1 da competência)
           const [cYearStr, cMonthStr] = compStr.split('-')
@@ -1054,7 +1098,7 @@ export const despesasService = {
           )
           const dueDateIso = `${cicloComp.dataVencimento}T12:00:00.000Z`
 
-          await pb.collection('despesas_ocorrencias').create({
+          const newRecord = await pb.collection<DespesaOcorrencia>('despesas_ocorrencias').create({
             compromisso: compromisso.id,
             contexto_tipo: compromisso.contexto_tipo,
             empresa: compromisso.empresa || null,
@@ -1074,6 +1118,9 @@ export const despesasService = {
             numero_parcela: 0,
             total_parcelas: 0,
           })
+          if (cachedOcorrencias) {
+            cachedOcorrencias.push(newRecord)
+          }
         }
       }
       return
@@ -1122,42 +1169,85 @@ export const despesasService = {
         continue
       }
 
-      try {
-        const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-          filter: `compromisso = '${compromisso.id}' && competencia = '${compStr}'`,
-        })
-        if (existing.totalItems === 0) {
-          const [yStr, mStr] = compStr.split('-')
-          const y = parseInt(yStr, 10)
-          const m = parseInt(mStr, 10) - 1
-          const dueDate = despesasService.calcularDataVencimentoNoMes(y, m, day)
+      const exists = await hasExistingOcorrencia({ competencia: compStr })
+      if (!exists) {
+        const [yStr, mStr] = compStr.split('-')
+        const y = parseInt(yStr, 10)
+        const m = parseInt(mStr, 10) - 1
+        const dueDate = despesasService.calcularDataVencimentoNoMes(y, m, day)
 
-          await pb.collection('despesas_ocorrencias').create({
-            compromisso: compromisso.id,
-            contexto_tipo: compromisso.contexto_tipo,
-            empresa: compromisso.empresa || null,
-            secao: compromisso.secao,
-            conta: compromisso.conta_padrao || null,
-            competencia: compStr,
-            data_vencimento: dueDate.toISOString(),
-            valor_previsto: compromisso.valor_estimado,
-            valor_estimado_original: compromisso.valor_estimado,
-            valor_ajustado_manualmente: false,
-            status: 'prevista',
-            dizimo: compromisso.dizimo || false,
-            tipo_dizimo: compromisso.tipo_dizimo || null,
-            direcionamento: compromisso.direcionamento || null,
-            link_pagamento: compromisso.link_pagamento || null,
-            observacoes: compromisso.observacoes || null,
-          })
+        const newRecord = await pb.collection<DespesaOcorrencia>('despesas_ocorrencias').create({
+          compromisso: compromisso.id,
+          contexto_tipo: compromisso.contexto_tipo,
+          empresa: compromisso.empresa || null,
+          secao: compromisso.secao,
+          conta: compromisso.conta_padrao || null,
+          competencia: compStr,
+          data_vencimento: dueDate.toISOString(),
+          valor_previsto: compromisso.valor_estimado,
+          valor_estimado_original: compromisso.valor_estimado,
+          valor_ajustado_manualmente: false,
+          status: 'prevista',
+          dizimo: compromisso.dizimo || false,
+          tipo_dizimo: compromisso.tipo_dizimo || null,
+          direcionamento: compromisso.direcionamento || null,
+          link_pagamento: compromisso.link_pagamento || null,
+          observacoes: compromisso.observacoes || null,
+        })
+        if (cachedOcorrencias) {
+          cachedOcorrencias.push(newRecord)
         }
-      } catch (err: any) {
-        if (err instanceof ClientResponseError && err.status === 429) {
-          console.warn(
-            `[gerarOcorrenciasParaCompromisso] 429 detectado para compromisso ${compromisso.id} na competência ${compStr}`,
-          )
-        }
-        throw err
+      }
+    }
+  },
+
+  /**
+   * Sincroniza em lote os compromissos para uma ou mais competências,
+   * eliminando consultas N+1 ao consultar de uma só vez as ocorrências da competência
+   * e processando em lotes controlados com pausa para respeitar limites do backend.
+   */
+  gerarOcorrenciasParaCompromissosLote: async (params: {
+    compromissos: DespesaCompromisso[]
+    competencias: string[]
+    batchSize?: number
+    batchDelayMs?: number
+  }) => {
+    const { compromissos, competencias, batchSize = 4, batchDelayMs = 150 } = params
+    const ativos = compromissos.filter((c) => c.ativo !== false)
+    if (ativos.length === 0 || competencias.length === 0) return
+
+    // 1. Consulta em lote (bulk) eliminando a causa raiz N+1
+    const filterCompetencias =
+      competencias.length === 1
+        ? `competencia = '${competencias[0]}'`
+        : `(${competencias.map((comp) => `competencia = '${comp}'`).join(' || ')})`
+
+    let ocorrenciasExistentes: DespesaOcorrencia[] = []
+    try {
+      ocorrenciasExistentes = await listAll<DespesaOcorrencia>('despesas_ocorrencias', {
+        filter: filterCompetencias,
+      })
+    } catch (e) {
+      console.warn(
+        '[gerarOcorrenciasParaCompromissosLote] Falha ao consultar ocorrências em lote, fallback dinâmico ativo:',
+        e,
+      )
+    }
+
+    // 2. Processamento em lotes (throttling) com verificação em memória
+    for (let i = 0; i < ativos.length; i += batchSize) {
+      const chunk = ativos.slice(i, i + batchSize)
+      await Promise.all(
+        chunk.map((comp) =>
+          despesasService.gerarOcorrenciasParaCompromisso(
+            comp,
+            competencias,
+            ocorrenciasExistentes,
+          ),
+        ),
+      )
+      if (i + batchSize < ativos.length && batchDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, batchDelayMs))
       }
     }
   },
