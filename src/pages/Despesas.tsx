@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   ArrowUpDown,
+  Banknote,
   Building2,
   Calendar,
   CalendarDays,
@@ -15,6 +16,8 @@ import {
   FileText,
   Filter,
   HeartHandshake,
+  HelpCircle,
+  Landmark,
   LoaderCircle,
   Pencil,
   Plus,
@@ -58,6 +61,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAppContext } from '@/contexts/AppContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
@@ -73,6 +77,7 @@ import { financeService } from '@/services/finance'
 import type {
   Categoria,
   Conta,
+  ContaTipoPagamento,
   DespesaCompromisso,
   DespesaOcorrencia,
   Empresa,
@@ -83,6 +88,7 @@ import type {
   TipoDespesa,
   TipoDizimo,
 } from '@/types/domain'
+import { CONTA_TIPO_PAGAMENTO_LABELS } from '@/types/domain'
 
 function getInitialCompetencia() {
   return getLocalDateStr().slice(0, 7)
@@ -483,6 +489,8 @@ export default function Despesas() {
   const [defaultSecaoCompromisso, setDefaultSecaoCompromisso] = useState<SecaoDespesa>(
     'contas_mensais_pix_boleto',
   )
+  const [defaultContaCompromissoId, setDefaultContaCompromissoId] = useState<string | undefined>()
+  const [defaultMetodoCompromissoId, setDefaultMetodoCompromissoId] = useState<string | undefined>()
 
   const [estornando, setEstornando] = useState<DespesaOcorrencia | null>(null)
   const [deletandoCompromisso, setDeletandoCompromisso] = useState<DespesaCompromisso | null>(null)
@@ -949,15 +957,18 @@ export default function Despesas() {
     return new Map<string, DespesaCompromisso>(compromissos.map((c) => [c.id, c]))
   }, [compromissos])
 
-  // Seção 1: Boletos & Contas Mensais Pix
-  const secaoBoletosPix = useMemo(() => {
-    const raw = filteredOcorrencias.filter(
-      (oc) => !oc.secao || oc.secao === 'contas_mensais_pix_boleto',
-    )
-    return sortOcorrenciasList(raw)
-  }, [filteredOcorrencias, sortOcorrenciasList])
+  // Novo agrupamento estruturado por Conta (com Abas), Cartões, Dinheiro, Assinaturas Anuais e Sem Conta
+  const despesasAgrupadas = useMemo(() => {
+    return despesasService.agruparDespesasParaVisualizacao({
+      ocorrencias: filteredOcorrencias,
+      contas,
+      compromissos,
+      metodosPagamento,
+      sortFn: sortOcorrenciasList,
+    })
+  }, [filteredOcorrencias, contas, compromissos, metodosPagamento, sortOcorrenciasList])
 
-  // Seção 2: Compromissos anuais ativos (visíveis em qualquer competência) + ocorrências do mês
+  // Seção: Compromissos anuais ativos (visíveis em qualquer competência) + ocorrências do mês
   const compromissosAnuais = useMemo(() => {
     const filtered = compromissos.filter((c) => {
       const isAnual = c.secao === 'assinaturas_anuais' || c.regra_repeticao === 'anual'
@@ -1246,16 +1257,23 @@ export default function Despesas() {
     }
   }
 
-  const handleOpenNovoCompromisso = (secao: SecaoDespesa = 'contas_mensais_pix_boleto') => {
+  const handleOpenNovoCompromisso = (
+    secao: SecaoDespesa = 'contas_mensais_pix_boleto',
+    options?: { contaId?: string; metodoId?: string },
+  ) => {
     setIsDuplicandoCompromisso(false)
     setCompromissoEditando(null)
     setDefaultSecaoCompromisso(secao)
+    setDefaultContaCompromissoId(options?.contaId)
+    setDefaultMetodoCompromissoId(options?.metodoId)
     setCompromissoModal(true)
   }
 
   const handleOpenEditarCompromisso = (comp: DespesaCompromisso) => {
     setIsDuplicandoCompromisso(false)
     setCompromissoEditando(comp)
+    setDefaultContaCompromissoId(undefined)
+    setDefaultMetodoCompromissoId(undefined)
     setCompromissoModal(true)
   }
 
@@ -1263,6 +1281,8 @@ export default function Despesas() {
     setIsDuplicandoCompromisso(true)
     setCompromissoEditando(comp)
     setDefaultSecaoCompromisso(comp.secao || 'contas_mensais_pix_boleto')
+    setDefaultContaCompromissoId(comp.conta_padrao)
+    setDefaultMetodoCompromissoId(comp.metodo_pagamento)
     setCompromissoModal(true)
   }
 
@@ -2057,6 +2077,8 @@ export default function Despesas() {
         pessoas={pessoas}
         empresas={empresas}
         defaultSecao={defaultSecaoCompromisso}
+        defaultContaId={defaultContaCompromissoId}
+        defaultMetodoId={defaultMetodoCompromissoId}
         onSuccess={loadData}
       />
 

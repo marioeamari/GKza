@@ -3,6 +3,7 @@ import pb from '@/lib/pocketbase/client'
 import { calcularFaturaCartao } from '@/lib/cartao-fatura'
 import type {
   Conta,
+  ContaTipoPagamento,
   ContextoTipo,
   DespesaCompromisso,
   DespesaOcorrencia,
@@ -14,6 +15,7 @@ import type {
   ConfigCalculo,
   TipoCalculoDizimo,
 } from '@/types/domain'
+import { CONTA_TIPOS_PAGAMENTO_FALLBACK } from '@/types/domain'
 
 const listAll = async <T>(collection: string, options?: RecordListOptions): Promise<T[]> => {
   try {
@@ -1139,6 +1141,310 @@ export const despesasService = {
           observacoes: compromisso.observacoes || null,
         })
       }
+    }
+  },
+
+  /**
+   * Obtém os tipos de pagamento ativos de uma conta, aplicando fallbacks se não preenchido
+   */
+  getTiposPagamentoConta: (conta?: Conta | null): ContaTipoPagamento[] => {
+    if (!conta) return ['debito', 'transferencia', 'boletos', 'pix']
+    if (conta.tipos_pagamento && conta.tipos_pagamento.length > 0) {
+      return conta.tipos_pagamento
+    }
+    return (
+      CONTA_TIPOS_PAGAMENTO_FALLBACK[conta.tipo] || ['debito', 'transferencia', 'boletos', 'pix']
+    )
+  },
+
+  /**
+   * Mapeia o método de pagamento da despesa para uma das chaves de ContaTipoPagamento
+   */
+  mapearMetodoParaTipoPagamento: (
+    metodo: MetodoPagamento | string | null | undefined,
+    tiposDisponiveis: ContaTipoPagamento[],
+  ): ContaTipoPagamento => {
+    let tipoStr = ''
+    let nomeStr = ''
+    let codigoStr = ''
+
+    if (metodo && typeof metodo === 'object') {
+      tipoStr = (metodo.tipo || '').toLowerCase()
+      nomeStr = (metodo.nome || '').toLowerCase()
+      codigoStr = (metodo.codigo || '').toLowerCase()
+    } else if (typeof metodo === 'string') {
+      nomeStr = metodo.toLowerCase()
+      codigoStr = metodo.toLowerCase()
+    }
+
+    const matchCandidate = (cand: ContaTipoPagamento): boolean => {
+      return tiposDisponiveis.includes(cand)
+    }
+
+    // 1. Detecção de Cartão / Crédito
+    if (
+      tipoStr === 'cartao' ||
+      nomeStr.includes('crédito') ||
+      nomeStr.includes('credito') ||
+      codigoStr.includes('credito')
+    ) {
+      if (matchCandidate('credito')) return 'credito'
+    }
+
+    // 2. Débito
+    if (nomeStr.includes('débito') || nomeStr.includes('debito') || codigoStr.includes('debito')) {
+      if (matchCandidate('debito')) return 'debito'
+    }
+
+    // 3. Pix
+    if (tipoStr === 'pix' || nomeStr.includes('pix') || codigoStr.includes('pix')) {
+      if (matchCandidate('pix')) return 'pix'
+    }
+
+    // 4. Boleto
+    if (tipoStr === 'boleto' || nomeStr.includes('boleto') || codigoStr.includes('boleto')) {
+      if (matchCandidate('boletos')) return 'boletos'
+    }
+
+    // 5. Transferência
+    if (
+      tipoStr === 'transferencia' ||
+      nomeStr.includes('transferência') ||
+      nomeStr.includes('transferencia') ||
+      nomeStr.includes('ted') ||
+      nomeStr.includes('doc') ||
+      codigoStr.includes('transferencia')
+    ) {
+      if (matchCandidate('transferencia')) return 'transferencia'
+    }
+
+    // Fallback: primeiro tipo da conta ou débito
+    return tiposDisponiveis[0] || 'debito'
+  },
+
+  /**
+   * Determina se uma ocorrência é pagamento em dinheiro vivo
+   */
+  isDespesaDinheiro: (
+    oc: DespesaOcorrencia,
+    compromisso?: DespesaCompromisso | null,
+    metodosPagamentoMap?: Map<string, MetodoPagamento>,
+  ): boolean => {
+    const comp = compromisso || oc.expand?.compromisso
+    const metodoObj =
+      comp?.expand?.metodo_pagamento ||
+      (comp?.metodo_pagamento && metodosPagamentoMap
+        ? metodosPagamentoMap.get(comp.metodo_pagamento)
+        : null)
+
+    const metodoTipo = (metodoObj?.tipo || '').toLowerCase()
+    const metodoNome = (metodoObj?.nome || '').toLowerCase()
+
+    if (
+      metodoTipo === 'dinheiro' ||
+      metodoNome.includes('dinheiro') ||
+      metodoNome.includes('espécie')
+    ) {
+      return true
+    }
+
+    // Se a conta for tipo 'caixa' e o método for dinheiro ou sem outro método específico de banco
+    const conta = oc.expand?.conta || comp?.expand?.conta_padrao
+    if (
+      conta?.tipo === 'caixa' &&
+      (metodoTipo === 'dinheiro' || !metodoObj || metodoTipo === 'outro')
+    ) {
+      return true
+    }
+
+    return false
+  },
+
+  /**
+   * Agrupa as ocorrências de despesas para exibição em /despesas
+   */
+  agruparDespesasParaVisualizacao: (params: {
+    ocorrencias: DespesaOcorrencia[]
+    contas: Conta[]
+    compromissos: DespesaCompromisso[]
+    metodosPagamento: MetodoPagamento[]
+    sortFn?: (list: DespesaOcorrencia[]) => DespesaOcorrencia[]
+  }) => {
+    const { ocorrencias, contas, compromissos, metodosPagamento, sortFn } = params
+    const sorter = sortFn || ((l: DespesaOcorrencia[]) => l)
+
+    const contasMap = new Map<string, Conta>(contas.map((c) => [c.id, c]))
+    const compromissosMap = new Map<string, DespesaCompromisso>(compromissos.map((c) => [c.id, c]))
+    const metodosMap = new Map<string, MetodoPagamento>(metodosPagamento.map((m) => [m.id, m]))
+
+    // Grupos resultantes
+    const ocorrenciasDinheiro: DespesaOcorrencia[] = []
+    const ocorrenciasAssinaturas: DespesaOcorrencia[] = []
+    const ocorrenciasSemConta: DespesaOcorrencia[] = []
+
+    // Agrupamento de Cartões: map de contaId -> { conta, ocorrencias }
+    const cartoesMap = new Map<string, { conta: Conta; ocorrencias: DespesaOcorrencia[] }>()
+    // Inicializa cartões ativos
+    contas
+      .filter((c) => c.tipo === 'cartao' && c.ativa)
+      .forEach((c) => {
+        cartoesMap.set(c.id, { conta: c, ocorrencias: [] })
+      })
+
+    // Agrupamento de Contas não-cartão: map de contaId -> { conta, abas: Map<ContaTipoPagamento, DespesaOcorrencia[]> }
+    const contasNaoCartaoMap = new Map<
+      string,
+      {
+        conta: Conta
+        abas: Map<ContaTipoPagamento, DespesaOcorrencia[]>
+      }
+    >()
+
+    // Função interna para obter ou criar o grupo de conta não-cartão
+    const getOrCreateContaNaoCartao = (conta: Conta) => {
+      let entry = contasNaoCartaoMap.get(conta.id)
+      if (!entry) {
+        const tipos = despesasService.getTiposPagamentoConta(conta)
+        const abas = new Map<ContaTipoPagamento, DespesaOcorrencia[]>()
+        tipos.forEach((t) => abas.set(t, []))
+        entry = { conta, abas }
+        contasNaoCartaoMap.set(conta.id, entry)
+      }
+      return entry
+    }
+
+    // Inicializa contas ativas (bancaria / caixa) conhecidas para sempre terem seu espaço se houver despesas vinculadas
+    contas
+      .filter((c) => c.ativa && c.tipo !== 'cartao')
+      .forEach((c) => {
+        getOrCreateContaNaoCartao(c)
+      })
+
+    // Processamento de cada ocorrência
+    for (const oc of ocorrencias) {
+      const comp =
+        oc.expand?.compromisso || (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
+
+      // Regra 1: Assinaturas anuais
+      const isAnual =
+        oc.secao === 'assinaturas_anuais' ||
+        comp?.secao === 'assinaturas_anuais' ||
+        comp?.regra_repeticao === 'anual'
+      if (isAnual) {
+        ocorrenciasAssinaturas.push(oc)
+        continue
+      }
+
+      // Regra 2: Pagamentos em dinheiro
+      if (despesasService.isDespesaDinheiro(oc, comp, metodosMap)) {
+        ocorrenciasDinheiro.push(oc)
+        continue
+      }
+
+      // Identificar a conta da ocorrência
+      const contaId = oc.conta || comp?.conta_padrao
+      let contaObj = contaId ? contasMap.get(contaId) : undefined
+      if (!contaObj && oc.expand?.conta) {
+        contaObj = oc.expand.conta
+      } else if (!contaObj && comp?.expand?.conta_padrao) {
+        contaObj = comp.expand.conta_padrao
+      }
+
+      // Regra 3: Seção explicitamente Cartões de Crédito ou Conta do tipo cartão
+      const isCartao = oc.secao === 'cartoes_credito' || contaObj?.tipo === 'cartao'
+      if (isCartao) {
+        const cId = contaObj?.id || contaId || 'cartao_desconhecido'
+        let cartaoEntry = cartoesMap.get(cId)
+        if (!cartaoEntry) {
+          const fallbackConta: Conta =
+            contaObj ||
+            ({
+              id: cId,
+              nome: 'Cartão de Crédito',
+              tipo: 'cartao',
+              saldo_inicial: 0,
+              cor: '#8A05BE',
+              ativa: true,
+            } as Conta)
+          cartaoEntry = { conta: fallbackConta, ocorrencias: [] }
+          cartoesMap.set(cId, cartaoEntry)
+        }
+        cartaoEntry.ocorrencias.push(oc)
+        continue
+      }
+
+      // Regra 4: Conta Não-Cartão (bancaria, caixa, marketplace ou outra)
+      if (contaObj) {
+        const contaGroup = getOrCreateContaNaoCartao(contaObj)
+        const tipos = despesasService.getTiposPagamentoConta(contaObj)
+        const metodoObj =
+          comp?.expand?.metodo_pagamento ||
+          (comp?.metodo_pagamento ? metodosMap.get(comp.metodo_pagamento) : null)
+
+        const tipoAlocado = despesasService.mapearMetodoParaTipoPagamento(metodoObj, tipos)
+        if (!contaGroup.abas.has(tipoAlocado)) {
+          contaGroup.abas.set(tipoAlocado, [])
+        }
+        contaGroup.abas.get(tipoAlocado)!.push(oc)
+        continue
+      }
+
+      // Regra 5: Sem conta definida (órfã / conta inexistente ou excluída)
+      ocorrenciasSemConta.push(oc)
+    }
+
+    // Filtrar contas não-cartão para manter apenas as que possuem pelo menos 1 ocorrência alocada
+    // OU contas ativas caso o usuário queira vê-las (no pedido: "para cada conta ativa que tenha despesas vinculadas")
+    const contasNaoCartaoFiltradas = Array.from(contasNaoCartaoMap.values())
+      .map((entry) => {
+        let totalOcorrencias = 0
+        const abasObj: { tipo: ContaTipoPagamento; ocorrencias: DespesaOcorrencia[] }[] = []
+
+        // Manter ordem original dos tipos da conta
+        const tipos = despesasService.getTiposPagamentoConta(entry.conta)
+        tipos.forEach((t) => {
+          const ocs = entry.abas.get(t) || []
+          totalOcorrencias += ocs.length
+          abasObj.push({
+            tipo: t,
+            ocorrencias: sorter(ocs),
+          })
+        })
+
+        // Se houver algum tipo no map que não estava na lista (caso dinâmico), inclui também
+        entry.abas.forEach((ocs, t) => {
+          if (!tipos.includes(t)) {
+            totalOcorrencias += ocs.length
+            abasObj.push({
+              tipo: t,
+              ocorrencias: sorter(ocs),
+            })
+          }
+        })
+
+        return {
+          conta: entry.conta,
+          totalOcorrencias,
+          abas: abasObj,
+        }
+      })
+      .filter((g) => g.totalOcorrencias > 0)
+      .sort((a, b) => a.conta.nome.localeCompare(b.conta.nome, 'pt-BR', { sensitivity: 'base' }))
+
+    // Formatar grupos de cartões
+    const cartoesList = Array.from(cartoesMap.values())
+      .map((item) => ({
+        conta: item.conta,
+        ocorrencias: sorter(item.ocorrencias),
+      }))
+      .sort((a, b) => a.conta.nome.localeCompare(b.conta.nome, 'pt-BR', { sensitivity: 'base' }))
+
+    return {
+      cartoes: cartoesList,
+      contasNaoCartao: contasNaoCartaoFiltradas,
+      dinheiro: sorter(ocorrenciasDinheiro),
+      assinaturas: sorter(ocorrenciasAssinaturas),
+      semConta: sorter(ocorrenciasSemConta),
     }
   },
 }

@@ -93,6 +93,24 @@ export interface Conta extends RecordModel {
   bandeira?: string
 }
 
+export const CONTA_TIPOS_PAGAMENTO_FALLBACK: Record<
+  'bancaria' | 'caixa' | 'cartao' | 'marketplace',
+  ContaTipoPagamento[]
+> = {
+  cartao: ['credito'],
+  bancaria: ['debito', 'transferencia', 'boletos', 'pix'],
+  caixa: ['pix', 'debito', 'transferencia', 'boletos'],
+  marketplace: ['transferencia', 'pix'],
+}
+
+export const CONTA_TIPO_PAGAMENTO_LABELS: Record<ContaTipoPagamento, string> = {
+  credito: 'Crédito',
+  debito: 'Débito',
+  transferencia: 'Transferência Bancária',
+  boletos: 'Boletos',
+  pix: 'Pix',
+}
+
 export interface TagItem extends RecordModel {
   nome: string
   cor?: string

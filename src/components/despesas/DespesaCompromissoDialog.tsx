@@ -77,6 +77,8 @@ interface DespesaCompromissoDialogProps {
   pessoas: Pessoa[]
   empresas: Empresa[]
   defaultSecao?: SecaoDespesa
+  defaultContaId?: string
+  defaultMetodoId?: string
   onSuccess?: () => void
 }
 
@@ -94,6 +96,8 @@ export function DespesaCompromissoDialog({
   pessoas,
   empresas,
   defaultSecao = 'contas_mensais_pix_boleto',
+  defaultContaId,
+  defaultMetodoId,
   onSuccess,
 }: DespesaCompromissoDialogProps) {
   const { activeContext } = useAppContext()
@@ -286,7 +290,10 @@ export function DespesaCompromissoDialog({
         const isAnual = defaultSecao === 'assinaturas_anuais'
 
         const defaultCard = contas.find((c) => c.tipo === 'cartao' && c.ativa)?.id || ''
-        const defaultMetodo = metodosPagamento[0]?.id || ''
+        const resolvedDefaultConta =
+          defaultContaId ||
+          (isCartao ? defaultCard : contas.find((c) => c.ativa && c.tipo !== 'cartao')?.id || '')
+        const resolvedDefaultMetodo = defaultMetodoId || metodosPagamento[0]?.id || ''
         const defaultDizimoTipo = tiposDizimo[0]?.id || ''
 
         // Titular default a partir do contexto ativo
@@ -319,8 +326,8 @@ export function DespesaCompromissoDialog({
           data_inicio: todayStr,
           valor_estimado: 0,
 
-          conta_padrao: isCartao ? defaultCard : '',
-          metodo_pagamento: defaultMetodo,
+          conta_padrao: resolvedDefaultConta,
+          metodo_pagamento: resolvedDefaultMetodo,
           pessoa_responsavel: '',
           link_pagamento: '',
           dizimo: false,
@@ -337,6 +344,8 @@ export function DespesaCompromissoDialog({
   }, [
     compromisso,
     defaultSecao,
+    defaultContaId,
+    defaultMetodoId,
     isDuplicating,
     open,
     contas,
