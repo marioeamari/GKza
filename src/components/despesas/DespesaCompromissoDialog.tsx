@@ -41,7 +41,7 @@ import { useToast } from '@/hooks/use-toast'
 import { apiMessage } from '@/lib/api-error'
 import { calcularFaturaCartao, getAvisoFaturaCartao } from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
-import { despesasService } from '@/services/despesas'
+import { contaAceitaCredito, despesasService } from '@/services/despesas'
 import { financeService } from '@/services/finance'
 import { ContaContextoWarning } from '@/components/ContaContextoWarning'
 import { AnexoUploadField } from '@/components/despesas/AnexoUploadField'
@@ -439,20 +439,21 @@ export function DespesaCompromissoDialog({
 
   // Conta de pagamento selecionada
   const selectedConta = contas.find((c) => c.id === form.conta_padrao)
-  // Conta de cartão efetiva: se a conta selecionada for tipo cartão, ou se a seção derivada for cartões de crédito
-  const isContaCartao = selectedConta?.tipo === 'cartao'
+  // Conta com suporte a crédito (tipo 'cartao' ou tipos_pagamento incluindo 'credito')
+  const temCredito = contaAceitaCredito(selectedConta)
+  const isContaCartao = selectedConta?.tipo === 'cartao' || temCredito
   const isSelectedContaCartao = isContaCartao || secaoDerivada === 'cartoes_credito'
 
   // Ciclo da fatura para compras no cartão (calculado em tempo real com base na conta e data_inicio)
   const faturaCicloCartao = useMemo(() => {
-    if (!selectedConta || selectedConta.tipo !== 'cartao' || !form.data_inicio) return null
+    if (!selectedConta || !temCredito || !form.data_inicio) return null
     return calcularFaturaCartao(selectedConta, form.data_inicio)
-  }, [selectedConta, form.data_inicio])
+  }, [selectedConta, temCredito, form.data_inicio])
 
   const avisoFaturaCartao = useMemo(() => {
-    if (!selectedConta || selectedConta.tipo !== 'cartao' || !form.data_inicio) return null
+    if (!selectedConta || !temCredito || !form.data_inicio) return null
     return getAvisoFaturaCartao(selectedConta, form.data_inicio)
-  }, [selectedConta, form.data_inicio])
+  }, [selectedConta, temCredito, form.data_inicio])
 
   // Data de vencimento formatada ou dia de vencimento derivado do ciclo do cartão
   const dataVencimentoCicloCartaoFormatada = useMemo(() => {
@@ -1508,9 +1509,11 @@ export function DespesaCompromissoDialog({
                     const contaId = v === 'none' ? '' : v
                     const c = contas.find((item) => item.id === contaId)
                     let updated = { ...form, conta_padrao: contaId }
-                    if (c && c.tipo === 'cartao') {
-                      // Fixa a seção em 'cartoes_credito' automaticamente
-                      updated.secao = 'cartoes_credito'
+                    if (c && (c.tipo === 'cartao' || contaAceitaCredito(c))) {
+                      // Fixa a seção em 'cartoes_credito' se for cartão dedicado
+                      if (c.tipo === 'cartao') {
+                        updated.secao = 'cartoes_credito'
+                      }
                       if (c.dia_vencimento) {
                         updated.dia_vencimento = c.dia_vencimento
                       }
