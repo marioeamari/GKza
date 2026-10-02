@@ -1256,5 +1256,292 @@ describe('despesasService - Agrupador de Despesas e Helpers', () => {
       expect(resultado.dinheiro).toHaveLength(1)
       expect(resultado.dinheiro[0].id).toBe('oc_d')
     })
+
+    describe('Lista Única de Contas (agrupamento unificado)', () => {
+      it('ordena a lista única de contas por conta.ordem ascendente e depois alfabeticamente', () => {
+        const c3: Conta = {
+          id: 'c3',
+          nome: 'Conta C',
+          tipo: 'bancaria',
+          ordem: 30,
+          ativa: true,
+          tipos_pagamento: ['pix'],
+        } as unknown as Conta
+        const c1: Conta = {
+          id: 'c1',
+          nome: 'Conta A',
+          tipo: 'cartao',
+          ordem: 10,
+          ativa: true,
+          tipos_pagamento: ['credito'],
+        } as unknown as Conta
+        const c2: Conta = {
+          id: 'c2',
+          nome: 'Conta B',
+          tipo: 'bancaria',
+          ordem: 20,
+          ativa: true,
+          tipos_pagamento: ['boletos'],
+        } as unknown as Conta
+        const cSemOrdemZ: Conta = {
+          id: 'c_z',
+          nome: 'Zeta',
+          tipo: 'carteira',
+          ativa: true,
+          tipos_pagamento: ['dinheiro'],
+        } as unknown as Conta
+        const cSemOrdemA: Conta = {
+          id: 'c_a',
+          nome: 'Alfa',
+          tipo: 'carteira',
+          ativa: true,
+          tipos_pagamento: ['dinheiro'],
+        } as unknown as Conta
+
+        const resultado = despesasService.agruparDespesasParaVisualizacao({
+          ocorrencias: [],
+          contas: [c3, cSemOrdemZ, c1, cSemOrdemA, c2],
+          compromissos: [],
+          metodosPagamento: [],
+        })
+
+        const ids = resultado.contas.map((g) => g.conta.id)
+        expect(ids).toEqual(['c1', 'c2', 'c3', 'c_a', 'c_z'])
+      })
+
+      it('gera abas por tipos_pagamento cadastrados na conta com contagem e soma', () => {
+        const contaMulti: Conta = {
+          id: 'c_multi',
+          nome: 'Banco Inter',
+          tipo: 'bancaria',
+          ordem: 1,
+          ativa: true,
+          tipos_pagamento: ['pix', 'boletos', 'debito'],
+        } as unknown as Conta
+
+        const mPix: MetodoPagamento = {
+          id: 'm_pix',
+          nome: 'Pix',
+          tipo: 'pix',
+          ativo: true,
+        } as MetodoPagamento
+        const mBol: MetodoPagamento = {
+          id: 'm_bol',
+          nome: 'Boleto',
+          tipo: 'boleto',
+          ativo: true,
+        } as MetodoPagamento
+
+        const compPix: DespesaCompromisso = {
+          id: 'cp_1',
+          descricao: 'Pix Luz',
+          conta_padrao: 'c_multi',
+          metodo_pagamento: 'm_pix',
+          ativo: true,
+        } as DespesaCompromisso
+        const compBol: DespesaCompromisso = {
+          id: 'cp_2',
+          descricao: 'Boleto Condomínio',
+          conta_padrao: 'c_multi',
+          metodo_pagamento: 'm_bol',
+          ativo: true,
+        } as DespesaCompromisso
+
+        const oc1: DespesaOcorrencia = {
+          id: 'oc_1',
+          compromisso: 'cp_1',
+          conta: 'c_multi',
+          valor_previsto: 100,
+        } as DespesaOcorrencia
+        const oc2: DespesaOcorrencia = {
+          id: 'oc_2',
+          compromisso: 'cp_2',
+          conta: 'c_multi',
+          valor_previsto: 350,
+        } as DespesaOcorrencia
+
+        const res = despesasService.agruparDespesasParaVisualizacao({
+          ocorrencias: [oc1, oc2],
+          contas: [contaMulti],
+          compromissos: [compPix, compBol],
+          metodosPagamento: [mPix, mBol],
+        })
+
+        expect(res.contas).toHaveLength(1)
+        const grupo = res.contas[0]
+        expect(grupo.abas.map((a) => a.tipo)).toEqual(['pix', 'boletos', 'debito'])
+
+        const abaPix = grupo.abas.find((a) => a.tipo === 'pix')!
+        expect(abaPix.ocorrencias).toHaveLength(1)
+        expect(abaPix.ocorrencias[0].id).toBe('oc_1')
+
+        const abaBol = grupo.abas.find((a) => a.tipo === 'boletos')!
+        expect(abaBol.ocorrencias).toHaveLength(1)
+        expect(abaBol.ocorrencias[0].id).toBe('oc_2')
+
+        const abaDeb = grupo.abas.find((a) => a.tipo === 'debito')!
+        expect(abaDeb.ocorrencias).toHaveLength(0)
+      })
+
+      it('aloca assinaturas anuais dentro do grupo da conta vinculada', () => {
+        const contaNubank: Conta = {
+          id: 'c_nu',
+          nome: 'Nubank',
+          tipo: 'cartao',
+          ordem: 1,
+          ativa: true,
+          tipos_pagamento: ['credito'],
+        } as unknown as Conta
+
+        const compAssinatura: DespesaCompromisso = {
+          id: 'comp_anual',
+          descricao: 'Amazon Prime Anual',
+          secao: 'assinaturas_anuais',
+          periodicidade: 'anual',
+          conta_padrao: 'c_nu',
+          ativo: true,
+        } as unknown as DespesaCompromisso
+
+        const ocAnual: DespesaOcorrencia = {
+          id: 'oc_anual_1',
+          compromisso: 'comp_anual',
+          conta: 'c_nu',
+          secao: 'assinaturas_anuais',
+          valor_previsto: 166.8,
+        } as DespesaOcorrencia
+
+        const res = despesasService.agruparDespesasParaVisualizacao({
+          ocorrencias: [ocAnual],
+          contas: [contaNubank],
+          compromissos: [compAssinatura],
+          metodosPagamento: [],
+        })
+
+        // Na lista única de contas, a assinatura fica dentro do grupo da conta 'c_nu'
+        expect(res.contas).toHaveLength(1)
+        expect(res.contas[0].conta.id).toBe('c_nu')
+        expect(res.contas[0].ocorrencias.map((o) => o.id)).toContain('oc_anual_1')
+      })
+
+      it('aloca despesas em dinheiro no grupo residual dinheiro e não nas contas', () => {
+        const contaBancaria: Conta = {
+          id: 'c_banco',
+          nome: 'Itaú',
+          tipo: 'bancaria',
+          ordem: 1,
+          ativa: true,
+          tipos_pagamento: ['pix'],
+        } as unknown as Conta
+
+        const mDin: MetodoPagamento = {
+          id: 'm_din',
+          nome: 'Espécie',
+          tipo: 'dinheiro',
+          ativo: true,
+        } as MetodoPagamento
+
+        const compDin: DespesaCompromisso = {
+          id: 'cp_din',
+          descricao: 'Feira Livre',
+          metodo_pagamento: 'm_din',
+          ativo: true,
+        } as DespesaCompromisso
+
+        const ocDin: DespesaOcorrencia = {
+          id: 'oc_din_feira',
+          compromisso: 'cp_din',
+          valor_previsto: 45,
+        } as DespesaOcorrencia
+
+        const res = despesasService.agruparDespesasParaVisualizacao({
+          ocorrencias: [ocDin],
+          contas: [contaBancaria],
+          compromissos: [compDin],
+          metodosPagamento: [mDin],
+        })
+
+        expect(res.dinheiro).toHaveLength(1)
+        expect(res.dinheiro[0].id).toBe('oc_din_feira')
+        expect(res.contas[0].ocorrencias).toHaveLength(0)
+      })
+
+      it('aloca despesas órfãs ou de contas inexistentes/inativas em semConta', () => {
+        const contaAtiva: Conta = {
+          id: 'c_ok',
+          nome: 'Ativa',
+          tipo: 'bancaria',
+          ordem: 1,
+          ativa: true,
+          tipos_pagamento: ['pix'],
+        } as unknown as Conta
+
+        const contaInativa: Conta = {
+          id: 'c_old',
+          nome: 'Velha',
+          tipo: 'bancaria',
+          ordem: 2,
+          ativa: false,
+          tipos_pagamento: ['pix'],
+        } as unknown as Conta
+
+        const ocSemNenhumaConta: DespesaOcorrencia = {
+          id: 'oc_orfa_1',
+          valor_previsto: 50,
+        } as DespesaOcorrencia
+
+        const ocContaInativa: DespesaOcorrencia = {
+          id: 'oc_orfa_2',
+          conta: 'c_old',
+          valor_previsto: 90,
+        } as DespesaOcorrencia
+
+        const res = despesasService.agruparDespesasParaVisualizacao({
+          ocorrencias: [ocSemNenhumaConta, ocContaInativa],
+          contas: [contaAtiva, contaInativa],
+          compromissos: [],
+          metodosPagamento: [],
+        })
+
+        expect(res.semConta.map((o) => o.id)).toEqual(['oc_orfa_1', 'oc_orfa_2'])
+      })
+
+      it('conta com crédito expõe ciclo através de contaAceitaCredito e dia_fechamento/dia_vencimento', () => {
+        const cartaoPuro: Conta = {
+          id: 'c_card',
+          nome: 'Mastercard Black',
+          tipo: 'cartao',
+          dia_fechamento: 5,
+          dia_vencimento: 15,
+          ativa: true,
+          tipos_pagamento: ['credito'],
+        } as unknown as Conta
+
+        const contaMista: Conta = {
+          id: 'c_mista',
+          nome: 'C6 Bank',
+          tipo: 'bancaria',
+          dia_fechamento: 8,
+          dia_vencimento: 18,
+          ativa: true,
+          tipos_pagamento: ['pix', 'credito'],
+        } as unknown as Conta
+
+        const contaApenasDebito: Conta = {
+          id: 'c_deb',
+          nome: 'Caixa Poupança',
+          tipo: 'bancaria',
+          ativa: true,
+          tipos_pagamento: ['debito'],
+        } as unknown as Conta
+
+        expect(contaAceitaCredito(cartaoPuro)).toBe(true)
+        expect(contaAceitaCredito(contaMista)).toBe(true)
+        expect(contaAceitaCredito(contaApenasDebito)).toBe(false)
+        expect(cartaoPuro.dia_fechamento).toBe(5)
+        expect(cartaoPuro.dia_vencimento).toBe(15)
+        expect(contaMista.dia_fechamento).toBe(8)
+        expect(contaMista.dia_vencimento).toBe(18)
+      })
+    })
   })
 })

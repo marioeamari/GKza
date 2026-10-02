@@ -1546,7 +1546,8 @@ export default function Despesas() {
          ======================================================== */}
       <div className="mt-8 space-y-8">
         {/* 1. LISTA ÚNICA DE CONTAS (ordem já devolvida pelo agrupador) */}
-        {(filterSecao === 'all' || (!['dinheiro', 'dinheiro_especie', 'sem_conta'].includes(filterSecao))) && (
+        {(filterSecao === 'all' ||
+          !['dinheiro', 'dinheiro_especie', 'sem_conta'].includes(filterSecao)) && (
           <section className="space-y-6">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -1784,7 +1785,8 @@ export default function Despesas() {
                                     <span>•</span>
                                     <span>
                                       Fecha dia <strong>{conta.dia_fechamento || 10}</strong> ·
-                                      Vence dia <strong>{conta.dia_vencimento || 20}</strong>                                    </span>
+                                      Vence dia <strong>{conta.dia_vencimento || 20}</strong>{' '}
+                                    </span>
                                   </>
                                 )}
                               </div>
@@ -1963,7 +1965,9 @@ export default function Despesas() {
         )}
 
         {/* 2. PAGAMENTOS EM DINHEIRO (ESPÉCIE) */}
-        {(filterSecao === 'all' || filterSecao === 'dinheiro' || filterSecao === 'dinheiro_especie') && (
+        {(filterSecao === 'all' ||
+          filterSecao === 'dinheiro' ||
+          filterSecao === 'dinheiro_especie') && (
           <section className="space-y-4">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div>
