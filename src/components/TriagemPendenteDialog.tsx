@@ -52,7 +52,7 @@ import { apiMessage } from '@/lib/api-error'
 import { calcularFaturaCartao } from '@/lib/cartao-fatura'
 import { dateOnly, formatCurrency, formatDate, toPocketBaseDate } from '@/lib/format'
 import { getFileUrl } from '@/lib/pocketbase/files'
-import { despesasService } from '@/services/despesas'
+import { contaAceitaCredito, despesasService } from '@/services/despesas'
 import {
   telegramPendentesService,
   type TriagemDespesaInput,
@@ -227,7 +227,17 @@ export function TriagemPendenteDialog({
       }
     }
 
-    const defaultMetodo = metodosPagamento[0]?.id || ''
+    const metodosSemDinheiro = metodosPagamento.filter((m) => {
+      const tipo = (m.tipo || '').toLowerCase()
+      const nome = (m.nome || '').toLowerCase()
+      const codigo = (m.codigo || '').toLowerCase()
+      if (tipo === 'dinheiro') return false
+      if (nome === 'dinheiro' || nome.includes('dinheiro')) return false
+      if (codigo === 'dinheiro' || codigo === 'dinherio') return false
+      return true
+    })
+
+    const defaultMetodo = metodosSemDinheiro[0]?.id || ''
     const defaultDizimoTipo = tiposDizimo[0]?.id || ''
     const defaultTag = tags[0]?.id || ''
 
@@ -290,14 +300,46 @@ export function TriagemPendenteDialog({
     [categorias],
   )
 
-  // Opções de contas para o select "Conta de pagamento prevista / Cartão" da despesa:
-  // Lista contas ativas cadastradas ordenadas por nome.
+  // Opções de contas ativas ordenadas pela posição manual (ordem) com fallback alfabético pt-BR.
   const despContaOptions = useMemo(() => {
     const list = contas.filter((c) => c.ativa)
-    return list
-      .slice()
-      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }))
+    return list.slice().sort((a, b) => {
+      const ordemA = a.ordem ?? 999999
+      const ordemB = b.ordem ?? 999999
+      if (ordemA !== ordemB) return ordemA - ordemB
+      return a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' })
+    })
   }, [contas])
+
+  const lancContaOptions = despContaOptions
+
+  // Métodos de pagamento filtrados (remove a opção de 'dinheiro' no formulário de despesa)
+  const metodosPagamentoDisponiveis = useMemo(() => {
+    return metodosPagamento.filter((m) => {
+      const tipo = (m.tipo || '').toLowerCase()
+      const nome = (m.nome || '').toLowerCase()
+      const codigo = (m.codigo || '').toLowerCase()
+      if (tipo === 'dinheiro') return false
+      if (nome === 'dinheiro' || nome.includes('dinheiro')) return false
+      if (codigo === 'dinheiro' || codigo === 'dinherio') return false
+      return true
+    })
+  }, [metodosPagamento])
+
+  // Derivação automática da seção do painel a partir da conta e regra de repetição:
+  // 1) Conta aceita crédito -> 'cartoes_credito'
+  // 2) Repetição 'anual' -> 'assinaturas_anuais'
+  // 3) Demais -> 'contas_mensais_pix_boleto'
+  const secaoDerivada = useMemo((): SecaoDespesa => {
+    const c = contas.find((item) => item.id === despForm.conta_padrao)
+    if (c && (c.tipo === 'cartao' || contaAceitaCredito(c))) {
+      return 'cartoes_credito'
+    }
+    if (despForm.regra_repeticao === 'anual') {
+      return 'assinaturas_anuais'
+    }
+    return 'contas_mensais_pix_boleto'
+  }, [contas, despForm.conta_padrao, despForm.regra_repeticao])
 
   // Identificação do Titular da Despesa selecionado
   const titularSelecionado = useMemo(() => {
@@ -322,16 +364,18 @@ export function TriagemPendenteDialog({
 
   // Conta selecionada na Despesa
   const selectedDespConta = contas.find((c) => c.id === despForm.conta_padrao)
-  const isContaCartao = selectedDespConta?.tipo === 'cartao'
-  const isSelectedDespContaCartao = isContaCartao || despForm.secao === 'cartoes_credito'
+  // Conta com suporte a crédito (tipo 'cartao' ou tipos_pagamento incluindo 'credito')
+  const temCredito = contaAceitaCredito(selectedDespConta)
+  const isContaCartao = selectedDespConta?.tipo === 'cartao' || temCredito
+  const isSelectedDespContaCartao = isContaCartao || secaoDerivada === 'cartoes_credito'
 
   // Ciclo da fatura para compras no cartão (calculado em tempo real com base na conta e data_inicio)
   const faturaCicloCartao = useMemo(() => {
-    if (!selectedDespConta || selectedDespConta.tipo !== 'cartao' || !despForm.data_inicio) {
+    if (!selectedDespConta || !temCredito || !despForm.data_inicio) {
       return null
     }
     return calcularFaturaCartao(selectedDespConta, despForm.data_inicio)
-  }, [selectedDespConta, despForm.data_inicio])
+  }, [selectedDespConta, temCredito, despForm.data_inicio])
 
   // Data de vencimento formatada derivada do ciclo do cartão
   const dataVencimentoCicloCartaoFormatada = useMemo(() => {
@@ -667,7 +711,7 @@ export function TriagemPendenteDialog({
         fornecedor: despForm.fornecedor.trim() || undefined,
         categoria: despForm.categoria || undefined,
         tag: despForm.tag || undefined,
-        secao: despForm.secao,
+        secao: secaoDerivada,
 
         titular_tipo: despForm.titular_tipo,
         titular_pessoa:
@@ -1069,13 +1113,16 @@ export function TriagemPendenteDialog({
                       <SelectValue placeholder="Selecione a conta" />
                     </SelectTrigger>
                     <SelectContent>
-                      {contas
-                        .filter((c) => c.ativa)
-                        .map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.nome} {c.bandeira ? `(${c.bandeira})` : ''}
-                          </SelectItem>
-                        ))}
+                      {lancContaOptions.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.nome}
+                          {c.tipo === 'cartao' && c.bandeira ? ` (${c.bandeira})` : ''}
+                          {c.tipo !== 'cartao'
+                            ? ` · [${c.tipo === 'caixa' ? 'Caixa' : c.tipo === 'bancaria' ? 'Banco' : 'Marketplace'}]`
+                            : ' · [Cartão]'}
+                          {!c.ativa ? ' · (Inativa)' : ''}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   {errors.lancConta && (
@@ -1306,42 +1353,6 @@ export function TriagemPendenteDialog({
                     <p className="text-[10px] text-muted-foreground">
                       A quem se refere (ex: Eu/Casa, Rafa, WeeKids).
                     </p>
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold">Seção do painel /despesas</Label>
-                    <Select
-                      value={isSelectedDespContaCartao ? 'cartoes_credito' : despForm.secao}
-                      disabled={isSelectedDespContaCartao}
-                      onValueChange={(v) => {
-                        const s = v as SecaoDespesa
-                        setDespForm((prev) => ({ ...prev, secao: s }))
-                      }}
-                    >
-                      <SelectTrigger
-                        className={isSelectedDespContaCartao ? 'bg-secondary/40 font-medium' : ''}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="contas_mensais_pix_boleto">
-                          Boletos & Contas Mensais Pix
-                        </SelectItem>
-                        <SelectItem value="assinaturas_anuais">Assinaturas Anuais</SelectItem>
-                        <SelectItem value="cartoes_credito">
-                          Cartões de Crédito (Parcelados/Rotativos)
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {isSelectedDespContaCartao ? (
-                      <p className="text-[10px] font-medium text-primary">
-                        Bloqueado em Cartões de Crédito para compras no cartão.
-                      </p>
-                    ) : (
-                      <p className="text-[10px] text-muted-foreground">
-                        Visualização na interface de Despesas.
-                      </p>
-                    )}
                   </div>
                 </div>
               </div>
@@ -1761,9 +1772,11 @@ export function TriagemPendenteDialog({
                       onValueChange={(v) => {
                         const contaId = v === 'none' ? '' : v
                         const c = contas.find((item) => item.id === contaId)
-                        let updated = { ...despForm, conta_padrao: contaId }
-                        if (c && c.tipo === 'cartao') {
-                          updated.secao = 'cartoes_credito'
+                        const updated = { ...despForm, conta_padrao: contaId }
+                        if (c && (c.tipo === 'cartao' || contaAceitaCredito(c))) {
+                          if (c.tipo === 'cartao') {
+                            updated.secao = 'cartoes_credito'
+                          }
                           if (c.dia_vencimento) {
                             updated.dia_vencimento = c.dia_vencimento
                           }
@@ -1820,7 +1833,7 @@ export function TriagemPendenteDialog({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Nenhum</SelectItem>
-                        {metodosPagamento.map((m) => (
+                        {metodosPagamentoDisponiveis.map((m) => (
                           <SelectItem key={m.id} value={m.id}>
                             {m.nome}
                           </SelectItem>
