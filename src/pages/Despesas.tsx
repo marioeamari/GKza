@@ -1555,7 +1555,9 @@ export default function Despesas() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas as Seções</SelectItem>
-              <SelectItem value="contas_mensais_pix_boleto">Boletos & Pix Mensais</SelectItem>
+              <SelectItem value="contas_mensais_pix_boleto">
+                Contas & Métodos de Pagamento
+              </SelectItem>
               <SelectItem value="assinaturas_anuais">Assinaturas Anuais</SelectItem>
               <SelectItem value="cartoes_credito">Cartões de Crédito</SelectItem>
             </SelectContent>
