@@ -158,7 +158,10 @@ export function getAvisoFaturaCartao(
   conta: Conta | undefined,
   dataTransacao: string,
 ): string | null {
-  if (!conta || conta.tipo !== 'cartao') return null
+  if (!conta) return null
+  const aceitaCredito =
+    (conta.tipos_pagamento && conta.tipos_pagamento.includes('credito')) || conta.tipo === 'cartao'
+  if (!aceitaCredito || !conta.dia_fechamento) return null
   const fatura = calcularFaturaCartao(conta, dataTransacao)
   const dateObj = new Date(fatura.dataFechamento + 'T12:00:00')
   const mesAno = dateObj.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })

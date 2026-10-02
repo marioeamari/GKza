@@ -503,7 +503,6 @@ export default function Contas() {
             </div>
             <h2 className="mt-4 text-[16px] font-bold text-foreground">{account.nome}</h2>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <Badge variant="outline">{labels[account.tipo]}</Badge>
               <Badge
                 variant="secondary"
                 className={`text-[10px] font-semibold ${
@@ -514,41 +513,38 @@ export default function Contas() {
               >
                 {account.natureza === 'juridica' ? 'Pessoa Jurídica' : 'Pessoa Física'}
               </Badge>
-              {account.tipo === 'cartao' && account.bandeira && (
-                <Badge variant="secondary" className="text-[10px]">
-                  {account.bandeira}
-                </Badge>
-              )}
-              {account.tipo === 'cartao' && account.dia_fechamento && (
-                <span className="text-[11px] text-muted-foreground">
-                  Fecha dia {account.dia_fechamento}
-                </span>
-              )}
-              {account.tipo === 'cartao' && account.dia_vencimento && (
-                <span className="text-[11px] font-medium text-foreground flex items-center gap-0.5">
-                  <Calendar className="h-3 w-3 text-primary" />
-                  Vence dia {account.dia_vencimento}
-                </span>
-              )}
-            </div>
-
-            {/* Tipos de pagamento aceitos */}
-            <div className="mt-2.5 flex flex-wrap items-center gap-1">
               {account.tipos_pagamento && account.tipos_pagamento.length > 0 ? (
                 account.tipos_pagamento.map((t) => {
                   const opt = tiposPagamentoOpcoes.find((o) => o.id === t)
                   return (
-                    <span
+                    <Badge
                       key={t}
-                      className="rounded bg-secondary/80 px-1.5 py-0.5 text-[10px] font-medium text-foreground"
+                      variant="outline"
+                      className="text-[10px] font-medium bg-secondary/40"
                     >
                       {opt?.label || t}
-                    </span>
+                    </Badge>
                   )
                 })
               ) : (
                 <span className="text-[11px] text-muted-foreground italic">
                   Sem tipos de pagamento definidos
+                </span>
+              )}
+              {account.tipos_pagamento?.includes('credito') && account.bandeira && (
+                <Badge variant="secondary" className="text-[10px]">
+                  {account.bandeira}
+                </Badge>
+              )}
+              {account.tipos_pagamento?.includes('credito') && account.dia_fechamento && (
+                <span className="text-[11px] text-muted-foreground">
+                  Fecha dia {account.dia_fechamento}
+                </span>
+              )}
+              {account.tipos_pagamento?.includes('credito') && account.dia_vencimento && (
+                <span className="text-[11px] font-medium text-foreground flex items-center gap-0.5">
+                  <Calendar className="h-3 w-3 text-primary" />
+                  Vence dia {account.dia_vencimento}
                 </span>
               )}
             </div>
@@ -692,52 +688,22 @@ export default function Contas() {
               />
               {errors.nome && <p className="field-error">{errors.nome}</p>}
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Tipo da conta</Label>
-                <Select
-                  value={form.tipo}
-                  onValueChange={(tipo) => {
-                    const novoTipo = tipo as Conta['tipo']
-                    setForm((prev) => {
-                      let nextTipos = prev.tipos_pagamento
-                      if (novoTipo === 'cartao' && !nextTipos.includes('credito')) {
-                        nextTipos = [...nextTipos, 'credito']
-                      }
-                      return { ...prev, tipo: novoTipo, tipos_pagamento: nextTipos }
-                    })
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(labels).map(([v, l]) => (
-                      <SelectItem value={v} key={v}>
-                        {l}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Natureza</Label>
-                <Select
-                  value={form.natureza}
-                  onValueChange={(natureza) =>
-                    setForm({ ...form, natureza: natureza as ContaNatureza })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="fisica">Física (CPF)</SelectItem>
-                    <SelectItem value="juridica">Jurídica (CNPJ)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <Label>Natureza</Label>
+              <Select
+                value={form.natureza}
+                onValueChange={(natureza) =>
+                  setForm({ ...form, natureza: natureza as ContaNatureza })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fisica">Física (CPF)</SelectItem>
+                  <SelectItem value="juridica">Jurídica (CNPJ)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Múltiplas escolhas de tipos de pagamento aceitos */}
@@ -784,10 +750,10 @@ export default function Contas() {
               </p>
             </div>
 
-            {form.tipo === 'cartao' && (
+            {form.tipos_pagamento.includes('credito') && (
               <div className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-secondary/30 p-3">
                 <div className="space-y-1">
-                  <Label className="text-xs">Dia Fechamento</Label>
+                  <Label className="text-xs">Dia Fechamento da Fatura</Label>
                   <Input
                     type="number"
                     min={1}
@@ -799,7 +765,7 @@ export default function Contas() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Dia Vencimento</Label>
+                  <Label className="text-xs">Dia Vencimento da Fatura</Label>
                   <Input
                     type="number"
                     min={1}

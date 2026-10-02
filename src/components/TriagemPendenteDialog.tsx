@@ -367,19 +367,34 @@ export function TriagemPendenteDialog({
     return false
   }, [selectedDespConta, selectedMetodoPagamento])
 
-  // Aviso orientativo NÃO-bloqueante: Cartão de Crédito + Pix/Boleto
+  // Aviso orientativo NÃO-bloqueante: se a conta tem tipos_pagamento configurados,
+  // o aviso orientativo aparece SOMENTE quando o tipo do método escolhido não está nos tipos da conta;
+  // se está nos tipos, nenhum aviso; se a conta não tem tipos cadastrados, mantém o aviso conservador.
   const avisoCartaoMetodoNaoCartao = useMemo(() => {
-    if (!isSelectedDespContaCartao || !selectedDespConta || !despForm.metodo_pagamento) return null
-    if (!selectedMetodoPagamento || selectedMetodoPagamento.tipo === 'cartao') return null
+    if (!selectedDespConta || !despForm.metodo_pagamento) return null
+    if (!selectedMetodoPagamento) return null
 
-    const metodoNome = selectedMetodoPagamento.nome || 'Pix/Boleto'
-    return `A conta "${selectedDespConta.nome}" é um cartão de crédito e o método selecionado é ${metodoNome} — se a intenção é pagar a fatura do cartão, tudo bem; se a intenção é pagamento direto, considere escolher uma conta bancária.`
-  }, [
-    isSelectedDespContaCartao,
-    selectedDespConta,
-    despForm.metodo_pagamento,
-    selectedMetodoPagamento,
-  ])
+    const tiposConta = selectedDespConta.tipos_pagamento
+    if (tiposConta && tiposConta.length > 0) {
+      const tipoMetodo = despesasService.mapearMetodoParaTipoPagamento(
+        selectedMetodoPagamento,
+        tiposConta,
+      )
+      if (!tiposConta.includes(tipoMetodo)) {
+        const metodoNome = selectedMetodoPagamento.nome || 'selecionado'
+        return `O método de pagamento "${metodoNome}" não está configurado entre os tipos aceitos pela conta "${selectedDespConta.nome}". Verifique se a forma de pagamento e a conta estão corretas.`
+      }
+      return null
+    }
+
+    // Se a conta não tem tipos cadastrados, manter aviso conservador
+    if (selectedDespConta.tipo === 'cartao' && selectedMetodoPagamento.tipo !== 'cartao') {
+      const metodoNome = selectedMetodoPagamento.nome || 'Pix/Boleto'
+      return `A conta "${selectedDespConta.nome}" é um cartão de crédito e o método selecionado é ${metodoNome} — se a intenção é pagar a fatura do cartão, tudo bem; se a intenção é pagamento direto, considere escolher uma conta bancária.`
+    }
+
+    return null
+  }, [selectedDespConta, despForm.metodo_pagamento, selectedMetodoPagamento])
 
   // Aviso de diferença de titularidade entre conta e despesa
   const titularidadeContaDiferente = useMemo(() => {
