@@ -111,14 +111,31 @@ export function FaturaCardGroupRow({
             </div>
 
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-              <span>{fatura.itens.length} compras no ciclo</span>
+              <span className="font-medium text-foreground">
+                {fatura.itens.length} {fatura.itens.length === 1 ? 'compra' : 'compras'} no ciclo
+              </span>
               <span>•</span>
-              <span>Fechamento: {formatDate(fatura.dataFechamento)}</span>
+              <span>
+                Fechamento dia {fatura.conta.dia_fechamento ?? '—'} (
+                {formatDate(fatura.dataFechamento)})
+              </span>
               <span>•</span>
               <span className="font-semibold text-foreground flex items-center gap-1">
-                <Calendar className="h-3 w-3 text-muted-foreground" />
-                Vencimento: {formatDate(fatura.dataVencimento)}
+                <Calendar className="h-3 w-3 text-primary" />
+                Vencimento dia {fatura.conta.dia_vencimento ?? '—'} (
+                {formatDate(fatura.dataVencimento)})
               </span>
+              {fatura.conta.natureza && (
+                <>
+                  <span>•</span>
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] uppercase font-semibold py-0 px-1.5 h-4 text-muted-foreground"
+                  >
+                    {fatura.conta.natureza === 'fisica' ? 'Pessoa Física' : 'Pessoa Jurídica'}
+                  </Badge>
+                </>
+              )}
             </div>
           </div>
         </div>

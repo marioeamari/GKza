@@ -4,7 +4,9 @@ import {
   ArrowDownLeft,
   ArrowUpDown,
   ArrowUpRight,
+  Calendar,
   CreditCard,
+  GripVertical,
   Landmark,
   LoaderCircle,
   Pencil,
@@ -125,6 +127,76 @@ export default function Contas() {
   const [savingMovement, setSavingMovement] = useState(false)
 
   const [showArchived, setShowArchived] = useState(false)
+  const [draggedContaId, setDraggedContaId] = useState<string | null>(null)
+  const [dragOverContaId, setDragOverContaId] = useState<string | null>(null)
+  const [isReordering, setIsReordering] = useState(false)
+
+  const handleDragStart = (id: string) => {
+    setDraggedContaId(id)
+  }
+
+  const handleDragOver = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault()
+    if (draggedContaId && draggedContaId !== targetId) {
+      setDragOverContaId(targetId)
+    }
+  }
+
+  const handleDragLeave = () => {
+    setDragOverContaId(null)
+  }
+
+  const handleDrop = async (targetId: string) => {
+    if (!draggedContaId || draggedContaId === targetId) {
+      setDraggedContaId(null)
+      setDragOverContaId(null)
+      return
+    }
+
+    // Apenas reordena as contas ativas
+    const activeContas = contas.filter((c) => c.ativa)
+    const fromIndex = activeContas.findIndex((c) => c.id === draggedContaId)
+    const toIndex = activeContas.findIndex((c) => c.id === targetId)
+
+    if (fromIndex === -1 || toIndex === -1) {
+      setDraggedContaId(null)
+      setDragOverContaId(null)
+      return
+    }
+
+    const reorderedActive = [...activeContas]
+    const [moved] = reorderedActive.splice(fromIndex, 1)
+    reorderedActive.splice(toIndex, 0, moved)
+
+    // Atualiza estado otimista imediato
+    const archivedContas = contas.filter((c) => !c.ativa)
+    const updatedAllContas = [
+      ...reorderedActive.map((item, idx) => ({ ...item, ordem: idx + 1 })),
+      ...archivedContas,
+    ]
+    setContas(updatedAllContas)
+    setDraggedContaId(null)
+    setDragOverContaId(null)
+    setIsReordering(true)
+
+    try {
+      await financeService.reordenarContas(reorderedActive.map((c) => c.id))
+      toast({
+        title: 'Ordem das contas atualizada',
+        description: 'A nova sequência será respeitada em Lançamentos, Despesas e Contas.',
+      })
+    } catch (err) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao salvar reordenação',
+        description: apiMessage(err),
+      })
+      await load()
+    } finally {
+      setIsReordering(false)
+    }
+  }
+
   const load = async () => {
     try {
       const [a, b, c] = await Promise.all([
@@ -342,18 +414,39 @@ export default function Contas() {
       setSavingMovement(false)
     }
   }
-  const AccountCard = ({ account, index }: { account: Conta; index: number }) => {
+  const AccountCard = ({
+    account,
+    index,
+    isDraggable = false,
+  }: {
+    account: Conta
+    index: number
+    isDraggable?: boolean
+  }) => {
     const Icon = icons[account.tipo]
     const isInActiveGroup = !activeContext.isAll && activeContext.contaIds.includes(account.id)
     const accountGroups = useMemo(
       () => grupos.filter((g) => g.contas.some((c) => c.id === account.id)),
       [account.id],
     )
+    const isBeingDragged = draggedContaId === account.id
+    const isOver = dragOverContaId === account.id
 
     return (
       <article
-        className={`card-hover rise-in flex flex-col justify-between overflow-hidden rounded-2xl border bg-white shadow-soft transition ${
-          isInActiveGroup ? 'border-primary ring-2 ring-primary/20' : 'border-border'
+        draggable={isDraggable}
+        onDragStart={() => isDraggable && handleDragStart(account.id)}
+        onDragOver={(e) => isDraggable && handleDragOver(e, account.id)}
+        onDragLeave={handleDragLeave}
+        onDrop={() => isDraggable && handleDrop(account.id)}
+        className={`card-hover rise-in flex flex-col justify-between overflow-hidden rounded-2xl border bg-white shadow-soft transition select-none ${
+          isBeingDragged ? 'opacity-40 scale-95 border-dashed border-primary' : ''
+        } ${
+          isOver
+            ? 'border-primary ring-2 ring-primary/40 bg-primary/5 translate-y-[-2px]'
+            : isInActiveGroup
+              ? 'border-primary ring-2 ring-primary/20'
+              : 'border-border'
         }`}
         style={{ animationDelay: `${index * 50}ms` }}
       >
@@ -361,16 +454,35 @@ export default function Contas() {
           <div className="h-1.5" style={{ background: account.cor || '#DF5830' }} />
           <div className="p-5 pb-0">
             <div className="flex items-start justify-between">
-              <span
-                className="grid h-10 w-10 place-items-center rounded-xl"
-                style={{
-                  background: `${account.cor || '#DF5830'}18`,
-                  color: account.cor || '#DF5830',
-                }}
-              >
-                <Icon className="h-5 w-5" />
-              </span>
+              <div className="flex items-center gap-2">
+                {isDraggable && (
+                  <button
+                    type="button"
+                    className="cursor-grab active:cursor-grabbing p-1 -ml-1 text-muted-foreground/60 hover:text-foreground transition rounded-md hover:bg-secondary"
+                    title="Arraste para reordenar a posição desta conta"
+                  >
+                    <GripVertical className="h-5 w-5" />
+                  </button>
+                )}
+                <span
+                  className="grid h-10 w-10 place-items-center rounded-xl"
+                  style={{
+                    background: `${account.cor || '#DF5830'}18`,
+                    color: account.cor || '#DF5830',
+                  }}
+                >
+                  <Icon className="h-5 w-5" />
+                </span>
+              </div>
               <div className="flex items-center gap-1">
+                {account.ordem && (
+                  <span
+                    className="text-[10px] font-bold text-muted-foreground px-1.5 py-0.5 rounded bg-secondary"
+                    title={`Posição / ordem de exibição: #${account.ordem}`}
+                  >
+                    #{account.ordem}
+                  </span>
+                )}
                 {!account.ativa && <Badge variant="secondary">Arquivada</Badge>}
                 {isInActiveGroup && (
                   <Badge className="bg-primary/10 text-primary border-primary/20 text-[10px]">
@@ -407,8 +519,14 @@ export default function Contas() {
                   {account.bandeira}
                 </Badge>
               )}
-              {account.tipo === 'cartao' && account.dia_vencimento && (
+              {account.tipo === 'cartao' && account.dia_fechamento && (
                 <span className="text-[11px] text-muted-foreground">
+                  Fecha dia {account.dia_fechamento}
+                </span>
+              )}
+              {account.tipo === 'cartao' && account.dia_vencimento && (
+                <span className="text-[11px] font-medium text-foreground flex items-center gap-0.5">
+                  <Calendar className="h-3 w-3 text-primary" />
                   Vence dia {account.dia_vencimento}
                 </span>
               )}
@@ -516,10 +634,25 @@ export default function Contas() {
           }
         />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {active.map((a, i) => (
-            <AccountCard key={a.id} account={a} index={i} />
-          ))}
+        <div className="space-y-3">
+          {active.length > 1 && (
+            <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+              <span className="flex items-center gap-1.5 font-medium">
+                <GripVertical className="h-4 w-4 text-primary" />
+                Arraste qualquer conta pelo ícone para reorganizar as posições de exibição.
+              </span>
+              {isReordering && (
+                <span className="inline-flex items-center gap-1 text-primary font-bold">
+                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> Salvando nova ordem...
+                </span>
+              )}
+            </div>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {active.map((a, i) => (
+              <AccountCard key={a.id} account={a} index={i} isDraggable={active.length > 1} />
+            ))}
+          </div>
         </div>
       )}
       {archived.length > 0 && (

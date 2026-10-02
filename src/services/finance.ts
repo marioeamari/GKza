@@ -110,7 +110,12 @@ export const financeService = {
     }
   },
 
-  listContas: () => listAll<Conta>('contas', { sort: '-ativa,nome' }),
+  listContas: () => listAll<Conta>('contas', { sort: 'ordem,-ativa,nome' }),
+  reordenarContas: async (idsOrdenados: string[]) => {
+    await Promise.all(
+      idsOrdenados.map((id, index) => pb.collection('contas').update(id, { ordem: index + 1 })),
+    )
+  },
   saveConta: (data: Partial<Conta>, id?: string) =>
     id
       ? pb.collection<Conta>('contas').update(id, data)

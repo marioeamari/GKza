@@ -7,6 +7,7 @@ import {
   Calendar,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -475,6 +476,7 @@ export default function Despesas() {
 
   // Modo de visualização de cartões: 'mes' (mês selecionado) ou 'historico' (todas as compras / histórico completo)
   const [cartaoViewMode, setCartaoViewMode] = useState<Record<string, 'mes' | 'historico'>>({})
+  const [cartaoExpanded, setCartaoExpanded] = useState<Record<string, boolean>>({})
 
   // Modais de ação
   const [baixaModal, setBaixaModal] = useState(false)
@@ -1072,7 +1074,18 @@ export default function Despesas() {
   )
 
   // Seção 3: Cartões de Crédito (Agrupados por Cartão) — somente cartões ativos
-  const cartaoContas = useMemo(() => contas.filter((c) => c.tipo === 'cartao' && c.ativa), [contas])
+  const cartaoContas = useMemo(
+    () =>
+      contas
+        .filter((c) => c.tipo === 'cartao' && c.ativa)
+        .sort((a, b) => {
+          const ordemA = a.ordem ?? 999999
+          const ordemB = b.ordem ?? 999999
+          if (ordemA !== ordemB) return ordemA - ordemB
+          return (a.nome || '').localeCompare(b.nome || '')
+        }),
+    [contas],
+  )
 
   // Filtragem de todas as ocorrências de cartões (para histórico completo)
   const filteredCartaoOcorrenciasAll = useMemo(() => {
@@ -2201,6 +2214,8 @@ export default function Despesas() {
                 cartoesGrouped.map(({ conta, abas, ocorrenciasMes, ocorrenciasTodas }) => {
                   const currentMode = cartaoViewMode[conta.id] || 'mes'
                   const isHist = currentMode === 'historico'
+                  // Toggle aberto por padrão
+                  const isExpanded = cartaoExpanded[conta.id] !== false
 
                   // Totais do cartão no modo selecionado (usado no header)
                   const totalHeaderMes = ocorrenciasMes.reduce(
@@ -2227,6 +2242,10 @@ export default function Despesas() {
                     isHist ? aba.ocorrenciasTodas.length > 0 : aba.ocorrenciasMes.length > 0,
                   )
                   const defaultTab = abasComOcorrencias[0]?.tipo || abas[0]?.tipo || 'credito'
+
+                  const countComprasExibidas = isHist
+                    ? ocorrenciasTodas.length
+                    : ocorrenciasMes.length
 
                   const renderOcorrenciasList = (
                     list: DespesaOcorrencia[],
@@ -2284,18 +2303,45 @@ export default function Despesas() {
                       key={conta.id}
                       className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft transition-all"
                     >
-                      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-secondary/25 p-4 sm:p-5">
-                        {/* Dados do Cartão: Nome, Bandeira, Fechamento e Vencimento */}
-                        <div className="flex items-center gap-3">
+                      <header
+                        className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-secondary/25 p-4 sm:p-5 cursor-pointer hover:bg-secondary/35 transition"
+                        onClick={() =>
+                          setCartaoExpanded((prev) => ({
+                            ...prev,
+                            [conta.id]: prev[conta.id] === undefined ? false : !prev[conta.id],
+                          }))
+                        }
+                      >
+                        {/* Dados do Cartão: Chevron toggle, Ícone, Nome, Bandeira, Fechamento e Vencimento */}
+                        <div className="flex items-center gap-3 min-w-0">
+                          <button
+                            type="button"
+                            className="grid h-8 w-8 place-items-center rounded-lg bg-white border border-border text-muted-foreground hover:text-foreground shrink-0 shadow-xs"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setCartaoExpanded((prev) => ({
+                                ...prev,
+                                [conta.id]: prev[conta.id] === undefined ? false : !prev[conta.id],
+                              }))
+                            }}
+                            title={isExpanded ? 'Recolher cartão' : 'Expandir cartão'}
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </button>
+
                           <span
-                            className="grid h-11 w-11 place-items-center rounded-xl text-white shadow-xs"
+                            className="grid h-11 w-11 place-items-center rounded-xl text-white shadow-xs shrink-0"
                             style={{ background: conta.cor || '#4C3A8C' }}
                           >
                             <CreditCard className="h-6 w-6" />
                           </span>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h3 className="text-base font-extrabold text-foreground sm:text-lg">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-base font-extrabold text-foreground sm:text-lg truncate">
                                 {conta.nome}
                               </h3>
                               {conta.bandeira && (
@@ -2303,22 +2349,39 @@ export default function Despesas() {
                                   {conta.bandeira}
                                 </Badge>
                               )}
+                              {conta.natureza && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] uppercase font-semibold py-0 px-1.5 h-4 text-muted-foreground"
+                                >
+                                  {conta.natureza === 'fisica'
+                                    ? 'Pessoa Física'
+                                    : 'Pessoa Jurídica'}
+                                </Badge>
+                              )}
                             </div>
                             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                               <span className="font-medium text-foreground">
+                                {countComprasExibidas}{' '}
+                                {countComprasExibidas === 1 ? 'lançamento' : 'lançamentos'}
+                                {!isHist ? ' no mês' : ' no histórico'}
+                              </span>
+                              <span>•</span>
+                              <span>
                                 {conta.dia_fechamento ? (
                                   <>
-                                    Fatura fecha todo <strong>dia {conta.dia_fechamento}</strong>
+                                    Fechamento dia <strong>{conta.dia_fechamento}</strong>
                                   </>
                                 ) : (
                                   'Fechamento não informado'
                                 )}
                               </span>
                               <span>•</span>
-                              <span className="font-medium text-foreground">
+                              <span className="font-semibold text-foreground flex items-center gap-1">
+                                <Calendar className="h-3 w-3 text-primary" />
                                 {conta.dia_vencimento ? (
                                   <>
-                                    Vencimento todo <strong>dia {conta.dia_vencimento}</strong>
+                                    Vencimento dia <strong>{conta.dia_vencimento}</strong>
                                   </>
                                 ) : (
                                   'Vencimento não informado'
@@ -2329,7 +2392,10 @@ export default function Despesas() {
                         </div>
 
                         {/* Valores e Alternador Mês vs Histórico Completo */}
-                        <div className="flex flex-wrap items-center gap-3">
+                        <div
+                          className="flex flex-wrap items-center gap-3 ml-auto"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           {/* Seletor de visualização */}
                           <div className="flex rounded-lg border border-border bg-background p-0.5 text-xs">
                             <button
@@ -2384,63 +2450,67 @@ export default function Despesas() {
                         </div>
                       </header>
 
-                      {hasSingleTab ? (
-                        // Cartões com apenas 1 tipo de pagamento (ex: ["credito"]): exibe direto sem poluir com abas
-                        renderOcorrenciasList(
-                          isHist ? ocorrenciasTodas : ocorrenciasMes,
-                          abas[0]?.tipo,
-                        )
-                      ) : (
-                        // Cartões com múltiplos tipos de pagamento (ex: NuBank com Crédito, Débito, Boleto, Pix, etc.)
-                        <div className="p-4 sm:p-5">
-                          <Tabs defaultValue={defaultTab} className="w-full">
-                            <TabsList className="mb-4 flex h-auto flex-wrap gap-1 bg-muted/60 p-1">
-                              {abas.map((aba) => {
-                                const list = isHist ? aba.ocorrenciasTodas : aba.ocorrenciasMes
-                                const qtd = list.length
-                                const totalAba = list.reduce(
-                                  (s, o) => s + (o.valor_previsto || 0),
-                                  0,
-                                )
-                                const label = CONTA_TIPO_PAGAMENTO_LABELS[aba.tipo] || aba.tipo
+                      {isExpanded && (
+                        <>
+                          {hasSingleTab ? (
+                            // Cartões com apenas 1 tipo de pagamento (ex: ["credito"]): exibe direto sem poluir com abas
+                            renderOcorrenciasList(
+                              isHist ? ocorrenciasTodas : ocorrenciasMes,
+                              abas[0]?.tipo,
+                            )
+                          ) : (
+                            // Cartões com múltiplos tipos de pagamento (ex: NuBank com Crédito, Débito, Boleto, Pix, etc.)
+                            <div className="p-4 sm:p-5">
+                              <Tabs defaultValue={defaultTab} className="w-full">
+                                <TabsList className="mb-4 flex h-auto flex-wrap gap-1 bg-muted/60 p-1">
+                                  {abas.map((aba) => {
+                                    const list = isHist ? aba.ocorrenciasTodas : aba.ocorrenciasMes
+                                    const qtd = list.length
+                                    const totalAba = list.reduce(
+                                      (s, o) => s + (o.valor_previsto || 0),
+                                      0,
+                                    )
+                                    const label = CONTA_TIPO_PAGAMENTO_LABELS[aba.tipo] || aba.tipo
 
-                                return (
-                                  <TabsTrigger
-                                    key={aba.tipo}
-                                    value={aba.tipo}
-                                    className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-xs"
-                                  >
-                                    <span>{label}</span>
-                                    <Badge
-                                      variant={qtd > 0 ? 'secondary' : 'outline'}
-                                      className="h-5 px-1.5 text-[10px] font-bold"
+                                    return (
+                                      <TabsTrigger
+                                        key={aba.tipo}
+                                        value={aba.tipo}
+                                        className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-xs"
+                                      >
+                                        <span>{label}</span>
+                                        <Badge
+                                          variant={qtd > 0 ? 'secondary' : 'outline'}
+                                          className="h-5 px-1.5 text-[10px] font-bold"
+                                        >
+                                          {qtd}
+                                        </Badge>
+                                        {qtd > 0 && (
+                                          <span className="hidden text-[11px] font-normal text-muted-foreground sm:inline">
+                                            ({formatCompactCurrency(totalAba)})
+                                          </span>
+                                        )}
+                                      </TabsTrigger>
+                                    )
+                                  })}
+                                </TabsList>
+
+                                {abas.map((aba) => {
+                                  const list = isHist ? aba.ocorrenciasTodas : aba.ocorrenciasMes
+                                  return (
+                                    <TabsContent
+                                      key={aba.tipo}
+                                      value={aba.tipo}
+                                      className="m-0 focus-visible:outline-none"
                                     >
-                                      {qtd}
-                                    </Badge>
-                                    {qtd > 0 && (
-                                      <span className="hidden text-[11px] font-normal text-muted-foreground sm:inline">
-                                        ({formatCompactCurrency(totalAba)})
-                                      </span>
-                                    )}
-                                  </TabsTrigger>
-                                )
-                              })}
-                            </TabsList>
-
-                            {abas.map((aba) => {
-                              const list = isHist ? aba.ocorrenciasTodas : aba.ocorrenciasMes
-                              return (
-                                <TabsContent
-                                  key={aba.tipo}
-                                  value={aba.tipo}
-                                  className="m-0 focus-visible:outline-none"
-                                >
-                                  {renderOcorrenciasList(list, aba.tipo)}
-                                </TabsContent>
-                              )
-                            })}
-                          </Tabs>
-                        </div>
+                                      {renderOcorrenciasList(list, aba.tipo)}
+                                    </TabsContent>
+                                  )
+                                })}
+                              </Tabs>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   )

@@ -91,6 +91,7 @@ export interface Conta extends RecordModel {
   dia_fechamento?: number
   dia_vencimento?: number
   bandeira?: string
+  ordem?: number
 }
 
 export const CONTA_TIPOS_PAGAMENTO_FALLBACK: Record<

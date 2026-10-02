@@ -316,9 +316,19 @@ export default function Lancamentos() {
     }
 
     return {
-      faturasGrouped: Array.from(faturasMap.values()).sort((a, b) =>
-        b.dataFechamento.localeCompare(a.dataFechamento),
-      ),
+      faturasGrouped: Array.from(faturasMap.values()).sort((a, b) => {
+        // 1. Respeita a ordem manual do cadastro da conta se existir
+        const ordemA = a.conta.ordem ?? 999999
+        const ordemB = b.conta.ordem ?? 999999
+        if (ordemA !== ordemB) {
+          return ordemA - ordemB
+        }
+        // 2. Data de fechamento mais recente primeiro
+        const cmpDate = b.dataFechamento.localeCompare(a.dataFechamento)
+        if (cmpDate !== 0) return cmpDate
+        // 3. Nome da conta
+        return (a.conta.nome || '').localeCompare(b.conta.nome || '')
+      }),
       regularGroups: regularMap,
     }
   }, [records, contasMap])

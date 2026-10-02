@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-02T02:28:26.278Z",
+  "generatedAt": "2026-10-02T02:46:38.109Z",
   "collections": [
     {
       "name": "users",
@@ -284,6 +284,12 @@
           "required": false,
           "system": false,
           "selectValues": ["credito", "debito", "transferencia", "boletos", "pix"]
+        },
+        {
+          "name": "ordem",
+          "type": "number",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": ["CREATE INDEX idx_contas_tipo ON contas (tipo)"]
