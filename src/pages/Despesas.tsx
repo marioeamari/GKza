@@ -67,13 +67,14 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
 import { getFileUrl } from '@/lib/pocketbase/files'
 import { apiMessage } from '@/lib/api-error'
-import { formatCurrency, formatDate, getLocalDateStr } from '@/lib/format'
+import { formatCurrency, formatCompactCurrency, formatDate, getLocalDateStr } from '@/lib/format'
 import { calcularFaturaCartao } from '@/lib/cartao-fatura'
 import { can } from '@/lib/permissions'
 import { cadastrosService } from '@/services/cadastros'
 import { useRealtime } from '@/hooks/use-realtime'
 import { despesasService } from '@/services/despesas'
 import { financeService } from '@/services/finance'
+import { CONTA_TIPO_PAGAMENTO_LABELS } from '@/types/domain'
 import type {
   Categoria,
   Conta,
@@ -88,7 +89,6 @@ import type {
   TipoDespesa,
   TipoDizimo,
 } from '@/types/domain'
-import { CONTA_TIPO_PAGAMENTO_LABELS } from '@/types/domain'
 
 function getInitialCompetencia() {
   return getLocalDateStr().slice(0, 7)
@@ -1705,45 +1705,244 @@ export default function Despesas() {
           AS 3 SEÇÕES PRINCIPAIS CONFORME A PLANILHA DO USUÁRIO
          ======================================================== */}
       <div className="mt-8 space-y-8">
-        {/* SEÇÃO 1: Pagamentos por boletos, e contas mensais pagas por pix */}
+        {/* SEÇÃO 1: Contas Bancárias e Caixas (Agrupadas por Conta com Abas por Tipo de Pagamento) */}
         {(filterSecao === 'all' || filterSecao === 'contas_mensais_pix_boleto') && (
-          <section className="space-y-3">
+          <section className="space-y-6">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
-                  Pagamentos por boletos, e contas mensais pagas por pix
+                  Contas & Métodos de Pagamento
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Água, energia, internet, escola, aluguel, segurança, dízimos e transferências
-                  mensais.
+                  Despesas e compromissos organizados por conta bancária e divididos em abas por
+                  método (Pix, Boletos, Débito, Transferência).
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-muted-foreground">
-                  Total:{' '}
-                  {formatCurrency(
-                    secaoBoletosPix.reduce((acc, curr) => acc + (curr.valor_previsto || 0), 0),
-                  )}
-                </span>
                 <PermissionButton
                   size="sm"
                   variant="outline"
                   allowed={can(user?.role, 'writeFinance')}
                   onClick={() => handleOpenNovoCompromisso('contas_mensais_pix_boleto')}
                 >
-                  <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
+                  <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar despesa
                 </PermissionButton>
               </div>
             </div>
 
-            <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft">
-              {secaoBoletosPix.length === 0 ? (
-                <div className="p-8 text-center text-sm text-muted-foreground">
-                  Nenhum boleto ou conta mensal Pix nesta competência.
-                </div>
-              ) : (
+            {despesasAgrupadas.contasNaoCartao.length === 0 ? (
+              <div className="overflow-hidden rounded-2xl border border-border bg-white p-8 text-center text-sm text-muted-foreground shadow-soft">
+                Nenhuma conta bancária possui despesas nesta competência.
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {despesasAgrupadas.contasNaoCartao.map(({ conta, totalOcorrencias, abas }) => {
+                  const abasComDespesas = abas.filter((aba) => aba.ocorrencias.length > 0)
+                  const defaultTab = abasComDespesas[0]?.tipo || abas[0]?.tipo || 'pix'
+                  const totalPrevistoConta = abas.reduce(
+                    (sumAba, aba) =>
+                      sumAba + aba.ocorrencias.reduce((s, o) => s + (o.valor_previsto || 0), 0),
+                    0,
+                  )
+                  const totalPagoConta = abas.reduce(
+                    (sumAba, aba) =>
+                      sumAba +
+                      aba.ocorrencias
+                        .filter((o) => o.status === 'paga')
+                        .reduce((s, o) => s + (o.valor_pago || o.valor_previsto || 0), 0),
+                    0,
+                  )
+
+                  return (
+                    <div
+                      key={conta.id}
+                      className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft transition-all"
+                    >
+                      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-secondary/25 p-4 sm:p-5">
+                        <div className="flex items-center gap-3">
+                          <span
+                            className="grid h-11 w-11 place-items-center rounded-xl text-white shadow-xs"
+                            style={{ background: conta.cor || '#1E40AF' }}
+                          >
+                            <Building2 className="h-6 w-6" />
+                          </span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-base font-extrabold text-foreground sm:text-lg">
+                                {conta.nome}
+                              </h3>
+                              {conta.natureza && (
+                                <Badge
+                                  variant="outline"
+                                  className="font-semibold text-[10px] uppercase"
+                                >
+                                  {conta.natureza === 'juridica' ? 'PJ' : 'PF'}
+                                </Badge>
+                              )}
+                              <Badge variant="secondary" className="text-[10px]">
+                                {totalOcorrencias} {totalOcorrencias === 1 ? 'item' : 'itens'}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {conta.tipo === 'caixa'
+                                ? 'Conta Caixa / Espécie'
+                                : 'Conta Corrente / Bancária'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="rounded-xl border border-border bg-white px-3 py-1 text-right">
+                            <p className="micro-label">Total Previsto</p>
+                            <p className="text-sm font-extrabold tabular-nums text-foreground">
+                              {formatCurrency(totalPrevistoConta)}
+                            </p>
+                          </div>
+                          {totalPagoConta > 0 && (
+                            <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-1 text-right">
+                              <p className="micro-label text-success">Total Pago</p>
+                              <p className="text-xs font-bold tabular-nums text-success">
+                                {formatCurrency(totalPagoConta)}
+                              </p>
+                            </div>
+                          )}
+                          <PermissionButton
+                            size="sm"
+                            variant="outline"
+                            allowed={can(user?.role, 'writeFinance')}
+                            onClick={() =>
+                              handleOpenNovoCompromisso('contas_mensais_pix_boleto', {
+                                contaId: conta.id,
+                              })
+                            }
+                            className="h-8 gap-1 text-xs"
+                          >
+                            <Plus className="h-3 w-3" /> Adicionar nesta conta
+                          </PermissionButton>
+                        </div>
+                      </header>
+
+                      <div className="p-4 sm:p-5">
+                        <Tabs defaultValue={defaultTab} className="w-full">
+                          <TabsList className="mb-4 flex h-auto flex-wrap gap-1 bg-muted/60 p-1">
+                            {abas.map((aba) => {
+                              const qtd = aba.ocorrencias.length
+                              const totalAba = aba.ocorrencias.reduce(
+                                (s, o) => s + (o.valor_previsto || 0),
+                                0,
+                              )
+                              const label = CONTA_TIPO_PAGAMENTO_LABELS[aba.tipo] || aba.tipo
+
+                              return (
+                                <TabsTrigger
+                                  key={aba.tipo}
+                                  value={aba.tipo}
+                                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-xs"
+                                >
+                                  <span>{label}</span>
+                                  <Badge
+                                    variant={qtd > 0 ? 'secondary' : 'outline'}
+                                    className="h-5 px-1.5 text-[10px] font-bold"
+                                  >
+                                    {qtd}
+                                  </Badge>
+                                  {qtd > 0 && (
+                                    <span className="hidden text-[11px] font-normal text-muted-foreground sm:inline">
+                                      ({formatCompactCurrency(totalAba)})
+                                    </span>
+                                  )}
+                                </TabsTrigger>
+                              )
+                            })}
+                          </TabsList>
+
+                          {abas.map((aba) => (
+                            <TabsContent
+                              key={aba.tipo}
+                              value={aba.tipo}
+                              className="m-0 focus-visible:outline-none"
+                            >
+                              {aba.ocorrencias.length === 0 ? (
+                                <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+                                  Nenhum pagamento via{' '}
+                                  {CONTA_TIPO_PAGAMENTO_LABELS[aba.tipo] || aba.tipo} cadastrado
+                                  nesta conta para este mês.
+                                </div>
+                              ) : (
+                                <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-white shadow-2xs">
+                                  {aba.ocorrencias.map((oc) => {
+                                    const compObj =
+                                      oc.expand?.compromisso ||
+                                      (oc.compromisso
+                                        ? compromissosMap.get(oc.compromisso)
+                                        : undefined)
+                                    return (
+                                      <OcorrenciaRow
+                                        key={oc.id}
+                                        ocorrencia={oc}
+                                        isModoPagamento={filtroDataCompetencia === 'pagamento'}
+                                        compromissoFallback={compObj}
+                                        onBaixar={() => handleOpenBaixa(oc)}
+                                        onEstornar={() => setEstornando(oc)}
+                                        onEditarCompromisso={() =>
+                                          compObj && handleOpenEditarCompromisso(compObj)
+                                        }
+                                        onDuplicarCompromisso={() =>
+                                          compObj && handleOpenDuplicarCompromisso(compObj)
+                                        }
+                                        onExcluirCompromisso={() =>
+                                          compObj && setDeletandoCompromisso(compObj)
+                                        }
+                                        onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
+                                        canEdit={can(user?.role, 'writeFinance')}
+                                      />
+                                    )
+                                  })}
+                                </div>
+                              )}
+                            </TabsContent>
+                          ))}
+                        </Tabs>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Subseção: Pagamentos em Dinheiro */}
+            {despesasAgrupadas.dinheiro.length > 0 && (
+              <div className="overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-soft">
+                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50/60 p-4 sm:p-5">
+                  <div className="flex items-center gap-3">
+                    <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-600 text-white shadow-xs">
+                      <Banknote className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <h3 className="text-base font-extrabold text-foreground">
+                        Pagamentos em Dinheiro (Espécie)
+                      </h3>
+                      <p className="text-xs text-muted-foreground">
+                        Despesas liquidadas ou previstas em moeda física
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-xl border border-emerald-200 bg-white px-3 py-1 text-right">
+                      <p className="micro-label">Total</p>
+                      <p className="text-sm font-extrabold tabular-nums text-foreground">
+                        {formatCurrency(
+                          despesasAgrupadas.dinheiro.reduce(
+                            (s, o) => s + (o.valor_previsto || 0),
+                            0,
+                          ),
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </header>
                 <div className="divide-y divide-border">
-                  {secaoBoletosPix.map((oc) => {
+                  {despesasAgrupadas.dinheiro.map((oc) => {
                     const compObj =
                       oc.expand?.compromisso ||
                       (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
@@ -1766,8 +1965,66 @@ export default function Despesas() {
                     )
                   })}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+
+            {/* Subseção: Sem Conta Definida (Órfãs ou Contas Excluídas) */}
+            {despesasAgrupadas.semConta.length > 0 && (
+              <div className="overflow-hidden rounded-2xl border border-amber-300 bg-white shadow-soft">
+                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-200 bg-amber-50/70 p-4 sm:p-5">
+                  <div className="flex items-center gap-3">
+                    <span className="grid h-10 w-10 place-items-center rounded-xl bg-amber-500 text-white shadow-xs">
+                      <HelpCircle className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <h3 className="text-base font-extrabold text-foreground">
+                        Sem Conta Definida
+                      </h3>
+                      <p className="text-xs text-muted-foreground">
+                        Despesas sem conta bancária associada ou cuja conta vinculada foi removida
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-xl border border-amber-200 bg-white px-3 py-1 text-right">
+                      <p className="micro-label">Total</p>
+                      <p className="text-sm font-extrabold tabular-nums text-foreground">
+                        {formatCurrency(
+                          despesasAgrupadas.semConta.reduce(
+                            (s, o) => s + (o.valor_previsto || 0),
+                            0,
+                          ),
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </header>
+                <div className="divide-y divide-border">
+                  {despesasAgrupadas.semConta.map((oc) => {
+                    const compObj =
+                      oc.expand?.compromisso ||
+                      (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
+                    return (
+                      <OcorrenciaRow
+                        key={oc.id}
+                        ocorrencia={oc}
+                        isModoPagamento={filtroDataCompetencia === 'pagamento'}
+                        compromissoFallback={compObj}
+                        onBaixar={() => handleOpenBaixa(oc)}
+                        onEstornar={() => setEstornando(oc)}
+                        onEditarCompromisso={() => compObj && handleOpenEditarCompromisso(compObj)}
+                        onDuplicarCompromisso={() =>
+                          compObj && handleOpenDuplicarCompromisso(compObj)
+                        }
+                        onExcluirCompromisso={() => compObj && setDeletandoCompromisso(compObj)}
+                        onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
+                        canEdit={can(user?.role, 'writeFinance')}
+                      />
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </section>
         )}
 
