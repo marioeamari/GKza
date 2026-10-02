@@ -1437,8 +1437,8 @@ export const despesasService = {
       ocorrenciasSemConta.push(oc)
     }
 
-    // Filtrar contas não-cartão para manter apenas as que possuem pelo menos 1 ocorrência alocada
-    // OU contas ativas caso o usuário queira vê-las (no pedido: "para cada conta ativa que tenha despesas vinculadas")
+    // Formatar contas não-cartão: exibe todas as contas ativas (inclusive com 0 lançamentos no mês),
+    // ou contas com ocorrências alocadas no período.
     const contasNaoCartaoFiltradas = Array.from(contasNaoCartaoMap.values())
       .map((entry) => {
         let totalOcorrencias = 0
@@ -1472,7 +1472,7 @@ export const despesasService = {
           abas: abasObj,
         }
       })
-      .filter((g) => g.totalOcorrencias > 0)
+      .filter((g) => g.conta.ativa || g.totalOcorrencias > 0)
       .sort((a, b) => {
         const ordemA = a.conta.ordem ?? 999999
         const ordemB = b.conta.ordem ?? 999999

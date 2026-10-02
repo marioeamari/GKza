@@ -901,5 +901,136 @@ describe('despesasService - Agrupador de Despesas e Helpers', () => {
       expect(resultado.cartoes[0].ocorrencias[0].id).toBe('oc_migrada_1')
       expect(resultado.semConta).toHaveLength(0)
     })
+
+    it('deve incluir todas as contas ativas mesmo sem despesas no mês para garantir botão de adicionar uniforme', () => {
+      const contaSemDespesa: Conta = {
+        id: 'conta_vazia',
+        nome: 'Conta Zerada',
+        tipo: 'bancaria',
+        ativa: true,
+        ordem: 2,
+        saldo_inicial: 0,
+        tipos_pagamento: ['pix'],
+        created: '2026-01-01',
+        updated: '2026-01-01',
+      } as unknown as Conta
+      const contaComDespesa: Conta = {
+        id: 'conta_ativa',
+        nome: 'Conta Ativa',
+        tipo: 'bancaria',
+        ativa: true,
+        ordem: 1,
+        saldo_inicial: 0,
+        tipos_pagamento: ['pix'],
+        created: '2026-01-01',
+        updated: '2026-01-01',
+      } as unknown as Conta
+      const contaInativaSemDespesa: Conta = {
+        id: 'conta_inativa',
+        nome: 'Conta Inativa',
+        tipo: 'bancaria',
+        ativa: false,
+        ordem: 3,
+        saldo_inicial: 0,
+        tipos_pagamento: ['pix'],
+        created: '2026-01-01',
+        updated: '2026-01-01',
+      } as unknown as Conta
+
+      const comp: DespesaCompromisso = {
+        id: 'comp_1',
+        descricao: 'Internet',
+        secao: 'contas_mensais_pix_boleto',
+        conta_padrao: 'conta_ativa',
+        ativo: true,
+      } as DespesaCompromisso
+
+      const oc: DespesaOcorrencia = {
+        id: 'oc_1',
+        compromisso: 'comp_1',
+        conta: 'conta_ativa',
+        secao: 'contas_mensais_pix_boleto',
+        valor_previsto: 120,
+      } as DespesaOcorrencia
+
+      const resultado = despesasService.agruparDespesasParaVisualizacao({
+        ocorrencias: [oc],
+        contas: [contaSemDespesa, contaComDespesa, contaInativaSemDespesa],
+        compromissos: [comp],
+        metodosPagamento: [],
+      })
+
+      // Ambas as contas ativas devem estar presentes, respeitando a ordem
+      // Contas inativas sem despesas são filtradas
+      expect(resultado.contasNaoCartao).toHaveLength(2)
+      expect(resultado.contasNaoCartao[0].conta.id).toBe('conta_ativa')
+      expect(resultado.contasNaoCartao[0].totalOcorrencias).toBe(1)
+      expect(resultado.contasNaoCartao[1].conta.id).toBe('conta_vazia')
+      expect(resultado.contasNaoCartao[1].totalOcorrencias).toBe(0)
+    })
+
+    it('separa corretamente as despesas em dinheiro da lista de contas não-cartão', () => {
+      const contaCorrente: Conta = {
+        id: 'conta_banco',
+        nome: 'Sicredi',
+        tipo: 'bancaria',
+        ativa: true,
+        tipos_pagamento: ['pix'],
+      } as unknown as Conta
+
+      const metodoDinheiro: MetodoPagamento = {
+        id: 'm_dinheiro',
+        nome: 'Dinheiro',
+        tipo: 'dinheiro',
+        ativo: true,
+      } as MetodoPagamento
+
+      const compBanco: DespesaCompromisso = {
+        id: 'comp_b',
+        descricao: 'Luz Escritório',
+        secao: 'contas_mensais_pix_boleto',
+        conta_padrao: 'conta_banco',
+        ativo: true,
+      } as DespesaCompromisso
+
+      const compDinheiro: DespesaCompromisso = {
+        id: 'comp_d',
+        descricao: 'Compra Mercado Feira',
+        secao: 'contas_mensais_pix_boleto',
+        metodo_pagamento: 'm_dinheiro',
+        ativo: true,
+      } as DespesaCompromisso
+
+      const ocBanco: DespesaOcorrencia = {
+        id: 'oc_b',
+        compromisso: 'comp_b',
+        conta: 'conta_banco',
+        secao: 'contas_mensais_pix_boleto',
+        valor_previsto: 250,
+      } as DespesaOcorrencia
+
+      const ocDinheiro: DespesaOcorrencia = {
+        id: 'oc_d',
+        compromisso: 'comp_d',
+        secao: 'contas_mensais_pix_boleto',
+        valor_previsto: 80,
+      } as DespesaOcorrencia
+
+      const resultado = despesasService.agruparDespesasParaVisualizacao({
+        ocorrencias: [ocBanco, ocDinheiro],
+        contas: [contaCorrente],
+        compromissos: [compBanco, compDinheiro],
+        metodosPagamento: [metodoDinheiro],
+      })
+
+      // Sicredi deve ter apenas 1 ocorrência (a do banco)
+      expect(resultado.contasNaoCartao[0].conta.nome).toBe('Sicredi')
+      expect(resultado.contasNaoCartao[0].totalOcorrencias).toBe(1)
+      expect(resultado.contasNaoCartao[0].abas[0].ocorrencias[0].id).toBe('oc_b')
+
+      // Ocorrência em dinheiro deve ir para despesasAgrupadas.dinheiro
+      expect(resultado.dinheiro).toHaveLength(1)
+      expect(resultado.dinheiro[0].id).toBe('oc_d')
+    })
   })
 })

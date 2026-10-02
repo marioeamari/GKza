@@ -477,6 +477,8 @@ export default function Despesas() {
   // Modo de visualização de cartões: 'mes' (mês selecionado) ou 'historico' (todas as compras / histórico completo)
   const [cartaoViewMode, setCartaoViewMode] = useState<Record<string, 'mes' | 'historico'>>({})
   const [cartaoExpanded, setCartaoExpanded] = useState<Record<string, boolean>>({})
+  const [contaExpanded, setContaExpanded] = useState<Record<string, boolean>>({})
+  const [dinheiroExpanded, setDinheiroExpanded] = useState(true)
 
   // Modais de ação
   const [baixaModal, setBaixaModal] = useState(false)
@@ -1627,6 +1629,7 @@ export default function Despesas() {
                 Contas & Métodos de Pagamento
               </SelectItem>
               <SelectItem value="cartoes_credito">Cartões de Crédito</SelectItem>
+              <SelectItem value="dinheiro_especie">Pagamentos em Dinheiro (Espécie)</SelectItem>
               <SelectItem value="assinaturas_anuais">Assinaturas Anuais</SelectItem>
             </SelectContent>
           </Select>
@@ -1797,6 +1800,7 @@ export default function Despesas() {
             ) : (
               <div className="space-y-6">
                 {despesasAgrupadas.contasNaoCartao.map(({ conta, totalOcorrencias, abas }) => {
+                  const isExpanded = contaExpanded[conta.id] !== false
                   const abasComDespesas = abas.filter((aba) => aba.ocorrencias.length > 0)
                   const defaultTab = abasComDespesas[0]?.tipo || abas[0]?.tipo || 'pix'
                   const totalPrevistoConta = abas.reduce(
@@ -1818,40 +1822,76 @@ export default function Despesas() {
                       key={conta.id}
                       className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft transition-all"
                     >
-                      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-secondary/25 p-4 sm:p-5">
-                        <div className="flex items-center gap-3">
+                      <header
+                        className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-secondary/25 p-4 sm:p-5 cursor-pointer hover:bg-secondary/35 transition"
+                        onClick={() =>
+                          setContaExpanded((prev) => ({
+                            ...prev,
+                            [conta.id]: prev[conta.id] === undefined ? false : !prev[conta.id],
+                          }))
+                        }
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <button
+                            type="button"
+                            className="grid h-8 w-8 place-items-center rounded-lg bg-white border border-border text-muted-foreground hover:text-foreground shrink-0 shadow-xs"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setContaExpanded((prev) => ({
+                                ...prev,
+                                [conta.id]: prev[conta.id] === undefined ? false : !prev[conta.id],
+                              }))
+                            }}
+                            title={isExpanded ? 'Recolher conta' : 'Expandir conta'}
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </button>
+
                           <span
-                            className="grid h-11 w-11 place-items-center rounded-xl text-white shadow-xs"
+                            className="grid h-11 w-11 place-items-center rounded-xl text-white shadow-xs shrink-0"
                             style={{ background: conta.cor || '#1E40AF' }}
                           >
                             <Building2 className="h-6 w-6" />
                           </span>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h3 className="text-base font-extrabold text-foreground sm:text-lg">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-base font-extrabold text-foreground sm:text-lg truncate">
                                 {conta.nome}
                               </h3>
                               {conta.natureza && (
                                 <Badge
                                   variant="outline"
-                                  className="font-semibold text-[10px] uppercase"
+                                  className="text-[10px] uppercase font-semibold py-0 px-1.5 h-4 text-muted-foreground"
                                 >
-                                  {conta.natureza === 'juridica' ? 'PJ' : 'PF'}
+                                  {conta.natureza === 'fisica'
+                                    ? 'Pessoa Física'
+                                    : 'Pessoa Jurídica'}
                                 </Badge>
                               )}
-                              <Badge variant="secondary" className="text-[10px]">
-                                {totalOcorrencias} {totalOcorrencias === 1 ? 'item' : 'itens'}
-                              </Badge>
                             </div>
-                            <p className="text-xs text-muted-foreground">
-                              {conta.tipo === 'caixa'
-                                ? 'Conta Caixa / Espécie'
-                                : 'Conta Corrente / Bancária'}
-                            </p>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                              <span className="font-medium text-foreground">
+                                {totalOcorrencias}{' '}
+                                {totalOcorrencias === 1 ? 'lançamento' : 'lançamentos'} no mês
+                              </span>
+                              <span>•</span>
+                              <span>
+                                {conta.tipo === 'caixa'
+                                  ? 'Conta Caixa / Espécie'
+                                  : 'Conta Corrente / Bancária'}
+                              </span>
+                            </div>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-3">
+                        <div
+                          className="flex flex-wrap items-center gap-3 ml-auto"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <div className="rounded-xl border border-border bg-white px-3 py-1 text-right">
                             <p className="micro-label">Total Previsto</p>
                             <p className="text-sm font-extrabold tabular-nums text-foreground">
@@ -1882,149 +1922,93 @@ export default function Despesas() {
                         </div>
                       </header>
 
-                      <div className="p-4 sm:p-5">
-                        <Tabs defaultValue={defaultTab} className="w-full">
-                          <TabsList className="mb-4 flex h-auto flex-wrap gap-1 bg-muted/60 p-1">
-                            {abas.map((aba) => {
-                              const qtd = aba.ocorrencias.length
-                              const totalAba = aba.ocorrencias.reduce(
-                                (s, o) => s + (o.valor_previsto || 0),
-                                0,
-                              )
-                              const label = CONTA_TIPO_PAGAMENTO_LABELS[aba.tipo] || aba.tipo
+                      {isExpanded && (
+                        <div className="p-4 sm:p-5">
+                          <Tabs defaultValue={defaultTab} className="w-full">
+                            <TabsList className="mb-4 flex h-auto flex-wrap gap-1 bg-muted/60 p-1">
+                              {abas.map((aba) => {
+                                const qtd = aba.ocorrencias.length
+                                const totalAba = aba.ocorrencias.reduce(
+                                  (s, o) => s + (o.valor_previsto || 0),
+                                  0,
+                                )
+                                const label = CONTA_TIPO_PAGAMENTO_LABELS[aba.tipo] || aba.tipo
 
-                              return (
-                                <TabsTrigger
-                                  key={aba.tipo}
-                                  value={aba.tipo}
-                                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-xs"
-                                >
-                                  <span>{label}</span>
-                                  <Badge
-                                    variant={qtd > 0 ? 'secondary' : 'outline'}
-                                    className="h-5 px-1.5 text-[10px] font-bold"
+                                return (
+                                  <TabsTrigger
+                                    key={aba.tipo}
+                                    value={aba.tipo}
+                                    className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-xs"
                                   >
-                                    {qtd}
-                                  </Badge>
-                                  {qtd > 0 && (
-                                    <span className="hidden text-[11px] font-normal text-muted-foreground sm:inline">
-                                      ({formatCompactCurrency(totalAba)})
-                                    </span>
-                                  )}
-                                </TabsTrigger>
-                              )
-                            })}
-                          </TabsList>
+                                    <span>{label}</span>
+                                    <Badge
+                                      variant={qtd > 0 ? 'secondary' : 'outline'}
+                                      className="h-5 px-1.5 text-[10px] font-bold"
+                                    >
+                                      {qtd}
+                                    </Badge>
+                                    {qtd > 0 && (
+                                      <span className="hidden text-[11px] font-normal text-muted-foreground sm:inline">
+                                        ({formatCompactCurrency(totalAba)})
+                                      </span>
+                                    )}
+                                  </TabsTrigger>
+                                )
+                              })}
+                            </TabsList>
 
-                          {abas.map((aba) => (
-                            <TabsContent
-                              key={aba.tipo}
-                              value={aba.tipo}
-                              className="m-0 focus-visible:outline-none"
-                            >
-                              {aba.ocorrencias.length === 0 ? (
-                                <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
-                                  Nenhum pagamento via{' '}
-                                  {CONTA_TIPO_PAGAMENTO_LABELS[aba.tipo] || aba.tipo} cadastrado
-                                  nesta conta para este mês.
-                                </div>
-                              ) : (
-                                <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-white shadow-2xs">
-                                  {aba.ocorrencias.map((oc) => {
-                                    const compObj =
-                                      oc.expand?.compromisso ||
-                                      (oc.compromisso
-                                        ? compromissosMap.get(oc.compromisso)
-                                        : undefined)
-                                    return (
-                                      <OcorrenciaRow
-                                        key={oc.id}
-                                        ocorrencia={oc}
-                                        isModoPagamento={filtroDataCompetencia === 'pagamento'}
-                                        compromissoFallback={compObj}
-                                        onBaixar={() => handleOpenBaixa(oc)}
-                                        onEstornar={() => setEstornando(oc)}
-                                        onEditarCompromisso={() =>
-                                          compObj && handleOpenEditarCompromisso(compObj)
-                                        }
-                                        onDuplicarCompromisso={() =>
-                                          compObj && handleOpenDuplicarCompromisso(compObj)
-                                        }
-                                        onExcluirCompromisso={() =>
-                                          compObj && setDeletandoCompromisso(compObj)
-                                        }
-                                        onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
-                                        canEdit={can(user?.role, 'writeFinance')}
-                                      />
-                                    )
-                                  })}
-                                </div>
-                              )}
-                            </TabsContent>
-                          ))}
-                        </Tabs>
-                      </div>
+                            {abas.map((aba) => (
+                              <TabsContent
+                                key={aba.tipo}
+                                value={aba.tipo}
+                                className="m-0 focus-visible:outline-none"
+                              >
+                                {aba.ocorrencias.length === 0 ? (
+                                  <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+                                    Nenhum pagamento via{' '}
+                                    {CONTA_TIPO_PAGAMENTO_LABELS[aba.tipo] || aba.tipo} cadastrado
+                                    nesta conta para este mês.
+                                  </div>
+                                ) : (
+                                  <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-white shadow-2xs">
+                                    {aba.ocorrencias.map((oc) => {
+                                      const compObj =
+                                        oc.expand?.compromisso ||
+                                        (oc.compromisso
+                                          ? compromissosMap.get(oc.compromisso)
+                                          : undefined)
+                                      return (
+                                        <OcorrenciaRow
+                                          key={oc.id}
+                                          ocorrencia={oc}
+                                          isModoPagamento={filtroDataCompetencia === 'pagamento'}
+                                          compromissoFallback={compObj}
+                                          onBaixar={() => handleOpenBaixa(oc)}
+                                          onEstornar={() => setEstornando(oc)}
+                                          onEditarCompromisso={() =>
+                                            compObj && handleOpenEditarCompromisso(compObj)
+                                          }
+                                          onDuplicarCompromisso={() =>
+                                            compObj && handleOpenDuplicarCompromisso(compObj)
+                                          }
+                                          onExcluirCompromisso={() =>
+                                            compObj && setDeletandoCompromisso(compObj)
+                                          }
+                                          onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
+                                          canEdit={can(user?.role, 'writeFinance')}
+                                        />
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </TabsContent>
+                            ))}
+                          </Tabs>
+                        </div>
+                      )}
                     </div>
                   )
                 })}
-              </div>
-            )}
-
-            {/* Subseção: Pagamentos em Dinheiro */}
-            {despesasAgrupadas.dinheiro.length > 0 && (
-              <div className="overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-soft">
-                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50/60 p-4 sm:p-5">
-                  <div className="flex items-center gap-3">
-                    <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-600 text-white shadow-xs">
-                      <Banknote className="h-5 w-5" />
-                    </span>
-                    <div>
-                      <h3 className="text-base font-extrabold text-foreground">
-                        Pagamentos em Dinheiro (Espécie)
-                      </h3>
-                      <p className="text-xs text-muted-foreground">
-                        Despesas liquidadas ou previstas em moeda física
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-xl border border-emerald-200 bg-white px-3 py-1 text-right">
-                      <p className="micro-label">Total</p>
-                      <p className="text-sm font-extrabold tabular-nums text-foreground">
-                        {formatCurrency(
-                          despesasAgrupadas.dinheiro.reduce(
-                            (s, o) => s + (o.valor_previsto || 0),
-                            0,
-                          ),
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                </header>
-                <div className="divide-y divide-border">
-                  {despesasAgrupadas.dinheiro.map((oc) => {
-                    const compObj =
-                      oc.expand?.compromisso ||
-                      (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
-                    return (
-                      <OcorrenciaRow
-                        key={oc.id}
-                        ocorrencia={oc}
-                        isModoPagamento={filtroDataCompetencia === 'pagamento'}
-                        compromissoFallback={compObj}
-                        onBaixar={() => handleOpenBaixa(oc)}
-                        onEstornar={() => setEstornando(oc)}
-                        onEditarCompromisso={() => compObj && handleOpenEditarCompromisso(compObj)}
-                        onDuplicarCompromisso={() =>
-                          compObj && handleOpenDuplicarCompromisso(compObj)
-                        }
-                        onExcluirCompromisso={() => compObj && setDeletandoCompromisso(compObj)}
-                        onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
-                        canEdit={can(user?.role, 'writeFinance')}
-                      />
-                    )
-                  })}
-                </div>
               </div>
             )}
 
@@ -2433,7 +2417,201 @@ export default function Despesas() {
           </section>
         )}
 
-        {/* SEÇÃO 3: Assinaturas anuais */}
+        {/* SEÇÃO 3: Pagamentos em Dinheiro (Espécie) */}
+        {(filterSecao === 'all' || filterSecao === 'dinheiro_especie') && (
+          <section className="space-y-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
+                  Pagamentos em Dinheiro (Espécie)
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Despesas liquidadas ou previstas em moeda física / espécie.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <PermissionButton
+                  size="sm"
+                  variant="outline"
+                  allowed={can(user?.role, 'writeFinance')}
+                  onClick={() => {
+                    const metodoDinheiro = metodosPagamento.find(
+                      (m) =>
+                        m.tipo === 'dinheiro' ||
+                        m.nome?.toLowerCase().includes('dinheiro') ||
+                        m.nome?.toLowerCase().includes('espécie'),
+                    )
+                    const contaCaixa = contas.find(
+                      (c) =>
+                        c.tipo === 'caixa' ||
+                        c.nome?.toLowerCase().includes('caixa') ||
+                        c.nome?.toLowerCase().includes('dinheiro'),
+                    )
+                    handleOpenNovoCompromisso('contas_mensais_pix_boleto', {
+                      metodoId: metodoDinheiro?.id,
+                      contaId: contaCaixa?.id,
+                    })
+                  }}
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar despesa em espécie
+                </PermissionButton>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-soft">
+              {(() => {
+                const totalPrevistoDinheiro = despesasAgrupadas.dinheiro.reduce(
+                  (s, o) => s + (o.valor_previsto || 0),
+                  0,
+                )
+                const totalPagoDinheiro = despesasAgrupadas.dinheiro
+                  .filter((o) => o.status === 'paga')
+                  .reduce((s, o) => s + (o.valor_pago || o.valor_previsto || 0), 0)
+                const countDinheiro = despesasAgrupadas.dinheiro.length
+
+                return (
+                  <>
+                    <header
+                      className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50/60 p-4 sm:p-5 cursor-pointer hover:bg-emerald-50/80 transition"
+                      onClick={() => setDinheiroExpanded((prev) => !prev)}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <button
+                          type="button"
+                          className="grid h-8 w-8 place-items-center rounded-lg bg-white border border-emerald-200 text-emerald-700 hover:text-foreground shrink-0 shadow-xs"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setDinheiroExpanded((prev) => !prev)
+                          }}
+                          title={dinheiroExpanded ? 'Recolher seção' : 'Expandir seção'}
+                        >
+                          {dinheiroExpanded ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </button>
+
+                        <span className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-600 text-white shadow-xs shrink-0">
+                          <Banknote className="h-6 w-6" />
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-base font-extrabold text-foreground sm:text-lg">
+                              Pagamentos em Dinheiro (Espécie)
+                            </h3>
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] uppercase font-semibold py-0 px-1.5 h-4 border-emerald-300 text-emerald-800 bg-emerald-100/50"
+                            >
+                              Moeda Física
+                            </Badge>
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                            <span className="font-medium text-foreground">
+                              {countDinheiro} {countDinheiro === 1 ? 'lançamento' : 'lançamentos'}{' '}
+                              no mês
+                            </span>
+                            <span>•</span>
+                            <span>Despesas liquidadas ou previstas em moeda física</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div
+                        className="flex flex-wrap items-center gap-3 ml-auto"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="rounded-xl border border-emerald-200 bg-white px-3 py-1 text-right">
+                          <p className="micro-label">Total Previsto</p>
+                          <p className="text-sm font-extrabold tabular-nums text-foreground">
+                            {formatCurrency(totalPrevistoDinheiro)}
+                          </p>
+                        </div>
+                        {totalPagoDinheiro > 0 && (
+                          <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-1 text-right">
+                            <p className="micro-label text-success">Total Baixado</p>
+                            <p className="text-xs font-bold tabular-nums text-success">
+                              {formatCurrency(totalPagoDinheiro)}
+                            </p>
+                          </div>
+                        )}
+                        <PermissionButton
+                          size="sm"
+                          variant="outline"
+                          allowed={can(user?.role, 'writeFinance')}
+                          onClick={() => {
+                            const metodoDinheiro = metodosPagamento.find(
+                              (m) =>
+                                m.tipo === 'dinheiro' ||
+                                m.nome?.toLowerCase().includes('dinheiro') ||
+                                m.nome?.toLowerCase().includes('espécie'),
+                            )
+                            const contaCaixa = contas.find(
+                              (c) =>
+                                c.tipo === 'caixa' ||
+                                c.nome?.toLowerCase().includes('caixa') ||
+                                c.nome?.toLowerCase().includes('dinheiro'),
+                            )
+                            handleOpenNovoCompromisso('contas_mensais_pix_boleto', {
+                              metodoId: metodoDinheiro?.id,
+                              contaId: contaCaixa?.id,
+                            })
+                          }}
+                          className="h-8 gap-1 text-xs"
+                        >
+                          <Plus className="h-3 w-3" /> Adicionar despesa em espécie
+                        </PermissionButton>
+                      </div>
+                    </header>
+
+                    {dinheiroExpanded && (
+                      <>
+                        {despesasAgrupadas.dinheiro.length === 0 ? (
+                          <div className="p-8 text-center text-xs text-muted-foreground">
+                            Nenhuma despesa em espécie (dinheiro físico) cadastrada nesta
+                            competência.
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-border">
+                            {despesasAgrupadas.dinheiro.map((oc) => {
+                              const compObj =
+                                oc.expand?.compromisso ||
+                                (oc.compromisso ? compromissosMap.get(oc.compromisso) : undefined)
+                              return (
+                                <OcorrenciaRow
+                                  key={oc.id}
+                                  ocorrencia={oc}
+                                  isModoPagamento={filtroDataCompetencia === 'pagamento'}
+                                  compromissoFallback={compObj}
+                                  onBaixar={() => handleOpenBaixa(oc)}
+                                  onEstornar={() => setEstornando(oc)}
+                                  onEditarCompromisso={() =>
+                                    compObj && handleOpenEditarCompromisso(compObj)
+                                  }
+                                  onDuplicarCompromisso={() =>
+                                    compObj && handleOpenDuplicarCompromisso(compObj)
+                                  }
+                                  onExcluirCompromisso={() =>
+                                    compObj && setDeletandoCompromisso(compObj)
+                                  }
+                                  onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
+                                  canEdit={can(user?.role, 'writeFinance')}
+                                />
+                              )
+                            })}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
+                )
+              })()}
+            </div>
+          </section>
+        )}
+
+        {/* SEÇÃO 4: Assinaturas anuais */}
         {(filterSecao === 'all' || filterSecao === 'assinaturas_anuais') && (
           <section className="space-y-3">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
