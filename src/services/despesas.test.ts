@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import pb from '@/lib/pocketbase/client'
-import { despesasService, contaAceitaCredito } from './despesas'
+import { despesasService, contaAceitaCredito, isMetodoCredito } from './despesas'
 import type { Conta, DespesaCompromisso, DespesaOcorrencia, MetodoPagamento } from '@/types/domain'
 
 vi.mock('@/lib/pocketbase/client', () => {
@@ -1542,6 +1542,237 @@ describe('despesasService - Agrupador de Despesas e Helpers', () => {
         expect(contaMista.dia_fechamento).toBe(8)
         expect(contaMista.dia_vencimento).toBe(18)
       })
+    })
+  })
+
+  describe('isMetodoCredito e regra exclusiva de ciclo da fatura', () => {
+    it('identifica corretamente métodos de crédito por código, nome com ou sem acento', () => {
+      expect(
+        isMetodoCredito({ id: '1', codigo: 'Credito', nome: 'Crédito', tipo: 'cartao' } as any),
+      ).toBe(true)
+      expect(
+        isMetodoCredito({
+          id: '2',
+          codigo: 'cartao_credito',
+          nome: 'Cartão de Crédito',
+          tipo: 'cartao',
+        } as any),
+      ).toBe(true)
+      expect(
+        isMetodoCredito({
+          id: '3',
+          codigo: 'Outro',
+          nome: 'Cartao Credito',
+          tipo: 'cartao',
+        } as any),
+      ).toBe(true)
+      expect(
+        isMetodoCredito({ id: '4', codigo: 'credito', nome: 'Crédito Visa', tipo: 'outro' } as any),
+      ).toBe(true)
+    })
+
+    it('exclui métodos de débito mesmo se tiver tipo cartao ou palavra cartao no nome', () => {
+      expect(
+        isMetodoCredito({ id: '5', codigo: 'Debito', nome: 'Débito', tipo: 'cartao' } as any),
+      ).toBe(false)
+      expect(
+        isMetodoCredito({
+          id: '6',
+          codigo: 'cartao_debito',
+          nome: 'Cartão de Débito',
+          tipo: 'cartao',
+        } as any),
+      ).toBe(false)
+      expect(
+        isMetodoCredito({ id: '7', codigo: 'debito', nome: 'debito', tipo: 'cartao' } as any),
+      ).toBe(false)
+    })
+
+    it('exclui outros métodos como Pix, Boleto, Transferência e Dinheiro', () => {
+      expect(isMetodoCredito({ id: '8', codigo: 'Pix', nome: 'Pix', tipo: 'pix' } as any)).toBe(
+        false,
+      )
+      expect(
+        isMetodoCredito({
+          id: '9',
+          codigo: 'BoletoBancario',
+          nome: 'Boleto Bancário',
+          tipo: 'boleto',
+        } as any),
+      ).toBe(false)
+      expect(
+        isMetodoCredito({
+          id: '10',
+          codigo: 'Transferencia',
+          nome: 'Transferência TED',
+          tipo: 'transferencia',
+        } as any),
+      ).toBe(false)
+      expect(
+        isMetodoCredito({
+          id: '11',
+          codigo: 'Dinheiro',
+          nome: 'Dinheiro',
+          tipo: 'dinheiro',
+        } as any),
+      ).toBe(false)
+      expect(isMetodoCredito(null)).toBe(false)
+      expect(isMetodoCredito(undefined)).toBe(false)
+    })
+
+    it('funciona com string direta e com lista de métodos para lookup', () => {
+      const metodosList: MetodoPagamento[] = [
+        { id: 'm_cred', codigo: 'Credito', nome: 'Crédito', tipo: 'cartao' } as any,
+        { id: 'm_pix', codigo: 'Pix', nome: 'Pix', tipo: 'pix' } as any,
+      ]
+
+      expect(isMetodoCredito('m_cred', metodosList)).toBe(true)
+      expect(isMetodoCredito('m_pix', metodosList)).toBe(false)
+      expect(isMetodoCredito('Credito')).toBe(true)
+      expect(isMetodoCredito('cartao_credito')).toBe(true)
+      expect(isMetodoCredito('Pix')).toBe(false)
+      expect(isMetodoCredito('Debito')).toBe(false)
+    })
+
+    it('obterContaCartaoCompromisso: despesa em conta com crédito + Pix retorna null (não entra no ciclo)', async () => {
+      const mockContaSicredi = {
+        id: 'c_sicredi_cartao',
+        nome: 'Sicred',
+        tipo: 'cartao',
+        tipos_pagamento: ['pix', 'debito', 'transferencia', 'boletos', 'credito'],
+        dia_fechamento: 1,
+        dia_vencimento: 10,
+      }
+
+      const mockMetodoPix = {
+        id: 'm_pix_id',
+        codigo: 'Pix',
+        nome: 'Pix',
+        tipo: 'pix',
+      }
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') {
+          return {
+            getOne: vi.fn().mockResolvedValue(mockContaSicredi),
+          } as any
+        }
+        if (name === 'metodos_pagamento') {
+          return {
+            getOne: vi.fn().mockResolvedValue(mockMetodoPix),
+          } as any
+        }
+        return {} as any
+      })
+
+      const resultado = await despesasService.obterContaCartaoCompromisso({
+        conta_padrao: 'c_sicredi_cartao',
+        metodo_pagamento: 'm_pix_id',
+      })
+
+      // Como o método é Pix, DEVE retornar null mesmo a conta tendo dia_fechamento e aceitando crédito
+      expect(resultado).toBeNull()
+    })
+
+    it('obterContaCartaoCompromisso: despesa em conta com crédito + método Crédito retorna a conta (entra no ciclo)', async () => {
+      const mockContaSicredi = {
+        id: 'c_sicredi_cartao',
+        nome: 'Sicred',
+        tipo: 'cartao',
+        tipos_pagamento: ['pix', 'debito', 'transferencia', 'boletos', 'credito'],
+        dia_fechamento: 1,
+        dia_vencimento: 10,
+      }
+
+      const mockMetodoCredito = {
+        id: 'm_credito_id',
+        codigo: 'Credito',
+        nome: 'Crédito',
+        tipo: 'cartao',
+      }
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') {
+          return {
+            getOne: vi.fn().mockResolvedValue(mockContaSicredi),
+          } as any
+        }
+        if (name === 'metodos_pagamento') {
+          return {
+            getOne: vi.fn().mockResolvedValue(mockMetodoCredito),
+          } as any
+        }
+        return {} as any
+      })
+
+      const resultado = await despesasService.obterContaCartaoCompromisso({
+        conta_padrao: 'c_sicredi_cartao',
+        metodo_pagamento: 'm_credito_id',
+      })
+
+      expect(resultado).not.toBeNull()
+      expect(resultado?.id).toBe('c_sicredi_cartao')
+    })
+
+    it('gerarOcorrenciasParaCompromisso: despesa avulsa em conta com crédito + Pix gera competência normal e vencimento na própria data', async () => {
+      const mockContaSicredi = {
+        id: 'c_sicredi_cartao',
+        nome: 'Sicred',
+        tipo: 'cartao',
+        tipos_pagamento: ['pix', 'debito', 'transferencia', 'boletos', 'credito'],
+        dia_fechamento: 1,
+        dia_vencimento: 10,
+      }
+
+      const mockMetodoPix = {
+        id: 'm_pix_id',
+        codigo: 'Pix',
+        nome: 'Pix',
+        tipo: 'pix',
+      }
+
+      const mockOcorrCreate = vi.fn().mockResolvedValue({ id: 'ocorr_nova_1' })
+      const mockOcorrGetList = vi.fn().mockResolvedValue({ totalItems: 0, items: [] })
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') {
+          return { getOne: vi.fn().mockResolvedValue(mockContaSicredi) } as any
+        }
+        if (name === 'metodos_pagamento') {
+          return { getOne: vi.fn().mockResolvedValue(mockMetodoPix) } as any
+        }
+        if (name === 'despesas_ocorrencias') {
+          return {
+            getList: mockOcorrGetList,
+            create: mockOcorrCreate,
+          } as any
+        }
+        return {} as any
+      })
+
+      // Pedreiro / Birimate: data 02/10/2026, método Pix, conta Sicred (fechamento dia 1, vencimento dia 10)
+      const compromissoPedreiro: DespesaCompromisso = {
+        id: 'comp_pedreiro',
+        descricao: 'Pedreiro',
+        conta_padrao: 'c_sicredi_cartao',
+        metodo_pagamento: 'm_pix_id',
+        secao: 'contas_mensais_pix_boleto',
+        regra_repeticao: 'avulso',
+        data_inicio: '2026-10-02 00:00:00.000Z',
+        dia_vencimento: 2,
+        valor_estimado: 200,
+        contexto_tipo: 'empresa',
+      } as any
+
+      await despesasService.gerarOcorrenciasParaCompromisso(compromissoPedreiro)
+
+      expect(mockOcorrCreate).toHaveBeenCalledTimes(1)
+      const callData = mockOcorrCreate.mock.calls[0][0]
+
+      // Competência deve ser 2026-10 (mês da compra), e NÃO 2026-11 (ciclo da fatura)
+      expect(callData.competencia).toBe('2026-10')
+      // Data de vencimento = 2026-10-02
+      expect(callData.data_vencimento.slice(0, 10)).toBe('2026-10-02')
     })
   })
 })

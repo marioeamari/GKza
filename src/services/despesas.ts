@@ -29,6 +29,66 @@ export const contaAceitaCredito = (conta?: Conta | null): boolean => {
   return tipos.includes('credito')
 }
 
+/**
+ * Identifica se um método de pagamento corresponde à modalidade Crédito.
+ * Aceita objeto MetodoPagamento, ID do método (com metodosList opcional para lookup) ou string com código/nome.
+ * Identifica crédito por:
+ * - código 'Credito' ou 'cartao_credito' (case insensitive)
+ * - nome contendo 'crédito' ou 'credito' (excluindo 'débito' / 'debito')
+ * - tipo 'cartao' ou 'credito' desde que o nome/código NÃO contenha débito
+ */
+export const isMetodoCredito = (
+  metodo?: MetodoPagamento | string | null,
+  metodosList?: MetodoPagamento[],
+): boolean => {
+  if (!metodo) return false
+
+  let metodoObj: MetodoPagamento | undefined
+
+  if (typeof metodo === 'object') {
+    metodoObj = metodo
+  } else if (typeof metodo === 'string') {
+    if (metodosList && metodosList.length > 0) {
+      metodoObj = metodosList.find((m) => m.id === metodo || m.codigo === metodo)
+    }
+  }
+
+  const codigo = (metodoObj ? metodoObj.codigo : typeof metodo === 'string' ? metodo : '') || ''
+  const nome = (metodoObj ? metodoObj.nome : typeof metodo === 'string' ? metodo : '') || ''
+  const tipo = (metodoObj ? metodoObj.tipo : '') || ''
+
+  const cLower = codigo.toLowerCase().trim()
+  const nLower = nome.toLowerCase().trim()
+  const tLower = tipo.toLowerCase().trim()
+
+  // Se explicitamente falar em débito, nunca é crédito
+  if (nLower.includes('débito') || nLower.includes('debito') || cLower.includes('debito')) {
+    return false
+  }
+
+  // Código conhecido
+  if (
+    cLower === 'credito' ||
+    cLower === 'cartao_credito' ||
+    cLower === 'cartao-credito' ||
+    cLower === 'cartaocredito'
+  ) {
+    return true
+  }
+
+  // Nome contém crédito/credito
+  if (nLower.includes('crédito') || nLower.includes('credito')) {
+    return true
+  }
+
+  // Tipo 'cartao' sem débito (e que não seja pix/boleto/transferencia/dinheiro)
+  if (tLower === 'cartao' || tLower === 'credito') {
+    return true
+  }
+
+  return false
+}
+
 const listAll = async <T>(collection: string, options?: RecordListOptions): Promise<T[]> => {
   try {
     return await pb.collection<T>(collection).getFullList<T>({ batch: 200, ...options })
@@ -554,6 +614,26 @@ export const despesasService = {
   obterContaCartaoCompromisso: async (
     compromisso: Pick<DespesaCompromisso, 'conta_padrao' | 'metodo_pagamento'>,
   ): Promise<Conta | null> => {
+    // REGRA NOVA: O ciclo da fatura só se aplica quando o método do compromisso é Crédito.
+    // Se o método estiver definido e não for crédito (ex: Pix, Débito, Boleto, Transferência),
+    // a despesa NÃO entra no ciclo da fatura nem vira cartão_credito.
+    if (!compromisso.metodo_pagamento) {
+      return null
+    }
+
+    let metodoObj: MetodoPagamento | null = null
+    try {
+      metodoObj = await pb
+        .collection<MetodoPagamento>('metodos_pagamento')
+        .getOne(compromisso.metodo_pagamento, { expand: 'conta_padrao' })
+    } catch {
+      /* ignore */
+    }
+
+    if (!isMetodoCredito(metodoObj || compromisso.metodo_pagamento)) {
+      return null
+    }
+
     const isContaCredito = (c: Conta | null | undefined): boolean => {
       return !!c && contaAceitaCredito(c) && !!c.dia_fechamento
     }
@@ -569,22 +649,19 @@ export const despesasService = {
       }
     }
 
-    if (compromisso.metodo_pagamento) {
-      try {
-        const mp = await pb
-          .collection<MetodoPagamento>('metodos_pagamento')
-          .getOne(compromisso.metodo_pagamento, { expand: 'conta_padrao' })
-        if (mp.expand?.conta_padrao && isContaCredito(mp.expand.conta_padrao)) {
-          return mp.expand.conta_padrao
-        }
-        if (mp.conta_padrao) {
-          const c = await pb.collection<Conta>('contas').getOne(mp.conta_padrao)
+    if (metodoObj) {
+      if (metodoObj.expand?.conta_padrao && isContaCredito(metodoObj.expand.conta_padrao)) {
+        return metodoObj.expand.conta_padrao
+      }
+      if (metodoObj.conta_padrao) {
+        try {
+          const c = await pb.collection<Conta>('contas').getOne(metodoObj.conta_padrao)
           if (isContaCredito(c)) {
             return c
           }
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
       }
     }
 

@@ -52,7 +52,7 @@ import { apiMessage } from '@/lib/api-error'
 import { calcularFaturaCartao } from '@/lib/cartao-fatura'
 import { dateOnly, formatCurrency, formatDate, toPocketBaseDate } from '@/lib/format'
 import { getFileUrl } from '@/lib/pocketbase/files'
-import { contaAceitaCredito, despesasService } from '@/services/despesas'
+import { contaAceitaCredito, isMetodoCredito, despesasService } from '@/services/despesas'
 import {
   telegramPendentesService,
   type TriagemDespesaInput,
@@ -326,20 +326,33 @@ export function TriagemPendenteDialog({
     })
   }, [metodosPagamento])
 
-  // Derivação automática da seção do painel a partir da conta e regra de repetição:
-  // 1) Conta aceita crédito -> 'cartoes_credito'
+  // Derivação automática da seção do painel a partir do método de pagamento, conta e regra de repetição:
+  // REGRA: o ciclo da fatura e seção 'cartoes_credito' aplicam-se EXCLUSIVAMENTE quando o método é Crédito
+  // E a conta aceita crédito (ou é tipo cartão) com fechamento/vencimento.
+  // 1) Método é crédito E (conta tipo cartão OU conta aceita crédito) -> 'cartoes_credito'
   // 2) Repetição 'anual' -> 'assinaturas_anuais'
   // 3) Demais -> 'contas_mensais_pix_boleto'
   const secaoDerivada = useMemo((): SecaoDespesa => {
     const c = contas.find((item) => item.id === despForm.conta_padrao)
-    if (c && (c.tipo === 'cartao' || contaAceitaCredito(c))) {
+    const metodoEhCredito = isMetodoCredito(despForm.metodo_pagamento, metodosPagamento)
+    const contaTemCredito = c
+      ? (c.tipo === 'cartao' || contaAceitaCredito(c)) && !!c.dia_fechamento
+      : false
+
+    if (metodoEhCredito && contaTemCredito) {
       return 'cartoes_credito'
     }
     if (despForm.regra_repeticao === 'anual') {
       return 'assinaturas_anuais'
     }
     return 'contas_mensais_pix_boleto'
-  }, [contas, despForm.conta_padrao, despForm.regra_repeticao])
+  }, [
+    contas,
+    despForm.conta_padrao,
+    despForm.metodo_pagamento,
+    despForm.regra_repeticao,
+    metodosPagamento,
+  ])
 
   // Identificação do Titular da Despesa selecionado
   const titularSelecionado = useMemo(() => {
@@ -366,16 +379,19 @@ export function TriagemPendenteDialog({
   const selectedDespConta = contas.find((c) => c.id === despForm.conta_padrao)
   // Conta com suporte a crédito (tipo 'cartao' ou tipos_pagamento incluindo 'credito')
   const temCredito = contaAceitaCredito(selectedDespConta)
-  const isContaCartao = selectedDespConta?.tipo === 'cartao' || temCredito
+  const selectedDespMetodoEhCredito = isMetodoCredito(despForm.metodo_pagamento, metodosPagamento)
+  // Só considera compra no ciclo do cartão se o método for CRÉDITO e a conta aceitar crédito
+  const isContaCartao =
+    (selectedDespConta?.tipo === 'cartao' || temCredito) && selectedDespMetodoEhCredito
   const isSelectedDespContaCartao = isContaCartao || secaoDerivada === 'cartoes_credito'
 
   // Ciclo da fatura para compras no cartão (calculado em tempo real com base na conta e data_inicio)
   const faturaCicloCartao = useMemo(() => {
-    if (!selectedDespConta || !temCredito || !despForm.data_inicio) {
+    if (!isSelectedDespContaCartao || !selectedDespConta || !temCredito || !despForm.data_inicio) {
       return null
     }
     return calcularFaturaCartao(selectedDespConta, despForm.data_inicio)
-  }, [selectedDespConta, temCredito, despForm.data_inicio])
+  }, [isSelectedDespContaCartao, selectedDespConta, temCredito, despForm.data_inicio])
 
   // Data de vencimento formatada derivada do ciclo do cartão
   const dataVencimentoCicloCartaoFormatada = useMemo(() => {
@@ -1772,21 +1788,20 @@ export function TriagemPendenteDialog({
                       onValueChange={(v) => {
                         const contaId = v === 'none' ? '' : v
                         const c = contas.find((item) => item.id === contaId)
-                        const updated = { ...despForm, conta_padrao: contaId }
+                        let updated = { ...despForm, conta_padrao: contaId }
                         if (c && (c.tipo === 'cartao' || contaAceitaCredito(c))) {
-                          if (c.tipo === 'cartao') {
-                            updated.secao = 'cartoes_credito'
-                          }
                           if (c.dia_vencimento) {
                             updated.dia_vencimento = c.dia_vencimento
                           }
                           const matched = metodosPagamento.find(
                             (m) =>
                               m.conta_padrao === c.id ||
-                              (m.tipo === 'cartao' &&
+                              (isMetodoCredito(m) &&
                                 m.nome.toLowerCase().includes(c.nome.toLowerCase())),
                           )
-                          if (matched) updated.metodo_pagamento = matched.id
+                          if (matched && !updated.metodo_pagamento) {
+                            updated.metodo_pagamento = matched.id
+                          }
                         }
                         setDespForm(updated)
                       }}
