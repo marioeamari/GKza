@@ -47,7 +47,14 @@ import { can } from '@/lib/permissions'
 import { ContaContextoWarning } from '@/components/ContaContextoWarning'
 import { contextoService } from '@/services/contexto'
 import { financeService } from '@/services/finance'
-import type { Categoria, Conta, Lancamento, TransactionType } from '@/types/domain'
+import type {
+  Categoria,
+  Conta,
+  ContaNatureza,
+  ContaTipoPagamento,
+  Lancamento,
+  TransactionType,
+} from '@/types/domain'
 
 const colors = ['#DF5830', '#1E6F5C', '#2B5BA8', '#4C3A8C', '#B7791F', '#A8556A', '#61737E']
 const labels = {
@@ -57,9 +64,20 @@ const labels = {
   marketplace: 'Marketplace',
 }
 const icons = { bancaria: Landmark, caixa: PiggyBank, cartao: CreditCard, marketplace: Wallet }
+
+export const tiposPagamentoOpcoes: { id: ContaTipoPagamento; label: string }[] = [
+  { id: 'credito', label: 'Crédito' },
+  { id: 'debito', label: 'Débito' },
+  { id: 'transferencia', label: 'Transferência' },
+  { id: 'boletos', label: 'Boletos' },
+  { id: 'pix', label: 'Pix' },
+]
+
 const initial = {
   nome: '',
   tipo: 'bancaria' as Conta['tipo'],
+  natureza: 'fisica' as ContaNatureza,
+  tipos_pagamento: ['debito', 'transferencia', 'boletos', 'pix'] as ContaTipoPagamento[],
   saldo_inicial: 0,
   cor: '#DF5830',
   ativa: true,
@@ -150,6 +168,13 @@ export default function Contas() {
         ? {
             nome: account.nome,
             tipo: account.tipo,
+            natureza: account.natureza || 'fisica',
+            tipos_pagamento:
+              account.tipos_pagamento && account.tipos_pagamento.length > 0
+                ? account.tipos_pagamento
+                : account.tipo === 'cartao'
+                  ? ['credito']
+                  : ['debito', 'transferencia', 'boletos', 'pix'],
             saldo_inicial: account.saldo_inicial,
             cor: account.cor || '#DF5830',
             ativa: account.ativa,
@@ -192,6 +217,16 @@ export default function Contas() {
     setSelectedGrupoIds((prev) =>
       prev.includes(grupoId) ? prev.filter((id) => id !== grupoId) : [...prev, grupoId],
     )
+  }
+
+  const toggleTipoPagamento = (tipoId: ContaTipoPagamento) => {
+    setForm((prev) => {
+      const exists = prev.tipos_pagamento.includes(tipoId)
+      const next = exists
+        ? prev.tipos_pagamento.filter((t) => t !== tipoId)
+        : [...prev.tipos_pagamento, tipoId]
+      return { ...prev, tipos_pagamento: next }
+    })
   }
 
   const save = async (e: React.FormEvent) => {
@@ -357,6 +392,16 @@ export default function Contas() {
             <h2 className="mt-4 text-[16px] font-bold text-foreground">{account.nome}</h2>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <Badge variant="outline">{labels[account.tipo]}</Badge>
+              <Badge
+                variant="secondary"
+                className={`text-[10px] font-semibold ${
+                  account.natureza === 'juridica'
+                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                }`}
+              >
+                {account.natureza === 'juridica' ? 'Pessoa Jurídica' : 'Pessoa Física'}
+              </Badge>
               {account.tipo === 'cartao' && account.bandeira && (
                 <Badge variant="secondary" className="text-[10px]">
                   {account.bandeira}
@@ -365,6 +410,27 @@ export default function Contas() {
               {account.tipo === 'cartao' && account.dia_vencimento && (
                 <span className="text-[11px] text-muted-foreground">
                   Vence dia {account.dia_vencimento}
+                </span>
+              )}
+            </div>
+
+            {/* Tipos de pagamento aceitos */}
+            <div className="mt-2.5 flex flex-wrap items-center gap-1">
+              {account.tipos_pagamento && account.tipos_pagamento.length > 0 ? (
+                account.tipos_pagamento.map((t) => {
+                  const opt = tiposPagamentoOpcoes.find((o) => o.id === t)
+                  return (
+                    <span
+                      key={t}
+                      className="rounded bg-secondary/80 px-1.5 py-0.5 text-[10px] font-medium text-foreground"
+                    >
+                      {opt?.label || t}
+                    </span>
+                  )
+                })
+              ) : (
+                <span className="text-[11px] text-muted-foreground italic">
+                  Sem tipos de pagamento definidos
                 </span>
               )}
             </div>
@@ -493,23 +559,86 @@ export default function Contas() {
               />
               {errors.nome && <p className="field-error">{errors.nome}</p>}
             </div>
-            <div className="space-y-2">
-              <Label>Tipo</Label>
-              <Select
-                value={form.tipo}
-                onValueChange={(tipo) => setForm({ ...form, tipo: tipo as Conta['tipo'] })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(labels).map(([v, l]) => (
-                    <SelectItem value={v} key={v}>
-                      {l}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Tipo da conta</Label>
+                <Select
+                  value={form.tipo}
+                  onValueChange={(tipo) => {
+                    const novoTipo = tipo as Conta['tipo']
+                    setForm((prev) => {
+                      let nextTipos = prev.tipos_pagamento
+                      if (novoTipo === 'cartao' && !nextTipos.includes('credito')) {
+                        nextTipos = [...nextTipos, 'credito']
+                      }
+                      return { ...prev, tipo: novoTipo, tipos_pagamento: nextTipos }
+                    })
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(labels).map(([v, l]) => (
+                      <SelectItem value={v} key={v}>
+                        {l}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Natureza</Label>
+                <Select
+                  value={form.natureza}
+                  onValueChange={(natureza) =>
+                    setForm({ ...form, natureza: natureza as ContaNatureza })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="fisica">Física (CPF)</SelectItem>
+                    <SelectItem value="juridica">Jurídica (CNPJ)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Múltiplas escolhas de tipos de pagamento aceitos */}
+            <div className="space-y-2 rounded-xl border border-border bg-secondary/20 p-3.5">
+              <div>
+                <Label className="text-xs font-bold text-foreground">
+                  Tipos de pagamento aceitos nesta conta
+                </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Selecione as formas de pagamento disponíveis (ex.: Débito, Transferência, Boletos,
+                  Pix ou Crédito).
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-1 sm:grid-cols-3">
+                {tiposPagamentoOpcoes.map((opcao) => {
+                  const checked = form.tipos_pagamento.includes(opcao.id)
+                  return (
+                    <label
+                      key={opcao.id}
+                      className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2 text-xs transition select-none ${
+                        checked
+                          ? 'border-primary bg-primary/10 text-primary font-semibold shadow-2xs'
+                          : 'border-border bg-white text-muted-foreground hover:bg-secondary/40'
+                      }`}
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={() => toggleTipoPagamento(opcao.id)}
+                      />
+                      <span>{opcao.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Saldo inicial</Label>

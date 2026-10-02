@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-01T23:54:57.693Z",
+  "generatedAt": "2026-10-02T01:24:01.564Z",
   "collections": [
     {
       "name": "users",
@@ -270,6 +270,20 @@
           "type": "text",
           "required": false,
           "system": false
+        },
+        {
+          "name": "natureza",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["fisica", "juridica"]
+        },
+        {
+          "name": "tipos_pagamento",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["credito", "debito", "transferencia", "boletos", "pix"]
         }
       ],
       "indexes": ["CREATE INDEX idx_contas_tipo ON contas (tipo)"]

@@ -77,9 +77,14 @@ export interface Pessoa extends RecordModel {
   observacoes: string
 }
 
+export type ContaNatureza = 'fisica' | 'juridica'
+export type ContaTipoPagamento = 'credito' | 'debito' | 'transferencia' | 'boletos' | 'pix'
+
 export interface Conta extends RecordModel {
   nome: string
   tipo: 'bancaria' | 'caixa' | 'cartao' | 'marketplace'
+  natureza?: ContaNatureza
+  tipos_pagamento?: ContaTipoPagamento[]
   saldo_inicial: number
   cor: string
   ativa: boolean
