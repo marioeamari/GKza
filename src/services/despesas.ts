@@ -1473,7 +1473,12 @@ export const despesasService = {
         }
       })
       .filter((g) => g.totalOcorrencias > 0)
-      .sort((a, b) => a.conta.nome.localeCompare(b.conta.nome, 'pt-BR', { sensitivity: 'base' }))
+      .sort((a, b) => {
+        const ordemA = a.conta.ordem ?? 999999
+        const ordemB = b.conta.ordem ?? 999999
+        if (ordemA !== ordemB) return ordemA - ordemB
+        return a.conta.nome.localeCompare(b.conta.nome, 'pt-BR', { sensitivity: 'base' })
+      })
 
     // Formatar grupos de cartões
     const cartoesList = Array.from(cartoesMap.values())
@@ -1504,7 +1509,12 @@ export const despesasService = {
           abas: abasObj,
         }
       })
-      .sort((a, b) => a.conta.nome.localeCompare(b.conta.nome, 'pt-BR', { sensitivity: 'base' }))
+      .sort((a, b) => {
+        const ordemA = a.conta.ordem ?? 999999
+        const ordemB = b.conta.ordem ?? 999999
+        if (ordemA !== ordemB) return ordemA - ordemB
+        return a.conta.nome.localeCompare(b.conta.nome, 'pt-BR', { sensitivity: 'base' })
+      })
 
     return {
       cartoes: cartoesList,

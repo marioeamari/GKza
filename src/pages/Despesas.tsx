@@ -1448,13 +1448,6 @@ export default function Despesas() {
               <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing && 'animate-spin'}`} />
               Sincronizar mês
             </Button>
-            <PermissionButton
-              allowed={can(user?.role, 'writeFinance')}
-              onClick={() => handleOpenNovoCompromisso()}
-            >
-              <Plus className="mr-1.5 h-4 w-4" />
-              Novo compromisso
-            </PermissionButton>
           </div>
         }
       />
@@ -1633,8 +1626,8 @@ export default function Despesas() {
               <SelectItem value="contas_mensais_pix_boleto">
                 Contas & Métodos de Pagamento
               </SelectItem>
-              <SelectItem value="assinaturas_anuais">Assinaturas Anuais</SelectItem>
               <SelectItem value="cartoes_credito">Cartões de Crédito</SelectItem>
+              <SelectItem value="assinaturas_anuais">Assinaturas Anuais</SelectItem>
             </SelectContent>
           </Select>
 
@@ -1794,16 +1787,6 @@ export default function Despesas() {
                   Despesas e compromissos organizados por conta bancária e divididos em abas por
                   método (Pix, Boletos, Débito, Transferência).
                 </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <PermissionButton
-                  size="sm"
-                  variant="outline"
-                  allowed={can(user?.role, 'writeFinance')}
-                  onClick={() => handleOpenNovoCompromisso('contas_mensais_pix_boleto')}
-                >
-                  <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar despesa
-                </PermissionButton>
               </div>
             </div>
 
@@ -2105,77 +2088,7 @@ export default function Despesas() {
           </section>
         )}
 
-        {/* SEÇÃO 2: Assinaturas anuais */}
-        {(filterSecao === 'all' || filterSecao === 'assinaturas_anuais') && (
-          <section className="space-y-3">
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
-                  Assinaturas anuais
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  Domínios, ferramentas, softwares e renovações de ciclo anual ativos em qualquer
-                  competência.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-muted-foreground">
-                  Ativas: {compromissosAnuais.length}
-                </span>
-                <PermissionButton
-                  size="sm"
-                  variant="outline"
-                  allowed={can(user?.role, 'writeFinance')}
-                  onClick={() => handleOpenNovoCompromisso('assinaturas_anuais')}
-                >
-                  <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
-                </PermissionButton>
-              </div>
-            </div>
-
-            <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft">
-              {compromissosAnuais.length === 0 ? (
-                <div className="p-8 text-center text-sm text-muted-foreground">
-                  Nenhuma assinatura anual cadastrada.
-                </div>
-              ) : (
-                <div className="divide-y divide-border">
-                  {compromissosAnuais.map((comp) => {
-                    // Verifica se existe ocorrência deste compromisso na competência visualizada
-                    const ocorrenciaDoMes = secaoAssinaturasOcorrencias.find(
-                      (o) => o.compromisso === comp.id,
-                    )
-
-                    // Busca a última ocorrência paga deste compromisso no histórico geral
-                    const ultimaPaga = assinaturasOcorrenciasAll.find(
-                      (o) => o.compromisso === comp.id && o.status === 'paga',
-                    )
-
-                    return (
-                      <CompromissoAnualRow
-                        key={comp.id}
-                        compromisso={comp}
-                        ocorrenciaMes={ocorrenciaDoMes}
-                        ultimaOcorrenciaPaga={ultimaPaga}
-                        competencia={currentCompetencia}
-                        onBaixarOcorrencia={(oc) => handleOpenBaixa(oc)}
-                        onRegistrarPagamentoRetroativo={() => handleOpenBaixaCompromisso(comp)}
-                        onEstornarOcorrencia={(oc) => setEstornando(oc)}
-                        onEditarCompromisso={() => handleOpenEditarCompromisso(comp)}
-                        onDuplicarCompromisso={() => handleOpenDuplicarCompromisso(comp)}
-                        onExcluirCompromisso={() => setDeletandoCompromisso(comp)}
-                        onExcluirOcorrencia={(oc) => setDeletandoOcorrencia(oc)}
-                        canEdit={can(user?.role, 'writeFinance')}
-                      />
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          </section>
-        )}
-
-        {/* SEÇÃO 3: Cartões de Crédito (NuBank, Porto Seguro, Sicred e cadastráveis) */}
+        {/* SEÇÃO 2: Cartões de Crédito (cadastráveis) */}
         {(filterSecao === 'all' || filterSecao === 'cartoes_credito') && (
           <section className="space-y-4">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -2184,8 +2097,8 @@ export default function Despesas() {
                   Cartões de Crédito
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Compras parceladas e rotativas separadas por cartão (NuBank, Porto Seguro, Sicred,
-                  etc.) com controle da fatura, dia de fechamento e vencimento.
+                  Compras parceladas e rotativas separadas por cartão com controle da fatura, dia de
+                  fechamento e vencimento.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -2515,6 +2428,76 @@ export default function Despesas() {
                     </div>
                   )
                 })
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* SEÇÃO 3: Assinaturas anuais */}
+        {(filterSecao === 'all' || filterSecao === 'assinaturas_anuais') && (
+          <section className="space-y-3">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">
+                  Assinaturas anuais
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Domínios, ferramentas, softwares e renovações de ciclo anual ativos em qualquer
+                  competência.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-muted-foreground">
+                  Ativas: {compromissosAnuais.length}
+                </span>
+                <PermissionButton
+                  size="sm"
+                  variant="outline"
+                  allowed={can(user?.role, 'writeFinance')}
+                  onClick={() => handleOpenNovoCompromisso('assinaturas_anuais')}
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
+                </PermissionButton>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft">
+              {compromissosAnuais.length === 0 ? (
+                <div className="p-8 text-center text-sm text-muted-foreground">
+                  Nenhuma assinatura anual cadastrada.
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {compromissosAnuais.map((comp) => {
+                    // Verifica se existe ocorrência deste compromisso na competência visualizada
+                    const ocorrenciaDoMes = secaoAssinaturasOcorrencias.find(
+                      (o) => o.compromisso === comp.id,
+                    )
+
+                    // Busca a última ocorrência paga deste compromisso no histórico geral
+                    const ultimaPaga = assinaturasOcorrenciasAll.find(
+                      (o) => o.compromisso === comp.id && o.status === 'paga',
+                    )
+
+                    return (
+                      <CompromissoAnualRow
+                        key={comp.id}
+                        compromisso={comp}
+                        ocorrenciaMes={ocorrenciaDoMes}
+                        ultimaOcorrenciaPaga={ultimaPaga}
+                        competencia={currentCompetencia}
+                        onBaixarOcorrencia={(oc) => handleOpenBaixa(oc)}
+                        onRegistrarPagamentoRetroativo={() => handleOpenBaixaCompromisso(comp)}
+                        onEstornarOcorrencia={(oc) => setEstornando(oc)}
+                        onEditarCompromisso={() => handleOpenEditarCompromisso(comp)}
+                        onDuplicarCompromisso={() => handleOpenDuplicarCompromisso(comp)}
+                        onExcluirCompromisso={() => setDeletandoCompromisso(comp)}
+                        onExcluirOcorrencia={(oc) => setDeletandoOcorrencia(oc)}
+                        canEdit={can(user?.role, 'writeFinance')}
+                      />
+                    )
+                  })}
+                </div>
               )}
             </div>
           </section>

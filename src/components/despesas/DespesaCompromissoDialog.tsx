@@ -289,11 +289,21 @@ export function DespesaCompromissoDialog({
         const isCartao = defaultSecao === 'cartoes_credito'
         const isAnual = defaultSecao === 'assinaturas_anuais'
 
+        const metodosSemDinheiro = metodosPagamento.filter((m) => {
+          const tipo = (m.tipo || '').toLowerCase()
+          const nome = (m.nome || '').toLowerCase()
+          const codigo = (m.codigo || '').toLowerCase()
+          if (tipo === 'dinheiro') return false
+          if (nome === 'dinheiro' || nome.includes('dinheiro')) return false
+          if (codigo === 'dinheiro' || codigo === 'dinherio') return false
+          return true
+        })
+
         const defaultCard = contas.find((c) => c.tipo === 'cartao' && c.ativa)?.id || ''
         const resolvedDefaultConta =
           defaultContaId ||
           (isCartao ? defaultCard : contas.find((c) => c.ativa && c.tipo !== 'cartao')?.id || '')
-        const resolvedDefaultMetodo = defaultMetodoId || metodosPagamento[0]?.id || ''
+        const resolvedDefaultMetodo = defaultMetodoId || metodosSemDinheiro[0]?.id || ''
         const defaultDizimoTipo = tiposDizimo[0]?.id || ''
 
         // Titular default a partir do contexto ativo
@@ -382,8 +392,23 @@ export function DespesaCompromissoDialog({
     }
   }, [form.titular_tipo, form.titular_empresa, form.titular_pessoa, empresas, pessoas])
 
+  // Derivação automática da seção do painel a partir da conta e regra de repetição:
+  // 1) Conta do tipo cartão -> 'cartoes_credito'
+  // 2) Repetição 'anual' -> 'assinaturas_anuais'
+  // 3) Demais -> 'contas_mensais_pix_boleto'
+  const secaoDerivada = useMemo((): SecaoDespesa => {
+    const c = contas.find((item) => item.id === form.conta_padrao)
+    if (c && c.tipo === 'cartao') {
+      return 'cartoes_credito'
+    }
+    if (form.regra_repeticao === 'anual') {
+      return 'assinaturas_anuais'
+    }
+    return 'contas_mensais_pix_boleto'
+  }, [contas, form.conta_padrao, form.regra_repeticao])
+
   // Opções de contas para o select "Conta de pagamento prevista / Cartão":
-  // Lista contas ativas cadastradas (bancaria, caixa, cartao, marketplace) ordenadas por nome.
+  // Lista contas ativas cadastradas (bancaria, caixa, cartao, marketplace) ordenadas por ordem / nome.
   // Preserva a conta já vinculada no compromisso em edição apenas se houver compromisso existente sendo editado.
   const contasOptions = useMemo(() => {
     const list = contas.filter((c) => {
@@ -391,16 +416,32 @@ export function DespesaCompromissoDialog({
       if (compromisso && form.conta_padrao && c.id === form.conta_padrao) return true
       return false
     })
-    return list
-      .slice()
-      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }))
+    return list.slice().sort((a, b) => {
+      const ordemA = a.ordem ?? 999999
+      const ordemB = b.ordem ?? 999999
+      if (ordemA !== ordemB) return ordemA - ordemB
+      return a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' })
+    })
   }, [contas, form.conta_padrao, compromisso])
+
+  // Métodos de pagamento filtrados (remove a opção de 'dinheiro' no formulário)
+  const metodosPagamentoDisponiveis = useMemo(() => {
+    return metodosPagamento.filter((m) => {
+      const tipo = (m.tipo || '').toLowerCase()
+      const nome = (m.nome || '').toLowerCase()
+      const codigo = (m.codigo || '').toLowerCase()
+      if (tipo === 'dinheiro') return false
+      if (nome === 'dinheiro' || nome.includes('dinheiro')) return false
+      if (codigo === 'dinheiro' || codigo === 'dinherio') return false
+      return true
+    })
+  }, [metodosPagamento])
 
   // Conta de pagamento selecionada
   const selectedConta = contas.find((c) => c.id === form.conta_padrao)
-  // Conta de cartão efetiva: se a conta selecionada for tipo cartão, ou se a seção for cartões de crédito e houver conta de cartão
+  // Conta de cartão efetiva: se a conta selecionada for tipo cartão, ou se a seção derivada for cartões de crédito
   const isContaCartao = selectedConta?.tipo === 'cartao'
-  const isSelectedContaCartao = isContaCartao || form.secao === 'cartoes_credito'
+  const isSelectedContaCartao = isContaCartao || secaoDerivada === 'cartoes_credito'
 
   // Ciclo da fatura para compras no cartão (calculado em tempo real com base na conta e data_inicio)
   const faturaCicloCartao = useMemo(() => {
@@ -669,7 +710,7 @@ export function DespesaCompromissoDialog({
         if (form.fornecedor.trim()) fd.append('fornecedor', form.fornecedor.trim())
         if (form.categoria) fd.append('categoria', form.categoria)
         if (form.tag) fd.append('tag', form.tag)
-        fd.append('secao', form.secao)
+        fd.append('secao', secaoDerivada)
 
         // Titular
         fd.append('titular_tipo', form.titular_tipo)
@@ -745,7 +786,7 @@ export function DespesaCompromissoDialog({
           fornecedor: form.fornecedor.trim() || (null as unknown as string),
           categoria: form.categoria || (null as unknown as string),
           tag: form.tag || (null as unknown as string),
-          secao: form.secao,
+          secao: secaoDerivada,
 
           // Titular da obrigação
           titular_tipo: form.titular_tipo,
@@ -1045,42 +1086,6 @@ export function DespesaCompromissoDialog({
                 <p className="text-[11px] text-muted-foreground">
                   A quem ou a qual operação o gasto se refere (ex: Eu/Casa, Rafa, WeeKids).
                 </p>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="font-semibold">Seção do painel (Visualização)</Label>
-                <Select
-                  value={isSelectedContaCartao ? 'cartoes_credito' : form.secao}
-                  disabled={isSelectedContaCartao}
-                  onValueChange={(v) => {
-                    const s = v as SecaoDespesa
-                    setForm({ ...form, secao: s })
-                  }}
-                >
-                  <SelectTrigger
-                    className={isSelectedContaCartao ? 'bg-secondary/40 font-medium' : ''}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="contas_mensais_pix_boleto">
-                      Boletos & Contas Mensais Pix
-                    </SelectItem>
-                    <SelectItem value="assinaturas_anuais">Assinaturas Anuais</SelectItem>
-                    <SelectItem value="cartoes_credito">
-                      Cartões de Crédito (Parcelados/Rotativos)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                {isSelectedContaCartao ? (
-                  <p className="text-[11px] font-medium text-primary">
-                    Bloqueado em Cartões de Crédito para compras no cartão.
-                  </p>
-                ) : (
-                  <p className="text-[11px] text-muted-foreground">
-                    Onde este compromisso será visualizado na interface de Despesas.
-                  </p>
-                )}
               </div>
             </div>
           </div>
@@ -1545,7 +1550,7 @@ export function DespesaCompromissoDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Nenhum</SelectItem>
-                    {metodosPagamento.map((m) => (
+                    {metodosPagamentoDisponiveis.map((m) => (
                       <SelectItem key={m.id} value={m.id}>
                         {m.nome}
                       </SelectItem>
