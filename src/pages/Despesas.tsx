@@ -30,6 +30,9 @@ import {
   Trash2,
   Undo2,
   UserRound,
+  Power,
+  PowerOff,
+  MoreVertical,
   WalletCards,
   Receipt,
   Wallet,
@@ -56,6 +59,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -497,6 +508,11 @@ export default function Despesas() {
   const [estornando, setEstornando] = useState<DespesaOcorrencia | null>(null)
   const [deletandoCompromisso, setDeletandoCompromisso] = useState<DespesaCompromisso | null>(null)
   const [deletandoOcorrencia, setDeletandoOcorrencia] = useState<DespesaOcorrencia | null>(null)
+  const [desativandoCompromisso, setDesativandoCompromisso] = useState<DespesaCompromisso | null>(
+    null,
+  )
+  const [excluirPrevistasAoDesativar, setExcluirPrevistasAoDesativar] = useState(true)
+  const [isTogglingAtivo, setIsTogglingAtivo] = useState(false)
 
   // Filtros locais de busca
   const [search, setSearch] = useState('')
@@ -1159,6 +1175,63 @@ export default function Despesas() {
     }
   }
 
+  const handleOpenDesativarCompromisso = (comp: DespesaCompromisso) => {
+    setDesativandoCompromisso(comp)
+    setExcluirPrevistasAoDesativar(true)
+  }
+
+  const handleConfirmDesativarCompromisso = async () => {
+    if (!desativandoCompromisso) return
+    setIsTogglingAtivo(true)
+    try {
+      const res = await despesasService.setCompromissoAtivo({
+        compromissoId: desativandoCompromisso.id,
+        ativo: false,
+        excluirPrevistas: excluirPrevistasAoDesativar,
+      })
+      toast({
+        title: 'Compromisso desativado',
+        description:
+          res.ocorrenciasExcluidas > 0
+            ? `Compromisso inativado e ${res.ocorrenciasExcluidas} ocorrência(s) prevista(s) excluída(s).`
+            : 'Compromisso desativado com sucesso.',
+      })
+      await loadData()
+    } catch (e) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao desativar compromisso',
+        description: apiMessage(e),
+      })
+    } finally {
+      setIsTogglingAtivo(false)
+      setDesativandoCompromisso(null)
+    }
+  }
+
+  const handleReativarCompromisso = async (comp: DespesaCompromisso) => {
+    setIsTogglingAtivo(true)
+    try {
+      await despesasService.setCompromissoAtivo({
+        compromissoId: comp.id,
+        ativo: true,
+      })
+      toast({
+        title: 'Compromisso reativado',
+        description: 'Compromisso reativado com sucesso.',
+      })
+      await loadData()
+    } catch (e) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao reativar compromisso',
+        description: apiMessage(e),
+      })
+    } finally {
+      setIsTogglingAtivo(false)
+    }
+  }
+
   if (isOverloaded) {
     return (
       <div className="flex min-h-[420px] flex-col items-center justify-center rounded-2xl border border-dashed border-amber-300 bg-amber-50/50 p-8 text-center shadow-soft">
@@ -1532,6 +1605,10 @@ export default function Despesas() {
                     onDuplicarCompromisso={() => compObj && handleOpenDuplicarCompromisso(compObj)}
                     onExcluirCompromisso={() => compObj && setDeletandoCompromisso(compObj)}
                     onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
+                    onDesativarCompromisso={() =>
+                      compObj && handleOpenDesativarCompromisso(compObj)
+                    }
+                    onReativarCompromisso={() => compObj && handleReativarCompromisso(compObj)}
                     canEdit={can(user?.role, 'writeFinance')}
                   />
                 )
@@ -1699,6 +1776,12 @@ export default function Despesas() {
                                   compObj && setDeletandoCompromisso(compObj)
                                 }
                                 onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
+                                onDesativarCompromisso={() =>
+                                  compObj && handleOpenDesativarCompromisso(compObj)
+                                }
+                                onReativarCompromisso={() =>
+                                  compObj && handleReativarCompromisso(compObj)
+                                }
                                 canEdit={can(user?.role, 'writeFinance')}
                               />
                             )
@@ -2146,6 +2229,12 @@ export default function Despesas() {
                                     compObj && setDeletandoCompromisso(compObj)
                                   }
                                   onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
+                                  onDesativarCompromisso={() =>
+                                    compObj && handleOpenDesativarCompromisso(compObj)
+                                  }
+                                  onReativarCompromisso={() =>
+                                    compObj && handleReativarCompromisso(compObj)
+                                  }
                                   canEdit={can(user?.role, 'writeFinance')}
                                 />
                               )
@@ -2214,6 +2303,10 @@ export default function Despesas() {
                         }
                         onExcluirCompromisso={() => compObj && setDeletandoCompromisso(compObj)}
                         onExcluirOcorrencia={() => setDeletandoOcorrencia(oc)}
+                        onDesativarCompromisso={() =>
+                          compObj && handleOpenDesativarCompromisso(compObj)
+                        }
+                        onReativarCompromisso={() => compObj && handleReativarCompromisso(compObj)}
                         canEdit={can(user?.role, 'writeFinance')}
                       />
                     )
@@ -2330,6 +2423,57 @@ export default function Despesas() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Confirmar Desativação do Compromisso */}
+      <AlertDialog
+        open={!!desativandoCompromisso}
+        onOpenChange={(o) => !o && setDesativandoCompromisso(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desativar compromisso?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3 text-left">
+              <span>
+                Tem certeza que deseja desativar o compromisso "
+                <strong>{desativandoCompromisso?.descricao}</strong>"?
+              </span>
+              <br />
+              <br />
+              <span>
+                O compromisso deixará de gerar novas ocorrências nos próximos meses. Ocorrências{' '}
+                <strong>PAGAS</strong> permanecem intactas no histórico.
+              </span>
+              <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-border bg-secondary/30 p-3">
+                <Checkbox
+                  id="chk-excluir-previstas"
+                  checked={excluirPrevistasAoDesativar}
+                  onCheckedChange={(checked) => setExcluirPrevistasAoDesativar(checked === true)}
+                  className="mt-0.5"
+                />
+                <label
+                  htmlFor="chk-excluir-previstas"
+                  className="text-xs font-medium text-foreground cursor-pointer leading-tight select-none"
+                >
+                  Também excluir as ocorrências previstas futuras
+                  <span className="block text-[11px] text-muted-foreground font-normal mt-0.5">
+                    Remove ocorrências não pagas já geradas deste compromisso.
+                  </span>
+                </label>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isTogglingAtivo}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-primary hover:bg-primary/90 text-white"
+              onClick={handleConfirmDesativarCompromisso}
+              disabled={isTogglingAtivo}
+            >
+              {isTogglingAtivo ? 'Desativando...' : 'Desativar compromisso'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Confirmar Exclusão do Compromisso Todo */}
       <AlertDialog
         open={!!deletandoCompromisso}
@@ -2372,6 +2516,8 @@ interface OcorrenciaRowProps {
   onDuplicarCompromisso?: () => void
   onExcluirCompromisso: () => void
   onExcluirOcorrencia?: () => void
+  onDesativarCompromisso?: () => void
+  onReativarCompromisso?: () => void
   canEdit: boolean
 }
 
@@ -2386,6 +2532,8 @@ function OcorrenciaRow({
   onDuplicarCompromisso,
   onExcluirCompromisso,
   onExcluirOcorrencia,
+  onDesativarCompromisso,
+  onReativarCompromisso,
   canEdit,
 }: OcorrenciaRowProps) {
   const comp = ocorrencia.expand?.compromisso || compromissoFallback
@@ -2400,11 +2548,13 @@ function OcorrenciaRow({
   const todayStr = getLocalDateStr()
   const dueStr = ocorrencia.data_vencimento ? ocorrencia.data_vencimento.slice(0, 10) : ''
   const isRealmenteAtrasada = !isPaga && dueStr !== '' && dueStr < todayStr
-  const isCartao = contaPag?.tipo === 'cartao' || ocorrencia.secao === 'cartoes_credito'
+  const metodoEhCredito = isMetodoCredito(metodoPag)
+  const isCartao =
+    (contaPag?.tipo === 'cartao' || ocorrencia.secao === 'cartoes_credito') && metodoEhCredito
 
-  // Badge do ciclo da fatura do cartão
+  // Badge do ciclo da fatura do cartão (apenas para despesas em método Crédito)
   const faturaCicloBadge = useMemo(() => {
-    if (!contaPag || contaPag.tipo !== 'cartao') return null
+    if (!contaPag || contaPag.tipo !== 'cartao' || !metodoEhCredito) return null
     const dataRef =
       ocorrencia.data_pagamento?.slice(0, 10) ||
       ocorrencia.data_vencimento?.slice(0, 10) ||
@@ -2416,7 +2566,13 @@ function OcorrenciaRow({
     const mesCap = mesAno.charAt(0).toUpperCase() + mesAno.slice(1)
     const [vy, vm, vd] = ciclo.dataVencimento.split('-')
     return `Fatura de ${mesCap} · vence ${vd}/${vm}`
-  }, [contaPag, ocorrencia.data_pagamento, ocorrencia.data_vencimento, comp?.data_inicio])
+  }, [
+    contaPag,
+    metodoEhCredito,
+    ocorrencia.data_pagamento,
+    ocorrencia.data_vencimento,
+    comp?.data_inicio,
+  ])
 
   // Titular da obrigação
   const titularTipo = comp?.titular_tipo || (comp?.empresa ? 'cnpj' : 'cpf')
@@ -2548,6 +2704,16 @@ function OcorrenciaRow({
               </Badge>
             )}
 
+            {comp?.ativo === false && (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-semibold border-muted-foreground/30 bg-muted/60 text-muted-foreground"
+                title="Compromisso inativo — não gera novas ocorrências"
+              >
+                Inativo
+              </Badge>
+            )}
+
             {comp?.precisa_revisao && (
               <Badge
                 variant="outline"
@@ -2557,7 +2723,6 @@ function OcorrenciaRow({
               </Badge>
             )}
           </div>
-
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {comp?.fornecedor && (
               <span>
@@ -2712,6 +2877,61 @@ function OcorrenciaRow({
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
 
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100"
+                    title="Mais ações do compromisso"
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  {comp && (
+                    <>
+                      {comp.ativo === false ? (
+                        <DropdownMenuItem
+                          onClick={onReativarCompromisso}
+                          className="cursor-pointer text-success focus:text-success"
+                        >
+                          <Power className="mr-2 h-4 w-4 text-success" />
+                          Reativar compromisso
+                        </DropdownMenuItem>
+                      ) : (
+                        <DropdownMenuItem
+                          onClick={onDesativarCompromisso}
+                          className="cursor-pointer text-amber-700 focus:text-amber-800"
+                        >
+                          <PowerOff className="mr-2 h-4 w-4 text-amber-600" />
+                          Desativar compromisso
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
+                  {onExcluirOcorrencia && (
+                    <DropdownMenuItem
+                      onClick={onExcluirOcorrencia}
+                      className="cursor-pointer text-destructive focus:text-destructive"
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      {isAtrasada
+                        ? 'Excluir pendência atrasada'
+                        : 'Excluir ocorrência desta competência'}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    onClick={onExcluirCompromisso}
+                    className="cursor-pointer text-destructive focus:text-destructive"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Excluir compromisso inteiro
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
               <Button
                 variant="ghost"
                 size="icon"
@@ -2721,7 +2941,7 @@ function OcorrenciaRow({
                   onExcluirOcorrencia
                     ? isAtrasada
                       ? 'Excluir pendência atrasada'
-                      : 'Excluir ocorrência'
+                      : 'Excluir ocorrência desta competência'
                     : 'Excluir compromisso'
                 }
               >

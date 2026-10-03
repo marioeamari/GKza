@@ -61,7 +61,9 @@ export function BaixaOcorrenciaDialog({
   const title = comp?.descricao || ocorrencia?.observacoes || 'Despesa'
 
   const selectedContaObj = contas.find((c) => c.id === contaId)
-  const isContaCartao = selectedContaObj?.tipo === 'cartao'
+  const metodoPagamentoComp = comp?.expand?.metodo_pagamento || comp?.metodo_pagamento
+  const metodoEhCredito = isMetodoCredito(metodoPagamentoComp)
+  const isContaCartao = selectedContaObj?.tipo === 'cartao' && metodoEhCredito
   const faturaCiclo =
     isContaCartao && selectedContaObj && dataPagamento
       ? calcularFaturaCartao(selectedContaObj, dataPagamento)

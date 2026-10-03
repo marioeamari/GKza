@@ -192,6 +192,41 @@ describe('despesasService - Agrupador de Despesas para Visualização (Nova Arqu
     expect(resultado.contas[0].totalOcorrencias).toBe(0)
   })
 
+  it('respeita ocorrências pagas de compromissos inativos sem quebrá-las no agrupador', () => {
+    const compInativo = {
+      id: 'comp_inativo_1',
+      descricao: 'Academia Antiga Inativa',
+      ativo: false,
+      conta_padrao: 'c_nubank',
+      metodo_pagamento: 'm_pix',
+      created: '',
+      updated: '',
+    } as unknown as DespesaCompromisso
+
+    const ocPaga = {
+      id: 'oc_paga_inativo',
+      compromisso: 'comp_inativo_1',
+      conta: 'c_nubank',
+      valor_previsto: 120,
+      valor_pago: 120,
+      competencia: '2025-05',
+      status: 'paga',
+      created: '',
+      updated: '',
+    } as unknown as DespesaOcorrencia
+
+    const resultado = despesasService.agruparDespesasParaVisualizacao({
+      ocorrencias: [ocPaga],
+      contas: [contaNubank],
+      compromissos: [compInativo],
+      metodosPagamento: metodos,
+    })
+
+    const grupoNubank = resultado.contas.find((g) => g.conta.id === 'c_nubank')!
+    expect(grupoNubank.totalOcorrencias).toBe(1)
+    expect(grupoNubank.ocorrencias[0].id).toBe('oc_paga_inativo')
+  })
+
   it('aloca despesas sem conta ou vinculadas a conta inativa no grupo semConta', () => {
     const ocSemConta = {
       id: 'oc_orfa',
@@ -232,6 +267,193 @@ describe('despesasService - Agrupador de Despesas para Visualização (Nova Arqu
     expect(resultado.semConta).toHaveLength(2)
     expect(resultado.semConta.map((o) => o.id)).toContain('oc_orfa')
     expect(resultado.semConta.map((o) => o.id)).toContain('oc_inativa')
+  })
+})
+
+describe('despesasService - setCompromissoAtivo', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('desativa o compromisso e quando excluirPrevistas=true exclui apenas ocorrências previstas não pagas, preservando as pagas', async () => {
+    const mockCompromissoUpdate = vi.fn().mockResolvedValue({
+      id: 'comp_academia',
+      descricao: 'Academia',
+      ativo: false,
+    })
+
+    const mockOcorrenciasPrevistas = [
+      { id: 'oc_prevista_1', status: 'prevista', data_pagamento: null },
+      { id: 'oc_prevista_2', status: 'prevista', data_pagamento: null },
+    ]
+
+    const mockDelete = vi.fn().mockResolvedValue(true)
+    const mockGetFullList = vi.fn().mockResolvedValue(mockOcorrenciasPrevistas)
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'despesas_compromisso') {
+        return {
+          update: mockCompromissoUpdate,
+        } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getFullList: mockGetFullList,
+          delete: mockDelete,
+        } as any
+      }
+      return {} as any
+    })
+
+    const result = await despesasService.setCompromissoAtivo({
+      compromissoId: 'comp_academia',
+      ativo: false,
+      excluirPrevistas: true,
+    })
+
+    expect(mockCompromissoUpdate).toHaveBeenCalledWith('comp_academia', { ativo: false })
+    expect(mockDelete).toHaveBeenCalledTimes(2)
+    expect(mockDelete).toHaveBeenCalledWith('oc_prevista_1')
+    expect(mockDelete).toHaveBeenCalledWith('oc_prevista_2')
+    expect(result.ocorrenciasExcluidas).toBe(2)
+    expect(result.compromisso.ativo).toBe(false)
+  })
+
+  it('desativa o compromisso com excluirPrevistas=false sem excluir ocorrências', async () => {
+    const mockCompromissoUpdate = vi.fn().mockResolvedValue({
+      id: 'comp_academia',
+      descricao: 'Academia',
+      ativo: false,
+    })
+
+    const mockDelete = vi.fn().mockResolvedValue(true)
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'despesas_compromisso') {
+        return { update: mockCompromissoUpdate } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return { delete: mockDelete } as any
+      }
+      return {} as any
+    })
+
+    const result = await despesasService.setCompromissoAtivo({
+      compromissoId: 'comp_academia',
+      ativo: false,
+      excluirPrevistas: false,
+    })
+
+    expect(mockCompromissoUpdate).toHaveBeenCalledWith('comp_academia', { ativo: false })
+    expect(mockDelete).not.toHaveBeenCalled()
+    expect(result.ocorrenciasExcluidas).toBe(0)
+  })
+
+  it('reativa o compromisso definindo ativo=true sem excluir ocorrências', async () => {
+    const mockCompromissoUpdate = vi.fn().mockResolvedValue({
+      id: 'comp_academia',
+      descricao: 'Academia',
+      ativo: true,
+    })
+
+    const mockDelete = vi.fn().mockResolvedValue(true)
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'despesas_compromisso') {
+        return { update: mockCompromissoUpdate } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return { delete: mockDelete } as any
+      }
+      return {} as any
+    })
+
+    const result = await despesasService.setCompromissoAtivo({
+      compromissoId: 'comp_academia',
+      ativo: true,
+    })
+
+    expect(mockCompromissoUpdate).toHaveBeenCalledWith('comp_academia', { ativo: true })
+    expect(mockDelete).not.toHaveBeenCalled()
+    expect(result.compromisso.ativo).toBe(true)
+  })
+})
+
+describe('despesasService - gerarOcorrenciasParaCompromissosLote', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('ignora compromissos inativos e gera apenas para compromissos ativos cobrindo competências e janela futura', async () => {
+    const spyGerar = vi
+      .spyOn(despesasService, 'gerarOcorrenciasParaCompromisso')
+      .mockResolvedValue(undefined)
+
+    const mockGetFullList = vi.fn().mockResolvedValue([])
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getFullList: mockGetFullList,
+        } as any
+      }
+      return {} as any
+    })
+
+    const compAtivo = {
+      id: 'comp_ativo',
+      descricao: 'Internet Fibra',
+      ativo: true,
+      regra_repeticao: 'mensal',
+    } as unknown as DespesaCompromisso
+
+    const compInativo = {
+      id: 'comp_inativo',
+      descricao: 'Academia Desativada',
+      ativo: false,
+      regra_repeticao: 'mensal',
+    } as unknown as DespesaCompromisso
+
+    await despesasService.gerarOcorrenciasParaCompromissosLote({
+      compromissos: [compAtivo, compInativo],
+      competencias: ['2026-05'],
+      batchSize: 5,
+      batchDelayMs: 0,
+      incluirMesesFuturos: true,
+    })
+
+    // Deve chamar apenas para compAtivo
+    expect(spyGerar).toHaveBeenCalledTimes(1)
+    expect(spyGerar.mock.calls[0][0].id).toBe('comp_ativo')
+
+    // Competências passadas devem incluir a informada ('2026-05') mais os 3 meses futuros da janela ('2026-06', '2026-07', '2026-08')
+    const competenciasGeradas = spyGerar.mock.calls[0][1] as string[]
+    expect(competenciasGeradas).toContain('2026-05')
+    expect(competenciasGeradas).toContain('2026-06')
+    expect(competenciasGeradas).toContain('2026-07')
+    expect(competenciasGeradas).toContain('2026-08')
+
+    spyGerar.mockRestore()
+  })
+
+  it('não executa se todos os compromissos forem inativos', async () => {
+    const spyGerar = vi
+      .spyOn(despesasService, 'gerarOcorrenciasParaCompromisso')
+      .mockResolvedValue(undefined)
+
+    const compInativo = {
+      id: 'comp_inativo_sozinho',
+      descricao: 'Academia 2',
+      ativo: false,
+    } as unknown as DespesaCompromisso
+
+    await despesasService.gerarOcorrenciasParaCompromissosLote({
+      compromissos: [compInativo],
+      competencias: ['2026-05'],
+    })
+
+    expect(spyGerar).not.toHaveBeenCalled()
+    spyGerar.mockRestore()
   })
 })
 

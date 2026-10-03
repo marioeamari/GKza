@@ -305,11 +305,23 @@ export const despesasService = {
       /* intentionally ignored */
     }
 
+    // Busca dados prévios da ocorrência para conferir o método de pagamento
+    const ocorrAtual = await pb
+      .collection<DespesaOcorrencia>('despesas_ocorrencias')
+      .getOne(params.ocorrenciaId)
+
+    const metodoCompId =
+      typeof ocorrAtual.compromisso === 'object' && ocorrAtual.compromisso !== null
+        ? (ocorrAtual.compromisso as any).metodo_pagamento
+        : null
+    // REGRA v0.0.128: APENAS o método Crédito entra no ciclo da fatura do cartão
+    const metodoEfetivoEhCredito = isCartao && isMetodoCredito(metodoCompId)
+
     let lancamentoId: string | null = null
     let lancamento: any = null
 
     // Montagem dos dados do lançamento (usando FormData se houver comprovante)
-    if (isCartao && contaObj) {
+    if (metodoEfetivoEhCredito && contaObj) {
       // Para cartão de crédito: a despesa entra na fatura do cartão referente ao ciclo.
       // O lançamento financeiro é criado como pendente de fatura (sem saída imediata de caixa)
       // até que a fatura inteira seja baixada/paga.
@@ -390,19 +402,19 @@ export const despesasService = {
     }
 
     // 2. Atualizar ocorrência (permitindo ajustar valor real da ocorrência sem afetar as demais)
-    const ocorrAtual = await pb
-      .collection<DespesaOcorrencia>('despesas_ocorrencias')
-      .getOne(params.ocorrenciaId)
     const diferencaValor = params.valorPago !== ocorrAtual.valor_previsto
 
     // Se a ocorrência foi paga com data retroativa diferente de sua competência original,
     // atualizamos a competência se for uma assinatura ou ajuste manual correspondente
     const compDataPag = params.dataPagamento.slice(0, 7)
 
-    // Se a conta for tipo cartão, calcula o ciclo da fatura para a dataPagamento informada
+    // Se a conta for tipo cartão E a despesa for de método crédito, calcula o ciclo da fatura para a dataPagamento informada.
+    // REGRA v0.0.128: APENAS compras/despesas no método Crédito seguem o ciclo da fatura do cartão.
+    // Pix, Débito, Transferência, Boletos e Dinheiro mantêm competência = mês da despesa (compDataPag).
     let cardCicloCompetencia: string | null = null
     let cardCicloVencimentoIso: string | null = null
-    if (isCartao && contaObj) {
+
+    if (metodoEfetivoEhCredito && contaObj) {
       const ciclo = calcularFaturaCartao(contaObj, params.dataPagamento)
       if (ciclo.competencia !== ocorrAtual.competencia) {
         // Verifica se já não existe outra ocorrência para o mesmo compromisso ocupando essa competência
@@ -446,9 +458,9 @@ export const despesasService = {
         fdOcorr.append('competencia', cardCicloCompetencia)
         fdOcorr.append('data_vencimento', cardCicloVencimentoIso)
       } else if (
-        ocorrAtual.secao === 'assinaturas_anuais' &&
         compDataPag &&
-        compDataPag !== ocorrAtual.competencia
+        compDataPag !== ocorrAtual.competencia &&
+        (ocorrAtual.secao === 'assinaturas_anuais' || !metodoEfetivoEhCredito)
       ) {
         fdOcorr.append('competencia', compDataPag)
       }
@@ -475,9 +487,9 @@ export const despesasService = {
         updatesOcorr.competencia = cardCicloCompetencia
         updatesOcorr.data_vencimento = cardCicloVencimentoIso
       } else if (
-        ocorrAtual.secao === 'assinaturas_anuais' &&
         compDataPag &&
-        compDataPag !== ocorrAtual.competencia
+        compDataPag !== ocorrAtual.competencia &&
+        (ocorrAtual.secao === 'assinaturas_anuais' || !metodoEfetivoEhCredito)
       ) {
         updatesOcorr.competencia = compDataPag
       }
@@ -1365,7 +1377,7 @@ export const despesasService = {
     // competências requisitadas + até 3 meses à frente para blindagem contínua dos compromissos recorrentes
     const todasCompetenciasSet = new Set<string>(competencias)
     if (incluirMesesFuturos) {
-      const baseComp = competencias[0] || getLocalDateStr().slice(0, 7)
+      const baseComp = competencias[0] || new Date().toISOString().slice(0, 7)
       const [bYStr, bMStr] = baseComp.split('-')
       const bY = parseInt(bYStr, 10)
       const bM = parseInt(bMStr, 10) - 1
