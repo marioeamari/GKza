@@ -27,11 +27,9 @@ export function DespesaRapidaModal({
   const [open, setOpen] = useState(false)
 
   const mobileUrl =
-    typeof window !== 'undefined'
-      ? `${window.location.origin}/despesa-rapida`
-      : 'https://seuerp.com/despesa-rapida'
+    typeof window !== 'undefined' ? `${window.location.origin}/m` : 'https://seuerp.com/m'
 
-  // Gera o QR Code utilizando SVG da API pública do Google Chart ou QR Server com segurança
+  // Gera o QR Code para o Hub móvel /m
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
     mobileUrl,
   )}&color=DF5830&bgcolor=FFFFFF&margin=2`
@@ -64,9 +62,9 @@ export function DespesaRapidaModal({
             <button
               type="button"
               className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#DF5830] to-[#b83f1d] text-white shadow-sm hover:opacity-95 transition"
-              title="Sub-app Móvel: Despesa Rápida (PWA)"
+              title="Sub-app Móvel: Hub GKza (PWA)"
             >
-              <Zap className="h-4 w-4 fill-white" />
+              <Sparkles className="h-4 w-4 fill-white" />
             </button>
           ) : (
             <button
@@ -75,14 +73,14 @@ export function DespesaRapidaModal({
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#DF5830] text-white shadow-xs">
-                  <Zap className="h-4 w-4 fill-white" />
+                  <Sparkles className="h-4 w-4 fill-white" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs font-extrabold text-foreground group-hover:text-[#DF5830] transition leading-tight truncate">
-                    Despesa Rápida
+                    App Móvel GKza
                   </p>
                   <p className="text-[10px] text-muted-foreground leading-tight truncate">
-                    Instalar PWA no Celular
+                    Despesas & Lembretes PWA
                   </p>
                 </div>
               </div>
@@ -107,11 +105,11 @@ export function DespesaRapidaModal({
             <Smartphone className="h-6 w-6" />
           </div>
           <DialogTitle className="text-xl font-black text-foreground">
-            Sub-app Despesa Rápida
+            Sub-app Móvel GKza (v2)
           </DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground leading-relaxed">
-            Aplicativo móvel leve e focado para registrar despesas na rua em segundos com uma mão.
-            As compras vão direto para a esteira de Triagem do ERP.
+            Hub móvel com Despesa Rápida (lançamentos para a Triagem) e o novo Lembrete Rápido (com
+            avisos no smartphone até você realizar a tarefa).
           </DialogDescription>
         </DialogHeader>
 
@@ -186,7 +184,7 @@ export function DespesaRapidaModal({
               size="sm"
               className="text-xs text-[#DF5830] hover:text-[#b83f1d] hover:bg-orange-500/10 font-bold"
             >
-              <a href="/despesa-rapida" target="_blank" rel="noopener noreferrer">
+              <a href="/m" target="_blank" rel="noopener noreferrer">
                 Testar visualização no navegador
                 <ExternalLink className="ml-1.5 h-3 w-3" />
               </a>

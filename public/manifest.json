@@ -1,8 +1,8 @@
 {
-  "name": "Despesa Rápida",
-  "short_name": "Despesa Rápida",
-  "description": "Lançamento ultra-rápido de despesas para o ERP GKza",
-  "start_url": "/despesa-rapida",
+  "name": "GKza Rápido",
+  "short_name": "GKza Rápido",
+  "description": "Hub móvel GKza: Lançamento ultra-rápido de despesas e lembretes",
+  "start_url": "/m",
   "display": "standalone",
   "background_color": "#FBF8F5",
   "theme_color": "#DF5830",
@@ -13,6 +13,22 @@
       "sizes": "192x192 512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Lembrete Rápido",
+      "short_name": "Lembrete",
+      "description": "Anotar lembrete rápido",
+      "url": "/lembrete-rapido",
+      "icons": [{ "src": "/pwa-icon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Despesa Rápida",
+      "short_name": "Despesa",
+      "description": "Registrar despesa rápida",
+      "url": "/despesa-rapida",
+      "icons": [{ "src": "/pwa-icon.svg", "sizes": "192x192" }]
     }
   ]
 }

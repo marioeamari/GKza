@@ -40,7 +40,7 @@ export function MobileDesktopNotice() {
               O ERP completo é melhor no computador.
             </p>
             <p className="text-[11px] text-amber-800/90 leading-tight">
-              Para registrar gastos no celular, use o sub-app dedicado.
+              Para registrar gastos ou lembretes no celular, use o sub-app móvel.
             </p>
           </div>
         </div>
@@ -51,9 +51,9 @@ export function MobileDesktopNotice() {
             size="sm"
             className="h-7 px-2.5 text-[11px] font-bold bg-[#DF5830] hover:bg-[#c94924] text-white shadow-xs rounded-md"
           >
-            <Link to="/despesa-rapida">
+            <Link to="/m">
               <Zap className="mr-1 h-3 w-3 fill-current" />
-              Despesa Rápida
+              App Móvel
             </Link>
           </Button>
 

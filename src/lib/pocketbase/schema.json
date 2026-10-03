@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-03T13:38:00.745Z",
+  "generatedAt": "2026-10-03T13:58:16.259Z",
   "collections": [
     {
       "name": "users",
@@ -4254,6 +4254,132 @@
         "CREATE INDEX idx_kit_hist_num ON kit_historico_separacao (numero_pedido)",
         "CREATE INDEX idx_kit_hist_status ON kit_historico_separacao (status)",
         "CREATE INDEX idx_kit_hist_func ON kit_historico_separacao (funcionario)"
+      ]
+    },
+    {
+      "name": "lembretes_rapidos",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "titulo",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "detalhe",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "contexto_tipo",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["pessoal", "empresa"]
+        },
+        {
+          "name": "pessoa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "pessoas"
+        },
+        {
+          "name": "empresa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "empresas"
+        },
+        {
+          "name": "contexto_nome",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "data_limite",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "hora_limite",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "prioridade",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["normal", "urgente"]
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["pendente", "concluido"]
+        },
+        {
+          "name": "repetir_ate_concluir",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "concluido_em",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "origem",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "usuario",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "users"
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_lemb_rap_status ON lembretes_rapidos (status)",
+        "CREATE INDEX idx_lemb_rap_data ON lembretes_rapidos (data_limite)",
+        "CREATE INDEX idx_lemb_rap_prioridade ON lembretes_rapidos (prioridade)",
+        "CREATE INDEX idx_lemb_rap_ctx ON lembretes_rapidos (contexto_tipo)",
+        "CREATE INDEX idx_lemb_rap_pessoa ON lembretes_rapidos (pessoa)",
+        "CREATE INDEX idx_lemb_rap_empresa ON lembretes_rapidos (empresa)",
+        "CREATE INDEX idx_lemb_rap_user ON lembretes_rapidos (usuario)"
       ]
     }
   ]

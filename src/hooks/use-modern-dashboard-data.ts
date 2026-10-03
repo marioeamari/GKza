@@ -24,6 +24,9 @@ import type {
 } from '@/types/domain'
 import type { PrecPrecificacaoRecord, PrecProdutoRecord } from '@/types/precificacao'
 
+import { lembretesService } from '@/services/lembretes'
+import type { LembreteRapido } from '@/types/domain'
+
 export interface ExtendedDashboardData {
   contas: Conta[]
   categorias: Categoria[]
@@ -41,11 +44,11 @@ export interface ExtendedDashboardData {
   precificacoes: PrecPrecificacaoRecord[]
   metas: MetaMeta[]
   pendentes: TelegramRegistroPendente[]
+  lembretes: LembreteRapido[]
   loading: boolean
-  error: unknown
+  error: any
   refresh: () => Promise<void>
 }
-
 export function useModernDashboardData(): ExtendedDashboardData {
   const [contas, setContas] = useState<Conta[]>([])
   const [categorias, setCategorias] = useState<Categoria[]>([])
@@ -63,6 +66,7 @@ export function useModernDashboardData(): ExtendedDashboardData {
   const [precificacoes, setPrecificacoes] = useState<PrecPrecificacaoRecord[]>([])
   const [metas, setMetas] = useState<MetaMeta[]>([])
   const [pendentes, setPendentes] = useState<TelegramRegistroPendente[]>([])
+  const [lembretes, setLembretes] = useState<LembreteRapido[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>()
 
@@ -86,6 +90,7 @@ export function useModernDashboardData(): ExtendedDashboardData {
         resPrecificacoes,
         resMetas,
         resPendentes,
+        resLembretes,
       ] = await Promise.allSettled([
         financeService.listContas(),
         financeService.listCategorias(),
@@ -109,6 +114,7 @@ export function useModernDashboardData(): ExtendedDashboardData {
           filter: "status = 'pendente'",
           sort: '-data',
         }),
+        lembretesService.listPendentes(),
       ])
 
       if (resContas.status === 'fulfilled') setContas(resContas.value)
@@ -128,6 +134,7 @@ export function useModernDashboardData(): ExtendedDashboardData {
       if (resPrecificacoes.status === 'fulfilled') setPrecificacoes(resPrecificacoes.value)
       if (resMetas.status === 'fulfilled') setMetas(resMetas.value)
       if (resPendentes.status === 'fulfilled') setPendentes(resPendentes.value)
+      if (resLembretes.status === 'fulfilled') setLembretes(resLembretes.value)
     } catch (err) {
       setError(err)
     } finally {
@@ -156,6 +163,7 @@ export function useModernDashboardData(): ExtendedDashboardData {
     precificacoes,
     metas,
     pendentes,
+    lembretes,
     loading,
     error,
     refresh,

@@ -55,6 +55,7 @@ import {
   addDays,
   formatCurrency,
   formatDate,
+  getLocalDateStr,
   getPeriodRange,
   isWithin,
   parseDate,
@@ -109,6 +110,7 @@ export default function Dashboard() {
     precificacoes,
     metas,
     pendentes,
+    lembretes = [],
     loading,
     error,
     refresh,
@@ -156,6 +158,7 @@ export default function Dashboard() {
   useRealtime('vendas', refresh)
   useRealtime('repasses', refresh)
   useRealtime('despesas_ocorrencias', refresh)
+  useRealtime('lembretes_rapidos', refresh)
 
   // Mapas auxiliares
   const contasMap = useMemo(() => new Map(contas.map((c) => [c.id, c])), [contas])
@@ -429,6 +432,28 @@ export default function Dashboard() {
       })
     }
 
+    // 5.1. Lembretes rápidos pendentes para hoje / urgentes
+    const lembretesHoje = lembretes.filter((l) => {
+      const d = l.data_limite ? l.data_limite.slice(0, 10) : ''
+      const hojeStr = getLocalDateStr(hoje)
+      return d === hojeStr || (d < hojeStr && l.repetir_ate_concluir) || l.prioridade === 'urgente'
+    })
+
+    if (lembretesHoje.length > 0) {
+      const temUrgente = lembretesHoje.some((l) => l.prioridade === 'urgente')
+      list.push({
+        id: 'lembretes-pendentes-hoje',
+        titulo: `${lembretesHoje.length} Lembrete(s) Rápido(s) para Hoje`,
+        descricao: temUrgente
+          ? 'Você tem tarefas rápidas marcadas como urgentes que aguardam realização.'
+          : 'Tarefas e compromissos rápidos do dia aguardando conclusão no sub-app / agenda.',
+        prioridade: temUrgente ? 'alta' : 'media',
+        categoria: 'triagem',
+        acaoTexto: 'Ver Lembretes',
+        acaoLink: '/agenda',
+      })
+    }
+
     // 6. Produtos com margem negativa ou crítica na precificação
     const produtosCriticos = precificacoes.filter((p) => {
       if (p.status !== 'aprovada') return false
@@ -459,6 +484,7 @@ export default function Dashboard() {
     repassesPrevistos,
     pendentes,
     precificacoes,
+    lembretes,
   ])
 
   // Indicadores de Tendência & Projeção

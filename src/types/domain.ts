@@ -651,3 +651,28 @@ export interface ResumoCaixaOfertas {
   saldoMes: number
   saldoAcumuladoGeral: number
 }
+
+export type LembreteRapidoPrioridade = 'normal' | 'urgente'
+export type LembreteRapidoStatus = 'pendente' | 'concluido'
+
+export interface LembreteRapido extends RecordModel {
+  titulo: string
+  detalhe?: string
+  contexto_tipo?: ContextoTipo
+  pessoa?: string
+  empresa?: string
+  contexto_nome?: string
+  data_limite: string
+  hora_limite?: string
+  prioridade: LembreteRapidoPrioridade
+  status: LembreteRapidoStatus
+  repetir_ate_concluir?: boolean
+  concluido_em?: string
+  origem?: string
+  usuario?: string
+  expand?: {
+    pessoa?: Pessoa
+    empresa?: Empresa
+    usuario?: UserRecord
+  }
+}

@@ -764,17 +764,16 @@ export default function DespesaRapida() {
                 </p>
               </div>
             </div>
-
-            {/* Atalho para o ERP Completo */}
+            {/* Atalho para o Hub Móvel */}
             <Button
               asChild
               variant="ghost"
               size="sm"
               className="h-8 px-2.5 text-xs font-bold text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-lg shrink-0"
-              title="Abrir ERP no modo completo"
+              title="Voltar ao Hub Móvel"
             >
-              <Link to="/">Voltar ao ERP</Link>
-            </Button>
+              <Link to="/m">Ir ao Hub</Link>
+            </Button>{' '}
           </div>
 
           {/* 1. SELETOR DE CONTEXTO NO TOPO */}
@@ -865,12 +864,19 @@ export default function DespesaRapida() {
                     >
                       <Link to="/pendentes">Ver Triagem</Link>
                     </Button>
+                    <Button
+                      asChild
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-3 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 rounded-lg"
+                    >
+                      <Link to="/m">Voltar ao Hub</Link>
+                    </Button>
                   </div>
                 </div>
               </div>
             </div>
           )}
-
           {/* Mensagem de Erro Online / Validação */}
           {errorMessage && (
             <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-3.5 shadow-sm animate-in fade-in-50">
