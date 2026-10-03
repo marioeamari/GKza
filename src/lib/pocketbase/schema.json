@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-03T05:04:09.414Z",
+  "generatedAt": "2026-10-03T13:07:18.152Z",
   "collections": [
     {
       "name": "users",
@@ -1803,6 +1803,26 @@
           "type": "text",
           "required": false,
           "system": false
+        },
+        {
+          "name": "fornecedor",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "fornecedores"
+        },
+        {
+          "name": "fornecedor_nome",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "metodo_pagamento",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "metodos_pagamento"
         }
       ],
       "indexes": [

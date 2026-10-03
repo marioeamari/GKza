@@ -157,7 +157,8 @@ export default function DespesaRapida() {
             .collection<TelegramRegistroPendente>('telegram_registros_pendentes')
             .getList(1, 100, {
               sort: '-created',
-              fields: 'id,descricao,conta,created,origem_tipo,comprovante_texto,expand',
+              fields:
+                'id,descricao,conta,created,origem_tipo,comprovante_texto,fornecedor,fornecedor_nome,metodo_pagamento,observacoes,expand',
             })
             .catch(() => ({ items: [] })),
         ])
@@ -237,7 +238,7 @@ export default function DespesaRapida() {
         .getList(1, 5, {
           sort: '-created',
           filter: `origem_tipo = 'pwa'`,
-          expand: 'conta',
+          expand: 'conta,fornecedor,metodo_pagamento',
         })
       setUltimosLancamentos(res.items)
     } catch (err) {
@@ -610,6 +611,15 @@ export default function DespesaRapida() {
         if (empresaRef) fd.append('empresa', empresaRef)
         if (pessoaRef) fd.append('pessoa', pessoaRef)
         if (contextoLabel) fd.append('contexto_nome', contextoLabel)
+        if (selectedFornecedorId) {
+          fd.append('fornecedor', selectedFornecedorId)
+        }
+        if (fornecedorNome.trim()) {
+          fd.append('fornecedor_nome', fornecedorNome.trim())
+        }
+        if (metodoId) {
+          fd.append('metodo_pagamento', metodoId)
+        }
         fd.append('observacoes', obsParts.join(' | '))
         fd.append('comprovante_texto', comprovanteTexto)
         fd.append('comprovante_foto', anexoFile)
@@ -627,6 +637,9 @@ export default function DespesaRapida() {
           empresa: empresaRef || null,
           pessoa: pessoaRef || null,
           contexto_nome: contextoLabel,
+          fornecedor: selectedFornecedorId || null,
+          fornecedor_nome: fornecedorNome.trim() || null,
+          metodo_pagamento: metodoId || null,
           observacoes: obsParts.join(' | '),
           comprovante_texto: comprovanteTexto,
         })
@@ -674,13 +687,30 @@ export default function DespesaRapida() {
       }),
     )
 
-    // Tenta extrair o fornecedor das observações ou do comprovante_texto
-    const fornecedorMatch = item.observacoes?.match(/Fornecedor:\s*([^|]+)/)
-    if (fornecedorMatch && fornecedorMatch[1]) {
-      const fNome = fornecedorMatch[1].trim()
-      setFornecedorNome(fNome)
+    // Tenta obter fornecedor estruturado ou extrair das observações
+    if (item.fornecedor && fornecedores.some((f) => f.id === item.fornecedor)) {
+      const fornObj = fornecedores.find((f) => f.id === item.fornecedor)
+      setSelectedFornecedorId(item.fornecedor)
+      setFornecedorNome(
+        fornObj?.nome_fantasia || fornObj?.razao_social || item.fornecedor_nome || '',
+      )
+    } else if (item.fornecedor_nome) {
+      setSelectedFornecedorId(null)
+      setFornecedorNome(item.fornecedor_nome)
     } else {
-      setFornecedorNome('')
+      const fornecedorMatch = item.observacoes?.match(/Fornecedor:\s*([^|]+)/)
+      if (fornecedorMatch && fornecedorMatch[1]) {
+        const fNome = fornecedorMatch[1].trim()
+        setFornecedorNome(fNome)
+        setSelectedFornecedorId(null)
+      } else {
+        setFornecedorNome('')
+        setSelectedFornecedorId(null)
+      }
+    }
+
+    if (item.metodo_pagamento && metodosPagamento.some((m) => m.id === item.metodo_pagamento)) {
+      setMetodoId(item.metodo_pagamento)
     }
 
     if (item.conta && contas.some((c) => c.id === item.conta)) {

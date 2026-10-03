@@ -62,14 +62,16 @@ export const telegramPendentesService = {
     pb.collection<TelegramRegistroPendente>('telegram_registros_pendentes').getFullList({
       sort: '-created',
       filter: "status = 'pendente'",
-      expand: 'conta,categoria,empresa,pessoa,lancamento_gerado,compromisso_gerado',
+      expand:
+        'conta,categoria,empresa,pessoa,fornecedor,metodo_pagamento,lancamento_gerado,compromisso_gerado',
       ...options,
     }),
 
   pagePendentes: (page = 1, perPage = 20, options?: RecordListOptions) =>
     pb.collection<TelegramRegistroPendente>('telegram_registros_pendentes').getList(page, perPage, {
       sort: '-created',
-      expand: 'conta,categoria,empresa,pessoa,lancamento_gerado,compromisso_gerado',
+      expand:
+        'conta,categoria,empresa,pessoa,fornecedor,metodo_pagamento,lancamento_gerado,compromisso_gerado',
       ...options,
     }),
 

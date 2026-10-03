@@ -425,16 +425,22 @@ export interface TelegramRegistroPendente extends RecordModel {
   observacoes?: string
   lancamento_gerado?: string
   compromisso_gerado?: string
-  // Campos Open Finance / Pluggy
+  // Campos Open Finance / Pluggy / PWA
   external_id?: string
   origem_tipo?: 'telegram' | 'open_finance' | 'pwa' | string
   banco_nome?: string
   pluggy_item_id?: string
+  // Fornecedor e Método estruturados
+  fornecedor?: string
+  fornecedor_nome?: string
+  metodo_pagamento?: string
   expand?: {
     conta?: Conta
     categoria?: Categoria
     empresa?: Empresa
     pessoa?: Pessoa
+    fornecedor?: Fornecedor
+    metodo_pagamento?: MetodoPagamento
     lancamento_gerado?: Lancamento
     compromisso_gerado?: DespesaCompromisso
   }
