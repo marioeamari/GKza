@@ -241,10 +241,21 @@ export function TriagemPendenteDialog({
     const defaultDizimoTipo = tiposDizimo[0]?.id || ''
     const defaultTag = tags[0]?.id || ''
 
+    // Resolução de pré-preenchimento inteligente de fornecedor e método de pagamento
+    const fornecedorInit =
+      item.fornecedor ||
+      (item.fornecedor_nome && item.fornecedor_nome.trim() ? item.fornecedor_nome.trim() : descInit)
+
+    const metodoPagamentoInit =
+      item.metodo_pagamento &&
+      (item.expand?.metodo_pagamento?.id || metodosPagamento.some((m) => m.id === item.metodo_pagamento))
+        ? item.metodo_pagamento
+        : defaultMetodo
+
     // Inicializa formulário de despesa (compromisso recorrente) com 4 grupos alinhados
     setDespForm({
       descricao: descInit,
-      fornecedor: descInit,
+      fornecedor: fornecedorInit,
       categoria: catInit,
       tag: defaultTag,
       secao: 'contas_mensais_pix_boleto',
@@ -263,7 +274,7 @@ export function TriagemPendenteDialog({
       valor_estimado: valorInit,
 
       conta_padrao: contaInit,
-      metodo_pagamento: defaultMetodo,
+      metodo_pagamento: metodoPagamentoInit,
       pessoa_responsavel: '',
       link_pagamento: '',
       dizimo: false,
