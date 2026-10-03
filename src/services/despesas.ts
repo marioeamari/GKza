@@ -189,7 +189,17 @@ export const despesasService = {
       ? pb.collection<DespesaCompromisso>('despesas_compromisso').update(id, sanitizedData, options)
       : pb.collection<DespesaCompromisso>('despesas_compromisso').create(sanitizedData, options)
   },
-  deleteCompromisso: (id: string) => pb.collection('despesas_compromisso').delete(id),
+  deleteCompromisso: async (id: string) => {
+    try {
+      return await pb.collection('despesas_compromisso').delete(id)
+    } catch (err) {
+      if (err instanceof ClientResponseError && err.status === 404) {
+        // Idempotência: o registro já não existe mais no backend (excluído anteriormente ou por cascata)
+        return true
+      }
+      throw err
+    }
+  },
 
   /**
    * Altera o status ativo de um compromisso (desativar ou reativar).
@@ -220,7 +230,15 @@ export const despesasService = {
         // Exclusão sequencial das previstas (sem tocar em pagas)
         for (const oc of ocorrenciasPrevistas) {
           if (oc.status === 'prevista' && !oc.data_pagamento) {
-            await pb.collection('despesas_ocorrencias').delete(oc.id)
+            try {
+              await pb.collection('despesas_ocorrencias').delete(oc.id)
+            } catch (delErr) {
+              if (delErr instanceof ClientResponseError && delErr.status === 404) {
+                // Já excluído, ignora
+              } else {
+                throw delErr
+              }
+            }
             ocorrenciasExcluidas++
           }
         }
@@ -257,13 +275,30 @@ export const despesasService = {
         try {
           await pb.collection('lancamentos').delete(oc.lancamento)
         } catch (e) {
-          console.warn('Lançamento vinculado já havia sido removido ou não encontrado:', e)
+          if (e instanceof ClientResponseError && e.status === 404) {
+            // Lançamento já não existe
+          } else {
+            console.warn('Lançamento vinculado já havia sido removido ou não encontrado:', e)
+          }
         }
       }
     } catch (e) {
+      if (e instanceof ClientResponseError && e.status === 404) {
+        // A própria ocorrência não existe mais
+        return true
+      }
       console.warn('Ocorrência não encontrada antes de excluir:', e)
     }
-    return pb.collection('despesas_ocorrencias').delete(id)
+
+    try {
+      return await pb.collection('despesas_ocorrencias').delete(id)
+    } catch (err) {
+      if (err instanceof ClientResponseError && err.status === 404) {
+        // Idempotência: ocorrência já excluída
+        return true
+      }
+      throw err
+    }
   },
 
   /**

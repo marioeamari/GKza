@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import pb from '@/lib/pocketbase/client'
+import { ClientResponseError } from 'pocketbase'
 import { despesasService, contaAceitaCredito, isMetodoCredito } from './despesas'
 import type { Conta, DespesaCompromisso, DespesaOcorrencia, MetodoPagamento } from '@/types/domain'
 
@@ -267,6 +268,99 @@ describe('despesasService - Agrupador de Despesas para Visualização (Nova Arqu
     expect(resultado.semConta).toHaveLength(2)
     expect(resultado.semConta.map((o) => o.id)).toContain('oc_orfa')
     expect(resultado.semConta.map((o) => o.id)).toContain('oc_inativa')
+  })
+
+  describe('deleteCompromisso e deleteOcorrencia - tratamento idempotente de 404', () => {
+    beforeEach(() => {
+      vi.clearAllMocks()
+    })
+
+    it('deleteCompromisso retorna true quando registro existe e é excluído com sucesso', async () => {
+      const mockDelete = vi.fn().mockResolvedValue(true)
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'despesas_compromisso') {
+          return { delete: mockDelete } as any
+        }
+        return {} as any
+      })
+
+      const res = await despesasService.deleteCompromisso('comp_existente')
+      expect(mockDelete).toHaveBeenCalledWith('comp_existente')
+      expect(res).toBe(true)
+    })
+
+    it('deleteCompromisso trata ClientResponseError com status 404 como sucesso idempotente sem lançar erro', async () => {
+      const error404 = new ClientResponseError({
+        status: 404,
+        response: { message: "The requested resource wasn't found", code: 404, data: {} },
+      })
+      const mockDelete = vi.fn().mockRejectedValue(error404)
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'despesas_compromisso') {
+          return { delete: mockDelete } as any
+        }
+        return {} as any
+      })
+
+      const res = await despesasService.deleteCompromisso('comp_ja_deletado')
+      expect(mockDelete).toHaveBeenCalledWith('comp_ja_deletado')
+      expect(res).toBe(true)
+    })
+
+    it('deleteCompromisso propaga outros erros como 400, 429 ou 500', async () => {
+      const error429 = new ClientResponseError({
+        status: 429,
+        response: { message: 'Too Many Requests', code: 429, data: {} },
+      })
+      const mockDelete = vi.fn().mockRejectedValue(error429)
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'despesas_compromisso') {
+          return { delete: mockDelete } as any
+        }
+        return {} as any
+      })
+
+      await expect(despesasService.deleteCompromisso('comp_123')).rejects.toThrow()
+    })
+
+    it('deleteOcorrencia trata 404 na ocorrência e no lançamento de forma idempotente', async () => {
+      const error404 = new ClientResponseError({
+        status: 404,
+        response: { message: "The requested resource wasn't found", code: 404, data: {} },
+      })
+      const mockGetOne = vi.fn().mockRejectedValue(error404)
+      const mockDelete = vi.fn().mockRejectedValue(error404)
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'despesas_ocorrencias') {
+          return { getOne: mockGetOne, delete: mockDelete } as any
+        }
+        return {} as any
+      })
+
+      const res = await despesasService.deleteOcorrencia('oc_ja_deletada')
+      expect(res).toBe(true)
+    })
+
+    it('deleteOcorrencia quando delete final retorna 404 também é idempotente', async () => {
+      const error404 = new ClientResponseError({
+        status: 404,
+        response: { message: "The requested resource wasn't found", code: 404, data: {} },
+      })
+      const mockGetOne = vi.fn().mockResolvedValue({ id: 'oc_existente', lancamento: null })
+      const mockDelete = vi.fn().mockRejectedValue(error404)
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'despesas_ocorrencias') {
+          return { getOne: mockGetOne, delete: mockDelete } as any
+        }
+        return {} as any
+      })
+
+      const res = await despesasService.deleteOcorrencia('oc_existente')
+      expect(mockDelete).toHaveBeenCalledWith('oc_existente')
+      expect(res).toBe(true)
+    })
   })
 })
 

@@ -1239,8 +1239,29 @@ export default function Despesas() {
 
   const handleDeleteCompromisso = async () => {
     if (!deletandoCompromisso) return
+    const compId = deletandoCompromisso.id
     try {
-      await despesasService.deleteCompromisso(deletandoCompromisso.id)
+      await despesasService.deleteCompromisso(compId)
+      // Remoção otimista imediata no estado local (compromisso e ocorrências vinculadas)
+      setCompromissos((prev) => prev.filter((c) => c.id !== compId))
+      setOcorrencias((prev) =>
+        prev.filter((oc) => {
+          const cId =
+            typeof oc.compromisso === 'object' && oc.compromisso !== null
+              ? (oc.compromisso as any).id
+              : oc.compromisso
+          return cId !== compId
+        }),
+      )
+      setOcorrenciasAtrasadas((prev) =>
+        prev.filter((oc) => {
+          const cId =
+            typeof oc.compromisso === 'object' && oc.compromisso !== null
+              ? (oc.compromisso as any).id
+              : oc.compromisso
+          return cId !== compId
+        }),
+      )
       toast({
         title: 'Compromisso excluído',
         description: 'Compromisso e suas ocorrências vinculadas foram removidos.',
@@ -1259,8 +1280,12 @@ export default function Despesas() {
 
   const handleDeleteOcorrencia = async () => {
     if (!deletandoOcorrencia) return
+    const ocId = deletandoOcorrencia.id
     try {
-      await despesasService.deleteOcorrencia(deletandoOcorrencia.id)
+      await despesasService.deleteOcorrencia(ocId)
+      // Remoção otimista imediata no estado local
+      setOcorrencias((prev) => prev.filter((oc) => oc.id !== ocId))
+      setOcorrenciasAtrasadas((prev) => prev.filter((oc) => oc.id !== ocId))
       toast({
         title: 'Ocorrência excluída',
         description: 'Apenas a ocorrência selecionada foi removida com sucesso.',
