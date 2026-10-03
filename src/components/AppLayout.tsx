@@ -64,6 +64,8 @@ import { cn } from '@/lib/utils'
 import { initials, roleLabel } from '@/lib/format'
 import pb from '@/lib/pocketbase/client'
 import { telegramPendentesService } from '@/services/telegramPendentes'
+import { DespesaRapidaModal } from '@/components/DespesaRapidaModal'
+import { MobileDesktopNotice } from '@/components/MobileDesktopNotice'
 
 const SIDEBAR_COLLAPSED_KEY = 'erpgkza_sidebar_collapsed'
 
@@ -323,11 +325,14 @@ export function AppLayout() {
           {/* SELETOR DE CONTEXTO FIXO */}
           <div
             className={cn(
-              'shrink-0 border-b border-border/40 py-2.5 transition-all',
+              'shrink-0 border-b border-border/40 py-2.5 transition-all space-y-2',
               isCollapsed ? 'px-2' : 'px-3',
             )}
           >
             <ContextSelector compact={isCollapsed} />
+            <div className={cn('flex', isCollapsed ? 'justify-center' : 'w-full')}>
+              <DespesaRapidaModal triggerVariant="sidebar" collapsed={isCollapsed} />
+            </div>
           </div>
 
           {/* ÁREA DE NAVEGAÇÃO COM SCROLL VERTICAL */}
@@ -664,11 +669,14 @@ export function AppLayout() {
           </div>
         </aside>
 
+        {/* AVISO MÓVEL DISCRETO EM ROTAS DESKTOP */}
+        <MobileDesktopNotice />
+
         {/* HEADER MOBILE */}
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border/80 bg-background/95 px-4 backdrop-blur lg:hidden">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <Brand />
-            <ContextSelector className="w-auto min-w-[120px] max-w-[170px]" compact />
+            <ContextSelector className="w-auto min-w-[110px] max-w-[150px]" compact />
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -779,6 +787,7 @@ export function AppLayout() {
                   ['/pessoas', 'Pessoas (CPF)', CircleUserRound],
                   ['/cadastros', 'Central de Cadastros', Building2],
                   ['/configuracoes', 'Configurações', SlidersHorizontal],
+                  ['/despesa-rapida', '⚡ Despesa Rápida (Sub-app Móvel)', Sparkles],
                 ].map(([to, label, Icon]) => (
                   <Button
                     key={to as string}

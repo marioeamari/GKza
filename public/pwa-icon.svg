@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="gkza-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF6B4A" />
+      <stop offset="100%" stop-color="#DF5830" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.25" />
+    </filter>
+  </defs>
+  <!-- Background com cantos arredondados padrão ícone PWA / iOS -->
+  <rect width="512" height="512" rx="112" fill="url(#gkza-grad)" />
+  
+  <!-- Círculo sutil central -->
+  <circle cx="256" cy="256" r="180" fill="#FFFFFF" fill-opacity="0.08" />
+  
+  <!-- Símbolo: Raio de velocidade + Cartão/Cifrão / Recibo dinâmico -->
+  <g filter="url(#shadow)" fill="#FFFFFF">
+    <!-- Prancheta / Recibo simplificado com recorte moderno -->
+    <path d="M168 128C150.327 128 136 142.327 136 160V352C136 369.673 150.327 384 168 384H344C361.673 384 376 369.673 376 352V160C376 142.327 361.673 128 344 128H168ZM176 176H336C340.418 176 344 179.582 344 184C344 188.418 340.418 192 336 192H176C171.582 192 168 188.418 168 184C168 179.582 171.582 176 176 176ZM176 224H280C284.418 224 288 227.582 288 232C288 236.418 284.418 240 280 240H176C171.582 240 168 236.418 168 232C168 227.582 171.582 224 176 224ZM176 272H240C244.418 272 248 275.582 248 280C248 284.418 244.418 288 240 288H176C171.582 288 168 284.418 168 280C168 275.582 171.582 272 176 272Z" fill-opacity="0.95" />
+    
+    <!-- Raio de velocidade "Rápida" sobreposto em destaque -->
+    <path d="M328 208L264 320H320L288 416L392 288H336L368 208H328Z" fill="#FFE27A" stroke="#DF5830" stroke-width="8" stroke-linejoin="round" />
+  </g>
+</svg>

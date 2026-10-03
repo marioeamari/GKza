@@ -821,9 +821,11 @@ export function TriagemPendenteDialog({
               className="border-primary/30 bg-primary/10 text-primary font-bold text-xs"
             >
               <Sparkles className="mr-1 h-3 w-3" />
-              {item?.origem_tipo === 'open_finance' || item?.external_id?.startsWith('pluggy_')
-                ? `Triagem Open Finance (${item?.banco_nome || 'Banco'})`
-                : 'Triagem de Comprovante Telegram'}
+              {item?.origem_tipo === 'pwa'
+                ? 'Despesa Rápida (Móvel / PWA)'
+                : item?.origem_tipo === 'open_finance' || item?.external_id?.startsWith('pluggy_')
+                  ? `Triagem Open Finance (${item?.banco_nome || 'Banco'})`
+                  : 'Triagem de Comprovante Telegram'}
             </Badge>
             {item?.contexto_nome && (
               <Badge variant="secondary" className="text-xs">
@@ -874,9 +876,11 @@ export function TriagemPendenteDialog({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-1 font-bold text-foreground">
               <FileText className="h-3.5 w-3.5 text-primary" />
-              {item?.origem_tipo === 'open_finance' || item?.external_id?.startsWith('pluggy_')
-                ? 'Dados Importados do Open Finance'
-                : 'Dados Coletados pelo Telegram'}
+              {item?.origem_tipo === 'pwa'
+                ? 'Dados Capturados no Celular (PWA)'
+                : item?.origem_tipo === 'open_finance' || item?.external_id?.startsWith('pluggy_')
+                  ? 'Dados Importados do Open Finance'
+                  : 'Dados Coletados pelo Telegram'}
             </span>
             <span className="text-[11px] text-muted-foreground">
               Recebido:{' '}
@@ -903,9 +907,11 @@ export function TriagemPendenteDialog({
             <div>
               <span className="text-muted-foreground">Origem:</span>{' '}
               <strong className="text-foreground">
-                {item?.origem_tipo === 'open_finance' || item?.external_id?.startsWith('pluggy_')
-                  ? `Open Finance (${item?.banco_nome || 'Banco'})`
-                  : item?.telegram_origem || 'Telegram'}
+                {item?.origem_tipo === 'pwa'
+                  ? 'Despesa Rápida (PWA)'
+                  : item?.origem_tipo === 'open_finance' || item?.external_id?.startsWith('pluggy_')
+                    ? `Open Finance (${item?.banco_nome || 'Banco'})`
+                    : item?.telegram_origem || 'Telegram'}
               </strong>
             </div>
           </div>

@@ -79,7 +79,9 @@ export default function Pendentes() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [filtroTipo, setFiltroTipo] = useState<'all' | 'receita' | 'despesa'>('all')
-  const [filtroOrigem, setFiltroOrigem] = useState<'all' | 'telegram' | 'open_finance'>('all')
+  const [filtroOrigem, setFiltroOrigem] = useState<'all' | 'telegram' | 'open_finance' | 'pwa'>(
+    'all',
+  )
   const [syncingPluggy, setSyncingPluggy] = useState(false)
 
   // Dados auxiliares para o formulário de triagem
@@ -218,8 +220,10 @@ export default function Pendentes() {
     if (filtroTipo !== 'all' && item.tipo !== filtroTipo) return false
     if (filtroOrigem !== 'all') {
       const isOF = item.origem_tipo === 'open_finance' || item.external_id?.startsWith('pluggy_')
+      const isPWA = item.origem_tipo === 'pwa'
       if (filtroOrigem === 'open_finance' && !isOF) return false
-      if (filtroOrigem === 'telegram' && isOF) return false
+      if (filtroOrigem === 'pwa' && !isPWA) return false
+      if (filtroOrigem === 'telegram' && (isOF || isPWA)) return false
     }
     if (!searchTerm.trim()) return true
     const term = searchTerm.toLowerCase()
@@ -313,7 +317,7 @@ export default function Pendentes() {
         <div className="flex items-center gap-2">
           <Select
             value={filtroOrigem}
-            onValueChange={(v) => setFiltroOrigem(v as 'all' | 'telegram' | 'open_finance')}
+            onValueChange={(v) => setFiltroOrigem(v as 'all' | 'telegram' | 'open_finance' | 'pwa')}
           >
             <SelectTrigger className="w-[170px] bg-white">
               <SelectValue placeholder="Origem" />
@@ -322,6 +326,7 @@ export default function Pendentes() {
               <SelectItem value="all">Todas as origens</SelectItem>
               <SelectItem value="open_finance">🏦 Open Finance</SelectItem>
               <SelectItem value="telegram">💬 Telegram</SelectItem>
+              <SelectItem value="pwa">⚡ PWA / Móvel</SelectItem>
             </SelectContent>
           </Select>
 
@@ -423,7 +428,15 @@ export default function Pendentes() {
                       </span>
 
                       {/* Badge de Origem */}
-                      {isOpenFinance ? (
+                      {item.origem_tipo === 'pwa' ? (
+                        <Badge
+                          variant="outline"
+                          className="border-[#DF5830]/40 bg-[#DF5830]/10 text-[#DF5830] font-bold text-xs"
+                        >
+                          <Sparkles className="mr-1 h-3 w-3" />
+                          PWA / Móvel
+                        </Badge>
+                      ) : isOpenFinance ? (
                         <Badge
                           variant="outline"
                           className="border-primary/40 bg-primary/10 text-primary font-bold text-xs"

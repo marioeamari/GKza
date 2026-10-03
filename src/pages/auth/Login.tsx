@@ -53,8 +53,14 @@ export default function Login() {
       })
 
       await Promise.race([loginPromise, timeoutPromise])
+      const fromState = (location.state as { from?: { pathname?: string; search?: string } } | null)
+        ?.from
+      const searchParams = new URLSearchParams(location.search)
+      const redirectQuery = searchParams.get('redirect')
       const destination =
-        (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/'
+        redirectQuery ||
+        (fromState ? `${fromState.pathname || ''}${fromState.search || ''}` : null) ||
+        '/'
       navigate(destination, { replace: true })
     } catch (nextError) {
       setError(

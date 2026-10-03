@@ -427,7 +427,7 @@ export interface TelegramRegistroPendente extends RecordModel {
   compromisso_gerado?: string
   // Campos Open Finance / Pluggy
   external_id?: string
-  origem_tipo?: 'telegram' | 'open_finance' | string
+  origem_tipo?: 'telegram' | 'open_finance' | 'pwa' | string
   banco_nome?: string
   pluggy_item_id?: string
   expand?: {

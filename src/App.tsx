@@ -37,6 +37,7 @@ import Login from '@/pages/auth/Login'
 import ResetPassword from '@/pages/auth/ResetPassword'
 import Signup from '@/pages/auth/Signup'
 import TokenAction from '@/pages/auth/TokenAction'
+import DespesaRapida from '@/pages/DespesaRapida'
 
 // Redirecionador auxiliar caso algum fluxo do Google bata direto no frontend
 function GoogleCallbackRedirect() {
@@ -59,6 +60,10 @@ export default function App() {
       <Route path="/backend/v1/google/callback" element={<GoogleCallbackRedirect />} />
       <Route path="/google/callback" element={<GoogleCallbackRedirect />} />
       <Route path="/auth/google/callback" element={<GoogleCallbackRedirect />} />
+      {/* Rota exclusiva do Sub-app Móvel: PWA Standalone / Despesa Rápida (com login compartilhado) */}
+      <Route element={<ProtectedRoute />}>
+        <Route path="/despesa-rapida" element={<DespesaRapida />} />
+      </Route>
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route index element={<Dashboard />} />
