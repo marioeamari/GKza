@@ -200,9 +200,16 @@ export function TriagemPendenteDialog({
       (activeContext.pessoaIds.length > 0 ? activeContext.pessoaIds[0] : pessoas[0]?.id || '')
     const preferCnpj = item.empresa ? true : activeContext.hasEmpresas && !activeContext.hasPessoas
 
+    // Resolução de pré-preenchimento inteligente de fornecedor e favorecido
+    const fornecedorExpandNome =
+      item.expand?.fornecedor?.nome_fantasia || item.expand?.fornecedor?.razao_social
+    const fornecedorInit =
+      (item.fornecedor && (fornecedorExpandNome || item.fornecedor_nome || item.fornecedor)) ||
+      (item.fornecedor_nome && item.fornecedor_nome.trim() ? item.fornecedor_nome.trim() : descInit)
+
     // Inicializa formulário de lançamento
     setLancForm({
-      descricao: descInit,
+      descricao: descInit || fornecedorExpandNome || item.fornecedor_nome || '',
       valor: valorInit,
       tipo: item.tipo || 'despesa',
       data: dataInit,
@@ -241,14 +248,10 @@ export function TriagemPendenteDialog({
     const defaultDizimoTipo = tiposDizimo[0]?.id || ''
     const defaultTag = tags[0]?.id || ''
 
-    // Resolução de pré-preenchimento inteligente de fornecedor e método de pagamento
-    const fornecedorInit =
-      item.fornecedor ||
-      (item.fornecedor_nome && item.fornecedor_nome.trim() ? item.fornecedor_nome.trim() : descInit)
-
     const metodoPagamentoInit =
       item.metodo_pagamento &&
-      (item.expand?.metodo_pagamento?.id || metodosPagamento.some((m) => m.id === item.metodo_pagamento))
+      (item.expand?.metodo_pagamento?.id ||
+        metodosPagamento.some((m) => m.id === item.metodo_pagamento))
         ? item.metodo_pagamento
         : defaultMetodo
 
