@@ -202,6 +202,50 @@ export const despesasService = {
   },
   deleteCompromisso: (id: string) => pb.collection('despesas_compromisso').delete(id),
 
+  /**
+   * Altera o status ativo de um compromisso (desativar ou reativar).
+   * Opcionalmente, ao desativar, exclui em lote todas as ocorrências com status 'prevista' (não pagas),
+   * preservando rigorosamente as ocorrências já pagas e lançamentos associados.
+   */
+  setCompromissoAtivo: async (params: {
+    compromissoId: string
+    ativo: boolean
+    excluirPrevistas?: boolean
+  }) => {
+    const { compromissoId, ativo, excluirPrevistas = false } = params
+
+    // 1. Atualiza o status ativo do compromisso
+    const compromissoAtualizado = await pb
+      .collection<DespesaCompromisso>('despesas_compromisso')
+      .update(compromissoId, { ativo })
+
+    let ocorrenciasExcluidas = 0
+
+    // 2. Se for desativação e o usuário optou por excluir ocorrências previstas futuras
+    if (!ativo && excluirPrevistas) {
+      try {
+        const ocorrenciasPrevistas = await listAll<DespesaOcorrencia>('despesas_ocorrencias', {
+          filter: `compromisso = '${compromissoId}' && status = 'prevista'`,
+        })
+
+        // Exclusão sequencial das previstas (sem tocar em pagas)
+        for (const oc of ocorrenciasPrevistas) {
+          if (oc.status === 'prevista' && !oc.data_pagamento) {
+            await pb.collection('despesas_ocorrencias').delete(oc.id)
+            ocorrenciasExcluidas++
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `[setCompromissoAtivo] Falha ao excluir ocorrências previstas do compromisso ${compromissoId}:`,
+          err,
+        )
+      }
+    }
+
+    return { compromisso: compromissoAtualizado, ocorrenciasExcluidas }
+  },
+
   // Ocorrências
   listOcorrencias: (options?: RecordListOptions) =>
     listAll<DespesaOcorrencia>('despesas_ocorrencias', {
@@ -1305,16 +1349,39 @@ export const despesasService = {
     competencias: string[]
     batchSize?: number
     batchDelayMs?: number
+    incluirMesesFuturos?: boolean
   }) => {
-    const { compromissos, competencias, batchSize = 4, batchDelayMs = 150 } = params
+    const {
+      compromissos,
+      competencias,
+      batchSize = 4,
+      batchDelayMs = 150,
+      incluirMesesFuturos = true,
+    } = params
     const ativos = compromissos.filter((c) => c.ativo !== false)
-    if (ativos.length === 0 || competencias.length === 0) return
+    if (ativos.length === 0) return
 
-    // 1. Consulta em lote (bulk) eliminando a causa raiz N+1
+    // Monta a lista completa de competências a verificar/preencher:
+    // competências requisitadas + até 3 meses à frente para blindagem contínua dos compromissos recorrentes
+    const todasCompetenciasSet = new Set<string>(competencias)
+    if (incluirMesesFuturos) {
+      const baseComp = competencias[0] || getLocalDateStr().slice(0, 7)
+      const [bYStr, bMStr] = baseComp.split('-')
+      const bY = parseInt(bYStr, 10)
+      const bM = parseInt(bMStr, 10) - 1
+      for (let offset = 0; offset <= 3; offset++) {
+        const d = new Date(Date.UTC(bY, bM + offset, 1))
+        const compFutura = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+        todasCompetenciasSet.add(compFutura)
+      }
+    }
+    const todasCompetencias = Array.from(todasCompetenciasSet).sort()
+
+    // 1. Consulta única em lote (bulk) eliminando a causa raiz N+1 e evitando 429
     const filterCompetencias =
-      competencias.length === 1
-        ? `competencia = '${competencias[0]}'`
-        : `(${competencias.map((comp) => `competencia = '${comp}'`).join(' || ')})`
+      todasCompetencias.length === 1
+        ? `competencia = '${todasCompetencias[0]}'`
+        : `(${todasCompetencias.map((comp) => `competencia = '${comp}'`).join(' || ')})`
 
     let ocorrenciasExistentes: DespesaOcorrencia[] = []
     try {
@@ -1335,7 +1402,7 @@ export const despesasService = {
         chunk.map((comp) =>
           despesasService.gerarOcorrenciasParaCompromisso(
             comp,
-            competencias,
+            todasCompetencias,
             ocorrenciasExistentes,
           ),
         ),

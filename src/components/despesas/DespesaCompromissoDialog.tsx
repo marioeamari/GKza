@@ -278,7 +278,7 @@ export function DespesaCompromissoDialog({
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || '',
           direcionamento: compromisso.direcionamento || '',
-          ativo: true,
+          ativo: isDuplicating ? true : (compromisso.ativo ?? true),
           observacoes: compromisso.observacoes || '',
 
           precisa_revisao: isDuplicating ? false : compromisso.precisa_revisao || false,
