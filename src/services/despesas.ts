@@ -90,18 +90,7 @@ export const isMetodoCredito = (
 }
 
 const listAll = async <T>(collection: string, options?: RecordListOptions): Promise<T[]> => {
-  try {
-    return await pb.collection<T>(collection).getFullList<T>({ batch: 200, ...options })
-  } catch (err) {
-    if (err instanceof ClientResponseError && err.status === 429) {
-      console.warn(
-        `[despesasService.listAll] HTTP 429 detectado em "${collection}". Retornando fallback seguro [].`,
-        err,
-      )
-      return []
-    }
-    throw err
-  }
+  return pb.collection<T>(collection).getFullList<T>({ batch: 200, ...options })
 }
 
 export const despesasService = {

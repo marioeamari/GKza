@@ -458,7 +458,18 @@ export default function Despesas() {
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [isOverloaded, setIsOverloaded] = useState(false)
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
+  const [initialLoadError, setInitialLoadError] = useState<string | null>(null)
+  const [bannerError, setBannerError] = useState<{ message: string; is429: boolean } | null>(null)
+  const [retryBackoffSec, setRetryBackoffSec] = useState<number>(0)
+  const [isRetrying, setIsRetrying] = useState(false)
+
+  // Controle de concorrência e debounce
+  const retryCountRef = useRef<number>(0)
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isExecutingRef = useRef<boolean>(false)
+  const pendingReloadRef = useRef<boolean>(false)
+  const realtimeDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Cache de módulo/sessão para as tabelas de apoio fixas
   const apoioCacheRef = useRef<{
@@ -573,7 +584,7 @@ export default function Despesas() {
   // Ocorrências atrasadas (status 'prevista' com vencimento anterior ao mês atual)
   const [ocorrenciasAtrasadas, setOcorrenciasAtrasadas] = useState<DespesaOcorrencia[]>([])
 
-  const loadData = useCallback(async () => {
+  const executeLoadData = useCallback(async () => {
     try {
       // 1. Carrega dados de apoio essenciais (contas, categorias, cadastros) com cache de módulo/sessão
       if (!apoioCacheRef.current) {
@@ -635,7 +646,7 @@ export default function Despesas() {
         }),
       ])
 
-      // Pequeno atraso para escalonar antes das 3 consultas pesadas
+      // Pequeno atraso para escalonar antes das consultas secundárias
       await new Promise((r) => setTimeout(r, 80))
 
       // 3. Carrega consultas secundárias (atrasadas) escalonadas para evitar rajada
@@ -701,41 +712,132 @@ export default function Despesas() {
       const comps = allComps.filter(isCompromissoInContext)
       const ocs = allOcs.filter(isOcorrenciaInContext)
       const ocsAtrasadas = allOcsAtrasadas.filter(isOcorrenciaInContext)
+
+      // Carga concluída com sucesso: atualiza dados e limpa estados de erro
       setCompromissos(comps)
       setOcorrencias(ocs)
       setOcorrenciasAtrasadas(ocsAtrasadas)
-      setIsOverloaded(false)
+      setHasLoadedOnce(true)
+      setInitialLoadError(null)
+      setBannerError(null)
+      retryCountRef.current = 0
+      setRetryBackoffSec(0)
     } catch (err: any) {
       const is429 =
         (err instanceof ClientResponseError && err.status === 429) ||
         err?.status === 429 ||
-        String(err?.message || '').includes('429')
+        String(err?.message || '').includes('429') ||
+        String(err?.message || '')
+          .toLowerCase()
+          .includes('too many requests')
 
-      if (is429) {
-        setIsOverloaded(true)
+      const errorMsg = is429
+        ? 'O servidor atingiu o limite temporário de requisições.'
+        : apiMessage(err)
+
+      // Se a página nunca carregou com sucesso, registra erro para tela inicial cheia
+      // Se já possui dados anteriores em tela, NUNCA limpa o estado: apenas exibe o banner de aviso
+      if (!hasLoadedOnce) {
+        setInitialLoadError(errorMsg)
       } else {
-        toast({
-          variant: 'destructive',
-          title: 'Erro ao carregar despesas',
-          description: apiMessage(err),
-        })
+        setBannerError({ message: errorMsg, is429 })
       }
     } finally {
       setLoading(false)
       setRefreshing(false)
+      setIsRetrying(false)
     }
-  }, [activeContext, currentCompetencia, filtroDataCompetencia, toast])
+  }, [activeContext, currentCompetencia, filtroDataCompetencia, hasLoadedOnce])
+
+  /**
+   * Mutex e Fila de Coalescência:
+   * Se uma loadData() já estiver em execução, não inicia outra concorrentemente.
+   * Marca pendingReloadRef = true para executar UMA única recarga imediatamente após o término da atual.
+   */
+  const loadData = useCallback(async (): Promise<void> => {
+    if (isExecutingRef.current) {
+      pendingReloadRef.current = true
+      return
+    }
+
+    isExecutingRef.current = true
+    try {
+      await executeLoadData()
+    } finally {
+      isExecutingRef.current = false
+      if (pendingReloadRef.current) {
+        pendingReloadRef.current = false
+        // Dispara a próxima execução pendente coalescida
+        loadData()
+      }
+    }
+  }, [executeLoadData])
+
+  /**
+   * Debounce para eventos Realtime:
+   * Agrega múltiplos eventos recebidos em rajadas rápidas (ex.: cascata de exclusão de compromisso/ocorrências)
+   * em uma janela de 1000ms, executando uma única recarga coalescida ao final.
+   */
+  const triggerDebouncedRealtimeReload = useCallback(() => {
+    if (realtimeDebounceTimerRef.current) {
+      clearTimeout(realtimeDebounceTimerRef.current)
+    }
+    realtimeDebounceTimerRef.current = setTimeout(() => {
+      loadData()
+    }, 1000)
+  }, [loadData])
+
+  /**
+   * Tentativa manual com Backoff Exponencial simples (2s, 4s, 8s, max 16s)
+   */
+  const handleRetryWithBackoff = useCallback(() => {
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current)
+    }
+
+    const currentAttempt = retryCountRef.current
+    const delaySec = Math.min(2 ** (currentAttempt + 1), 16) // 2s, 4s, 8s, 16s
+    retryCountRef.current = currentAttempt + 1
+    setRetryBackoffSec(delaySec)
+    setIsRetrying(true)
+
+    let remaining = delaySec
+    const countdownInterval = setInterval(() => {
+      remaining -= 1
+      if (remaining <= 0) {
+        clearInterval(countdownInterval)
+        setRetryBackoffSec(0)
+        loadData()
+      } else {
+        setRetryBackoffSec(remaining)
+      }
+    }, 1000)
+
+    retryTimerRef.current = countdownInterval as unknown as ReturnType<typeof setTimeout>
+  }, [loadData])
+
+  // Limpeza de timers no desmonte do componente
+  useEffect(() => {
+    return () => {
+      if (realtimeDebounceTimerRef.current) {
+        clearTimeout(realtimeDebounceTimerRef.current)
+      }
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     loadData()
   }, [loadData])
 
-  // Subscrições em tempo real para refletir edições de compromissos e ocorrências instantaneamente
+  // Subscrições em tempo real com debounce para evitar tempestade de requisições 429
   useRealtime('despesas_compromisso', () => {
-    loadData()
+    triggerDebouncedRealtimeReload()
   })
   useRealtime('despesas_ocorrencias', () => {
-    loadData()
+    triggerDebouncedRealtimeReload()
   })
 
   // Navegação de mês
@@ -1232,38 +1334,83 @@ export default function Despesas() {
     }
   }
 
-  if (isOverloaded) {
+  // Se a carga inicial falhou (primeira visita/recarga de página inteira sem dados prévios no estado)
+  if (!hasLoadedOnce && initialLoadError && !loading) {
     return (
-      <div className="flex min-h-[420px] flex-col items-center justify-center rounded-2xl border border-dashed border-amber-300 bg-amber-50/50 p-8 text-center shadow-soft">
-        <span className="mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-amber-100 text-amber-700">
+      <div className="flex min-h-[440px] flex-col items-center justify-center rounded-2xl border border-dashed border-primary/40 bg-[#FAF9F6] p-8 text-center shadow-soft">
+        <span className="mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-primary">
           <ServerCrash className="h-7 w-7" />
         </span>
-        <h3 className="text-lg font-bold text-foreground">
-          Sobrecarga temporária, tente novamente
-        </h3>
-        <p className="mt-2 max-w-md text-sm text-muted-foreground">
-          O servidor está processando muitas solicitações simultâneas no momento. Aguarde alguns
-          instantes e tente recarregar os dados.
+        <h3 className="text-lg font-bold text-foreground">Não foi possível carregar as despesas</h3>
+        <p className="mt-2 max-w-md text-sm text-muted-foreground">{initialLoadError}</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Seus dados estão protegidos no banco de dados e não foram afetados.
         </p>
         <div className="mt-6 flex items-center gap-3">
           <Button
             onClick={() => {
               setLoading(true)
-              loadData()
+              handleRetryWithBackoff()
             }}
-            className="gap-2"
+            disabled={isRetrying}
+            className="gap-2 bg-primary hover:bg-primary/90 text-white"
           >
-            <RotateCcw className="h-4 w-4" /> Recarregar agora
+            <RotateCcw className={`h-4 w-4 ${isRetrying ? 'animate-spin' : ''}`} />
+            {isRetrying && retryBackoffSec > 0
+              ? `Tentando em ${retryBackoffSec}s...`
+              : 'Tentar novamente'}
           </Button>
         </div>
       </div>
     )
   }
 
-  if (loading) return <LoadingState label="Carregando módulo de despesas e compromissos..." />
+  if (loading && !hasLoadedOnce) {
+    return <LoadingState label="Carregando módulo de despesas e compromissos..." />
+  }
 
   return (
     <>
+      {/* Banner discreto de aviso em falhas de recarga (mantendo os dados existentes em tela) */}
+      {bannerError && (
+        <div className="mb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl border border-primary/30 bg-[#FAF9F6] p-3 text-xs shadow-soft text-foreground">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+              <AlertCircle className="h-4 w-4" />
+            </span>
+            <div>
+              <p className="font-bold text-foreground">
+                Não foi possível atualizar — seus dados estão seguros.
+              </p>
+              <p className="text-[11px] text-muted-foreground">{bannerError.message}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isRetrying}
+              onClick={handleRetryWithBackoff}
+              className="h-7 text-xs border-primary/30 hover:bg-primary/10 text-primary gap-1.5"
+            >
+              <RotateCcw className={`h-3 w-3 ${isRetrying ? 'animate-spin' : ''}`} />
+              {isRetrying && retryBackoffSec > 0
+                ? `Aguarde ${retryBackoffSec}s`
+                : 'Tentar novamente'}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setBannerError(null)}
+              className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+              aria-label="Fechar aviso"
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       <PageHeader
         title="Despesas & Compromissos"
         description={`Controle de boletos, pix recorrentes, assinaturas e cartões no contexto ${activeContext.label}.`}
