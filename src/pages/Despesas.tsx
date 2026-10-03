@@ -41,7 +41,7 @@ import {
 import { Link, useSearchParams } from 'react-router-dom'
 import { PagarFaturaDialog } from '@/components/cartao/PagarFaturaDialog'
 import type { FaturaCartaoGroup } from '@/lib/cartao-fatura'
-import { contaAceitaCredito } from '@/services/despesas'
+import { contaAceitaCredito, isMetodoCredito } from '@/services/despesas'
 import { ClientResponseError } from 'pocketbase'
 
 import { LoadingState } from '@/components/LoadingState'
