@@ -44,12 +44,20 @@ import { usePwaNotifications, isLembreteVencidoOuNoMomento } from '@/hooks/use-p
 
 const LAST_CONTEXT_KEY = 'gkza_despesa_rapida_last_context_id'
 
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Pencil } from 'lucide-react'
+
 export default function LembreteRapidoPage() {
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
   const { grupos, activeContext, setContextGroup, setContextAll, matchesContext } = useAppContext()
 
   // Contexto
   const [contextoId, setContextoId] = useState<string>('all')
+
+  // Modo edição
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   // Formulário Lembrete Rápido
   const [titulo, setTitulo] = useState('')
@@ -66,6 +74,7 @@ export default function LembreteRapidoPage() {
   const [submitting, setSubmitting] = useState(false)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [redirectCountdown, setRedirectCountdown] = useState<number | null>(null)
 
   // Lista de lembretes
   const [lembretes, setLembretes] = useState<LembreteRapido[]>([])
@@ -83,8 +92,10 @@ export default function LembreteRapidoPage() {
     try {
       const data = await lembretesService.listLembretes(undefined, '-created')
       setLembretes(data)
+      return data
     } catch (err) {
       console.warn('Erro ao carregar lembretes:', err)
+      return []
     } finally {
       setLoadingLembretes(false)
     }
@@ -93,6 +104,35 @@ export default function LembreteRapidoPage() {
   useEffect(() => {
     loadLembretes()
   }, [])
+
+  // Carregar lembrete para edição se fornecido na URL (?editar=ID)
+  useEffect(() => {
+    const editIdParam = searchParams.get('editar')
+    if (editIdParam) {
+      // Busca item ou carrega do backend
+      lembretesService
+        .getLembrete(editIdParam)
+        .then((item) => {
+          if (item) {
+            setEditingId(item.id)
+            setTitulo(item.titulo || '')
+            setDetalhe(item.detalhe || '')
+            setDataLimite(
+              item.data_limite ? item.data_limite.slice(0, 10) : getLocalDateStr(new Date()),
+            )
+            setHoraLimite(item.hora_limite || '')
+            setPrioridade(item.prioridade || 'normal')
+            setRepetirAteConcluir(item.repetir_ate_concluir ?? true)
+            setSuccessMessage(null)
+            setErrorMessage(null)
+            window.scrollTo({ top: 0, behavior: 'smooth' })
+          }
+        })
+        .catch((err) => {
+          console.warn('Erro ao carregar lembrete para edição:', err)
+        })
+    }
+  }, [searchParams])
 
   // Recupera último contexto usado compartilhado com a Despesa Rápida
   useEffect(() => {
@@ -173,8 +213,31 @@ export default function LembreteRapidoPage() {
       .slice(0, 5)
   }, [lembretesFiltrados])
 
+  // Iniciar edição a partir da lista
+  const handleEditarLembrete = (item: LembreteRapido) => {
+    setEditingId(item.id)
+    setTitulo(item.titulo || '')
+    setDetalhe(item.detalhe || '')
+    setDataLimite(item.data_limite ? item.data_limite.slice(0, 10) : getLocalDateStr(new Date()))
+    setHoraLimite(item.hora_limite || '')
+    setPrioridade(item.prioridade || 'normal')
+    setRepetirAteConcluir(item.repetir_ate_concluir ?? true)
+    setSuccessMessage(null)
+    setErrorMessage(null)
+    setRedirectCountdown(null)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // Cancelar edição
+  const handleCancelarEdicao = () => {
+    setEditingId(null)
+    setSearchParams({})
+    handleNovoLembrete()
+  }
+
   // Reset do formulário
   const handleNovoLembrete = () => {
+    setEditingId(null)
     setTitulo('')
     setDetalhe('')
     setDataLimite(getLocalDateStr(new Date()))
@@ -186,10 +249,27 @@ export default function LembreteRapidoPage() {
     setRepetirAteConcluir(true)
     setSuccessMessage(null)
     setErrorMessage(null)
+    setRedirectCountdown(null)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  // Criação do Lembrete Rápido
+  // Contagem regressiva e retorno automático ao Hub após sucesso
+  useEffect(() => {
+    if (redirectCountdown === null) return
+    if (redirectCountdown <= 0) {
+      navigate('/m', {
+        replace: true,
+        state: { flash: successMessage || 'Lembrete salvo com sucesso!' },
+      })
+      return
+    }
+    const timer = setTimeout(() => {
+      setRedirectCountdown((prev) => (prev !== null ? prev - 1 : null))
+    }, 1000)
+    return () => clearTimeout(timer)
+  }, [redirectCountdown, navigate, successMessage])
+
+  // Criação ou Edição do Lembrete Rápido
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrorMessage(null)
@@ -220,26 +300,51 @@ export default function LembreteRapidoPage() {
         }
       }
 
-      await lembretesService.createLembrete({
-        titulo: titulo.trim(),
-        detalhe: detalhe.trim(),
-        data_limite: dataLimite,
-        hora_limite: horaLimite || undefined,
-        prioridade,
-        repetir_ate_concluir: repetirAteConcluir,
-        contexto_tipo: ctxTipo,
-        pessoa: pessoaRef || undefined,
-        empresa: empresaRef || undefined,
-        contexto_nome: contextoLabel,
-        origem: 'pwa',
-        usuario: user?.id,
-      })
+      if (editingId) {
+        // Atualização de lembrete existente
+        await lembretesService.updateLembrete(editingId, {
+          titulo: titulo.trim(),
+          detalhe: detalhe.trim(),
+          data_limite: dataLimite,
+          hora_limite: horaLimite || '',
+          prioridade,
+          repetir_ate_concluir: repetirAteConcluir,
+          contexto_tipo: ctxTipo,
+          pessoa: pessoaRef || undefined,
+          empresa: empresaRef || undefined,
+          contexto_nome: contextoLabel,
+        })
 
-      setSuccessMessage('Lembrete criado com sucesso.')
-      handleNovoLembrete()
-      loadLembretes()
+        const msg = 'Lembrete atualizado com sucesso.'
+        setSuccessMessage(msg)
+        setEditingId(null)
+        setSearchParams({})
+        loadLembretes()
+        setRedirectCountdown(2)
+      } else {
+        // Criação de novo lembrete
+        await lembretesService.createLembrete({
+          titulo: titulo.trim(),
+          detalhe: detalhe.trim(),
+          data_limite: dataLimite,
+          hora_limite: horaLimite || undefined,
+          prioridade,
+          repetir_ate_concluir: repetirAteConcluir,
+          contexto_tipo: ctxTipo,
+          pessoa: pessoaRef || undefined,
+          empresa: empresaRef || undefined,
+          contexto_nome: contextoLabel,
+          origem: 'pwa',
+          usuario: user?.id,
+        })
+
+        const msg = 'Lembrete criado com sucesso.'
+        setSuccessMessage(msg)
+        loadLembretes()
+        setRedirectCountdown(2)
+      }
     } catch (err: any) {
-      console.error('Falha ao criar lembrete rápido:', err)
+      console.error('Falha ao salvar lembrete rápido:', err)
       setErrorMessage(
         apiMessage(
           err,
@@ -425,7 +530,7 @@ export default function LembreteRapidoPage() {
             </div>
           )}
 
-          {/* Mensagem de Sucesso */}
+          {/* Mensagem de Sucesso com retorno ao Hub */}
           {successMessage && (
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50/90 p-4 shadow-sm animate-in fade-in-50">
               <div className="flex items-start gap-3">
@@ -435,28 +540,56 @@ export default function LembreteRapidoPage() {
                 <div className="min-w-0 flex-1">
                   <h3 className="text-sm font-extrabold text-emerald-950">{successMessage}</h3>
                   <p className="text-xs text-emerald-800/90 mt-0.5 leading-relaxed">
-                    O sistema manterá você avisado até a conclusão desta tarefa.
+                    {redirectCountdown !== null
+                      ? `Retornando ao Hub em ${redirectCountdown}s...`
+                      : 'O sistema manterá você avisado até a conclusão desta tarefa.'}
                   </p>
                   <div className="mt-3 flex items-center gap-2">
                     <Button
+                      asChild
                       size="sm"
-                      onClick={handleNovoLembrete}
                       className="h-8 px-3 text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs rounded-lg"
                     >
-                      <Plus className="mr-1 h-3.5 w-3.5" />
-                      Novo lembrete
+                      <Link to="/m">Voltar ao Hub agora</Link>
                     </Button>
                     <Button
-                      asChild
                       variant="outline"
                       size="sm"
+                      onClick={handleNovoLembrete}
                       className="h-8 px-3 text-xs font-semibold border-emerald-300 text-emerald-900 hover:bg-emerald-100 rounded-lg"
                     >
-                      <Link to="/m">Ir ao Hub</Link>
+                      <Plus className="mr-1 h-3.5 w-3.5" />
+                      Criar outro
                     </Button>
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Banner de Edição Ativa */}
+          {editingId && (
+            <div className="rounded-2xl border border-orange-300 bg-orange-50/90 p-3 shadow-xs flex items-center justify-between gap-2 animate-in fade-in-50">
+              <div className="flex items-center gap-2 min-w-0">
+                <Pencil className="h-4 w-4 text-[#DF5830] shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-black text-orange-950 truncate">
+                    Modo de edição ativo
+                  </p>
+                  <p className="text-[11px] text-orange-800 truncate">
+                    Alterando dados do lembrete selecionado
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleCancelarEdicao}
+                className="h-7 px-2 text-xs font-bold text-orange-900 hover:bg-orange-100 rounded-lg shrink-0"
+              >
+                Cancelar
+              </Button>
             </div>
           )}
 
@@ -674,8 +807,8 @@ export default function LembreteRapidoPage() {
               </div>
             </div>
 
-            {/* BOTÃO CRIAR LEMBRETE */}
-            <div className="pt-2">
+            {/* BOTÃO SALVAR / ATUALIZAR LEMBRETE */}
+            <div className="pt-2 flex flex-col gap-2">
               <Button
                 type="submit"
                 disabled={submitting}
@@ -684,7 +817,12 @@ export default function LembreteRapidoPage() {
                 {submitting ? (
                   <>
                     <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />
-                    Salvando lembrete...
+                    {editingId ? 'Atualizando lembrete...' : 'Salvando lembrete...'}
+                  </>
+                ) : editingId ? (
+                  <>
+                    <Pencil className="mr-2 h-5 w-5" />
+                    SALVAR ALTERAÇÕES
                   </>
                 ) : (
                   <>
@@ -693,6 +831,16 @@ export default function LembreteRapidoPage() {
                   </>
                 )}
               </Button>
+              {editingId && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleCancelarEdicao}
+                  className="h-10 text-xs font-bold border-stone-200 text-stone-700 hover:bg-stone-100 rounded-xl"
+                >
+                  Cancelar edição
+                </Button>
+              )}
             </div>
           </form>
 
@@ -791,6 +939,19 @@ export default function LembreteRapidoPage() {
                             </div>
 
                             <div className="flex items-center gap-1 shrink-0">
+                              {/* Botão Editar */}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleEditarLembrete(item)}
+                                className="h-8 px-2 text-[11px] font-bold border-stone-200 hover:border-[#DF5830] hover:text-[#DF5830] text-stone-700 rounded-lg shadow-2xs"
+                                title="Editar lembrete"
+                              >
+                                <Pencil className="mr-1 h-3 w-3" />
+                                Editar
+                              </Button>
+
                               <Button
                                 size="sm"
                                 disabled={actionLoadingId === item.id}

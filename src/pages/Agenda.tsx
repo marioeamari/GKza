@@ -1248,6 +1248,20 @@ export default function Agenda() {
                     </div>
 
                     <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                      {/* Botão Editar Lembrete */}
+                      <Button
+                        asChild
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-2 text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-[#DF5830] rounded-lg"
+                        title="Editar lembrete rápido"
+                      >
+                        <a href={`/lembrete-rapido?editar=${item.id}`}>
+                          <Edit2 className="mr-1 h-3 w-3" />
+                          Editar
+                        </a>
+                      </Button>
+
                       {item.status === 'pendente' ? (
                         <Button
                           size="sm"

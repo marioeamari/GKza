@@ -1,9 +1,10 @@
 import { useEffect, useState, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
   Bell,
   BellRing,
   Check,
+  CheckCircle2,
   ChevronDown,
   Clock,
   ExternalLink,
@@ -16,6 +17,7 @@ import {
   Inbox,
   AlertCircle,
   Calendar,
+  Pencil,
 } from 'lucide-react'
 
 import pb from '@/lib/pocketbase/client'
@@ -39,8 +41,14 @@ import { usePwaNotifications, isLembreteVencidoOuNoMomento } from '@/hooks/use-p
 const LAST_CONTEXT_KEY = 'gkza_despesa_rapida_last_context_id'
 
 export default function MobileHubPage() {
+  const location = useLocation()
   const { user } = useAuth()
   const { grupos, activeContext, setContextGroup, setContextAll, matchesContext } = useAppContext()
+
+  // Feedback flash vindo de redirecionamentos
+  const [flashMessage, setFlashMessage] = useState<string | null>(() => {
+    return (location.state as any)?.flash || null
+  })
 
   // Contexto
   const [contextoId, setContextoId] = useState<string>('all')
@@ -260,6 +268,23 @@ export default function MobileHubPage() {
 
         {/* CONTEÚDO DO HUB */}
         <main className="flex-1 px-4 py-5 space-y-5">
+          {/* FLASH MESSAGE DE SUCESSO PÓS-CRIAÇÃO/EDIÇÃO */}
+          {flashMessage && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/90 p-3.5 shadow-xs flex items-center justify-between gap-2 animate-in fade-in-50">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+                <p className="text-xs font-bold text-emerald-950 truncate">{flashMessage}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFlashMessage(null)}
+                className="text-emerald-700 hover:text-emerald-950 text-xs font-black p-1"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {/* BANNER NOTIFICAÇÃO PWA SE NÃO PERMITIDA */}
           {permission === 'default' && !dismissNotificationBanner && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50/90 p-3.5 shadow-xs animate-in fade-in-50">
@@ -430,12 +455,11 @@ export default function MobileHubPage() {
                   {lembretesPendentes.slice(0, 3).map((item) => {
                     const vencido = isLembreteVencidoOuNoMomento(item)
                     return (
-                      <Link
+                      <div
                         key={item.id}
-                        to="/lembrete-rapido"
-                        className="flex items-center justify-between p-2 rounded-xl bg-stone-50 hover:bg-stone-100 transition text-xs"
+                        className="flex items-center justify-between p-2 rounded-xl bg-stone-50 hover:bg-stone-100 transition text-xs gap-2"
                       >
-                        <div className="min-w-0 flex-1 truncate pr-2">
+                        <Link to="/lembrete-rapido" className="min-w-0 flex-1 truncate pr-1">
                           <span className="font-bold text-stone-900 truncate block">
                             {item.titulo}
                           </span>
@@ -443,20 +467,34 @@ export default function MobileHubPage() {
                             {item.hora_limite ? `às ${item.hora_limite}` : 'ao longo do dia'}
                             {item.prioridade === 'urgente' && ' • URGENTE'}
                           </span>
-                        </div>
-                        {vencido ? (
-                          <Badge
-                            variant="outline"
-                            className="text-[9px] font-bold border-orange-400 text-orange-700 bg-orange-100/50 shrink-0"
+                        </Link>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {vencido ? (
+                            <Badge
+                              variant="outline"
+                              className="text-[9px] font-bold border-orange-400 text-orange-700 bg-orange-100/50 shrink-0"
+                            >
+                              Agora
+                            </Badge>
+                          ) : (
+                            <span className="text-[10px] font-semibold text-stone-400 shrink-0">
+                              Pendente
+                            </span>
+                          )}
+                          <Button
+                            asChild
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-[11px] font-bold text-stone-600 hover:text-[#DF5830] hover:bg-orange-50 rounded-lg"
+                            title="Editar este lembrete"
                           >
-                            Agora
-                          </Badge>
-                        ) : (
-                          <span className="text-[10px] font-semibold text-stone-400 shrink-0">
-                            Pendente
-                          </span>
-                        )}
-                      </Link>
+                            <Link to={`/lembrete-rapido?editar=${item.id}`}>
+                              <Pencil className="mr-1 h-3 w-3" />
+                              Editar
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
                     )
                   })}
                 </div>

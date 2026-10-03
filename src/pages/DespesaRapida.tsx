@@ -69,7 +69,12 @@ interface FornecedorHistoricoSugerido {
   totalUsos: number
 }
 
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Pencil } from 'lucide-react'
+
 export default function DespesaRapida() {
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
   const { grupos, activeContext, setContextGroup, setContextAll } = useAppContext()
 
@@ -79,6 +84,9 @@ export default function DespesaRapida() {
   const [contas, setContas] = useState<Conta[]>([])
   const [metodosPagamento, setMetodosPagamento] = useState<MetodoPagamento[]>([])
   const [descricoesSugeridas, setDescricoesSugeridas] = useState<string[]>([])
+
+  // Modo de edição
+  const [editingPendenteId, setEditingPendenteId] = useState<string | null>(null)
 
   // Formulário
   const [contextoId, setContextoId] = useState<string>('all')
@@ -131,6 +139,7 @@ export default function DespesaRapida() {
   const [submitting, setSubmitting] = useState(false)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [redirectCountdown, setRedirectCountdown] = useState<number | null>(null)
 
   // Últimos lançamentos do usuário
   const [ultimosLancamentos, setUltimosLancamentos] = useState<TelegramRegistroPendente[]>([])
@@ -252,6 +261,59 @@ export default function DespesaRapida() {
     loadInitialData()
     loadUltimosLancamentos()
   }, [])
+
+  // Carregar despesa pendente para edição se fornecido na URL (?editar=ID)
+  useEffect(() => {
+    const editIdParam = searchParams.get('editar')
+    if (editIdParam) {
+      pb.collection<TelegramRegistroPendente>('telegram_registros_pendentes')
+        .getOne(editIdParam, { expand: 'conta,fornecedor,metodo_pagamento' })
+        .then((item) => {
+          if (item) {
+            if (item.status !== 'pendente') {
+              setErrorMessage(
+                'Este lançamento já foi triado ou descartado e não pode mais ser editado na triagem.',
+              )
+              return
+            }
+            setEditingPendenteId(item.id)
+            setDescricao(item.descricao || '')
+            setValorStr(
+              (item.valor || 0).toLocaleString('pt-BR', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              }),
+            )
+            if (item.fornecedor) {
+              setSelectedFornecedorId(item.fornecedor)
+              setFornecedorNome(
+                item.expand?.fornecedor?.nome_fantasia ||
+                  item.expand?.fornecedor?.razao_social ||
+                  item.fornecedor_nome ||
+                  '',
+              )
+            } else if (item.fornecedor_nome) {
+              setSelectedFornecedorId(null)
+              setFornecedorNome(item.fornecedor_nome)
+            }
+            if (item.conta) setContaId(item.conta)
+            if (item.metodo_pagamento) setMetodoId(item.metodo_pagamento)
+            if (item.data) {
+              const d = new Date(item.data)
+              const tzOffset = d.getTimezoneOffset() * 60000
+              setDataHora(new Date(d.getTime() - tzOffset).toISOString().slice(0, 16))
+            }
+            setSuccessMessage(null)
+            setErrorMessage(null)
+            setRedirectCountdown(null)
+            window.scrollTo({ top: 0, behavior: 'smooth' })
+          }
+        })
+        .catch((err) => {
+          console.warn('Erro ao carregar despesa para edição:', err)
+        })
+    }
+  }, [searchParams])
 
   // Recupera último contexto usado (localStorage ou contexto global ativo)
   useEffect(() => {
@@ -534,8 +596,70 @@ export default function DespesaRapida() {
   // Parsing do valor float
   const valorNumerico = parseFloat(valorStr.replace(/\./g, '').replace(',', '.')) || 0
 
+  // Iniciar edição de uma despesa rápida pendente
+  const handleEditarDespesa = (item: TelegramRegistroPendente) => {
+    if (item.status !== 'pendente') {
+      setErrorMessage(
+        'Este lançamento já foi triado ou descartado e não pode ser editado na triagem.',
+      )
+      return
+    }
+    setEditingPendenteId(item.id)
+    setDescricao(item.descricao || '')
+    setValorStr(
+      (item.valor || 0).toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+    )
+    if (item.fornecedor) {
+      setSelectedFornecedorId(item.fornecedor)
+      setFornecedorNome(
+        item.expand?.fornecedor?.nome_fantasia ||
+          item.expand?.fornecedor?.razao_social ||
+          item.fornecedor_nome ||
+          '',
+      )
+    } else if (item.fornecedor_nome) {
+      setSelectedFornecedorId(null)
+      setFornecedorNome(item.fornecedor_nome)
+    } else {
+      const fornecedorMatch = item.observacoes?.match(/Fornecedor:\s*([^|]+)/)
+      if (fornecedorMatch && fornecedorMatch[1]) {
+        setFornecedorNome(fornecedorMatch[1].trim())
+        setSelectedFornecedorId(null)
+      } else {
+        setFornecedorNome('')
+        setSelectedFornecedorId(null)
+      }
+    }
+
+    if (item.conta) setContaId(item.conta)
+    if (item.metodo_pagamento) setMetodoId(item.metodo_pagamento)
+    if (item.data) {
+      const d = new Date(item.data)
+      const tzOffset = d.getTimezoneOffset() * 60000
+      setDataHora(new Date(d.getTime() - tzOffset).toISOString().slice(0, 16))
+    }
+
+    setAnexoFile(null)
+    setAnexoPreview(null)
+    setSuccessMessage(null)
+    setErrorMessage(null)
+    setRedirectCountdown(null)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // Cancelar edição
+  const handleCancelarEdicao = () => {
+    setEditingPendenteId(null)
+    setSearchParams({})
+    handleNovaDespesa()
+  }
+
   // Reset do formulário para nova despesa
   const handleNovaDespesa = () => {
+    setEditingPendenteId(null)
     setDescricao('')
     setValorStr('')
     setFornecedorNome('')
@@ -545,13 +669,30 @@ export default function DespesaRapida() {
     setAnexoPreview(null)
     setSuccessMessage(null)
     setErrorMessage(null)
+    setRedirectCountdown(null)
     const now = new Date()
     const tzOffset = now.getTimezoneOffset() * 60000
     setDataHora(new Date(now.getTime() - tzOffset).toISOString().slice(0, 16))
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  // Submissão do formulário: validação e criação no telegram_registros_pendentes
+  // Contagem regressiva e retorno automático ao Hub após sucesso
+  useEffect(() => {
+    if (redirectCountdown === null) return
+    if (redirectCountdown <= 0) {
+      navigate('/m', {
+        replace: true,
+        state: { flash: successMessage || 'Despesa salva com sucesso!' },
+      })
+      return
+    }
+    const timer = setTimeout(() => {
+      setRedirectCountdown((prev) => (prev !== null ? prev - 1 : null))
+    }, 1000)
+    return () => clearTimeout(timer)
+  }, [redirectCountdown, navigate, successMessage])
+
+  // Submissão do formulário: validação e criação ou atualização no telegram_registros_pendentes
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrorMessage(null)
@@ -583,7 +724,6 @@ export default function DespesaRapida() {
       }
 
       // Detalhes complementares para observações/comprovante_texto
-      const contaObj = contas.find((c) => c.id === contaId)
       const metodoObj = metodosPagamento.find((m) => m.id === metodoId)
       const obsParts: string[] = ['Origem: PWA (Despesa Rápida)']
       if (fornecedorNome.trim()) obsParts.push(`Fornecedor: ${fornecedorNome.trim()}`)
@@ -598,76 +738,126 @@ export default function DespesaRapida() {
         .filter(Boolean)
         .join(' ')
 
-      // Construção do payload (FormData se houver anexo)
-      if (anexoFile) {
-        const fd = new FormData()
-        fd.append('descricao', descricao.trim())
-        fd.append('valor', String(valorNumerico))
-        fd.append('tipo', 'despesa')
-        fd.append('data', dataIso)
-        fd.append('status', 'pendente')
-        fd.append('origem_tipo', 'pwa')
-        if (contaId) fd.append('conta', contaId)
-        if (empresaRef) fd.append('empresa', empresaRef)
-        if (pessoaRef) fd.append('pessoa', pessoaRef)
-        if (contextoLabel) fd.append('contexto_nome', contextoLabel)
-        if (selectedFornecedorId) {
-          fd.append('fornecedor', selectedFornecedorId)
-        }
-        if (fornecedorNome.trim()) {
-          fd.append('fornecedor_nome', fornecedorNome.trim())
-        }
-        if (metodoId) {
-          fd.append('metodo_pagamento', metodoId)
-        }
-        fd.append('observacoes', obsParts.join(' | '))
-        fd.append('comprovante_texto', comprovanteTexto)
-        fd.append('comprovante_foto', anexoFile)
+      if (editingPendenteId) {
+        // MODO EDIÇÃO: Atualiza registro pendente existente
+        if (anexoFile) {
+          const fd = new FormData()
+          fd.append('descricao', descricao.trim())
+          fd.append('valor', String(valorNumerico))
+          fd.append('data', dataIso)
+          if (contaId) fd.append('conta', contaId)
+          if (empresaRef) fd.append('empresa', empresaRef)
+          if (pessoaRef) fd.append('pessoa', pessoaRef)
+          if (contextoLabel) fd.append('contexto_nome', contextoLabel)
+          if (selectedFornecedorId) {
+            fd.append('fornecedor', selectedFornecedorId)
+          }
+          if (fornecedorNome.trim()) {
+            fd.append('fornecedor_nome', fornecedorNome.trim())
+          }
+          if (metodoId) {
+            fd.append('metodo_pagamento', metodoId)
+          }
+          fd.append('observacoes', obsParts.join(' | '))
+          fd.append('comprovante_texto', comprovanteTexto)
+          fd.append('comprovante_foto', anexoFile)
 
-        await pb.collection('telegram_registros_pendentes').create(fd)
+          await pb.collection('telegram_registros_pendentes').update(editingPendenteId, fd)
+        } else {
+          await pb.collection('telegram_registros_pendentes').update(editingPendenteId, {
+            descricao: descricao.trim(),
+            valor: valorNumerico,
+            data: dataIso,
+            conta: contaId || null,
+            empresa: empresaRef || null,
+            pessoa: pessoaRef || null,
+            contexto_nome: contextoLabel,
+            fornecedor: selectedFornecedorId || null,
+            fornecedor_nome: fornecedorNome.trim() || null,
+            metodo_pagamento: metodoId || null,
+            observacoes: obsParts.join(' | '),
+            comprovante_texto: comprovanteTexto,
+          })
+        }
+
+        const msg = 'Despesa pendente atualizada com sucesso!'
+        setSuccessMessage(msg)
+        setEditingPendenteId(null)
+        setSearchParams({})
+        loadUltimosLancamentos()
+        setRedirectCountdown(2)
       } else {
-        await pb.collection('telegram_registros_pendentes').create({
-          descricao: descricao.trim(),
-          valor: valorNumerico,
-          tipo: 'despesa',
-          data: dataIso,
-          status: 'pendente',
-          origem_tipo: 'pwa',
-          conta: contaId || null,
-          empresa: empresaRef || null,
-          pessoa: pessoaRef || null,
-          contexto_nome: contextoLabel,
-          fornecedor: selectedFornecedorId || null,
-          fornecedor_nome: fornecedorNome.trim() || null,
-          metodo_pagamento: metodoId || null,
-          observacoes: obsParts.join(' | '),
-          comprovante_texto: comprovanteTexto,
-        })
+        // MODO CRIAÇÃO: Cria novo registro pendente
+        if (anexoFile) {
+          const fd = new FormData()
+          fd.append('descricao', descricao.trim())
+          fd.append('valor', String(valorNumerico))
+          fd.append('tipo', 'despesa')
+          fd.append('data', dataIso)
+          fd.append('status', 'pendente')
+          fd.append('origem_tipo', 'pwa')
+          if (contaId) fd.append('conta', contaId)
+          if (empresaRef) fd.append('empresa', empresaRef)
+          if (pessoaRef) fd.append('pessoa', pessoaRef)
+          if (contextoLabel) fd.append('contexto_nome', contextoLabel)
+          if (selectedFornecedorId) {
+            fd.append('fornecedor', selectedFornecedorId)
+          }
+          if (fornecedorNome.trim()) {
+            fd.append('fornecedor_nome', fornecedorNome.trim())
+          }
+          if (metodoId) {
+            fd.append('metodo_pagamento', metodoId)
+          }
+          fd.append('observacoes', obsParts.join(' | '))
+          fd.append('comprovante_texto', comprovanteTexto)
+          fd.append('comprovante_foto', anexoFile)
+
+          await pb.collection('telegram_registros_pendentes').create(fd)
+        } else {
+          await pb.collection('telegram_registros_pendentes').create({
+            descricao: descricao.trim(),
+            valor: valorNumerico,
+            tipo: 'despesa',
+            data: dataIso,
+            status: 'pendente',
+            origem_tipo: 'pwa',
+            conta: contaId || null,
+            empresa: empresaRef || null,
+            pessoa: pessoaRef || null,
+            contexto_nome: contextoLabel,
+            fornecedor: selectedFornecedorId || null,
+            fornecedor_nome: fornecedorNome.trim() || null,
+            metodo_pagamento: metodoId || null,
+            observacoes: obsParts.join(' | '),
+            comprovante_texto: comprovanteTexto,
+          })
+        }
+
+        const msg = 'Despesa enviada para a Triagem.'
+        setSuccessMessage(msg)
+        // Limpa formulário após envio com sucesso
+        setDescricao('')
+        setValorStr('')
+        setFornecedorNome('')
+        setSelectedFornecedorId(null)
+        setSugestaoAtiva(null)
+        setAnexoFile(null)
+        setAnexoPreview(null)
+        const now = new Date()
+        const tzOffset = now.getTimezoneOffset() * 60000
+        setDataHora(new Date(now.getTime() - tzOffset).toISOString().slice(0, 16))
+
+        // Recarrega últimos lançamentos da PWA
+        loadUltimosLancamentos()
+        setRedirectCountdown(2)
       }
-
-      setSuccessMessage('Despesa enviada para a Triagem.')
-      // Limpa formulário após envio com sucesso
-      setDescricao('')
-      setValorStr('')
-      setFornecedorNome('')
-      setSelectedFornecedorId(null)
-      setSugestaoAtiva(null)
-      setAnexoFile(null)
-      setAnexoPreview(null)
-      const now = new Date()
-      const tzOffset = now.getTimezoneOffset() * 60000
-      setDataHora(new Date(now.getTime() - tzOffset).toISOString().slice(0, 16))
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-
-      // Recarrega últimos lançamentos da PWA
-      loadUltimosLancamentos()
     } catch (err: any) {
-      console.error('Falha ao enviar despesa rápida:', err)
-      // V1 ONLINE-ONLY: mensagem clara de erro e os dados no formulário NÃO se perdem para permitir reenvio
+      console.error('Falha ao enviar/atualizar despesa rápida:', err)
       setErrorMessage(
         apiMessage(
           err,
-          'Não foi possível enviar a despesa. Verifique sua conexão à internet e tente novamente.',
+          'Não foi possível salvar a despesa. Verifique sua conexão à internet e tente novamente.',
         ),
       )
     } finally {
@@ -835,7 +1025,7 @@ export default function DespesaRapida() {
 
         {/* ÁREA CENTRAL: FORMULÁRIO DE LANÇAMENTO */}
         <main className="flex-1 px-4 py-4 space-y-4">
-          {/* Mensagem de Sucesso com opção de nova despesa */}
+          {/* Mensagem de Sucesso com opção de nova despesa e redirecionamento ao Hub */}
           {successMessage && (
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50/90 p-4 shadow-sm animate-in fade-in-50">
               <div className="flex items-start gap-3">
@@ -845,24 +1035,26 @@ export default function DespesaRapida() {
                 <div className="min-w-0 flex-1">
                   <h3 className="text-sm font-extrabold text-emerald-950">{successMessage}</h3>
                   <p className="text-xs text-emerald-800/90 mt-0.5 leading-relaxed">
-                    Você pode conferir e aprovar o lançamento na Triagem a qualquer momento.
+                    {redirectCountdown !== null
+                      ? `Retornando ao Hub em ${redirectCountdown}s...`
+                      : 'Você pode conferir e aprovar o lançamento na Triagem a qualquer momento.'}
                   </p>
-                  <div className="mt-3 flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      onClick={handleNovaDespesa}
-                      className="h-8 px-3 text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs rounded-lg"
-                    >
-                      <Plus className="mr-1 h-3.5 w-3.5" />
-                      Nova despesa
-                    </Button>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
                     <Button
                       asChild
+                      size="sm"
+                      className="h-8 px-3 text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs rounded-lg"
+                    >
+                      <Link to="/m">Voltar ao Hub agora</Link>
+                    </Button>
+                    <Button
                       variant="outline"
                       size="sm"
+                      onClick={handleNovaDespesa}
                       className="h-8 px-3 text-xs font-semibold border-emerald-300 text-emerald-900 hover:bg-emerald-100 rounded-lg"
                     >
-                      <Link to="/pendentes">Ver Triagem</Link>
+                      <Plus className="mr-1 h-3.5 w-3.5" />
+                      Lançar outra
                     </Button>
                     <Button
                       asChild
@@ -870,11 +1062,37 @@ export default function DespesaRapida() {
                       size="sm"
                       className="h-8 px-3 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 rounded-lg"
                     >
-                      <Link to="/m">Voltar ao Hub</Link>
+                      <Link to="/pendentes">Ver Triagem</Link>
                     </Button>
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Banner de Edição Ativa */}
+          {editingPendenteId && (
+            <div className="rounded-2xl border border-orange-300 bg-orange-50/90 p-3 shadow-xs flex items-center justify-between gap-2 animate-in fade-in-50">
+              <div className="flex items-center gap-2 min-w-0">
+                <Pencil className="h-4 w-4 text-[#DF5830] shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-black text-orange-950 truncate">
+                    Editando despesa da Triagem
+                  </p>
+                  <p className="text-[11px] text-orange-800 truncate">
+                    Você está alterando os dados antes da confirmação final
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleCancelarEdicao}
+                className="h-7 px-2 text-xs font-bold text-orange-900 hover:bg-orange-100 rounded-lg shrink-0"
+              >
+                Cancelar
+              </Button>
             </div>
           )}
           {/* Mensagem de Erro Online / Validação */}
@@ -1162,8 +1380,8 @@ export default function DespesaRapida() {
               )}
             </div>
 
-            {/* BOTÃO PRINCIPAL DESTACADO: ENVIAR PARA TRIAGEM */}
-            <div className="pt-2">
+            {/* BOTÃO PRINCIPAL DESTACADO: ENVIAR PARA TRIAGEM / SALVAR ALTERAÇÕES */}
+            <div className="pt-2 flex flex-col gap-2">
               <Button
                 type="submit"
                 disabled={submitting}
@@ -1172,7 +1390,12 @@ export default function DespesaRapida() {
                 {submitting ? (
                   <>
                     <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />
-                    Enviando para triagem...
+                    {editingPendenteId ? 'Salvando alterações...' : 'Enviando para triagem...'}
+                  </>
+                ) : editingPendenteId ? (
+                  <>
+                    <Pencil className="mr-2 h-5 w-5" />
+                    SALVAR ALTERAÇÕES NA TRIAGEM
                   </>
                 ) : (
                   <>
@@ -1181,6 +1404,16 @@ export default function DespesaRapida() {
                   </>
                 )}
               </Button>
+              {editingPendenteId && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleCancelarEdicao}
+                  className="h-10 text-xs font-bold border-stone-200 text-stone-700 hover:bg-stone-100 rounded-xl"
+                >
+                  Cancelar edição
+                </Button>
+              )}
             </div>
           </form>
 
@@ -1261,18 +1494,42 @@ export default function DespesaRapida() {
                           </div>
                         </div>
 
-                        {/* Botão Duplicar */}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDuplicar(item)}
-                          className="h-8 px-2.5 text-xs font-bold border-stone-200 hover:border-[#DF5830] hover:text-[#DF5830] rounded-lg shrink-0"
-                          title="Preencher formulário com estes dados"
-                        >
-                          <Copy className="mr-1 h-3 w-3" />
-                          Duplicar
-                        </Button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {/* Botão Editar (apenas para registros pendentes na triagem) */}
+                          {item.status === 'pendente' ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEditarDespesa(item)}
+                              className="h-8 px-2.5 text-xs font-bold border-stone-200 hover:border-[#DF5830] hover:text-[#DF5830] text-stone-700 rounded-lg shadow-2xs"
+                              title="Editar lançamento pendente na triagem"
+                            >
+                              <Pencil className="mr-1 h-3 w-3" />
+                              Editar
+                            </Button>
+                          ) : (
+                            <span
+                              className="text-[10px] font-bold text-stone-400 px-1 cursor-default"
+                              title="Registro já processado na triagem"
+                            >
+                              Processada
+                            </span>
+                          )}
+
+                          {/* Botão Duplicar */}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDuplicar(item)}
+                            className="h-8 px-2 text-xs font-bold text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-lg"
+                            title="Preencher formulário com estes dados para novo lançamento"
+                          >
+                            <Copy className="mr-1 h-3 w-3" />
+                            Duplicar
+                          </Button>
+                        </div>
                       </div>
                     )
                   })
