@@ -4,7 +4,7 @@ routerAdd('POST', '/backend/v1/pluggy/webhook', (e) => {
     payload = e.requestInfo().body || {}
   } catch (_) {}
 
-  console.log('Pluggy Webhook recebido:', JSON.stringify(payload))
+  console.log('[PluggyWebhook] Payload recebido:', JSON.stringify(payload))
 
   const event = payload.event || payload.type || ''
   const itemId = payload.itemId || (payload.data && payload.data.itemId) || ''
@@ -18,6 +18,7 @@ routerAdd('POST', '/backend/v1/pluggy/webhook', (e) => {
     $os.getenv('PLUGGY_CLIENT_SECRET') || 'RCqCZjybNbeJddKQ95JlAvjAbnmhLM0yXClwxpE4QYU'
 
   if (!clientId || !clientSecret) {
+    console.log('[PluggyWebhook] Credenciais não configuradas.')
     return e.json(200, { received: true, error: 'Credentials not configured' })
   }
 
@@ -35,7 +36,7 @@ routerAdd('POST', '/backend/v1/pluggy/webhook', (e) => {
       apiKey = authRes.json.apiKey
     }
   } catch (err) {
-    console.log('Erro ao autenticar Pluggy no webhook:', err)
+    console.log('[PluggyWebhook] Erro ao autenticar Pluggy no webhook:', err)
     return e.json(200, { received: true, error: 'Auth error' })
   }
 
@@ -79,7 +80,7 @@ routerAdd('POST', '/backend/v1/pluggy/webhook', (e) => {
       $app.save(itemRecord)
     }
   } catch (err) {
-    console.log('Erro ao atualizar item no webhook:', err)
+    console.log('[PluggyWebhook] Erro ao atualizar item no webhook:', err)
   }
 
   // 3. Se for evento de transações criadas/atualizadas ou item criado/atualizado, puxar transações
@@ -92,12 +93,35 @@ routerAdd('POST', '/backend/v1/pluggy/webhook', (e) => {
   if (isTransactionEvent) {
     const pendentesCol = $app.findCollectionByNameOrId('telegram_registros_pendentes')
 
-    // Tentar associar conta bancária interna correspondente se existir
-    let contaInternaId = ''
+    let contasCadastradas = []
     try {
-      const cRec = $app.findFirstRecordByData('contas', 'nome', bancoNome)
-      if (cRec) contaInternaId = cRec.id
+      contasCadastradas = $app.findRecordsByFilter('contas', '', 'nome', 100, 0)
     } catch (_) {}
+
+    function mapearContaInterna(bNome, accountData) {
+      if (!contasCadastradas || contasCadastradas.length === 0) return ''
+      const bNomeNorm = (bNome || '').toLowerCase().trim()
+      const accNameNorm = (accountData && accountData.name ? accountData.name : '')
+        .toLowerCase()
+        .trim()
+
+      for (let i = 0; i < contasCadastradas.length; i++) {
+        const c = contasCadastradas[i]
+        const cNome = (c.getString('nome') || '').toLowerCase().trim()
+        if (!cNome || cNome === '0') continue
+
+        if (cNome === bNomeNorm || cNome === accNameNorm) {
+          return c.id
+        }
+        if (
+          (bNomeNorm && cNome.indexOf(bNomeNorm) !== -1) ||
+          (bNomeNorm && bNomeNorm.indexOf(cNome) !== -1)
+        ) {
+          return c.id
+        }
+      }
+      return ''
+    }
 
     // Buscar contas do item
     let accounts = []
@@ -112,37 +136,63 @@ routerAdd('POST', '/backend/v1/pluggy/webhook', (e) => {
         accounts = accRes.json.results
       }
     } catch (err) {
-      console.log('Erro ao buscar contas no webhook:', err)
+      console.log('[PluggyWebhook] Erro ao buscar contas:', err)
     }
 
     const now = new Date()
-    const fromDateObj = new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000)
+    const fromDateObj = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000)
     const fromDateStr = fromDateObj.toISOString().slice(0, 10)
+    const toDateStr = now.toISOString().slice(0, 10)
 
     let importedCount = 0
 
     for (let a = 0; a < accounts.length; a++) {
       const acc = accounts[a]
+      const contaInternaId = mapearContaInterna(bancoNome, acc)
+
+      let page = 1
+      let totalPages = 1
+      const pageSize = 100
       let transactions = []
-      try {
-        const txRes = $http.send({
-          url:
-            'https://api.pluggy.ai/transactions?accountId=' +
-            acc.id +
-            '&from=' +
-            fromDateStr +
-            '&pageSize=100',
-          method: 'GET',
-          headers: { 'X-API-KEY': apiKey },
-          timeout: 20,
-        })
-        if (txRes.statusCode === 200 && txRes.json && txRes.json.results) {
-          transactions = txRes.json.results
+
+      while (page <= totalPages && page <= 20) {
+        try {
+          const txRes = $http.send({
+            url:
+              'https://api.pluggy.ai/transactions?accountId=' +
+              acc.id +
+              '&from=' +
+              fromDateStr +
+              '&to=' +
+              toDateStr +
+              '&page=' +
+              page +
+              '&pageSize=' +
+              pageSize,
+            method: 'GET',
+            headers: { 'X-API-KEY': apiKey },
+            timeout: 20,
+          })
+          if (txRes.statusCode === 200 && txRes.json && txRes.json.results) {
+            const list = txRes.json.results || []
+            for (let r = 0; r < list.length; r++) {
+              transactions.push(list[r])
+            }
+            if (txRes.json.totalPages && Number(txRes.json.totalPages) > 0) {
+              totalPages = Number(txRes.json.totalPages)
+            }
+          } else {
+            break
+          }
+        } catch (_) {
+          break
         }
-      } catch (_) {}
+        page++
+      }
 
       for (let t = 0; t < transactions.length; t++) {
         const tx = transactions[t]
+        if (!tx.id) continue
         const externalId = 'pluggy_' + tx.id
 
         let alreadyExists = false
@@ -161,12 +211,15 @@ routerAdd('POST', '/backend/v1/pluggy/webhook', (e) => {
         const absAmount = Math.abs(rawAmount)
 
         let tipo = 'despesa'
-        if (tx.type === 'CREDIT' || rawAmount > 0) {
+        if (tx.type === 'CREDIT' || (tx.type !== 'DEBIT' && rawAmount > 0)) {
           tipo = 'receita'
         }
 
         let txDate = tx.date ? tx.date.slice(0, 10) : new Date().toISOString().slice(0, 10)
-        const desc = tx.description || tx.descriptionRaw || 'Transação ' + bancoNome
+        const desc =
+          tx.description ||
+          tx.descriptionRaw ||
+          (acc.name ? 'Transação ' + acc.name : 'Transação ' + bancoNome)
 
         const rec = new Record(pendentesCol)
         rec.set('descricao', desc)
@@ -191,12 +244,12 @@ routerAdd('POST', '/backend/v1/pluggy/webhook', (e) => {
           $app.save(rec)
           importedCount++
         } catch (err) {
-          console.log('Erro ao salvar tx webhook:', err)
+          console.log('[PluggyWebhook] Erro ao salvar tx webhook:', err)
         }
       }
     }
 
-    console.log('Webhook processado: ' + importedCount + ' transações importadas.')
+    console.log('[PluggyWebhook] Processado: ' + importedCount + ' transações importadas.')
   }
 
   return e.json(200, { received: true, event: event, itemId: itemId })

@@ -4,6 +4,7 @@ cronAdd('pluggy_sync_hourly', '15 * * * *', () => {
     $os.getenv('PLUGGY_CLIENT_SECRET') || 'RCqCZjybNbeJddKQ95JlAvjAbnmhLM0yXClwxpE4QYU'
 
   if (!clientId || !clientSecret) {
+    console.log('[PluggyCronSync] Credenciais não configuradas. Encerrando.')
     return
   }
 
@@ -19,9 +20,14 @@ cronAdd('pluggy_sync_hourly', '15 * * * *', () => {
     })
     if (authRes.statusCode === 200 && authRes.json && authRes.json.apiKey) {
       apiKey = authRes.json.apiKey
+    } else {
+      console.log(
+        '[PluggyCronSync] Falha auth status=' + authRes.statusCode + ' raw=' + authRes.raw,
+      )
+      return
     }
   } catch (err) {
-    console.log('Cron Pluggy: erro ao autenticar:', err)
+    console.log('[PluggyCronSync] Erro ao autenticar:', err)
     return
   }
 
@@ -31,26 +37,58 @@ cronAdd('pluggy_sync_hourly', '15 * * * *', () => {
   let savedItems = []
   try {
     savedItems = $app.findRecordsByFilter('pluggy_items', '', '-created', 100, 0)
-  } catch (_) {}
+  } catch (err) {
+    console.log('[PluggyCronSync] Erro ao buscar pluggy_items:', err)
+    return
+  }
 
-  if (savedItems.length === 0) return
+  if (savedItems.length === 0) {
+    console.log('[PluggyCronSync] Nenhum item cadastrado.')
+    return
+  }
 
   const pendentesCol = $app.findCollectionByNameOrId('telegram_registros_pendentes')
   const now = new Date()
-  const fromDateObj = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const fromDateObj = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
   const fromDateStr = fromDateObj.toISOString().slice(0, 10)
+  const toDateStr = now.toISOString().slice(0, 10)
+
+  let contasCadastradas = []
+  try {
+    contasCadastradas = $app.findRecordsByFilter('contas', '', 'nome', 100, 0)
+  } catch (_) {}
+
+  function mapearContaInterna(bNome, accountData) {
+    if (!contasCadastradas || contasCadastradas.length === 0) return ''
+    const bNomeNorm = (bNome || '').toLowerCase().trim()
+    const accNameNorm = (accountData && accountData.name ? accountData.name : '')
+      .toLowerCase()
+      .trim()
+
+    for (let i = 0; i < contasCadastradas.length; i++) {
+      const c = contasCadastradas[i]
+      const cNome = (c.getString('nome') || '').toLowerCase().trim()
+      if (!cNome || cNome === '0') continue
+
+      if (cNome === bNomeNorm || cNome === accNameNorm) {
+        return c.id
+      }
+      if (
+        (bNomeNorm && cNome.indexOf(bNomeNorm) !== -1) ||
+        (bNomeNorm && bNomeNorm.indexOf(cNome) !== -1)
+      ) {
+        return c.id
+      }
+    }
+    return ''
+  }
 
   for (let i = 0; i < savedItems.length; i++) {
     const itemRec = savedItems[i]
     const itemId = itemRec.getString('item_id')
     const bancoNome = itemRec.getString('connector_name') || 'Open Finance'
 
-    // Tentar associar conta bancária interna correspondente
-    let contaInternaId = ''
-    try {
-      const cRec = $app.findFirstRecordByData('contas', 'nome', bancoNome)
-      if (cRec) contaInternaId = cRec.id
-    } catch (_) {}
+    console.log('[PluggyCronSync] Verificando item ' + itemId + ' (' + bancoNome + ')')
 
     // Buscar contas
     let accounts = []
@@ -63,31 +101,65 @@ cronAdd('pluggy_sync_hourly', '15 * * * *', () => {
       })
       if (accRes.statusCode === 200 && accRes.json && accRes.json.results) {
         accounts = accRes.json.results
+      } else {
+        console.log(
+          '[PluggyCronSync] Erro accounts itemId=' + itemId + ' status=' + accRes.statusCode,
+        )
       }
-    } catch (_) {}
+    } catch (err) {
+      console.log('[PluggyCronSync] Exceção accounts itemId=' + itemId + ':', err)
+    }
+
+    let itemImported = 0
+    let itemSkipped = 0
 
     for (let a = 0; a < accounts.length; a++) {
       const acc = accounts[a]
-      let transactions = []
-      try {
-        const txRes = $http.send({
-          url:
-            'https://api.pluggy.ai/transactions?accountId=' +
-            acc.id +
-            '&from=' +
-            fromDateStr +
-            '&pageSize=100',
-          method: 'GET',
-          headers: { 'X-API-KEY': apiKey },
-          timeout: 20,
-        })
-        if (txRes.statusCode === 200 && txRes.json && txRes.json.results) {
-          transactions = txRes.json.results
-        }
-      } catch (_) {}
+      const contaInternaId = mapearContaInterna(bancoNome, acc)
 
-      for (let t = 0; t < transactions.length; t++) {
-        const tx = transactions[t]
+      let page = 1
+      let totalPages = 1
+      const pageSize = 100
+      let accountTransactions = []
+
+      while (page <= totalPages && page <= 20) {
+        try {
+          const txRes = $http.send({
+            url:
+              'https://api.pluggy.ai/transactions?accountId=' +
+              acc.id +
+              '&from=' +
+              fromDateStr +
+              '&to=' +
+              toDateStr +
+              '&page=' +
+              page +
+              '&pageSize=' +
+              pageSize,
+            method: 'GET',
+            headers: { 'X-API-KEY': apiKey },
+            timeout: 20,
+          })
+          if (txRes.statusCode === 200 && txRes.json && txRes.json.results) {
+            const list = txRes.json.results || []
+            for (let r = 0; r < list.length; r++) {
+              accountTransactions.push(list[r])
+            }
+            if (txRes.json.totalPages && Number(txRes.json.totalPages) > 0) {
+              totalPages = Number(txRes.json.totalPages)
+            }
+          } else {
+            break
+          }
+        } catch (_) {
+          break
+        }
+        page++
+      }
+
+      for (let t = 0; t < accountTransactions.length; t++) {
+        const tx = accountTransactions[t]
+        if (!tx.id) continue
         const externalId = 'pluggy_' + tx.id
 
         let alreadyExists = false
@@ -100,18 +172,24 @@ cronAdd('pluggy_sync_hourly', '15 * * * *', () => {
           if (existing) alreadyExists = true
         } catch (_) {}
 
-        if (alreadyExists) continue
+        if (alreadyExists) {
+          itemSkipped++
+          continue
+        }
 
         const rawAmount = tx.amount != null ? Number(tx.amount) : 0
         const absAmount = Math.abs(rawAmount)
 
         let tipo = 'despesa'
-        if (tx.type === 'CREDIT' || rawAmount > 0) {
+        if (tx.type === 'CREDIT' || (tx.type !== 'DEBIT' && rawAmount > 0)) {
           tipo = 'receita'
         }
 
         let txDate = tx.date ? tx.date.slice(0, 10) : new Date().toISOString().slice(0, 10)
-        const desc = tx.description || tx.descriptionRaw || 'Transação ' + bancoNome
+        const desc =
+          tx.description ||
+          tx.descriptionRaw ||
+          (acc.name ? 'Transação ' + acc.name : 'Transação ' + bancoNome)
 
         const rec = new Record(pendentesCol)
         rec.set('descricao', desc)
@@ -134,6 +212,7 @@ cronAdd('pluggy_sync_hourly', '15 * * * *', () => {
 
         try {
           $app.save(rec)
+          itemImported++
         } catch (_) {}
       }
     }
@@ -142,5 +221,15 @@ cronAdd('pluggy_sync_hourly', '15 * * * *', () => {
       itemRec.set('last_sync_at', new Date().toISOString())
       $app.save(itemRec)
     } catch (_) {}
+
+    console.log(
+      '[PluggyCronSync] Item ' +
+        itemId +
+        ' finalizado: ' +
+        itemImported +
+        ' importadas, ' +
+        itemSkipped +
+        ' duplicadas ignoradas.',
+    )
   }
 })

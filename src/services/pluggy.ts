@@ -19,6 +19,16 @@ export interface PluggySyncResponse {
   imported_pendentes: number
   skipped_duplicates: number
   message?: string
+  error?: string
+  warnings?: string[]
+  audit?: Array<{
+    itemId: string
+    accountsCount: number
+    transactionsFound: number
+    transactionsImported: number
+    transactionsSkipped: number
+    errors: string[]
+  }>
 }
 
 export const pluggyService = {

@@ -224,18 +224,27 @@ export function OpenFinanceCard() {
           try {
             if (newItemId) {
               const syncRes = await pluggyService.syncItem(newItemId)
-              toast({
-                title: 'Sincronização concluída!',
-                description: `${syncRes.imported_pendentes} novas transações enviadas para /pendentes para aprovação (${syncRes.skipped_duplicates} duplicadas ignoradas).`,
-              })
+              const countImported = syncRes?.imported_pendentes ?? 0
+              const countSkipped = syncRes?.skipped_duplicates ?? 0
+              if (syncRes.warnings && syncRes.warnings.length > 0) {
+                toast({
+                  title: 'Sincronizado com avisos',
+                  description: `${countImported} nova(s) transação(ões) enviada(s) para Triagem (/pendentes) (${countSkipped} já existiam). Avisos: ${syncRes.warnings[0]}`,
+                })
+              } else {
+                toast({
+                  title: 'Sincronização concluída!',
+                  description: `${countImported} nova(s) transação(ões) enviada(s) para Triagem (/pendentes) para aprovação (${countSkipped} duplicadas ignoradas).`,
+                })
+              }
             }
           } catch (syncErr) {
             console.error('Erro na sincronização automática pós-conexão:', syncErr)
+            const errorMsg = apiMessage(syncErr) || 'Falha ao buscar transações do banco.'
             toast({
               variant: 'destructive',
-              title: 'Aviso na sincronização',
-              description:
-                'O banco foi conectado, mas a sincronização inicial falhou. Você pode clicar em "Sincronizar" manualmente.',
+              title: 'Falha na sincronização inicial',
+              description: `${errorMsg}. Você pode clicar em "Sincronizar" para tentar novamente.`,
             })
           } finally {
             await loadData()
@@ -278,16 +287,29 @@ export function OpenFinanceCard() {
     try {
       setSyncingId(itemId)
       const res = await pluggyService.syncItem(itemId)
-      toast({
-        title: 'Sincronização concluída!',
-        description: `${res.imported_pendentes} transações novas importadas para triagem (${res.skipped_duplicates} duplicadas ignoradas).`,
-      })
+      const countImported = res?.imported_pendentes ?? 0
+      const countSkipped = res?.skipped_duplicates ?? 0
+
+      if (res.warnings && res.warnings.length > 0 && countImported === 0) {
+        toast({
+          variant: 'destructive',
+          title: 'Aviso na sincronização',
+          description: `${res.warnings[0]} (0 importadas, ${countSkipped} duplicadas).`,
+        })
+      } else {
+        toast({
+          title: 'Sincronização concluída!',
+          description: `${countImported} transação(ões) nova(s) importada(s) para triagem (${countSkipped} duplicadas ignoradas).`,
+        })
+      }
       await loadData()
     } catch (err) {
+      console.error('Erro ao sincronizar item Pluggy:', err)
+      const msg = apiMessage(err) || 'Não foi possível sincronizar as transações com a Pluggy.'
       toast({
         variant: 'destructive',
         title: 'Erro na sincronização',
-        description: apiMessage(err),
+        description: msg,
       })
     } finally {
       setSyncingId(null)
