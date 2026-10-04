@@ -94,6 +94,34 @@ export const telegramPendentesService = {
       status: 'descartado',
     }),
 
+  descartarTodosOpenFinance: async () => {
+    // Busca todas as pendências originadas via open_finance ainda pendentes
+    const itens = await pb
+      .collection<TelegramRegistroPendente>('telegram_registros_pendentes')
+      .getFullList({
+        filter: "origem_tipo = 'open_finance' && status = 'pendente'",
+      })
+
+    if (itens.length === 0) {
+      return 0
+    }
+
+    // Processa atualização em blocos para evitar sobrecarga de requisições paralelas
+    const chunkSize = 10
+    let totalDescartados = 0
+    for (let i = 0; i < itens.length; i += chunkSize) {
+      const chunk = itens.slice(i, i + chunkSize)
+      await Promise.all(
+        chunk.map((item) =>
+          pb.collection('telegram_registros_pendentes').update(item.id, { status: 'descartado' }),
+        ),
+      )
+      totalDescartados += chunk.length
+    }
+
+    return totalDescartados
+  },
+
   deletePendente: (id: string) => pb.collection('telegram_registros_pendentes').delete(id),
 
   checkDuplicates: async (valor: number, tipo: string, data: string) => {

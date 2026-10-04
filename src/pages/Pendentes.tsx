@@ -99,9 +99,16 @@ export default function Pendentes() {
   const [dialogTriagem, setDialogTriagem] = useState(false)
   const [itemParaDescartar, setItemParaDescartar] = useState<TelegramRegistroPendente | null>(null)
   const [descartando, setDescartando] = useState(false)
+  const [dialogDescartarTudoOF, setDialogDescartarTudoOF] = useState(false)
+  const [descartandoTudoOF, setDescartandoTudoOF] = useState(false)
   const [fotoVisualizar, setFotoVisualizar] = useState<string | null>(null)
 
   const canEdit = can(user?.role, 'writeFinance')
+
+  // Total de pendências do Open Finance aguardando triagem
+  const countOpenFinancePendentes = pendentes.filter(
+    (item) => item.origem_tipo === 'open_finance' && item.status === 'pendente',
+  ).length
 
   const loadPendentes = useCallback(async () => {
     setLoading(true)
@@ -215,6 +222,28 @@ export default function Pendentes() {
     }
   }
 
+  // Descartar todas as transações pendentes de Open Finance
+  const handleConfirmarDescarteTudoOF = async () => {
+    setDescartandoTudoOF(true)
+    try {
+      const total = await telegramPendentesService.descartarTodosOpenFinance()
+      await loadPendentes()
+      toast({
+        title: 'Transações descartadas com sucesso',
+        description: `${total} transações do Open Finance foram marcadas como descartadas.`,
+      })
+    } catch (err) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao descartar transações do Open Finance',
+        description: apiMessage(err),
+      })
+    } finally {
+      setDescartandoTudoOF(false)
+      setDialogDescartarTudoOF(false)
+    }
+  }
+
   // Filtragem local por texto, tipo e origem
   const filteredPendentes = pendentes.filter((item) => {
     if (filtroTipo !== 'all' && item.tipo !== filtroTipo) return false
@@ -244,11 +273,24 @@ export default function Pendentes() {
         description="Transações do Open Finance e comprovantes do Telegram aguardando definição de destino: Lançamento de Caixa ou Despesa Recorrente."
         action={
           <div className="flex items-center gap-2">
+            {canEdit && countOpenFinancePendentes > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDialogDescartarTudoOF(true)}
+                disabled={loading || descartandoTudoOF}
+                className="font-bold text-xs border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                title="Descartar todas as transações importadas via Open Finance"
+              >
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                Descartar tudo (Open Finance)
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
               onClick={handleSyncOpenFinance}
-              disabled={syncingPluggy || loading}
+              disabled={syncingPluggy || loading || descartandoTudoOF}
               className="font-bold text-xs"
               title="Buscar transações recentes de bancos conectados"
             >
@@ -259,7 +301,7 @@ export default function Pendentes() {
               variant="outline"
               size="sm"
               onClick={loadPendentes}
-              disabled={loading}
+              disabled={loading || descartandoTudoOF}
               className="font-bold text-xs"
             >
               <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -565,7 +607,34 @@ export default function Pendentes() {
         onTriado={loadPendentes}
       />
 
-      {/* Confirmação de Descarte */}
+      {/* Confirmação de Descarte em Lote de Open Finance */}
+      <AlertDialog
+        open={dialogDescartarTudoOF}
+        onOpenChange={(open) => !descartandoTudoOF && setDialogDescartarTudoOF(open)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Descartar todas as transações Open Finance?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Isso descartará {countOpenFinancePendentes} transações importadas via Open Finance.
+              Elas não viram despesas nem lançamentos de caixa.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={descartandoTudoOF}>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmarDescarteTudoOF}
+              disabled={descartandoTudoOF}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              {descartandoTudoOF && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
+              Sim, descartar tudo ({countOpenFinancePendentes})
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmação de Descarte Individual */}
       <AlertDialog
         open={!!itemParaDescartar}
         onOpenChange={(open) => !open && setItemParaDescartar(null)}
