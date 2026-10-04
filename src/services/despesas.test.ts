@@ -2328,4 +2328,268 @@ describe('despesasService - Agrupador de Despesas e Helpers', () => {
       expect(updatePayload.data_vencimento).toBeUndefined()
     })
   })
+
+  describe('gerarOcorrenciasParaCompromisso: continuidade e não omissão de competências correntes/retroativas', () => {
+    it('compromisso criado dia 4 com vencimento dia 1 gera ocorrência do mês corrente como prevista (não pula mês)', async () => {
+      // Simula o caso de Energia Elétrica / CPFL: data_inicio 2026-09-01, dia_vencimento=1, não-cartão (Boleto/Pix)
+      const mockContaBoleto = {
+        id: 'c_sicredi_empresa',
+        nome: 'Sicred',
+        tipo: 'corrente',
+        tipos_pagamento: ['boletos', 'pix'],
+      }
+
+      const mockMetodoBoleto = {
+        id: 'm_boleto_id',
+        codigo: 'BoletoBancario',
+        nome: 'Boleto Bancário',
+        tipo: 'boleto',
+      }
+
+      const criadas: any[] = []
+      const mockCreate = vi.fn().mockImplementation((data) => {
+        const item = { id: `ocorr_${criadas.length + 1}`, ...data }
+        criadas.push(item)
+        return Promise.resolve(item)
+      })
+
+      // Simula banco com apenas a competência 2026-09 existente (paga)
+      const mockGetList = vi.fn().mockImplementation((page, perPage, options) => {
+        const filterStr = options?.filter || ''
+        if (filterStr.includes("competencia = '2026-09'")) {
+          return Promise.resolve({
+            totalItems: 1,
+            items: [{ id: 'oc_paga_09', competencia: '2026-09', status: 'paga' }],
+          })
+        }
+        return Promise.resolve({ totalItems: 0, items: [] })
+      })
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') {
+          return { getOne: vi.fn().mockResolvedValue(mockContaBoleto) } as any
+        }
+        if (name === 'metodos_pagamento') {
+          return { getOne: vi.fn().mockResolvedValue(mockMetodoBoleto) } as any
+        }
+        if (name === 'despesas_ocorrencias') {
+          return {
+            getList: mockGetList,
+            create: mockCreate,
+          } as any
+        }
+        return {} as any
+      })
+
+      const compromissoEnergia: DespesaCompromisso = {
+        id: 'h3g4fjsx0yjxdge',
+        descricao: 'Energia Elétrica',
+        conta_padrao: 'c_sicredi_empresa',
+        metodo_pagamento: 'm_boleto_id',
+        secao: 'contas_mensais_pix_boleto',
+        regra_repeticao: 'mensal',
+        modalidade_parcelamento: 'a_vista',
+        data_inicio: '2026-09-01 00:00:00.000Z',
+        dia_vencimento: 1,
+        valor_estimado: 93.09,
+        contexto_tipo: 'empresa',
+      } as any
+
+      await despesasService.gerarOcorrenciasParaCompromisso(compromissoEnergia)
+
+      // A competência 2026-10 DEVE ter sido criada como prevista
+      const ocorr10 = criadas.find((c) => c.competencia === '2026-10')
+      expect(ocorr10).toBeDefined()
+      expect(ocorr10.status).toBe('prevista')
+      expect(ocorr10.data_vencimento.slice(0, 10)).toBe('2026-10-01')
+      expect(ocorr10.valor_previsto).toBe(93.09)
+      expect(ocorr10.valor_estimado_original).toBe(93.09)
+    })
+
+    it('nenhuma competência é pulada entre data_inicio e mês atual+3 na chamada padrão sem targetCompetencias', async () => {
+      const mockConta = {
+        id: 'c_corrente',
+        nome: 'Conta Corrente',
+        tipo: 'corrente',
+        tipos_pagamento: ['pix', 'boletos'],
+      }
+      const mockMetodo = {
+        id: 'm_pix',
+        codigo: 'Pix',
+        nome: 'Pix',
+        tipo: 'pix',
+      }
+
+      const criadas: any[] = []
+      const mockCreate = vi.fn().mockImplementation((data) => {
+        const item = { id: `ocorr_${criadas.length + 1}`, ...data }
+        criadas.push(item)
+        return Promise.resolve(item)
+      })
+
+      const mockGetList = vi.fn().mockResolvedValue({ totalItems: 0, items: [] })
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') return { getOne: vi.fn().mockResolvedValue(mockConta) } as any
+        if (name === 'metodos_pagamento')
+          return { getOne: vi.fn().mockResolvedValue(mockMetodo) } as any
+        if (name === 'despesas_ocorrencias') {
+          return { getList: mockGetList, create: mockCreate } as any
+        }
+        return {} as any
+      })
+
+      // Compromisso iniciando em 2026-09 com vencimento dia 1
+      const compromisso: DespesaCompromisso = {
+        id: 'comp_continuo',
+        descricao: 'Assinatura Software',
+        conta_padrao: 'c_corrente',
+        metodo_pagamento: 'm_pix',
+        secao: 'contas_mensais_pix_boleto',
+        regra_repeticao: 'mensal',
+        modalidade_parcelamento: 'a_vista',
+        data_inicio: '2026-09-01 00:00:00.000Z',
+        dia_vencimento: 1,
+        valor_estimado: 50,
+        contexto_tipo: 'empresa',
+      } as any
+
+      await despesasService.gerarOcorrenciasParaCompromisso(compromisso)
+
+      // Calcula quais competências devem existir continuamente
+      const now = new Date()
+      const endYear = now.getUTCFullYear()
+      const endMonth = now.getUTCMonth() + 3
+      const targetEnd = new Date(Date.UTC(endYear, endMonth, 1))
+
+      let cursor = new Date(Date.UTC(2026, 8, 1)) // 2026-09
+      const esperadas: string[] = []
+      while (cursor.getTime() <= targetEnd.getTime()) {
+        const cY = cursor.getUTCFullYear()
+        const cM = cursor.getUTCMonth()
+        esperadas.push(`${cY}-${String(cM + 1).padStart(2, '0')}`)
+        cursor = new Date(Date.UTC(cY, cM + 1, 1))
+      }
+
+      const criadasCompetencias = criadas.map((c) => c.competencia).sort()
+      expect(criadasCompetencias).toEqual(esperadas)
+    })
+
+    it('quando targetCompetencias é fornecido, preenche competências faltantes desde data_inicio até a maior competência pedida', async () => {
+      const mockConta = {
+        id: 'c_corrente',
+        nome: 'Conta Corrente',
+        tipo: 'corrente',
+        tipos_pagamento: ['pix'],
+      }
+      const mockMetodo = {
+        id: 'm_pix',
+        codigo: 'Pix',
+        nome: 'Pix',
+        tipo: 'pix',
+      }
+
+      const criadas: any[] = []
+      const mockCreate = vi.fn().mockImplementation((data) => {
+        const item = { id: `ocorr_${criadas.length + 1}`, ...data }
+        criadas.push(item)
+        return Promise.resolve(item)
+      })
+
+      // Simula que 2026-09 já existe no banco
+      const mockGetList = vi.fn().mockImplementation((page, perPage, options) => {
+        const filterStr = options?.filter || ''
+        if (filterStr.includes("competencia = '2026-09'")) {
+          return Promise.resolve({
+            totalItems: 1,
+            items: [{ id: 'oc_09', competencia: '2026-09' }],
+          })
+        }
+        return Promise.resolve({ totalItems: 0, items: [] })
+      })
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') return { getOne: vi.fn().mockResolvedValue(mockConta) } as any
+        if (name === 'metodos_pagamento')
+          return { getOne: vi.fn().mockResolvedValue(mockMetodo) } as any
+        if (name === 'despesas_ocorrencias') {
+          return { getList: mockGetList, create: mockCreate } as any
+        }
+        return {} as any
+      })
+
+      const compromisso: DespesaCompromisso = {
+        id: 'comp_lote',
+        descricao: 'Internet Escritório',
+        conta_padrao: 'c_corrente',
+        metodo_pagamento: 'm_pix',
+        secao: 'contas_mensais_pix_boleto',
+        regra_repeticao: 'mensal',
+        modalidade_parcelamento: 'a_vista',
+        data_inicio: '2026-09-01 00:00:00.000Z',
+        dia_vencimento: 1,
+        valor_estimado: 100,
+        contexto_tipo: 'empresa',
+      } as any
+
+      // Chamada pedindo explicitamente 2026-10 (como na navegação para /despesas em 2026-10)
+      await despesasService.gerarOcorrenciasParaCompromisso(compromisso, ['2026-10'])
+
+      // Deve ter gerado 2026-10 mesmo que o dia de vencimento (1) seja anterior à data atual
+      const comp10 = criadas.find((c) => c.competencia === '2026-10')
+      expect(comp10).toBeDefined()
+      expect(comp10.status).toBe('prevista')
+      expect(comp10.data_vencimento.slice(0, 10)).toBe('2026-10-01')
+    })
+
+    it('chamada repetida é estritamente idempotente e não duplica ocorrências existentes', async () => {
+      const mockConta = {
+        id: 'c_corrente',
+        nome: 'Conta Corrente',
+        tipo: 'corrente',
+        tipos_pagamento: ['pix'],
+      }
+      const mockMetodo = {
+        id: 'm_pix',
+        codigo: 'Pix',
+        nome: 'Pix',
+        tipo: 'pix',
+      }
+
+      const mockCreate = vi.fn().mockResolvedValue({ id: 'nova' })
+
+      // Todas as competências checadas já existem
+      const mockGetList = vi.fn().mockResolvedValue({
+        totalItems: 1,
+        items: [{ id: 'ocorr_existente', status: 'prevista' }],
+      })
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') return { getOne: vi.fn().mockResolvedValue(mockConta) } as any
+        if (name === 'metodos_pagamento')
+          return { getOne: vi.fn().mockResolvedValue(mockMetodo) } as any
+        if (name === 'despesas_ocorrencias') {
+          return { getList: mockGetList, create: mockCreate } as any
+        }
+        return {} as any
+      })
+
+      const compromisso: DespesaCompromisso = {
+        id: 'comp_idempotente',
+        descricao: 'Limpeza',
+        conta_padrao: 'c_corrente',
+        metodo_pagamento: 'm_pix',
+        secao: 'contas_mensais_pix_boleto',
+        regra_repeticao: 'mensal',
+        modalidade_parcelamento: 'a_vista',
+        data_inicio: '2026-09-01 00:00:00.000Z',
+        dia_vencimento: 1,
+        valor_estimado: 120,
+        contexto_tipo: 'pessoal',
+      } as any
+
+      await despesasService.gerarOcorrenciasParaCompromisso(compromisso)
+      expect(mockCreate).not.toHaveBeenCalled()
+    })
+  })
 })

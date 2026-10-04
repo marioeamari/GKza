@@ -1378,38 +1378,63 @@ export const despesasService = {
       return `${now.getUTCFullYear()}-${(now.getUTCMonth() + 1).toString().padStart(2, '0')}`
     })()
 
-    const meses =
-      targetCompetencias && targetCompetencias.length > 0
-        ? targetCompetencias
-        : (() => {
-            const now = new Date()
-            const endYear = now.getUTCFullYear()
-            const endMonth = now.getUTCMonth() + 3 // mês atual + 3
-            const targetEnd = new Date(Date.UTC(endYear, endMonth, 1))
+    const meses = (() => {
+      // Determina a competência final desejada:
+      // se targetCompetencias foi informada, cobre continuamente do startCompStr até a maior competência pedida.
+      // Se não, cobre continuamente do startCompStr até o mês atual + 3.
+      const [sYStr, sMStr] = startCompStr.split('-')
+      const startYear = parseInt(sYStr, 10)
+      const startMonth = parseInt(sMStr, 10) - 1
 
-            const [sYStr, sMStr] = startCompStr.split('-')
-            let currYear = parseInt(sYStr, 10)
-            let currMonth = parseInt(sMStr, 10) - 1
+      let targetEndYear: number
+      let targetEndMonth: number
 
-            const list: string[] = []
-            let cursor = new Date(Date.UTC(currYear, currMonth, 1))
-            while (cursor.getTime() <= targetEnd.getTime()) {
-              const cY = cursor.getUTCFullYear()
-              const cM = cursor.getUTCMonth()
-              const compFormatted = `${cY}-${String(cM + 1).padStart(2, '0')}`
-              if (!list.includes(compFormatted)) {
-                list.push(compFormatted)
-              }
-              currMonth += 1
-              cursor = new Date(Date.UTC(currYear, currMonth, 1))
-            }
-            return list
-          })()
+      if (targetCompetencias && targetCompetencias.length > 0) {
+        // Encontra a maior competência da lista requisitada
+        const sortedTargets = [...targetCompetencias].sort()
+        const maxTarget = sortedTargets[sortedTargets.length - 1]
+        const [maxYStr, maxMStr] = maxTarget.split('-')
+        targetEndYear = parseInt(maxYStr, 10)
+        targetEndMonth = parseInt(maxMStr, 10) - 1
+      } else {
+        const now = new Date()
+        targetEndYear = now.getUTCFullYear()
+        targetEndMonth = now.getUTCMonth() + 3 // mês atual + 3
+      }
+
+      const targetEndDate = new Date(Date.UTC(targetEndYear, targetEndMonth, 1))
+      const list: string[] = []
+      let cursor = new Date(Date.UTC(startYear, startMonth, 1))
+
+      while (cursor.getTime() <= targetEndDate.getTime()) {
+        const cY = cursor.getUTCFullYear()
+        const cM = cursor.getUTCMonth()
+        const compFormatted = `${cY}-${String(cM + 1).padStart(2, '0')}`
+        if (!list.includes(compFormatted)) {
+          list.push(compFormatted)
+        }
+        cursor = new Date(Date.UTC(cY, cM + 1, 1))
+      }
+
+      // Se houver alguma competência adicional específica em targetCompetencias que exceda ou difira, inclui-a também
+      if (targetCompetencias && targetCompetencias.length > 0) {
+        for (const tComp of targetCompetencias) {
+          if (tComp >= startCompStr && !list.includes(tComp)) {
+            list.push(tComp)
+          }
+        }
+        list.sort()
+      }
+
+      return list
+    })()
 
     const day = compromisso.dia_vencimento || 10
 
     for (const compStr of meses) {
       // NUNCA gerar ocorrência anterior ao mês/competência de data_inicio do compromisso
+      // e nunca pular meses cujo dia_vencimento <= dia_atual:
+      // a ocorrência de competência vencida nasce como status 'prevista' e aparecerá nas atrasadas.
       if (compStr < startCompStr) {
         continue
       }
