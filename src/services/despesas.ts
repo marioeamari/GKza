@@ -468,6 +468,38 @@ export const despesasService = {
       }
     }
 
+    // REGRA DE PRODUTO (vencimento retroativo para NÃO crédito):
+    // Para métodos de pagamento imediato (tudo que NÃO é crédito), o vencimento de uma
+    // ocorrência paga nunca pode ser posterior ao mês do pagamento.
+    // Se a data_vencimento atual for de mês posterior ao pagamento, recalcular o vencimento
+    // no mês do pagamento usando o dia_vencimento do compromisso vinculado (clamp ao último dia do mês).
+    let naoCreditoVencimentoAjustadoIso: string | null = null
+    if (!metodoEfetivoEhCredito) {
+      const mesVencAtual = (ocorrAtual.data_vencimento || '').slice(0, 7)
+      if (mesVencAtual && mesVencAtual > compDataPag) {
+        const [pAnoStr, pMesStr] = compDataPag.split('-')
+        const pAno = parseInt(pAnoStr, 10)
+        const pMesZero = parseInt(pMesStr, 10) - 1
+
+        let diaCompromisso = 10
+        if (typeof ocorrAtual.compromisso === 'object' && ocorrAtual.compromisso !== null) {
+          diaCompromisso = (ocorrAtual.compromisso as any).dia_vencimento || 10
+        } else if (ocorrAtual.compromisso) {
+          try {
+            const c = await pb
+              .collection<DespesaCompromisso>('despesas_compromisso')
+              .getOne(ocorrAtual.compromisso)
+            diaCompromisso = c.dia_vencimento || 10
+          } catch {
+            /* ignore */
+          }
+        }
+
+        const dataVenc = despesasService.calcularDataVencimentoNoMes(pAno, pMesZero, diaCompromisso)
+        naoCreditoVencimentoAjustadoIso = dataVenc.toISOString()
+      }
+    }
+
     let ocorr: DespesaOcorrencia
     if (params.comprovanteArquivo) {
       const fdOcorr = new FormData()
@@ -481,12 +513,17 @@ export const despesasService = {
       if (cardCicloCompetencia && cardCicloVencimentoIso) {
         fdOcorr.append('competencia', cardCicloCompetencia)
         fdOcorr.append('data_vencimento', cardCicloVencimentoIso)
-      } else if (
-        compDataPag &&
-        compDataPag !== ocorrAtual.competencia &&
-        (ocorrAtual.secao === 'assinaturas_anuais' || !metodoEfetivoEhCredito)
-      ) {
-        fdOcorr.append('competencia', compDataPag)
+      } else {
+        if (
+          compDataPag &&
+          compDataPag !== ocorrAtual.competencia &&
+          (ocorrAtual.secao === 'assinaturas_anuais' || !metodoEfetivoEhCredito)
+        ) {
+          fdOcorr.append('competencia', compDataPag)
+        }
+        if (naoCreditoVencimentoAjustadoIso) {
+          fdOcorr.append('data_vencimento', naoCreditoVencimentoAjustadoIso)
+        }
       }
       fdOcorr.append('comprovante_pagamento', params.comprovanteArquivo)
 
@@ -510,12 +547,17 @@ export const despesasService = {
       if (cardCicloCompetencia && cardCicloVencimentoIso) {
         updatesOcorr.competencia = cardCicloCompetencia
         updatesOcorr.data_vencimento = cardCicloVencimentoIso
-      } else if (
-        compDataPag &&
-        compDataPag !== ocorrAtual.competencia &&
-        (ocorrAtual.secao === 'assinaturas_anuais' || !metodoEfetivoEhCredito)
-      ) {
-        updatesOcorr.competencia = compDataPag
+      } else {
+        if (
+          compDataPag &&
+          compDataPag !== ocorrAtual.competencia &&
+          (ocorrAtual.secao === 'assinaturas_anuais' || !metodoEfetivoEhCredito)
+        ) {
+          updatesOcorr.competencia = compDataPag
+        }
+        if (naoCreditoVencimentoAjustadoIso) {
+          updatesOcorr.data_vencimento = naoCreditoVencimentoAjustadoIso
+        }
       }
 
       ocorr = await pb
@@ -587,6 +629,25 @@ export const despesasService = {
     }
 
     // 2. Criar ocorrência já como 'paga'
+    // REGRA DE PRODUTO: para métodos de pagamento imediato (tudo que NÃO é crédito),
+    // o vencimento nunca pode ser posterior ao mês do pagamento.
+    // Se o compromisso tem dia_vencimento, usamos o dia_vencimento no mês do pagamento (clamp ao último dia do mês).
+    // Caso contrário (ou fallback), usamos a própria data do pagamento.
+    let vencimentoRegistradoIso = `${params.dataPagamento} 12:00:00.000Z`
+    try {
+      const compRecord = await pb
+        .collection<DespesaCompromisso>('despesas_compromisso')
+        .getOne(params.compromissoId)
+      const diaComp = compRecord.dia_vencimento || 10
+      const [pAnoStr, pMesStr] = compStr.split('-')
+      const pAno = parseInt(pAnoStr, 10)
+      const pMesZero = parseInt(pMesStr, 10) - 1
+      const dataVenc = despesasService.calcularDataVencimentoNoMes(pAno, pMesZero, diaComp)
+      vencimentoRegistradoIso = dataVenc.toISOString()
+    } catch {
+      /* fallback para params.dataPagamento */
+    }
+
     let ocorrencia: DespesaOcorrencia
     if (params.comprovanteArquivo) {
       const fdOcorr = new FormData()
@@ -596,7 +657,7 @@ export const despesasService = {
       fdOcorr.append('secao', params.secao || 'assinaturas_anuais')
       fdOcorr.append('conta', params.contaId)
       fdOcorr.append('competencia', compStr)
-      fdOcorr.append('data_vencimento', `${params.dataPagamento} 12:00:00.000Z`)
+      fdOcorr.append('data_vencimento', vencimentoRegistradoIso)
       fdOcorr.append('data_pagamento', `${params.dataPagamento} 12:00:00`)
       fdOcorr.append('valor_previsto', String(params.valorPago))
       fdOcorr.append('valor_pago', String(params.valorPago))
@@ -623,7 +684,7 @@ export const despesasService = {
           secao: params.secao || 'assinaturas_anuais',
           conta: params.contaId,
           competencia: compStr,
-          data_vencimento: `${params.dataPagamento} 12:00:00.000Z`,
+          data_vencimento: vencimentoRegistradoIso,
           data_pagamento: `${params.dataPagamento} 12:00:00`,
           valor_previsto: params.valorPago,
           valor_pago: params.valorPago,
@@ -1322,15 +1383,25 @@ export const despesasService = {
         ? targetCompetencias
         : (() => {
             const now = new Date()
-            const y = now.getUTCFullYear()
-            const m = now.getUTCMonth()
+            const endYear = now.getUTCFullYear()
+            const endMonth = now.getUTCMonth() + 3 // mês atual + 3
+            const targetEnd = new Date(Date.UTC(endYear, endMonth, 1))
+
+            const [sYStr, sMStr] = startCompStr.split('-')
+            let currYear = parseInt(sYStr, 10)
+            let currMonth = parseInt(sMStr, 10) - 1
+
             const list: string[] = []
-            // Gera a partir do mês atual até 3 meses à frente (nunca retroativo com i = -1)
-            for (let i = 0; i <= 3; i++) {
-              const d = new Date(Date.UTC(y, m + i, 1))
-              list.push(
-                `${d.getUTCFullYear()}-${(d.getUTCMonth() + 1).toString().padStart(2, '0')}`,
-              )
+            let cursor = new Date(Date.UTC(currYear, currMonth, 1))
+            while (cursor.getTime() <= targetEnd.getTime()) {
+              const cY = cursor.getUTCFullYear()
+              const cM = cursor.getUTCMonth()
+              const compFormatted = `${cY}-${String(cM + 1).padStart(2, '0')}`
+              if (!list.includes(compFormatted)) {
+                list.push(compFormatted)
+              }
+              currMonth += 1
+              cursor = new Date(Date.UTC(currYear, currMonth, 1))
             }
             return list
           })()

@@ -2091,4 +2091,241 @@ describe('despesasService - Agrupador de Despesas e Helpers', () => {
       expect(callData.data_vencimento.slice(0, 10)).toBe('2026-10-02')
     })
   })
+
+  describe('Regra de vencimento retroativo para NÃO crédito', () => {
+    it('baixarOcorrencia: pagamento em 30/09 de ocorrência com venc 30/10 recalcula venc para 30/09 (dia 30)', async () => {
+      const mockContaSicred = {
+        id: 'c_sicred',
+        nome: 'Sicred',
+        tipo: 'corrente',
+      }
+      const mockOcorrAtual = {
+        id: 'ocorr_taxa_licenca',
+        competencia: '2026-10',
+        data_vencimento: '2026-10-30T12:00:00.000Z',
+        valor_previsto: 154.97,
+        secao: 'contas_mensais_pix_boleto',
+        compromisso: {
+          id: 'comp_taxa_licenca',
+          dia_vencimento: 30,
+        },
+      }
+
+      const mockUpdate = vi.fn().mockImplementation((id, data) => {
+        return Promise.resolve({ id, ...data })
+      })
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') {
+          return { getOne: vi.fn().mockResolvedValue(mockContaSicred) } as any
+        }
+        if (name === 'despesas_ocorrencias') {
+          return {
+            getOne: vi.fn().mockResolvedValue(mockOcorrAtual),
+            update: mockUpdate,
+          } as any
+        }
+        if (name === 'lancamentos') {
+          return {
+            create: vi.fn().mockResolvedValue({ id: 'lanc_1' }),
+          } as any
+        }
+        return {} as any
+      })
+
+      await despesasService.baixarOcorrencia({
+        ocorrenciaId: 'ocorr_taxa_licenca',
+        contaId: 'c_sicred',
+        descricao: 'Taxa de Licença',
+        valorPago: 154.97,
+        dataPagamento: '2026-09-30',
+      })
+
+      expect(mockUpdate).toHaveBeenCalled()
+      const updatePayload = mockUpdate.mock.calls[0][1]
+      expect(updatePayload.status).toBe('paga')
+      expect(updatePayload.competencia).toBe('2026-09')
+      expect(updatePayload.data_vencimento.slice(0, 10)).toBe('2026-09-30')
+    })
+
+    it('baixarOcorrencia: pagamento em 05/09 com dia_vencimento 30 recalcula venc para 30/09 (clamp/corrida no mês do pagamento)', async () => {
+      const mockContaSicred = {
+        id: 'c_sicred',
+        nome: 'Sicred',
+        tipo: 'corrente',
+      }
+      const mockOcorrAtual = {
+        id: 'ocorr_vivo',
+        competencia: '2026-10',
+        data_vencimento: '2026-10-05T12:00:00.000Z',
+        valor_previsto: 102.91,
+        secao: 'contas_mensais_pix_boleto',
+        compromisso: {
+          id: 'comp_vivo',
+          dia_vencimento: 30, // dia 30 do compromisso
+        },
+      }
+
+      const mockUpdate = vi.fn().mockImplementation((id, data) => {
+        return Promise.resolve({ id, ...data })
+      })
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') {
+          return { getOne: vi.fn().mockResolvedValue(mockContaSicred) } as any
+        }
+        if (name === 'despesas_ocorrencias') {
+          return {
+            getOne: vi.fn().mockResolvedValue(mockOcorrAtual),
+            update: mockUpdate,
+          } as any
+        }
+        if (name === 'lancamentos') {
+          return {
+            create: vi.fn().mockResolvedValue({ id: 'lanc_2' }),
+          } as any
+        }
+        return {} as any
+      })
+
+      await despesasService.baixarOcorrencia({
+        ocorrenciaId: 'ocorr_vivo',
+        contaId: 'c_sicred',
+        descricao: 'Vivo',
+        valorPago: 102.91,
+        dataPagamento: '2026-09-05',
+      })
+
+      expect(mockUpdate).toHaveBeenCalled()
+      const updatePayload = mockUpdate.mock.calls[0][1]
+      expect(updatePayload.status).toBe('paga')
+      expect(updatePayload.competencia).toBe('2026-09')
+      // Mês de pagamento é 2026-09, dia_vencimento do compromisso é 30 -> 2026-09-30
+      expect(updatePayload.data_vencimento.slice(0, 10)).toBe('2026-09-30')
+    })
+
+    it('crédito permanece no ciclo da fatura mesmo se pago antes', async () => {
+      const mockContaCartao = {
+        id: 'c_cartao_sicred',
+        nome: 'Sicred Cartão',
+        tipo: 'cartao',
+        tipos_pagamento: ['credito'],
+        dia_fechamento: 20,
+        dia_vencimento: 28,
+      }
+      const mockMetodoCredito = {
+        id: 'm_credito',
+        codigo: 'Credito',
+        nome: 'Crédito',
+        tipo: 'cartao',
+      }
+      const mockOcorrCredito = {
+        id: 'ocorr_credito_compra',
+        competencia: '2026-10',
+        data_vencimento: '2026-10-28T12:00:00.000Z',
+        valor_previsto: 250,
+        secao: 'cartoes_credito',
+        compromisso: {
+          id: 'comp_credito',
+          dia_vencimento: 28,
+          metodo_pagamento: 'm_credito',
+        },
+      }
+
+      const mockUpdate = vi.fn().mockImplementation((id, data) => {
+        return Promise.resolve({ id, ...data })
+      })
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') {
+          return { getOne: vi.fn().mockResolvedValue(mockContaCartao) } as any
+        }
+        if (name === 'metodos_pagamento') {
+          return { getOne: vi.fn().mockResolvedValue(mockMetodoCredito) } as any
+        }
+        if (name === 'despesas_ocorrencias') {
+          return {
+            getOne: vi.fn().mockResolvedValue(mockOcorrCredito),
+            update: mockUpdate,
+            getList: vi.fn().mockResolvedValue({ totalItems: 0, items: [] }),
+          } as any
+        }
+        if (name === 'lancamentos') {
+          return {
+            create: vi.fn().mockResolvedValue({ id: 'lanc_3' }),
+          } as any
+        }
+        return {} as any
+      })
+
+      // Compra feita em 25/09 (após fechamento dia 20), cai na fatura com vencimento 28/10
+      await despesasService.baixarOcorrencia({
+        ocorrenciaId: 'ocorr_credito_compra',
+        contaId: 'c_cartao_sicred',
+        descricao: 'Compra Crédito',
+        valorPago: 250,
+        dataPagamento: '2026-09-25',
+      })
+
+      expect(mockUpdate).toHaveBeenCalled()
+      const updatePayload = mockUpdate.mock.calls[0][1]
+      expect(updatePayload.status).toBe('paga')
+      // Para crédito, data_vencimento permanece no ciclo da fatura (outubro) e não é forçada para setembro!
+      expect(updatePayload.competencia).toBe('2026-10')
+      expect(updatePayload.data_vencimento).toBeUndefined() // Se já era 2026-10-28, não sofre override
+    })
+
+    it('regra é idempotente: pagar ocorrência já com vencimento no mês do pagamento não altera o vencimento', async () => {
+      const mockContaSicred = {
+        id: 'c_sicred',
+        nome: 'Sicred',
+        tipo: 'corrente',
+      }
+      const mockOcorrAtual = {
+        id: 'ocorr_ja_corrigida',
+        competencia: '2026-09',
+        data_vencimento: '2026-09-30T12:00:00.000Z',
+        valor_previsto: 100,
+        secao: 'contas_mensais_pix_boleto',
+        compromisso: {
+          id: 'comp_c1',
+          dia_vencimento: 30,
+        },
+      }
+
+      const mockUpdate = vi.fn().mockImplementation((id, data) => {
+        return Promise.resolve({ id, ...data })
+      })
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') {
+          return { getOne: vi.fn().mockResolvedValue(mockContaSicred) } as any
+        }
+        if (name === 'despesas_ocorrencias') {
+          return {
+            getOne: vi.fn().mockResolvedValue(mockOcorrAtual),
+            update: mockUpdate,
+          } as any
+        }
+        if (name === 'lancamentos') {
+          return {
+            create: vi.fn().mockResolvedValue({ id: 'lanc_4' }),
+          } as any
+        }
+        return {} as any
+      })
+
+      await despesasService.baixarOcorrencia({
+        ocorrenciaId: 'ocorr_ja_corrigida',
+        contaId: 'c_sicred',
+        descricao: 'Despesa já corrigida',
+        valorPago: 100,
+        dataPagamento: '2026-09-30',
+      })
+
+      expect(mockUpdate).toHaveBeenCalled()
+      const updatePayload = mockUpdate.mock.calls[0][1]
+      expect(updatePayload.data_vencimento).toBeUndefined()
+    })
+  })
 })

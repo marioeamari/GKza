@@ -591,11 +591,19 @@ export function DespesaCompromissoDialog({
   // Verificação de compatibilidade entre dia de vencimento e data de início
   // Isenta pagamentos imediatos (Pix, débito, transferência, dinheiro ou caixa) e compras no cartão de crédito
   // (onde o vencimento é por natureza governado pelo ciclo da fatura, não pela data da compra).
+  // Também não bloqueia nem adverte quando data_inicio for de mês retroativo (as ocorrências retroativas
+  // são geradas normalmente respeitando o dia de vencimento).
   const avisoIncompatibilidadeData = useMemo(() => {
     if (form.regra_repeticao === 'avulso') return null
     if (isMetodoIsentoDeVencimento) return null
     if (isSelectedContaCartao) return null
     if (!form.data_inicio) return null
+
+    // Se a data de início for em mês retroativo em relação ao mês atual, permitir livremente
+    const currentComp = new Date().toISOString().slice(0, 7)
+    const startComp = form.data_inicio.slice(0, 7)
+    if (startComp < currentComp) return null
+
     const day = parseInt(form.data_inicio.slice(8, 10), 10)
     const diaVenc = Number(form.dia_vencimento)
     if (diaVenc && day !== diaVenc) {
@@ -692,24 +700,31 @@ export function DespesaCompromissoDialog({
     }
 
     // Regra de validação estrita da data de primeira cobrança vs dia de vencimento (Item 10)
-    // Não se aplica a pagamentos sem dependência de vencimento (Pix, débito, transferência, dinheiro, caixa) nem a compras no cartão
+    // Não se aplica a pagamentos sem dependência de vencimento (Pix, débito, transferência, dinheiro, caixa) nem a compras no cartão,
+    // tampouco a compromissos com data_inicio retroativa (mês passado), cuja geração criará ocorrências retroativas.
     if (
       form.regra_repeticao !== 'avulso' &&
       !isMetodoIsentoDeVencimento &&
       !isSelectedContaCartao &&
       form.data_inicio
     ) {
-      const day = parseInt(form.data_inicio.slice(8, 10), 10)
-      const diaVenc = Number(form.dia_vencimento)
-      if (diaVenc && day !== diaVenc) {
-        toast({
-          variant: 'destructive',
-          title: 'Vencimento incompatível',
-          description: `A data da 1ª cobrança (${formatDate(
-            form.data_inicio,
-          )}) é no dia ${day}, mas o dia de vencimento está definido como ${diaVenc}. Ajuste para o mesmo dia do mês antes de salvar.`,
-        })
-        return
+      const currentComp = new Date().toISOString().slice(0, 7)
+      const startComp = form.data_inicio.slice(0, 7)
+      const isRetroativa = startComp < currentComp
+
+      if (!isRetroativa) {
+        const day = parseInt(form.data_inicio.slice(8, 10), 10)
+        const diaVenc = Number(form.dia_vencimento)
+        if (diaVenc && day !== diaVenc) {
+          toast({
+            variant: 'destructive',
+            title: 'Vencimento incompatível',
+            description: `A data da 1ª cobrança (${formatDate(
+              form.data_inicio,
+            )}) é no dia ${day}, mas o dia de vencimento está definido como ${diaVenc}. Ajuste para o mesmo dia do mês antes de salvar.`,
+          })
+          return
+        }
       }
     }
 
