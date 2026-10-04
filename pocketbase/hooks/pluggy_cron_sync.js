@@ -117,25 +117,32 @@ cronAdd('pluggy_sync_hourly', '15 * * * *', () => {
       const acc = accounts[a]
       const contaInternaId = mapearContaInterna(bancoNome, acc)
 
-      let page = 1
-      let totalPages = 1
-      const pageSize = 100
+      let cursorNext = null
+      let cursorStep = 1
       let accountTransactions = []
 
-      while (page <= totalPages && page <= 20) {
+      while (cursorStep <= 20) {
         try {
-          const txRes = $http.send({
-            url:
-              'https://api.pluggy.ai/transactions?accountId=' +
+          let txUrl = ''
+          if (cursorNext) {
+            const nextQuery = cursorNext.startsWith('?') ? cursorNext : '?' + cursorNext
+            txUrl = 'https://api.pluggy.ai/v2/transactions' + nextQuery
+          } else {
+            txUrl =
+              'https://api.pluggy.ai/v2/transactions?accountId=' +
               acc.id +
+              '&dateFrom=' +
+              fromDateStr +
+              '&dateTo=' +
+              toDateStr +
               '&from=' +
               fromDateStr +
               '&to=' +
-              toDateStr +
-              '&page=' +
-              page +
-              '&pageSize=' +
-              pageSize,
+              toDateStr
+          }
+
+          const txRes = $http.send({
+            url: txUrl,
             method: 'GET',
             headers: { 'X-API-KEY': apiKey },
             timeout: 20,
@@ -145,8 +152,9 @@ cronAdd('pluggy_sync_hourly', '15 * * * *', () => {
             for (let r = 0; r < list.length; r++) {
               accountTransactions.push(list[r])
             }
-            if (txRes.json.totalPages && Number(txRes.json.totalPages) > 0) {
-              totalPages = Number(txRes.json.totalPages)
+            cursorNext = txRes.json.next || null
+            if (!cursorNext) {
+              break
             }
           } else {
             break
@@ -154,7 +162,7 @@ cronAdd('pluggy_sync_hourly', '15 * * * *', () => {
         } catch (_) {
           break
         }
-        page++
+        cursorStep++
       }
 
       for (let t = 0; t < accountTransactions.length; t++) {

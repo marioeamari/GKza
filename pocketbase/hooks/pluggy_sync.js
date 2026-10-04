@@ -287,26 +287,32 @@ routerAdd(
             toDateStr,
         )
 
-        let page = 1
-        let totalPages = 1
-        const pageSize = 100
+        let cursorNext = null
+        let cursorStep = 1
         let accountTransactions = []
 
-        // Loop de paginação
-        while (page <= totalPages && page <= 20) {
-          // trava de segurança até 20 páginas (2000 txs)
+        // Loop de paginação por cursor (GET /v2/transactions)
+        while (cursorStep <= 20) {
+          // trava de segurança de até 20 iterações de cursor
           try {
-            const txUrl =
-              'https://api.pluggy.ai/transactions?accountId=' +
-              accId +
-              '&from=' +
-              fromDateStr +
-              '&to=' +
-              toDateStr +
-              '&page=' +
-              page +
-              '&pageSize=' +
-              pageSize
+            let txUrl = ''
+            if (cursorNext) {
+              // cursorNext já vem pronto como query string, ex: "?accountId=...&after=..." ou similar
+              const nextQuery = cursorNext.startsWith('?') ? cursorNext : '?' + cursorNext
+              txUrl = 'https://api.pluggy.ai/v2/transactions' + nextQuery
+            } else {
+              txUrl =
+                'https://api.pluggy.ai/v2/transactions?accountId=' +
+                accId +
+                '&dateFrom=' +
+                fromDateStr +
+                '&dateTo=' +
+                toDateStr +
+                '&from=' +
+                fromDateStr +
+                '&to=' +
+                toDateStr
+            }
 
             const txRes = $http.send({
               url: txUrl,
@@ -316,10 +322,10 @@ routerAdd(
             })
 
             console.log(
-              '[PluggySync] GET /transactions account=' +
+              '[PluggySync] GET /v2/transactions account=' +
                 accId +
-                ' page=' +
-                page +
+                ' cursorStep=' +
+                cursorStep +
                 ' status=' +
                 txRes.statusCode +
                 ' bodyPreview=' +
@@ -330,8 +336,8 @@ routerAdd(
               const errDetail =
                 'Erro ao buscar transações da conta ' +
                 accId +
-                ' pág ' +
-                page +
+                ' cursor ' +
+                cursorStep +
                 ' (HTTP ' +
                 txRes.statusCode +
                 '): ' +
@@ -347,22 +353,30 @@ routerAdd(
               for (let r = 0; r < resList.length; r++) {
                 accountTransactions.push(resList[r])
               }
-              if (txRes.json.totalPages && Number(txRes.json.totalPages) > 0) {
-                totalPages = Number(txRes.json.totalPages)
+
+              // Pluggy v2/transactions retorna 'next' (string com query params ou null)
+              cursorNext = txRes.json.next || null
+              if (!cursorNext) {
+                break
               }
             } else {
               break
             }
           } catch (err) {
             const errDetail =
-              'Exceção ao buscar transações da conta ' + accId + ' pág ' + page + ': ' + err
+              'Exceção ao buscar transações da conta ' +
+              accId +
+              ' cursor ' +
+              cursorStep +
+              ': ' +
+              err
             console.log('[PluggySync] ' + errDetail)
             itemAudit.errors.push(errDetail)
             globalErrors.push(errDetail)
             break
           }
 
-          page++
+          cursorStep++
         }
 
         itemAudit.transactionsFound += accountTransactions.length
