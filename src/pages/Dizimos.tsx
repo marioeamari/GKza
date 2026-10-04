@@ -50,6 +50,13 @@ import { despesasService } from '@/services/despesas'
 import { financeService } from '@/services/finance'
 import { ofertasService } from '@/services/ofertas'
 import { OfertasVoluntariasModule } from '@/components/dizimos/OfertasVoluntariasModule'
+import {
+  getMesBrasilia,
+  getPercentualDizimoEfetivo,
+  calcularValorEfetivoBaseDizimo,
+  filtrarOcorrenciasDizimoMes,
+  calcularBaseCompartilhadaDizimo,
+} from '@/lib/dizimoCalculo'
 import type {
   Categoria,
   Conta,
@@ -81,22 +88,6 @@ function formatDataPagamentoBrasilia(dateStr?: string | null): string {
     /* fallback */
   }
   return formatDate(dateStr.slice(0, 10))
-}
-
-// Extrai o mês YYYY-MM segundo o fuso de Brasília
-function getMesBrasilia(dateStr?: string | null): string | null {
-  if (!dateStr) return null
-  try {
-    const iso =
-      dateStr.includes(' ') && !dateStr.includes('T') ? dateStr.replace(' ', 'T') : dateStr
-    const d = new Date(iso)
-    if (!isNaN(d.getTime())) {
-      return getLocalDateStr(d).slice(0, 7) // 'YYYY-MM'
-    }
-  } catch {
-    /* fallback */
-  }
-  return dateStr.slice(0, 7)
 }
 
 export default function Dizimos() {
@@ -265,18 +256,7 @@ export default function Dizimos() {
   // ocorrências com dizimo=true, status='paga', com data_pagamento dentro do mês de referência (fuso Brasília).
   // Cada ocorrência contribui na base com: valor_pago * (dizimo_percentual ?? 100) / 100.
   const ocorrenciasFiltradas = useMemo(() => {
-    return ocorrenciasPagas
-      .filter((oc) => {
-        if (oc.status !== 'paga') return false
-        const mes =
-          getMesBrasilia(oc.data_pagamento) || (oc.competencia ? oc.competencia.slice(0, 7) : null)
-        return mes === selectedMonth
-      })
-      .sort((a, b) => {
-        const dataA = a.data_pagamento || a.competencia || ''
-        const dataB = b.data_pagamento || b.competencia || ''
-        return dataA.localeCompare(dataB)
-      })
+    return filtrarOcorrenciasDizimoMes(ocorrenciasPagas, selectedMonth)
   }, [ocorrenciasPagas, selectedMonth])
 
   // Total bruto pago das ocorrências de dízimo no mês
@@ -287,18 +267,7 @@ export default function Dizimos() {
 
   // Montante efetivo da base compartilhada calculada de forma ponderada por percentual
   const baseCompartilhada = useMemo(
-    () =>
-      ocorrenciasFiltradas.reduce((acc, oc) => {
-        const pct =
-          oc.dizimo_percentual !== undefined && oc.dizimo_percentual !== null
-            ? oc.dizimo_percentual
-            : oc.expand?.compromisso?.dizimo_percentual !== undefined &&
-                oc.expand?.compromisso?.dizimo_percentual !== null
-              ? oc.expand.compromisso.dizimo_percentual
-              : 100
-        const valorEfetivo = ((oc.valor_pago || 0) * pct) / 100
-        return acc + valorEfetivo
-      }, 0),
+    () => calcularBaseCompartilhadaDizimo(ocorrenciasFiltradas),
     [ocorrenciasFiltradas],
   )
 
@@ -370,13 +339,7 @@ export default function Dizimos() {
   // Abrir modal de edição de percentual de ocorrência
   const handleOpenEditPercentualOcorr = (oc: DespesaOcorrencia) => {
     setEditingOcorrenciaPercentual(oc)
-    const pct =
-      oc.dizimo_percentual !== undefined && oc.dizimo_percentual !== null
-        ? oc.dizimo_percentual
-        : oc.expand?.compromisso?.dizimo_percentual !== undefined &&
-            oc.expand?.compromisso?.dizimo_percentual !== null
-          ? oc.expand.compromisso.dizimo_percentual
-          : 100
+    const pct = getPercentualDizimoEfetivo(oc)
     setPercentualOcorrenciaInput(pct)
     setEditPercentualOcorrOpen(true)
   }
@@ -846,12 +809,7 @@ export default function Dizimos() {
                       getCategoriaNome(comp?.categoria)
                     const dataPag = formatDataPagamentoBrasilia(oc.data_pagamento)
                     const rotuloNome = getTipoDizimoNome(oc.tipo_dizimo, oc.expand?.tipo_dizimo)
-                    const pct =
-                      oc.dizimo_percentual !== undefined && oc.dizimo_percentual !== null
-                        ? oc.dizimo_percentual
-                        : comp?.dizimo_percentual !== undefined && comp?.dizimo_percentual !== null
-                          ? comp.dizimo_percentual
-                          : 100
+                    const pct = getPercentualDizimoEfetivo(oc)
                     const valorPago = oc.valor_pago || 0
                     const valorEfetivo = (valorPago * pct) / 100
 

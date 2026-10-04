@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, LoaderCircle } from 'lucide-react'
+import { CheckCircle2, Info, LoaderCircle } from 'lucide-react'
 
 import { MoneyInput } from '@/components/MoneyInput'
 import { Button } from '@/components/ui/button'
