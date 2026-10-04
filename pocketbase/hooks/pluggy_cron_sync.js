@@ -134,10 +134,6 @@ cronAdd('pluggy_sync_hourly', '15 * * * *', () => {
               '&dateFrom=' +
               fromDateStr +
               '&dateTo=' +
-              toDateStr +
-              '&from=' +
-              fromDateStr +
-              '&to=' +
               toDateStr
           }
 

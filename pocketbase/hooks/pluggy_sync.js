@@ -307,10 +307,6 @@ routerAdd(
                 '&dateFrom=' +
                 fromDateStr +
                 '&dateTo=' +
-                toDateStr +
-                '&from=' +
-                fromDateStr +
-                '&to=' +
                 toDateStr
             }
 

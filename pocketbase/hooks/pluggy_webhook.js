@@ -167,10 +167,6 @@ routerAdd('POST', '/backend/v1/pluggy/webhook', (e) => {
               '&dateFrom=' +
               fromDateStr +
               '&dateTo=' +
-              toDateStr +
-              '&from=' +
-              fromDateStr +
-              '&to=' +
               toDateStr
           }
 
