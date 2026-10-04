@@ -318,6 +318,7 @@ export const despesasService = {
     observacoes?: string
     comprovanteArquivo?: File | null
     descricao: string
+    dizimoPercentual?: number
   }) => {
     // Verifica se a conta escolhida para baixa é do tipo 'cartao'
     let isCartao = false
@@ -509,6 +510,9 @@ export const despesasService = {
       fdOcorr.append('valor_ajustado_manualmente', String(diferencaValor))
       fdOcorr.append('data_pagamento', `${params.dataPagamento} 12:00:00`)
       fdOcorr.append('conta', params.contaId)
+      if (params.dizimoPercentual !== undefined) {
+        fdOcorr.append('dizimo_percentual', String(params.dizimoPercentual))
+      }
       if (lancamentoId) fdOcorr.append('lancamento', lancamentoId)
       if (cardCicloCompetencia && cardCicloVencimentoIso) {
         fdOcorr.append('competencia', cardCicloCompetencia)
@@ -541,6 +545,9 @@ export const despesasService = {
         valor_ajustado_manualmente: diferencaValor,
         data_pagamento: `${params.dataPagamento} 12:00:00`,
         conta: params.contaId,
+        ...(params.dizimoPercentual !== undefined
+          ? { dizimo_percentual: params.dizimoPercentual }
+          : {}),
         lancamento: lancamentoId,
       }
 
@@ -591,6 +598,7 @@ export const despesasService = {
     dizimo?: boolean
     tipoDizimoId?: string
     direcionamento?: string
+    dizimoPercentual?: number
   }) => {
     const compStr = params.dataPagamento.slice(0, 7) // 'YYYY-MM'
 
@@ -667,6 +675,9 @@ export const despesasService = {
       fdOcorr.append('lancamento', lancamento.id)
       fdOcorr.append('dizimo', String(params.dizimo || false))
       if (params.tipoDizimoId) fdOcorr.append('tipo_dizimo', params.tipoDizimoId)
+      if (params.dizimoPercentual !== undefined) {
+        fdOcorr.append('dizimo_percentual', String(params.dizimoPercentual))
+      }
       if (params.direcionamento) fdOcorr.append('direcionamento', params.direcionamento)
       if (params.observacoes) fdOcorr.append('observacoes', params.observacoes)
       fdOcorr.append('comprovante_pagamento', params.comprovanteArquivo)
@@ -694,6 +705,7 @@ export const despesasService = {
           lancamento: lancamento.id,
           dizimo: params.dizimo || false,
           tipo_dizimo: params.tipoDizimoId || null,
+          dizimo_percentual: params.dizimoPercentual !== undefined ? params.dizimoPercentual : 100,
           direcionamento: params.direcionamento || null,
           observacoes: params.observacoes || null,
         },
@@ -872,6 +884,8 @@ export const despesasService = {
           status: 'prevista',
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || null,
+          dizimo_percentual:
+            compromisso.dizimo_percentual !== undefined ? compromisso.dizimo_percentual : 100,
           direcionamento: compromisso.direcionamento || null,
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || null,
@@ -909,6 +923,12 @@ export const despesasService = {
       }
       if (oc.tipo_dizimo !== (compromisso.tipo_dizimo || null)) {
         updates.tipo_dizimo = compromisso.tipo_dizimo || null
+      }
+      if (
+        compromisso.dizimo_percentual !== undefined &&
+        oc.dizimo_percentual !== compromisso.dizimo_percentual
+      ) {
+        updates.dizimo_percentual = compromisso.dizimo_percentual
       }
       if (oc.direcionamento !== (compromisso.direcionamento || null)) {
         updates.direcionamento = compromisso.direcionamento || null
@@ -1089,6 +1109,8 @@ export const despesasService = {
           status: 'prevista',
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || null,
+          dizimo_percentual:
+            compromisso.dizimo_percentual !== undefined ? compromisso.dizimo_percentual : 100,
           direcionamento: compromisso.direcionamento || null,
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || 'Pagamento único / avulso',
@@ -1154,6 +1176,8 @@ export const despesasService = {
                 status: 'prevista',
                 dizimo: compromisso.dizimo || false,
                 tipo_dizimo: compromisso.tipo_dizimo || null,
+                dizimo_percentual:
+                  compromisso.dizimo_percentual !== undefined ? compromisso.dizimo_percentual : 100,
                 direcionamento: compromisso.direcionamento || null,
                 link_pagamento: compromisso.link_pagamento || null,
                 observacoes: `Parcela ${p}/${total}`,
@@ -1197,6 +1221,8 @@ export const despesasService = {
                 status: 'prevista',
                 dizimo: compromisso.dizimo || false,
                 tipo_dizimo: compromisso.tipo_dizimo || null,
+                dizimo_percentual:
+                  compromisso.dizimo_percentual !== undefined ? compromisso.dizimo_percentual : 100,
                 direcionamento: compromisso.direcionamento || null,
                 link_pagamento: compromisso.link_pagamento || null,
                 observacoes: `Parcela ${p}/${total}`,
@@ -1263,6 +1289,8 @@ export const despesasService = {
           status: 'prevista',
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || null,
+          dizimo_percentual:
+            compromisso.dizimo_percentual !== undefined ? compromisso.dizimo_percentual : 100,
           direcionamento: compromisso.direcionamento || null,
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || 'Assinatura anual',
@@ -1347,6 +1375,8 @@ export const despesasService = {
             status: 'prevista',
             dizimo: compromisso.dizimo || false,
             tipo_dizimo: compromisso.tipo_dizimo || null,
+            dizimo_percentual:
+              compromisso.dizimo_percentual !== undefined ? compromisso.dizimo_percentual : 100,
             direcionamento: compromisso.direcionamento || null,
             link_pagamento: compromisso.link_pagamento || null,
             observacoes: compromisso.observacoes || null,
@@ -1460,6 +1490,8 @@ export const despesasService = {
           status: 'prevista',
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || null,
+          dizimo_percentual:
+            compromisso.dizimo_percentual !== undefined ? compromisso.dizimo_percentual : 100,
           direcionamento: compromisso.direcionamento || null,
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || null,

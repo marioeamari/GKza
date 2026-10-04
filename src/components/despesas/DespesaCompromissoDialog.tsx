@@ -157,6 +157,7 @@ export function DespesaCompromissoDialog({
     link_pagamento: '',
     dizimo: false,
     tipo_dizimo: '',
+    dizimo_percentual: 100,
     direcionamento: '',
     ativo: true,
     observacoes: '',
@@ -277,6 +278,10 @@ export function DespesaCompromissoDialog({
           link_pagamento: compromisso.link_pagamento || '',
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || '',
+          dizimo_percentual:
+            compromisso.dizimo_percentual !== undefined && compromisso.dizimo_percentual !== null
+              ? Number(compromisso.dizimo_percentual)
+              : 100,
           direcionamento: compromisso.direcionamento || '',
           ativo: isDuplicating ? true : (compromisso.ativo ?? true),
           observacoes: compromisso.observacoes || '',
@@ -342,6 +347,7 @@ export function DespesaCompromissoDialog({
           link_pagamento: '',
           dizimo: false,
           tipo_dizimo: defaultDizimoTipo,
+          dizimo_percentual: 100,
           direcionamento: '',
           ativo: true,
           observacoes: '',
@@ -804,6 +810,7 @@ export function DespesaCompromissoDialog({
         if (form.link_pagamento) fd.append('link_pagamento', form.link_pagamento)
         fd.append('dizimo', String(form.dizimo))
         if (form.dizimo && form.tipo_dizimo) fd.append('tipo_dizimo', form.tipo_dizimo)
+        fd.append('dizimo_percentual', String(form.dizimo_percentual ?? 100))
         if (form.direcionamento?.trim()) fd.append('direcionamento', form.direcionamento.trim())
         fd.append('ativo', String(form.ativo))
         if (form.observacoes) fd.append('observacoes', form.observacoes)
@@ -881,6 +888,7 @@ export function DespesaCompromissoDialog({
           dizimo: form.dizimo,
           tipo_dizimo:
             form.dizimo && form.tipo_dizimo ? form.tipo_dizimo : (null as unknown as string),
+          dizimo_percentual: Number(form.dizimo_percentual ?? 100),
           direcionamento: form.direcionamento?.trim() || (null as unknown as string),
           ativo: form.ativo,
           observacoes: form.observacoes || (null as unknown as string),
@@ -1760,21 +1768,109 @@ export function DespesaCompromissoDialog({
             <div className="rounded-xl border border-border bg-secondary/20 p-3 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <Label className="font-bold text-foreground">Dízimo / Oferta ministerial</Label>
+                  <Label className="font-bold text-foreground">Dízimo sobre esta despesa</Label>
                   <p className="text-xs text-muted-foreground">
-                    Marque para compromissos de dízimos/ofertas e compute nos totais do período
+                    Define se esta despesa entra no cálculo do dízimo e em qual proporção
                   </p>
                 </div>
                 <Switch
                   checked={form.dizimo}
-                  onCheckedChange={(v) => setForm({ ...form, dizimo: v })}
+                  onCheckedChange={(v) => {
+                    setForm({
+                      ...form,
+                      dizimo: v,
+                      dizimo_percentual: v
+                        ? form.dizimo_percentual === 0
+                          ? 100
+                          : form.dizimo_percentual
+                        : 0,
+                    })
+                  }}
                 />
               </div>
 
+              {/* Percentual de dízimo com botões de toque rápido */}
+              <div className="space-y-2 pt-1 border-t border-border/60">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold text-foreground">
+                    Percentual base de dízimo:{' '}
+                    <span className="text-primary font-bold">{form.dizimo_percentual ?? 100}%</span>
+                  </Label>
+                  {form.dizimo_percentual === 0 ? (
+                    <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                      Não incide dízimo (0%)
+                    </Badge>
+                  ) : form.dizimo_percentual === 100 ? (
+                    <Badge variant="secondary" className="text-[10px] bg-primary/10 text-primary">
+                      Integral (100%)
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] bg-amber-500/10 text-amber-700"
+                    >
+                      Parcial ({form.dizimo_percentual}%)
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[100, 75, 50, 25, 0].map((pct) => {
+                    const isSelected = form.dizimo_percentual === pct
+                    return (
+                      <Button
+                        key={pct}
+                        type="button"
+                        size="sm"
+                        variant={isSelected ? 'default' : 'outline'}
+                        className={`h-7 px-2.5 text-xs font-semibold rounded-md ${
+                          isSelected
+                            ? 'bg-primary text-primary-foreground shadow-xs'
+                            : 'bg-background hover:bg-secondary/60'
+                        }`}
+                        onClick={() => {
+                          setForm({
+                            ...form,
+                            dizimo_percentual: pct,
+                            dizimo: pct > 0,
+                          })
+                        }}
+                      >
+                        {pct}%
+                      </Button>
+                    )
+                  })}
+                  <div className="flex items-center gap-1 ml-auto">
+                    <span className="text-xs text-muted-foreground">Custom:</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={form.dizimo_percentual ?? 100}
+                      onChange={(e) => {
+                        const val = Math.max(0, Math.min(100, Number(e.target.value) || 0))
+                        setForm({
+                          ...form,
+                          dizimo_percentual: val,
+                          dizimo: val > 0,
+                        })
+                      }}
+                      className="h-7 w-16 text-xs text-right font-semibold"
+                    />
+                    <span className="text-xs text-muted-foreground">%</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  {form.dizimo_percentual === 0
+                    ? 'Com 0%, as parcelas e ocorrências geradas não entrarão na base do dízimo.'
+                    : `Cada parcela paga contribuirá com ${form.dizimo_percentual}% do seu valor na base do dízimo do mês em que for paga.`}
+                </p>
+              </div>
+
               {form.dizimo && (
-                <div className="space-y-3 pt-1">
+                <div className="space-y-3 pt-2 border-t border-border/60">
                   <div className="space-y-1.5">
-                    <Label>Tipo de Dízimo / Oferta</Label>
+                    <Label className="text-xs">Classificação do Dízimo / Oferta ministerial</Label>
                     <Select
                       value={form.tipo_dizimo || 'none'}
                       onValueChange={(v) =>
@@ -1795,7 +1891,7 @@ export function DespesaCompromissoDialog({
                     </Select>
                   </div>
                   <div className="space-y-1.5">
-                    <Label>Direcionamento (opcional)</Label>
+                    <Label className="text-xs">Direcionamento (opcional)</Label>
                     <Input
                       value={form.direcionamento || ''}
                       onChange={(e) => setForm({ ...form, direcionamento: e.target.value })}

@@ -199,6 +199,7 @@ export interface DespesaCompromisso extends RecordModel {
   anexo_conta?: string
   dizimo?: boolean
   tipo_dizimo?: string
+  dizimo_percentual?: number
   direcionamento?: string
   ativo: boolean
   observacoes?: string
@@ -237,6 +238,7 @@ export interface DespesaOcorrencia extends RecordModel {
   lancamento?: string
   dizimo?: boolean
   tipo_dizimo?: string
+  dizimo_percentual?: number
   direcionamento?: string
   link_pagamento?: string
   comprovante_pagamento?: string

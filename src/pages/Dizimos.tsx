@@ -260,10 +260,10 @@ export default function Dizimos() {
     }
   }, [selectedMonth])
 
-  // BASE ÚNICA COMPARTILHADA:
+  // BASE ÚNICA COMPARTILHADA COM CÁLCULO PONDERADO:
   // As 3 seções (Dízimo, Oferta, Primícias) utilizam a mesma base de cálculo =
   // ocorrências com dizimo=true, status='paga', com data_pagamento dentro do mês de referência (fuso Brasília).
-  // O campo tipo_dizimo deixa de ser critério de filtro da base.
+  // Cada ocorrência contribui na base com: valor_pago * (dizimo_percentual ?? 100) / 100.
   const ocorrenciasFiltradas = useMemo(() => {
     return ocorrenciasPagas
       .filter((oc) => {
@@ -279,9 +279,26 @@ export default function Dizimos() {
       })
   }, [ocorrenciasPagas, selectedMonth])
 
-  // Montante total da base única compartilhada
-  const baseCompartilhada = useMemo(
+  // Total bruto pago das ocorrências de dízimo no mês
+  const totalBrutoPago = useMemo(
     () => ocorrenciasFiltradas.reduce((acc, oc) => acc + (oc.valor_pago || 0), 0),
+    [ocorrenciasFiltradas],
+  )
+
+  // Montante efetivo da base compartilhada calculada de forma ponderada por percentual
+  const baseCompartilhada = useMemo(
+    () =>
+      ocorrenciasFiltradas.reduce((acc, oc) => {
+        const pct =
+          oc.dizimo_percentual !== undefined && oc.dizimo_percentual !== null
+            ? oc.dizimo_percentual
+            : oc.expand?.compromisso?.dizimo_percentual !== undefined &&
+                oc.expand?.compromisso?.dizimo_percentual !== null
+              ? oc.expand.compromisso.dizimo_percentual
+              : 100
+        const valorEfetivo = ((oc.valor_pago || 0) * pct) / 100
+        return acc + valorEfetivo
+      }, 0),
     [ocorrenciasFiltradas],
   )
 
@@ -340,6 +357,61 @@ export default function Dizimos() {
       })
     } finally {
       setSavingPercentual(false)
+    }
+  }
+
+  // Estado para edição retroativa de percentual de dízimo na ocorrência
+  const [editPercentualOcorrOpen, setEditPercentualOcorrOpen] = useState(false)
+  const [editingOcorrenciaPercentual, setEditingOcorrenciaPercentual] =
+    useState<DespesaOcorrencia | null>(null)
+  const [percentualOcorrenciaInput, setPercentualOcorrenciaInput] = useState<number>(100)
+  const [savingPercentualOcorrencia, setSavingPercentualOcorrencia] = useState(false)
+
+  // Abrir modal de edição de percentual de ocorrência
+  const handleOpenEditPercentualOcorr = (oc: DespesaOcorrencia) => {
+    setEditingOcorrenciaPercentual(oc)
+    const pct =
+      oc.dizimo_percentual !== undefined && oc.dizimo_percentual !== null
+        ? oc.dizimo_percentual
+        : oc.expand?.compromisso?.dizimo_percentual !== undefined &&
+            oc.expand?.compromisso?.dizimo_percentual !== null
+          ? oc.expand.compromisso.dizimo_percentual
+          : 100
+    setPercentualOcorrenciaInput(pct)
+    setEditPercentualOcorrOpen(true)
+  }
+
+  const handleSavePercentualOcorrencia = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingOcorrenciaPercentual) return
+    const val = Math.max(0, Math.min(100, Number(percentualOcorrenciaInput) || 0))
+    setSavingPercentualOcorrencia(true)
+    try {
+      await despesasService.atualizarOcorrencia(editingOcorrenciaPercentual.id, {
+        dizimo_percentual: val,
+        dizimo: val > 0,
+      })
+      // Atualiza localmente
+      setOcorrenciasPagas((prev) =>
+        prev.map((oc) =>
+          oc.id === editingOcorrenciaPercentual.id
+            ? { ...oc, dizimo_percentual: val, dizimo: val > 0 }
+            : oc,
+        ),
+      )
+      toast({
+        title: 'Percentual atualizado!',
+        description: `Percentual da ocorrência ajustado para ${val}%. Base do mês recalculada.`,
+      })
+      setEditPercentualOcorrOpen(false)
+    } catch (err) {
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao atualizar percentual',
+        description: apiMessage(err),
+      })
+    } finally {
+      setSavingPercentualOcorrencia(false)
     }
   }
 
@@ -462,7 +534,7 @@ export default function Dizimos() {
                   </span>
                   <div className="flex flex-wrap items-center gap-2 text-base font-bold text-foreground sm:text-lg">
                     <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border">
-                      Base paga no mês: {formatCurrency(baseCompartilhada)}
+                      Base efetiva no mês: {formatCurrency(baseCompartilhada)}
                     </span>
                     <span className="text-muted-foreground">×</span>
                     <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border text-[#DF5830] font-black">
@@ -485,12 +557,36 @@ export default function Dizimos() {
                 </div>
               </div>
 
-              <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+              {/* Composição: Total bruto pago com dízimo vs quanto efetivamente entrou na base */}
+              <div className="mt-3 pt-3 border-t border-[#DF5830]/20 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">
+                    Total bruto pago das despesas de dízimo:
+                  </span>
+                  <strong className="text-foreground">{formatCurrency(totalBrutoPago)}</strong>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Efetivamente ponderado na base:</span>
+                  <strong className="text-[#DF5830] font-bold">
+                    {formatCurrency(baseCompartilhada)}
+                  </strong>
+                  {totalBrutoPago > 0 && totalBrutoPago !== baseCompartilhada && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] bg-white border-[#DF5830]/30 text-[#DF5830]"
+                    >
+                      {((baseCompartilhada / totalBrutoPago) * 100).toFixed(1)}% do valor bruto
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Info className="h-4 w-4 text-[#DF5830] shrink-0" />
                 <span>
-                  Base única compartilhada: <strong>{ocorrenciasFiltradas.length}</strong>{' '}
+                  Base ponderada por despesa: <strong>{ocorrenciasFiltradas.length}</strong>{' '}
                   {ocorrenciasFiltradas.length === 1 ? 'despesa paga' : 'despesas pagas'} em{' '}
-                  <strong>{monthLabel}</strong> (fuso Brasília) compõem a base de cálculo.
+                  <strong>{monthLabel}</strong> somando cada parcela pelo seu percentual específico.
                 </span>
               </div>
             </div>
@@ -547,7 +643,7 @@ export default function Dizimos() {
                   </span>
                   <div className="flex flex-wrap items-center gap-2 text-base font-bold text-foreground sm:text-lg">
                     <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border">
-                      Base paga no mês: {formatCurrency(baseCompartilhada)}
+                      Base efetiva no mês: {formatCurrency(baseCompartilhada)}
                     </span>
                     <span className="text-muted-foreground">×</span>
                     <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border text-[#B7791F] font-black">
@@ -570,12 +666,26 @@ export default function Dizimos() {
                 </div>
               </div>
 
-              <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+              {/* Composição: Total bruto pago com dízimo vs quanto efetivamente entrou na base */}
+              <div className="mt-3 pt-3 border-t border-[#B7791F]/20 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Total bruto pago das despesas:</span>
+                  <strong className="text-foreground">{formatCurrency(totalBrutoPago)}</strong>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Efetivamente ponderado na base:</span>
+                  <strong className="text-[#B7791F] font-bold">
+                    {formatCurrency(baseCompartilhada)}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Info className="h-4 w-4 text-[#B7791F] shrink-0" />
                 <span>
-                  O montante base de cálculo é o mesmo do dízimo. Você pode atribuir o{' '}
-                  <em>"Direcionamento"</em> específico (ex.: Louvor, Bateria, Missões) em cada linha
-                  abaixo para auditoria do destino dos recursos.
+                  O montante base de cálculo é o mesmo do dízimo (ponderado por percentual). Você
+                  pode atribuir o <em>"Direcionamento"</em> específico (ex.: Louvor, Bateria,
+                  Missões) em cada linha abaixo para auditoria do destino dos recursos.
                 </span>
               </div>
             </div>
@@ -627,7 +737,7 @@ export default function Dizimos() {
                 </span>
                 <div className="flex flex-wrap items-center gap-2 text-base font-bold text-foreground sm:text-lg">
                   <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border">
-                    Base paga no mês: {formatCurrency(baseCompartilhada)}
+                    Base efetiva no mês: {formatCurrency(baseCompartilhada)}
                   </span>
                   <span className="text-muted-foreground">×</span>
                   <span className="rounded-lg bg-white px-2.5 py-1 shadow-xs border border-border text-[#1E6F5C] font-black">
@@ -649,15 +759,27 @@ export default function Dizimos() {
                 </p>
               </div>
             </div>
-
-            <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+            {/* Composição: Total bruto pago com dízimo vs quanto efetivamente entrou na base */}
+            <div className="mt-3 pt-3 border-t border-[#1E6F5C]/20 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Total bruto pago das despesas:</span>
+                <strong className="text-foreground">{formatCurrency(totalBrutoPago)}</strong>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Efetivamente ponderado na base:</span>
+                <strong className="text-[#1E6F5C] font-bold">
+                  {formatCurrency(baseCompartilhada)}
+                </strong>
+              </div>
+            </div>
+            <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
               <Info className="h-4 w-4 text-[#1E6F5C] shrink-0" />
               <span>
                 No mês de <strong>{monthLabel}</strong> (com <strong>{diasNoMes} dias</strong>), o
                 cálculo equivale a 1 dia ({((1 / diasNoMes) * 100).toFixed(2)}%) sobre a base única
-                compartilhada de despesas pagas.
+                compartilhada ponderada de despesas pagas.
               </span>
-            </div>
+            </div>{' '}
           </div>
         </CardContent>
       </Card>
@@ -711,7 +833,9 @@ export default function Dizimos() {
                     <TableHead className="font-bold">Descrição</TableHead>
                     <TableHead className="font-bold">Conta / Saída</TableHead>
                     <TableHead className="font-bold">Direcionamento</TableHead>
-                    <TableHead className="text-right font-bold w-36">Valor Pago</TableHead>
+                    <TableHead className="font-bold text-center w-28">% Dízimo</TableHead>
+                    <TableHead className="text-right font-bold w-32">Valor Bruto</TableHead>
+                    <TableHead className="text-right font-bold w-36">Base Efetiva</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -722,6 +846,14 @@ export default function Dizimos() {
                       getCategoriaNome(comp?.categoria)
                     const dataPag = formatDataPagamentoBrasilia(oc.data_pagamento)
                     const rotuloNome = getTipoDizimoNome(oc.tipo_dizimo, oc.expand?.tipo_dizimo)
+                    const pct =
+                      oc.dizimo_percentual !== undefined && oc.dizimo_percentual !== null
+                        ? oc.dizimo_percentual
+                        : comp?.dizimo_percentual !== undefined && comp?.dizimo_percentual !== null
+                          ? comp.dizimo_percentual
+                          : 100
+                    const valorPago = oc.valor_pago || 0
+                    const valorEfetivo = (valorPago * pct) / 100
 
                     return (
                       <TableRow key={oc.id} className="hover:bg-muted/40">
@@ -793,9 +925,40 @@ export default function Dizimos() {
                           </button>
                         </TableCell>
 
-                        {/* Valor Pago */}
+                        {/* Percentual com botão para ajuste retroativo */}
+                        <TableCell className="text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditPercentualOcorr(oc)}
+                            className="group inline-flex items-center gap-1 hover:opacity-80"
+                            title="Clique para ajustar percentual desta ocorrência"
+                          >
+                            <Badge
+                              variant={pct === 100 ? 'secondary' : 'outline'}
+                              className={`text-[11px] font-bold ${
+                                pct === 100
+                                  ? 'bg-secondary text-foreground'
+                                  : pct === 0
+                                    ? 'bg-destructive/10 text-destructive border-destructive/30'
+                                    : 'bg-amber-500/10 text-amber-700 border-amber-300'
+                              }`}
+                            >
+                              {pct}%
+                            </Badge>
+                            {can(user?.role, 'writeFinance') && (
+                              <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity text-primary" />
+                            )}
+                          </button>
+                        </TableCell>
+
+                        {/* Valor Pago Bruto */}
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          {formatCurrency(valorPago)}
+                        </TableCell>
+
+                        {/* Valor Efetivo na Base */}
                         <TableCell className="text-right font-bold text-foreground">
-                          {formatCurrency(oc.valor_pago || 0)}
+                          {formatCurrency(valorEfetivo)}
                         </TableCell>
                       </TableRow>
                     )
@@ -803,8 +966,11 @@ export default function Dizimos() {
 
                   {/* Subtotal da Base Única Compartilhada */}
                   <TableRow className="bg-secondary/30 font-bold border-t-2 border-border">
-                    <TableCell colSpan={6} className="text-right uppercase tracking-wider text-xs">
-                      Total da Base Compartilhada ({monthLabel}):
+                    <TableCell colSpan={7} className="text-right uppercase tracking-wider text-xs">
+                      Totais ({monthLabel}):
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground font-semibold">
+                      {formatCurrency(totalBrutoPago)}
                     </TableCell>
                     <TableCell className="text-right text-base text-foreground font-black">
                       {formatCurrency(baseCompartilhada)}
@@ -814,8 +980,8 @@ export default function Dizimos() {
                   {/* Linha de Resultado Específica da Seção Ativa */}
                   {tipo === 'dizimo' && (
                     <TableRow className="bg-[#DF5830]/10 font-bold">
-                      <TableCell colSpan={6} className="text-right text-foreground">
-                        Dízimo Apurado ({percentualDizimo}% sobre a base):
+                      <TableCell colSpan={8} className="text-right text-foreground">
+                        Dízimo Apurado ({percentualDizimo}% sobre a base efetiva):
                       </TableCell>
                       <TableCell
                         className="text-right text-base font-black"
@@ -828,8 +994,8 @@ export default function Dizimos() {
 
                   {tipo === 'oferta' && (
                     <TableRow className="bg-[#B7791F]/10 font-bold">
-                      <TableCell colSpan={6} className="text-right text-foreground">
-                        Oferta Apurada ({percentualOferta}% sobre a base):
+                      <TableCell colSpan={8} className="text-right text-foreground">
+                        Oferta Apurada ({percentualOferta}% sobre a base efetiva):
                       </TableCell>
                       <TableCell
                         className="text-right text-base font-black"
@@ -842,8 +1008,8 @@ export default function Dizimos() {
 
                   {tipo === 'primicias' && (
                     <TableRow className="bg-[#1E6F5C]/10 font-bold">
-                      <TableCell colSpan={6} className="text-right text-foreground">
-                        Primícias Apuradas (Fator 1/{diasNoMes} sobre a base):
+                      <TableCell colSpan={8} className="text-right text-foreground">
+                        Primícias Apuradas (Fator 1/{diasNoMes} sobre a base efetiva):
                       </TableCell>
                       <TableCell
                         className="text-right text-base font-black"
@@ -1175,6 +1341,107 @@ export default function Dizimos() {
                   <CheckCircle2 className="mr-2 h-4 w-4" />
                 )}
                 Salvar direcionamento
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG: EDITAR PERCENTUAL DE DÍZIMO DA OCORRÊNCIA (AJUSTE RETROATIVO) */}
+      <Dialog open={editPercentualOcorrOpen} onOpenChange={setEditPercentualOcorrOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Percent className="h-5 w-5 text-primary" />
+              Percentual de Dízimo da Ocorrência
+            </DialogTitle>
+            <DialogDescription>
+              Ajuste o percentual desta despesa/parcela específica paga que compõe a base do dízimo
+              deste mês.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSavePercentualOcorrencia} className="space-y-4">
+            <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs space-y-1">
+              <p className="font-bold text-foreground">
+                {editingOcorrenciaPercentual?.expand?.compromisso?.descricao ||
+                  editingOcorrenciaPercentual?.observacoes ||
+                  'Despesa selecionada'}
+              </p>
+              <p className="text-muted-foreground">
+                Valor pago: {formatCurrency(editingOcorrenciaPercentual?.valor_pago || 0)} · Pago
+                em: {formatDataPagamentoBrasilia(editingOcorrenciaPercentual?.data_pagamento)}
+              </p>
+              <p className="text-xs font-semibold text-primary">
+                Valor que entrará na base:{' '}
+                {formatCurrency(
+                  ((editingOcorrenciaPercentual?.valor_pago || 0) * percentualOcorrenciaInput) /
+                    100,
+                )}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Percentual sobre esta ocorrência (%)</Label>
+                <span className="text-xs font-bold text-primary">{percentualOcorrenciaInput}%</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[100, 75, 50, 25, 0].map((pct) => (
+                  <Button
+                    key={pct}
+                    type="button"
+                    size="sm"
+                    variant={percentualOcorrenciaInput === pct ? 'default' : 'outline'}
+                    className={`h-7 px-2.5 text-xs font-semibold ${
+                      percentualOcorrenciaInput === pct
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-background'
+                    }`}
+                    onClick={() => setPercentualOcorrenciaInput(pct)}
+                  >
+                    {pct}%
+                  </Button>
+                ))}
+                <div className="flex items-center gap-1 ml-auto">
+                  <span className="text-xs text-muted-foreground">Custom:</span>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={percentualOcorrenciaInput}
+                    onChange={(e) => {
+                      const val = Math.max(0, Math.min(100, Number(e.target.value) || 0))
+                      setPercentualOcorrenciaInput(val)
+                    }}
+                    className="h-7 w-16 text-xs text-right font-semibold"
+                  />
+                  <span className="text-xs text-muted-foreground">%</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                0% remove esta despesa da base do dízimo; 50% computa metade do valor pago; 100%
+                computa o valor integral.
+              </p>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditPercentualOcorrOpen(false)}
+                disabled={savingPercentualOcorrencia}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={savingPercentualOcorrencia}>
+                {savingPercentualOcorrencia ? (
+                  <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                )}
+                Salvar percentual
               </Button>
             </DialogFooter>
           </form>
