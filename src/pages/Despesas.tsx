@@ -2089,19 +2089,54 @@ export default function Despesas() {
                             onClick={(e) => e.stopPropagation()}
                           >
                             {/* Indicadores financeiros */}
-                            <div className="rounded-xl border border-border bg-white px-3 py-1 text-right">
-                              <p className="micro-label">Total Previsto</p>
+                            <div className="rounded-xl border border-border bg-white px-3 py-1.5 text-right">
+                              <p className="micro-label uppercase">
+                                Total Previsto (Todos os Meios)
+                              </p>
                               <p className="text-sm font-extrabold tabular-nums text-foreground">
                                 {formatCurrency(totalPrevistoMes)}
                               </p>
+                              {(() => {
+                                const breakdownPrevisto = abas
+                                  .map((aba) => {
+                                    const tot = aba.ocorrencias.reduce(
+                                      (s, o) => s + (o.valor_previsto || 0),
+                                      0,
+                                    )
+                                    const label = CONTA_TIPO_PAGAMENTO_LABELS[aba.tipo] || aba.tipo
+                                    return { tipo: aba.tipo, label, total: tot }
+                                  })
+                                  .filter((item) => item.total > 0)
+
+                                if (breakdownPrevisto.length === 0) return null
+
+                                return (
+                                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                                    {breakdownPrevisto
+                                      .map((b) => `${b.label} ${formatCurrency(b.total)}`)
+                                      .join(' · ')}
+                                  </p>
+                                )
+                              })()}
                             </div>
 
                             {totalPagoMes > 0 && (
-                              <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-1 text-right">
-                                <p className="micro-label text-success">Total Pago</p>
+                              <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-1.5 text-right">
+                                <p className="micro-label text-success uppercase">
+                                  Total Pago (Todos os Meios)
+                                </p>
                                 <p className="text-xs font-bold tabular-nums text-success">
                                   {formatCurrency(totalPagoMes)}
                                 </p>
+                                {pagamentosCartaoConta.length > 0 && (
+                                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                                    Inclui {pagamentosCartaoConta.length}{' '}
+                                    {pagamentosCartaoConta.length === 1
+                                      ? 'pagamento'
+                                      : 'pagamentos'}{' '}
+                                    de fatura
+                                  </p>
+                                )}
                               </div>
                             )}
 
@@ -2192,10 +2227,12 @@ export default function Despesas() {
                                 const est = faturaGroupRow?.estadoCiclo
                                 const isPago = est?.status === 'pago' || faturaGroupRow?.paga
                                 const isParcial = est?.status === 'parcialmente_pago'
+                                const diaFechamento = conta.dia_fechamento || 10
+                                const diaVencimento = conta.dia_vencimento || 20
 
                                 return (
                                   <div
-                                    className={`mb-4 flex flex-col gap-2.5 rounded-xl border px-4 py-3 text-xs transition ${
+                                    className={`mb-4 flex flex-col gap-3 rounded-xl border p-4 text-xs transition shadow-2xs ${
                                       isPago
                                         ? 'border-emerald-300 bg-emerald-50/70 text-emerald-950'
                                         : isParcial
@@ -2203,32 +2240,23 @@ export default function Despesas() {
                                           : 'border-primary/20 bg-primary/5 text-foreground'
                                     }`}
                                   >
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
-                                        <span className="font-semibold text-foreground flex items-center gap-1">
-                                          <CreditCard className="h-3.5 w-3.5 text-primary" />
-                                          Ciclo da Fatura:
-                                        </span>
-                                        <span>
-                                          Fechamento dia{' '}
-                                          <strong>{conta.dia_fechamento || 10}</strong>
-                                        </span>
-                                        <span>•</span>
-                                        <span className="font-semibold text-foreground flex items-center gap-1">
-                                          <Calendar className="h-3.5 w-3.5 text-primary" />
-                                          Vencimento dia{' '}
-                                          <strong>{conta.dia_vencimento || 20}</strong>
+                                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 pb-2.5">
+                                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                        <span className="font-extrabold uppercase tracking-wide text-foreground flex items-center gap-1.5 text-xs">
+                                          <CreditCard className="h-4 w-4 text-primary" />
+                                          Fatura de Crédito (ciclo {currentCompetencia})
                                         </span>
                                         {conta.bandeira && (
-                                          <>
-                                            <span>•</span>
-                                            <span>
-                                              Bandeira: <strong>{conta.bandeira}</strong>
-                                            </span>
-                                          </>
+                                          <Badge
+                                            variant="outline"
+                                            className="text-[10px] font-semibold py-0 px-1.5"
+                                          >
+                                            {conta.bandeira}
+                                          </Badge>
                                         )}
+                                      </div>
 
-                                        {/* Selos de estado da fatura */}
+                                      <div className="flex items-center gap-2">
                                         {isPago ? (
                                           <Badge
                                             variant="outline"
@@ -2248,60 +2276,127 @@ export default function Despesas() {
                                             {formatCurrency(est.totalFatura)} • Restante{' '}
                                             {formatCurrency(est.valorRestante)}
                                           </Badge>
-                                        ) : null}
-                                      </div>
-
-                                      {faturaGroupRow &&
-                                        (isPago ? (
-                                          <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            disabled
-                                            className="h-7 text-xs font-semibold text-emerald-800 p-0 cursor-not-allowed opacity-80"
-                                            title="Fatura já quitada para este ciclo"
-                                          >
-                                            <CheckCircle2 className="mr-1 h-3.5 w-3.5 text-emerald-600" />{' '}
-                                            Ciclo liquidado
-                                          </Button>
                                         ) : (
-                                          <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            className="h-7 text-xs font-bold text-primary hover:text-primary/80 p-0"
-                                            onClick={() => {
-                                              setFaturaToPay(faturaGroupRow)
-                                              setModoPagamentoFatura('quitar_ciclo')
-                                              setPayFaturaOpen(true)
-                                            }}
+                                          <Badge
+                                            variant="outline"
+                                            className="border-primary/30 bg-primary/10 text-primary font-bold text-[11px] py-0.5"
                                           >
-                                            <Receipt className="mr-1 h-3.5 w-3.5" />
-                                            {isParcial && est
-                                              ? `Quitar restante (${formatCurrency(est.valorRestante)})`
-                                              : 'Quitar ciclo atual'}
-                                          </Button>
-                                        ))}
+                                            Em aberto
+                                          </Badge>
+                                        )}
+
+                                        {faturaGroupRow &&
+                                          (isPago ? (
+                                            <Button
+                                              size="sm"
+                                              variant="ghost"
+                                              disabled
+                                              className="h-7 text-xs font-semibold text-emerald-800 p-0 cursor-not-allowed opacity-80"
+                                              title="Fatura já quitada para este ciclo"
+                                            >
+                                              <CheckCircle2 className="mr-1 h-3.5 w-3.5 text-emerald-600" />{' '}
+                                              Ciclo liquidado
+                                            </Button>
+                                          ) : (
+                                            <Button
+                                              size="sm"
+                                              variant="ghost"
+                                              className="h-7 text-xs font-bold text-primary hover:text-primary/80 p-0"
+                                              onClick={() => {
+                                                setFaturaToPay(faturaGroupRow)
+                                                setModoPagamentoFatura('quitar_ciclo')
+                                                setPayFaturaOpen(true)
+                                              }}
+                                            >
+                                              <Receipt className="mr-1 h-3.5 w-3.5" />
+                                              {isParcial && est
+                                                ? `Quitar restante (${formatCurrency(est.valorRestante)})`
+                                                : 'Quitar ciclo atual'}
+                                            </Button>
+                                          ))}
+                                      </div>
                                     </div>
 
-                                    {/* Barra de progresso do pagamento parcial */}
-                                    {isParcial && est && (
-                                      <div className="space-y-1 pt-1">
-                                        <div className="flex justify-between items-center text-[10px] text-amber-900 font-medium">
-                                          <span>Progresso da quitação ({est.percentualPago}%)</span>
-                                          <span>
-                                            Restante:{' '}
-                                            <strong>{formatCurrency(est.valorRestante)}</strong>
-                                          </span>
-                                        </div>
-                                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-amber-200">
-                                          <div
-                                            className="h-full bg-primary transition-all duration-300"
-                                            style={{
-                                              width: `${Math.min(100, Math.max(0, est.percentualPago))}%`,
-                                            }}
-                                          />
-                                        </div>
+                                    {/* Métricas do Ciclo: Total, Pago, Restante e Vencimento */}
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                                      <div className="rounded-lg border border-border/50 bg-white/80 p-2 text-left">
+                                        <p className="text-[10px] font-semibold text-muted-foreground uppercase">
+                                          Total do Ciclo
+                                        </p>
+                                        <p className="text-sm font-extrabold tabular-nums text-foreground">
+                                          {formatCurrency(est?.totalFatura ?? totalCreditoFatura)}
+                                        </p>
                                       </div>
-                                    )}
+
+                                      <div className="rounded-lg border border-border/50 bg-white/80 p-2 text-left">
+                                        <p className="text-[10px] font-semibold text-muted-foreground uppercase">
+                                          Total Pago
+                                        </p>
+                                        <p className="text-sm font-extrabold tabular-nums text-success">
+                                          {formatCurrency(est?.totalPago ?? 0)}
+                                        </p>
+                                      </div>
+
+                                      <div className="rounded-lg border border-border/50 bg-white/80 p-2 text-left">
+                                        <p className="text-[10px] font-semibold text-muted-foreground uppercase">
+                                          Valor Restante
+                                        </p>
+                                        <p
+                                          className={`text-sm font-extrabold tabular-nums ${
+                                            (est?.valorRestante ?? 0) > 0
+                                              ? 'text-primary'
+                                              : 'text-muted-foreground'
+                                          }`}
+                                        >
+                                          {formatCurrency(est?.valorRestante ?? 0)}
+                                        </p>
+                                      </div>
+
+                                      <div className="rounded-lg border border-border/50 bg-white/80 p-2 text-left">
+                                        <p className="text-[10px] font-semibold text-muted-foreground uppercase flex items-center gap-1">
+                                          <Calendar className="h-3 w-3 text-primary" /> Vencimento
+                                        </p>
+                                        <p className="text-sm font-extrabold text-foreground">
+                                          Dia {diaVencimento}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {/* Barra de progresso da fatura com detalhes do ciclo e pagamentos */}
+                                    <div className="space-y-1.5 pt-0.5">
+                                      <div className="flex flex-wrap items-center justify-between gap-1 text-[11px]">
+                                        <span className="font-semibold text-foreground">
+                                          Fatura de crédito — ciclo fecha dia {diaFechamento} ·
+                                          vence dia {diaVencimento}
+                                        </span>
+                                        <span className="text-muted-foreground text-[10px]">
+                                          Progresso:{' '}
+                                          <strong className="text-foreground">
+                                            {est?.percentualPago ?? 0}%
+                                          </strong>{' '}
+                                          quitado
+                                        </span>
+                                      </div>
+
+                                      <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+                                        <div
+                                          className="h-full bg-primary transition-all duration-300"
+                                          style={{
+                                            width: `${Math.min(100, Math.max(0, est?.percentualPago ?? 0))}%`,
+                                          }}
+                                        />
+                                      </div>
+
+                                      {est && est.pagamentosCount > 0 && (
+                                        <p className="text-[10px] text-muted-foreground">
+                                          {est.pagamentosCount}{' '}
+                                          {est.pagamentosCount === 1 ? 'pagamento' : 'pagamentos'}
+                                          {est.dataUltimoPagamento
+                                            ? ` · último em ${formatDate(est.dataUltimoPagamento)}`
+                                            : ''}
+                                        </p>
+                                      )}
+                                    </div>
                                   </div>
                                 )
                               })()}
