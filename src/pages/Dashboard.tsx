@@ -50,7 +50,11 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useModernDashboardData } from '@/hooks/use-modern-dashboard-data'
 import { useRealtime } from '@/hooks/use-realtime'
 import { apiMessage } from '@/lib/api-error'
-import { calcularFaturaCartao, type FaturaCartaoGroup } from '@/lib/cartao-fatura'
+import {
+  calcularEstadoCicloFatura,
+  calcularFaturaCartao,
+  type FaturaCartaoGroup,
+} from '@/lib/cartao-fatura'
 import {
   addDays,
   formatCurrency,
@@ -297,9 +301,12 @@ export default function Dashboard() {
     return vendas.filter((v) => isWithin(v.data, period.start, period.end))
   }, [vendas, period, filtroContextoTipo])
 
-  // Agrupamento de Faturas de Cartão de Crédito
+  // Agrupamento de Faturas de Cartão de Crédito alinhado com o estado de pagamento do ciclo
   const faturasCartao = useMemo(() => {
     const faturasMap = new Map<string, FaturaCartaoGroup>()
+
+    // Separamos todos os pagamentos de fatura (is_pagamento_fatura = true) disponíveis em lançamentos
+    const pagamentosFatura = lancamentos.filter((l) => l.is_pagamento_fatura === true)
 
     for (const item of filteredLancamentos) {
       const contaObj = item.expand?.conta || contasMap.get(item.conta)
@@ -331,10 +338,29 @@ export default function Dashboard() {
       }
     }
 
+    // Calcula o estado do ciclo para cada fatura agrupada com calcularEstadoCicloFatura
+    for (const fatura of faturasMap.values()) {
+      const pagamentosDoCiclo = pagamentosFatura.filter(
+        (p) =>
+          (p.cartao_fatura_conta === fatura.conta.id ||
+            (p as any).cartao_conta === fatura.conta.id) &&
+          p.competencia === fatura.competencia,
+      )
+
+      const estado = calcularEstadoCicloFatura({
+        totalFatura: fatura.totalFatura,
+        ocorrencias: fatura.itens,
+        pagamentos: pagamentosDoCiclo,
+      })
+
+      fatura.estadoCiclo = estado
+      fatura.paga = estado.status === 'pago'
+    }
+
     return Array.from(faturasMap.values()).sort((a, b) =>
       b.dataFechamento.localeCompare(a.dataFechamento),
     )
-  }, [filteredLancamentos, contasMap])
+  }, [filteredLancamentos, lancamentos, contasMap])
 
   // Motor Inteligente de Decisões Necessárias & Alertas
   const decisoes = useMemo(() => {

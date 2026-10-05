@@ -103,6 +103,7 @@ import type {
   DespesaCompromisso,
   DespesaOcorrencia,
   Empresa,
+  Lancamento,
   MetodoPagamento,
   Pessoa,
   SecaoDespesa,

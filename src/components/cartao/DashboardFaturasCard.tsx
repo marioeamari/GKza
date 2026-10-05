@@ -1,11 +1,15 @@
 import { useState } from 'react'
-import { CheckCircle2, ChevronDown, ChevronRight, CreditCard, Undo2 } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, CreditCard } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import type { FaturaCartaoGroup } from '@/lib/cartao-fatura'
+import {
+  calcularEstadoCicloFatura,
+  type EstadoCicloFatura,
+  type FaturaCartaoGroup,
+} from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
 
 interface DashboardFaturasCardProps {
@@ -51,10 +55,22 @@ export function DashboardFaturasCard({
             const mesCap = mesExtenso.charAt(0).toUpperCase() + mesExtenso.slice(1)
             const isExpanded = expandedId === fatura.id
 
+            const estado: EstadoCicloFatura =
+              fatura.estadoCiclo ||
+              calcularEstadoCicloFatura({
+                totalFatura: fatura.totalFatura,
+                ocorrencias: fatura.itens,
+              })
+
+            const isPago = estado.status === 'pago' || fatura.paga
+            const isParcial = !isPago && estado.status === 'parcialmente_pago'
+
             return (
               <div
                 key={fatura.id}
-                className="rounded-2xl border border-border bg-white p-4 shadow-soft transition hover:shadow-md flex flex-col justify-between"
+                className={`rounded-2xl border bg-white p-4 shadow-soft transition hover:shadow-md flex flex-col justify-between ${
+                  isPago ? 'border-emerald-200' : isParcial ? 'border-amber-300' : 'border-border'
+                }`}
               >
                 <div>
                   <div className="flex items-start justify-between gap-2">
@@ -72,9 +88,26 @@ export function DashboardFaturasCard({
                         <p className="text-xs text-muted-foreground">Fatura de {mesCap}</p>
                       </div>
                     </div>
-                    {fatura.paga ? (
-                      <Badge className="bg-success/15 text-success border-success/30 text-[10px]">
-                        Paga
+
+                    {/* Selos de estado da fatura */}
+                    {isPago ? (
+                      <Badge
+                        variant="outline"
+                        className="border-emerald-400 bg-emerald-50 text-emerald-800 font-bold flex items-center gap-1 text-[11px] py-0.5"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                        {estado.dataUltimoPagamento
+                          ? `Fatura quitada em ${formatDate(estado.dataUltimoPagamento)}`
+                          : 'Fatura quitada'}
+                      </Badge>
+                    ) : isParcial ? (
+                      <Badge
+                        variant="outline"
+                        className="border-amber-400 bg-amber-50 text-amber-900 font-bold text-[11px] py-0.5"
+                      >
+                        Pago {formatCurrency(estado.totalPago)} de{' '}
+                        {formatCurrency(estado.totalFatura)} • Restante{' '}
+                        {formatCurrency(estado.valorRestante)}
                       </Badge>
                     ) : (
                       <Badge
@@ -90,11 +123,31 @@ export function DashboardFaturasCard({
                     <p className="micro-label">Valor total</p>
                     <p
                       className={`text-2xl font-extrabold tabular-nums ${
-                        fatura.paga ? 'text-success' : 'text-primary'
+                        isPago ? 'text-emerald-700' : 'text-primary'
                       }`}
                     >
                       {formatCurrency(fatura.totalFatura)}
                     </p>
+
+                    {/* Barra de progresso para pagamento parcial (fina, como em /despesas) */}
+                    {isParcial && (
+                      <div className="mt-2 space-y-1">
+                        <div className="flex justify-between items-center text-[10px] text-amber-900 font-medium">
+                          <span>Progresso da quitação ({estado.percentualPago}%)</span>
+                          <span>
+                            Restante: <strong>{formatCurrency(estado.valorRestante)}</strong>
+                          </span>
+                        </div>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-amber-200">
+                          <div
+                            className="h-full bg-primary transition-all duration-300"
+                            style={{
+                              width: `${Math.min(100, Math.max(0, estado.percentualPago))}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-3 space-y-1 text-xs text-muted-foreground border-t pt-2.5">
@@ -137,14 +190,23 @@ export function DashboardFaturasCard({
                     )}
                   </Button>
 
-                  {canWrite && !fatura.paga && onPagarFatura && (
+                  {canWrite && !isPago && onPagarFatura && (
                     <Button
                       size="sm"
                       className="h-8 bg-primary hover:bg-primary/90 text-xs font-bold text-white shadow-xs"
                       onClick={() => onPagarFatura(fatura)}
                     >
-                      <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Pagar fatura
+                      <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                      {isParcial
+                        ? `Pagar restante (${formatCurrency(estado.valorRestante)})`
+                        : 'Pagar fatura'}
                     </Button>
+                  )}
+                  {isPago && (
+                    <span className="text-[11px] font-semibold text-emerald-800 flex items-center gap-1">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                      Liquidada
+                    </span>
                   )}
                 </div>
 
