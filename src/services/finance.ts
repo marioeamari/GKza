@@ -1,4 +1,4 @@
-import type { RecordListOptions, RecordOptions } from 'pocketbase'
+import { ClientResponseError, type RecordListOptions, type RecordOptions } from 'pocketbase'
 
 import pb from '@/lib/pocketbase/client'
 import type { Categoria, Conta, Lancamento } from '@/types/domain'
@@ -65,8 +65,21 @@ export const financeService = {
           fatura_pagamento_id: lancamentoPagamento.id,
           status: 'pago',
         })
-      } catch (err) {
+      } catch (err: any) {
+        // Idempotência: se o item já foi excluído do banco (HTTP 404), trata como sucesso/ignora
+        // e não interrompe a quitação da fatura nem deixa erro estourar na tela.
+        if (
+          (err instanceof ClientResponseError && err.status === 404) ||
+          err?.status === 404 ||
+          err?.response?.status === 404
+        ) {
+          console.info(
+            `Item ${itemId} da fatura já não existe no banco (404) — ignorando como sucesso idempotente.`,
+          )
+          continue
+        }
         console.warn(`Erro ao atualizar item ${itemId} da fatura:`, err)
+        throw err
       }
     }
 
@@ -95,7 +108,14 @@ export const financeService = {
           fatura_pagamento_id: null,
           status: 'pendente',
         })
-      } catch (err) {
+      } catch (err: any) {
+        if (
+          (err instanceof ClientResponseError && err.status === 404) ||
+          err?.status === 404 ||
+          err?.response?.status === 404
+        ) {
+          continue
+        }
         console.warn(`Erro ao desmarcar item ${item.id} da fatura:`, err)
       }
     }

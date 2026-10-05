@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Conta, DespesaCompromisso } from '@/types/domain'
 import { calcularFaturaCartao } from '@/lib/cartao-fatura'
 import { despesasService } from './despesas'
+import { financeService } from './finance'
 import pb from '@/lib/pocketbase/client'
+import { ClientResponseError } from 'pocketbase'
 
 vi.mock('@/lib/pocketbase/client', () => {
   return {
@@ -417,5 +419,116 @@ describe('despesasService - gerarOcorrenciasParaCompromisso em cartão', () => {
     // Criou apenas para comp_2 (já que comp_1 já tinha ocorrência em 2026-09)
     expect(mockCreate).toHaveBeenCalledTimes(1)
     expect(mockCreate.mock.calls[0][0].compromisso).toBe('comp_2')
+  })
+})
+
+describe('financeService - pagarFaturaCartao idempotência de 404', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('quando um item do lote retorna 404 no update, ignora o erro, prossegue com os demais itens e conclui o pagamento com sucesso', async () => {
+    const mockLancamentoPagamento = {
+      id: 'pag_fat_123',
+      descricao: 'Pagamento: Fatura Agosto — NuBank',
+      valor: 500,
+      tipo: 'despesa',
+      status: 'pago',
+    }
+
+    const mockCreate = vi.fn().mockResolvedValue(mockLancamentoPagamento)
+
+    const error404 = new ClientResponseError({
+      status: 404,
+      response: { message: "The requested resource wasn't found", code: 404, data: {} },
+    })
+
+    const mockUpdate = vi.fn().mockImplementation((id: string, _data: any) => {
+      if (id === 'item_ja_excluido_404') {
+        return Promise.reject(error404)
+      }
+      return Promise.resolve({ id, status: 'pago', fatura_paga: true })
+    })
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'lancamentos') {
+        return {
+          create: mockCreate,
+          update: mockUpdate,
+        } as any
+      }
+      return {} as any
+    })
+
+    const result = await financeService.pagarFaturaCartao({
+      cartaoContaId: 'cartao_nubank',
+      competencia: '2026-08',
+      valorPago: 500,
+      dataPagamento: '2026-08-20',
+      contaPagadoraId: 'conta_itau',
+      descricaoFatura: 'Fatura Agosto — NuBank',
+      itensIds: ['item_valido_1', 'item_ja_excluido_404', 'item_valido_2'],
+    })
+
+    // O lançamento de pagamento da fatura foi criado
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+    expect(result.id).toBe('pag_fat_123')
+
+    // Tentou atualizar todos os 3 itens
+    expect(mockUpdate).toHaveBeenCalledTimes(3)
+    expect(mockUpdate).toHaveBeenCalledWith('item_valido_1', {
+      fatura_paga: true,
+      fatura_pagamento_id: 'pag_fat_123',
+      status: 'pago',
+    })
+    expect(mockUpdate).toHaveBeenCalledWith('item_ja_excluido_404', {
+      fatura_paga: true,
+      fatura_pagamento_id: 'pag_fat_123',
+      status: 'pago',
+    })
+    expect(mockUpdate).toHaveBeenCalledWith('item_valido_2', {
+      fatura_paga: true,
+      fatura_pagamento_id: 'pag_fat_123',
+      status: 'pago',
+    })
+  })
+
+  it('quando ocorre um erro diferente de 404 (ex: 500 ou 400), o erro é propagado', async () => {
+    const mockLancamentoPagamento = {
+      id: 'pag_fat_error',
+      descricao: 'Pagamento: Fatura Teste',
+      valor: 200,
+    }
+
+    const mockCreate = vi.fn().mockResolvedValue(mockLancamentoPagamento)
+
+    const error500 = new ClientResponseError({
+      status: 500,
+      response: { message: 'Internal Server Error', code: 500, data: {} },
+    })
+
+    const mockUpdate = vi.fn().mockRejectedValue(error500)
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'lancamentos') {
+        return {
+          create: mockCreate,
+          update: mockUpdate,
+        } as any
+      }
+      return {} as any
+    })
+
+    await expect(
+      financeService.pagarFaturaCartao({
+        cartaoContaId: 'cartao_nubank',
+        competencia: '2026-08',
+        valorPago: 200,
+        dataPagamento: '2026-08-20',
+        contaPagadoraId: 'conta_itau',
+        descricaoFatura: 'Fatura Teste',
+        itensIds: ['item_1'],
+      }),
+    ).rejects.toThrow()
   })
 })
