@@ -28,9 +28,13 @@ export const financeService = {
   deleteLancamento: (id: string) => pb.collection('lancamentos').delete(id),
 
   /**
-   * Pagar Fatura Inteira:
-   * 1. Cria um lançamento de despesa na conta pagadora (bancária/caixa) na data do pagamento.
-   * 2. Marca todas as compras daquele ciclo de fatura como fatura_paga = true e vincula ao pagamento.
+   * Pagar Fatura de Cartão (Quitação Total ou Parcial com Baixa Cronológica):
+   * 1. Cria um lançamento de despesa na conta pagadora (saída de caixa) na data do pagamento.
+   * 2. Quando itens Detalhados (com data e valor) são fornecidos ou quando valorPago < total,
+   *    ordena cronologicamente (mais antigas primeiro) e quita até esgotar o valor pago.
+   *    Caso contrário, quita todos os itensIds fornecidos.
+   * 3. Marca os itens quitados com fatura_paga = true, fatura_pagamento_id e status = 'pago'.
+   * 4. Preserva a idempotência HTTP 404: se o item já foi excluído, segue em frente sem falhar.
    */
   pagarFaturaCartao: async (params: {
     cartaoContaId: string
@@ -40,8 +44,55 @@ export const financeService = {
     contaPagadoraId: string
     descricaoFatura: string
     categoriaId?: string
-    itensIds: string[]
+    observacoes?: string
+    itensIds?: string[]
+    itens?: Array<{ id: string; valor?: number; data?: string; created?: string }>
   }) => {
+    // Determinar os itens a serem quitados
+    let itensParaQuitarIds: string[] = []
+
+    if (params.itens && params.itens.length > 0) {
+      // Ordenação cronológica: mais antigas primeiro
+      const itensOrdenados = [...params.itens].sort((a, b) => {
+        const dataA = (a.data || a.created || '').slice(0, 10)
+        const dataB = (b.data || b.created || '').slice(0, 10)
+        if (dataA !== dataB) return dataA.localeCompare(dataB)
+        const valA = Number(a.valor) || 0
+        const valB = Number(b.valor) || 0
+        return valA - valB
+      })
+
+      const totalItens = itensOrdenados.reduce((s, it) => s + (Number(it.valor) || 0), 0)
+      const isParcial = params.valorPago < totalItens - 0.009 // tolerância de centavos
+
+      if (isParcial) {
+        let acumulado = 0
+        for (const item of itensOrdenados) {
+          const itemVal = Number(item.valor) || 0
+          if (acumulado + itemVal <= params.valorPago + 0.009) {
+            itensParaQuitarIds.push(item.id)
+            acumulado += itemVal
+          } else {
+            // Se o primeiro item já é maior que o valor pago, ainda assim quita pelo menos 1
+            // caso o usuário tenha pago algum valor e nenhuma compra caiba por inteiro?
+            // A especificação diz: "quita as ocorrências do ciclo em ordem cronológica (mais antigas primeiro)
+            // até esgotar o valor pago; as restantes continuam em aberto na fatura."
+            // Se acumulado + itemVal > valorPago, interrompe a baixa.
+            break
+          }
+        }
+      } else {
+        // Quitação total ou superior: todos os itens do ciclo são quitados
+        itensParaQuitarIds = itensOrdenados.map((it) => it.id)
+      }
+    } else if (params.itensIds && params.itensIds.length > 0) {
+      itensParaQuitarIds = [...params.itensIds]
+    }
+
+    const obsTexto =
+      params.observacoes ||
+      `Quitação de ${itensParaQuitarIds.length} compra(s) do ciclo ${params.competencia}`
+
     // 1. Criar lançamento de saída de caixa na conta pagadora
     const lancamentoPagamento = await pb.collection<Lancamento>('lancamentos').create({
       descricao: `Pagamento: ${params.descricaoFatura}`,
@@ -54,11 +105,11 @@ export const financeService = {
       is_pagamento_fatura: true,
       cartao_fatura_conta: params.cartaoContaId,
       competencia: params.competencia,
-      observacoes: `Quitação consolidada de ${params.itensIds.length} compra(s) do ciclo ${params.competencia}`,
+      observacoes: obsTexto,
     })
 
-    // 2. Atualizar as compras do cartão como vinculadas e pagas por esta fatura
-    for (const itemId of params.itensIds) {
+    // 2. Atualizar as compras do cartão quitadas nesta fatura
+    for (const itemId of itensParaQuitarIds) {
       try {
         await pb.collection('lancamentos').update(itemId, {
           fatura_paga: true,

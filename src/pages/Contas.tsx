@@ -740,13 +740,14 @@ export default function Contas() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Saldo inicial</Label>
+              <Label>Saldo inicial (caixa disponível)</Label>
               <MoneyInput
                 value={form.saldo_inicial}
                 onChange={(saldo_inicial) => setForm({ ...form, saldo_inicial })}
               />
               <p className="text-xs text-muted-foreground">
-                Use o saldo da conta antes do primeiro lançamento.
+                Saldo de partida da conta e caixa disponível para pagamentos (débito, transferência,
+                boletos e Pix).
               </p>
             </div>
 

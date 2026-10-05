@@ -39,7 +39,7 @@ import {
   X,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { PagarFaturaDialog } from '@/components/cartao/PagarFaturaDialog'
+import { ModoPagamentoFatura, PagarFaturaDialog } from '@/components/cartao/PagarFaturaDialog'
 import type { FaturaCartaoGroup } from '@/lib/cartao-fatura'
 import { contaAceitaCredito, isMetodoCredito } from '@/services/despesas'
 import { ClientResponseError } from 'pocketbase'
@@ -534,6 +534,8 @@ export default function Despesas() {
   const [filterSecao, setFilterSecao] = useState('all') // Seção do painel: 'all' | contaId | 'dinheiro_especie' | 'sem_conta'
   const [faturaToPay, setFaturaToPay] = useState<FaturaCartaoGroup | null>(null)
   const [payFaturaOpen, setPayFaturaOpen] = useState(false)
+  const [modoPagamentoFatura, setModoPagamentoFatura] =
+    useState<ModoPagamentoFatura>('pagamento_completo')
 
   // Filtro de Competência de Apuração: 'vencimento' (padrão) | 'pagamento'
   const [filtroDataCompetencia, setFiltroDataCompetencia] = useState<'vencimento' | 'pagamento'>(
@@ -2070,7 +2072,7 @@ export default function Despesas() {
                               </div>
                             )}
 
-                            {/* Botão de pagamento de fatura para contas que aceitam crédito */}
+                            {/* Botão de pagamento de fatura para contas que aceitam crédito (Modo Completo / Parcial) */}
                             {aceitaCredito && faturaGroupRow && (
                               <PermissionButton
                                 size="sm"
@@ -2078,6 +2080,7 @@ export default function Despesas() {
                                 allowed={can(user?.role, 'writeFinance')}
                                 onClick={() => {
                                   setFaturaToPay(faturaGroupRow)
+                                  setModoPagamentoFatura('pagamento_completo')
                                   setPayFaturaOpen(true)
                                 }}
                                 className="h-8 gap-1 text-xs bg-primary hover:bg-primary/90 text-white"
@@ -2148,6 +2151,7 @@ export default function Despesas() {
                                     className="h-7 text-xs font-bold text-primary hover:text-primary/80 p-0"
                                     onClick={() => {
                                       setFaturaToPay(faturaGroupRow)
+                                      setModoPagamentoFatura('quitar_ciclo')
                                       setPayFaturaOpen(true)
                                     }}
                                   >
@@ -2502,10 +2506,16 @@ export default function Despesas() {
       {/* Diálogo de Pagamento de Fatura de Cartão */}
       <PagarFaturaDialog
         open={payFaturaOpen}
-        onOpenChange={setPayFaturaOpen}
+        onOpenChange={(open) => {
+          setPayFaturaOpen(open)
+          if (!open) {
+            setFaturaToPay(null)
+          }
+        }}
         fatura={faturaToPay}
         contas={contas}
         categorias={categorias}
+        modo={modoPagamentoFatura}
         onSuccess={() => {
           loadData()
           setFaturaToPay(null)

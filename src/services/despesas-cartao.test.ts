@@ -532,3 +532,165 @@ describe('financeService - pagarFaturaCartao idempotência de 404', () => {
     ).rejects.toThrow()
   })
 })
+
+describe('financeService - pagarFaturaCartao com baixa cronológica parcial', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('quando o valor pago é menor que o total, quita as compras em ordem cronológica (mais antigas primeiro)', async () => {
+    const mockLancamentoPagamento = {
+      id: 'pag_fat_parcial',
+      descricao: 'Pagamento: Fatura Setembro — NuBank',
+      valor: 150,
+      tipo: 'despesa',
+      status: 'pago',
+    }
+
+    const mockCreate = vi.fn().mockResolvedValue(mockLancamentoPagamento)
+    const mockUpdate = vi.fn().mockImplementation((id: string, _data: any) => {
+      return Promise.resolve({ id, status: 'pago', fatura_paga: true })
+    })
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'lancamentos') {
+        return {
+          create: mockCreate,
+          update: mockUpdate,
+        } as any
+      }
+      return {} as any
+    })
+
+    // 3 compras do ciclo:
+    // compra_1: 05/08/2026, R$ 50
+    // compra_2: 10/08/2026, R$ 100
+    // compra_3: 15/08/2026, R$ 200
+    // Total = R$ 350. Valor pago = R$ 150.
+    // Deve quitar compra_1 (50) + compra_2 (100) = 150. Compra_3 (200) fica em aberto.
+    const itens = [
+      { id: 'compra_3', valor: 200, data: '2026-08-15' }, // inserida fora de ordem
+      { id: 'compra_1', valor: 50, data: '2026-08-05' },
+      { id: 'compra_2', valor: 100, data: '2026-08-10' },
+    ]
+
+    const result = await financeService.pagarFaturaCartao({
+      cartaoContaId: 'cartao_nubank',
+      competencia: '2026-09',
+      valorPago: 150,
+      dataPagamento: '2026-09-20',
+      contaPagadoraId: 'conta_cartao_caixa',
+      descricaoFatura: 'Fatura Setembro — NuBank',
+      itens,
+    })
+
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+    expect(result.id).toBe('pag_fat_parcial')
+
+    // Deve ter atualizado compra_1 e compra_2, mas NÃO compra_3
+    expect(mockUpdate).toHaveBeenCalledTimes(2)
+    expect(mockUpdate).toHaveBeenCalledWith('compra_1', {
+      fatura_paga: true,
+      fatura_pagamento_id: 'pag_fat_parcial',
+      status: 'pago',
+    })
+    expect(mockUpdate).toHaveBeenCalledWith('compra_2', {
+      fatura_paga: true,
+      fatura_pagamento_id: 'pag_fat_parcial',
+      status: 'pago',
+    })
+    expect(mockUpdate).not.toHaveBeenCalledWith('compra_3', expect.anything())
+  })
+
+  it('quando o valor pago cobre o total, quita todas as compras do ciclo', async () => {
+    const mockLancamentoPagamento = {
+      id: 'pag_fat_total',
+      descricao: 'Pagamento: Fatura Total',
+      valor: 350,
+      tipo: 'despesa',
+      status: 'pago',
+    }
+
+    const mockCreate = vi.fn().mockResolvedValue(mockLancamentoPagamento)
+    const mockUpdate = vi.fn().mockImplementation((id: string, _data: any) => {
+      return Promise.resolve({ id, status: 'pago', fatura_paga: true })
+    })
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'lancamentos') {
+        return {
+          create: mockCreate,
+          update: mockUpdate,
+        } as any
+      }
+      return {} as any
+    })
+
+    const itens = [
+      { id: 'item_a', valor: 150, data: '2026-08-01' },
+      { id: 'item_b', valor: 200, data: '2026-08-05' },
+    ]
+
+    await financeService.pagarFaturaCartao({
+      cartaoContaId: 'cartao_nubank',
+      competencia: '2026-09',
+      valorPago: 350,
+      dataPagamento: '2026-09-20',
+      contaPagadoraId: 'conta_cartao_caixa',
+      descricaoFatura: 'Fatura Total',
+      itens,
+    })
+
+    expect(mockUpdate).toHaveBeenCalledTimes(2)
+    expect(mockUpdate).toHaveBeenCalledWith('item_a', expect.anything())
+    expect(mockUpdate).toHaveBeenCalledWith('item_b', expect.anything())
+  })
+
+  it('baixa parcial preserva a tolerância a erro 404 em compras já excluídas', async () => {
+    const mockLancamentoPagamento = {
+      id: 'pag_fat_parcial_404',
+      descricao: 'Pagamento Fatura',
+      valor: 200,
+    }
+
+    const mockCreate = vi.fn().mockResolvedValue(mockLancamentoPagamento)
+    const error404 = new ClientResponseError({
+      status: 404,
+      response: { message: 'Not found', code: 404, data: {} },
+    })
+
+    const mockUpdate = vi.fn().mockImplementation((id: string) => {
+      if (id === 'item_deletado') return Promise.reject(error404)
+      return Promise.resolve({ id, status: 'pago' })
+    })
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'lancamentos') {
+        return {
+          create: mockCreate,
+          update: mockUpdate,
+        } as any
+      }
+      return {} as any
+    })
+
+    const itens = [
+      { id: 'item_deletado', valor: 50, data: '2026-08-01' },
+      { id: 'item_valido', valor: 100, data: '2026-08-02' },
+    ]
+
+    const res = await financeService.pagarFaturaCartao({
+      cartaoContaId: 'cartao_nubank',
+      competencia: '2026-09',
+      valorPago: 150,
+      dataPagamento: '2026-09-20',
+      contaPagadoraId: 'conta_qualquer',
+      descricaoFatura: 'Fatura Teste 404',
+      itens,
+    })
+
+    expect(res.id).toBe('pag_fat_parcial_404')
+    expect(mockUpdate).toHaveBeenCalledTimes(2)
+    expect(mockUpdate).toHaveBeenCalledWith('item_valido', expect.anything())
+  })
+})
