@@ -2920,6 +2920,41 @@ function OcorrenciaRow({
 
   const isValorVariavel = comp?.tipo_valor === 'variavel'
 
+  // Data da compra do compromisso / parcela correspondente
+  const dataCompraFormatada = useMemo(() => {
+    const dataBase = comp?.data_inicio?.slice(0, 10)
+    if (!dataBase) return null
+
+    const isParcelado =
+      comp.modalidade_parcelamento === 'parcelado' || comp.regra_repeticao === 'parcelado'
+    const pNum =
+      ocorrencia.numero_parcela && ocorrencia.numero_parcela > 0 ? ocorrencia.numero_parcela : 1
+    const pInicial = comp.parcela_inicial || 1
+    const offset = isParcelado ? pNum - pInicial : 0
+
+    if (offset === 0) {
+      return formatDate(dataBase)
+    }
+
+    const [anoStr, mesStr, diaStr] = dataBase.split('-')
+    const cAno = parseInt(anoStr, 10)
+    const cMesZero = parseInt(mesStr, 10) - 1
+    const cDia = parseInt(diaStr, 10)
+
+    if (isNaN(cAno) || isNaN(cMesZero) || isNaN(cDia)) {
+      return formatDate(dataBase)
+    }
+
+    const parcelaDate = despesasService.calcularDataVencimentoNoMes(cAno, cMesZero + offset, cDia)
+    return formatDate(parcelaDate)
+  }, [
+    comp?.data_inicio,
+    comp?.modalidade_parcelamento,
+    comp?.regra_repeticao,
+    comp?.parcela_inicial,
+    ocorrencia.numero_parcela,
+  ])
+
   return (
     <div
       className={`group flex flex-col gap-3 p-3.5 transition hover:bg-secondary/40 sm:flex-row sm:items-center sm:justify-between sm:p-4 ${
@@ -3060,6 +3095,12 @@ function OcorrenciaRow({
             {contaPag && (
               <span>
                 Sai de: <strong>{contaPag.nome}</strong>
+              </span>
+            )}
+
+            {dataCompraFormatada && (
+              <span>
+                Compra: <strong>{dataCompraFormatada}</strong>
               </span>
             )}
 

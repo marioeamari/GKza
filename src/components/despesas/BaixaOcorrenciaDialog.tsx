@@ -76,12 +76,13 @@ export function BaixaOcorrenciaDialog({
       setComprovanteArquivo(null)
       if (ocorrencia) {
         setValorPago(ocorrencia.valor_pago || ocorrencia.valor_previsto || 0)
-        // Inicializar sempre com a data real da ocorrência / compromisso (data_pagamento, data_vencimento ou data_inicio)
-        // e nunca cair para a data de hoje sem necessidade.
+        // Para ocorrências pendentes, inicializar prioritariamente com a data da compra (comp.data_inicio),
+        // preservando data_pagamento quando já baixada/paga.
+        const dataCompraComp = comp?.data_inicio?.slice(0, 10)
         const dataInicial =
           ocorrencia.data_pagamento?.slice(0, 10) ||
+          dataCompraComp ||
           ocorrencia.data_vencimento?.slice(0, 10) ||
-          comp?.data_inicio?.slice(0, 10) ||
           new Date().toISOString().slice(0, 10)
         setDataPagamento(dataInicial)
         const linkedConta = ocorrencia.conta || ocorrencia.expand?.compromisso?.conta_padrao
