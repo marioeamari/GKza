@@ -15,6 +15,22 @@ export interface CartaoFaturaCiclo {
 /**
  * Informações agrupadas de uma fatura para listagem e pagamento.
  */
+export type StatusFaturaCiclo = 'nao_pago' | 'parcialmente_pago' | 'pago'
+
+export interface EstadoCicloFatura {
+  status: StatusFaturaCiclo
+  totalFatura: number
+  totalPago: number
+  valorRestante: number
+  excedente: number
+  percentualPago: number
+  dataUltimoPagamento?: string
+  pagamentosCount: number
+}
+
+/**
+ * Informações agrupadas de uma fatura para listagem e pagamento.
+ */
 export interface FaturaCartaoGroup {
   id: string // chave única do grupo: `${contaId}_${competencia}`
   conta: Conta
@@ -25,6 +41,7 @@ export interface FaturaCartaoGroup {
   paga: boolean
   pagamentoLancamentoId?: string
   itens: Lancamento[]
+  estadoCiclo?: EstadoCicloFatura
 }
 
 /**
@@ -168,4 +185,146 @@ export function getAvisoFaturaCartao(
   const [vy, vm, vd] = fatura.dataVencimento.split('-')
   const diaMesVenc = `${vd}/${vm}`
   return `Este gasto entra na fatura de ${mesAno} (vence ${diaMesVenc})`
+}
+
+/**
+ * Interface mínima aceita para itens de pagamento do ciclo (lançamentos de pagamento).
+ */
+export interface PagamentoFaturaItem {
+  id?: string
+  valor?: number
+  data?: string
+  created?: string
+  is_pagamento_fatura?: boolean
+  cartao_fatura_conta?: string
+  competencia?: string
+  [key: string]: unknown
+}
+
+/**
+ * Interface mínima aceita para ocorrências/itens da fatura.
+ */
+export interface OcorrenciaFaturaItem {
+  id?: string
+  valor_previsto?: number
+  valor_pago?: number
+  valor?: number
+  status?: string
+  [key: string]: unknown
+}
+
+export interface CalcularEstadoCicloFaturaInput {
+  totalFatura?: number
+  ocorrencias?: OcorrenciaFaturaItem[]
+  pagamentos?: PagamentoFaturaItem[]
+}
+
+/**
+ * Calcula de forma DERIVADA e PURA o estado financeiro do ciclo de uma fatura de cartão.
+ *
+ * Regras:
+ * 1. totalFatura: usa o parâmetro se fornecido e > 0, senão soma valor_previsto || valor das ocorrências.
+ * 2. totalPago: soma de todos os pagamentos (is_pagamento_fatura) aplicáveis ao ciclo. Se não houver pagamentos
+ *    mas houver ocorrências com status 'paga', soma os valores das ocorrências pagas como fallback retrocompatível.
+ * 3. valorRestante: max(0, totalFatura - totalPago). Nunca negativo.
+ * 4. excedente: max(0, totalPago - totalFatura).
+ * 5. status:
+ *    - totalFatura <= 0 -> 'nao_pago' (ou 'pago' se totalPago > 0)
+ *    - totalPago >= totalFatura - 0.009 -> 'pago'
+ *    - totalPago > 0.009 -> 'parcialmente_pago'
+ *    - senão -> 'nao_pago'
+ * 6. percentualPago: entre 0 e 100 (arredondado ou com decimais)
+ * 7. dataUltimoPagamento: data do pagamento mais recente formatável ('YYYY-MM-DD' ou ISO)
+ * 8. pagamentosCount: quantidade de pagamentos somados
+ */
+export function calcularEstadoCicloFatura(
+  input: CalcularEstadoCicloFaturaInput,
+): EstadoCicloFatura {
+  const { totalFatura: rawTotalFatura, ocorrencias = [], pagamentos = [] } = input
+
+  // 1. Calcula o total da fatura
+  let totalFatura = Number(rawTotalFatura) || 0
+  if (totalFatura <= 0 && ocorrencias.length > 0) {
+    totalFatura = ocorrencias.reduce((acc, oc) => {
+      const v = Number(oc.valor_previsto ?? oc.valor ?? 0)
+      return acc + (isNaN(v) ? 0 : v)
+    }, 0)
+  }
+
+  // Arredonda para 2 casas
+  totalFatura = Math.round(totalFatura * 100) / 100
+
+  // 2. Pagamentos do ciclo
+  let totalPago = 0
+  let dataMaisRecente: string | undefined = undefined
+  let countPagamentos = 0
+
+  if (pagamentos.length > 0) {
+    for (const pag of pagamentos) {
+      const val = Number(pag.valor) || 0
+      if (val > 0) {
+        totalPago += val
+        countPagamentos += 1
+        const d = (pag.data || pag.created || '').slice(0, 10)
+        if (d && (!dataMaisRecente || d > dataMaisRecente)) {
+          dataMaisRecente = d
+        }
+      }
+    }
+  } else if (ocorrencias.length > 0) {
+    // Fallback: se nenhum lançamento is_pagamento_fatura foi passado,
+    // verifica se as ocorrências têm status 'paga'
+    for (const oc of ocorrencias) {
+      if (oc.status === 'paga' || oc.status === 'pago') {
+        const val = Number(oc.valor_pago ?? oc.valor_previsto ?? oc.valor ?? 0)
+        if (val > 0) {
+          totalPago += val
+          countPagamentos += 1
+          const d = ((oc as any).data_pagamento || (oc as any).data || '').slice(0, 10)
+          if (d && (!dataMaisRecente || d > dataMaisRecente)) {
+            dataMaisRecente = d
+          }
+        }
+      }
+    }
+  }
+
+  totalPago = Math.round(totalPago * 100) / 100
+
+  // 3. Cálculos derivados
+  const diferenca = totalFatura - totalPago
+  const valorRestante = Math.max(0, Math.round(diferenca * 100) / 100)
+  const excedente =
+    totalPago > totalFatura + 0.009 ? Math.round((totalPago - totalFatura) * 100) / 100 : 0
+
+  let status: StatusFaturaCiclo = 'nao_pago'
+  if (totalFatura > 0) {
+    if (totalPago >= totalFatura - 0.009) {
+      status = 'pago'
+    } else if (totalPago > 0.009) {
+      status = 'parcialmente_pago'
+    } else {
+      status = 'nao_pago'
+    }
+  } else if (totalPago > 0) {
+    status = 'pago'
+  }
+
+  const percentualPago =
+    totalFatura > 0
+      ? Math.min(100, Math.max(0, Math.round((totalPago / totalFatura) * 1000) / 10))
+      : totalPago > 0
+        ? 100
+        : 0
+
+  return {
+    status,
+    totalFatura,
+    totalPago,
+    valorRestante,
+    excedente,
+    percentualPago,
+    dataUltimoPagamento: dataMaisRecente,
+    pagamentosCount: countPagamentos,
+  }
 }

@@ -85,7 +85,11 @@ import { useToast } from '@/hooks/use-toast'
 import { getFileUrl } from '@/lib/pocketbase/files'
 import { apiMessage } from '@/lib/api-error'
 import { formatCurrency, formatCompactCurrency, formatDate, getLocalDateStr } from '@/lib/format'
-import { calcularFaturaCartao } from '@/lib/cartao-fatura'
+import {
+  calcularEstadoCicloFatura,
+  calcularFaturaCartao,
+  type EstadoCicloFatura,
+} from '@/lib/cartao-fatura'
 import { can } from '@/lib/permissions'
 import { cadastrosService } from '@/services/cadastros'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -586,6 +590,9 @@ export default function Despesas() {
   // Ocorrências atrasadas (status 'prevista' com vencimento anterior ao mês atual)
   const [ocorrenciasAtrasadas, setOcorrenciasAtrasadas] = useState<DespesaOcorrencia[]>([])
 
+  // Lançamentos de pagamento de fatura da competência (is_pagamento_fatura = true)
+  const [pagamentosFatura, setPagamentosFatura] = useState<Lancamento[]>([])
+
   const executeLoadData = useCallback(async () => {
     try {
       // 1. Carrega dados de apoio essenciais (contas, categorias, cadastros) com cache de módulo/sessão
@@ -641,10 +648,13 @@ export default function Despesas() {
         ? `(status = 'paga' && data_pagamento >= '${dataInicioMes}' && data_pagamento <= '${dataFimMes}') || (status = 'prevista' && competencia = '${currentCompetencia}')`
         : `competencia = '${currentCompetencia}'`
 
-      const [allComps, allOcs] = await Promise.all([
+      const [allComps, allOcs, allPagamentosFatura] = await Promise.all([
         despesasService.listCompromissos(),
         despesasService.listOcorrencias({
           filter: filterOcorrencias,
+        }),
+        financeService.listLancamentos({
+          filter: `is_pagamento_fatura = true && competencia = '${currentCompetencia}'`,
         }),
       ])
 
@@ -719,6 +729,7 @@ export default function Despesas() {
       setCompromissos(comps)
       setOcorrencias(ocs)
       setOcorrenciasAtrasadas(ocsAtrasadas)
+      setPagamentosFatura(allPagamentosFatura || [])
       setHasLoadedOnce(true)
       setInitialLoadError(null)
       setBannerError(null)
@@ -839,6 +850,9 @@ export default function Despesas() {
     triggerDebouncedRealtimeReload()
   })
   useRealtime('despesas_ocorrencias', () => {
+    triggerDebouncedRealtimeReload()
+  })
+  useRealtime('lancamentos', () => {
     triggerDebouncedRealtimeReload()
   })
 
@@ -1864,6 +1878,27 @@ export default function Despesas() {
                       .filter((o) => o.status === 'paga')
                       .reduce((s, o) => s + (o.valor_pago || o.valor_previsto || 0), 0)
 
+                    // Lançamentos de pagamento de fatura associados a esta conta de cartão
+                    const pagamentosCartaoConta = pagamentosFatura.filter(
+                      (p) =>
+                        p.cartao_fatura_conta === conta.id || (p as any).cartao_conta === conta.id,
+                    )
+
+                    const ocorrenciasFaturaItens =
+                      ocorrenciasCredito.length > 0 ? ocorrenciasCredito : todasOcorrenciasConta
+
+                    const totalBrutoFatura =
+                      totalCreditoFatura > 0 ? totalCreditoFatura : totalPrevistoMes
+
+                    const estadoCicloFaturaCalc: EstadoCicloFatura | null =
+                      aceitaCredito && cicloFatura && conta.dia_fechamento
+                        ? calcularEstadoCicloFatura({
+                            totalFatura: totalBrutoFatura,
+                            ocorrencias: ocorrenciasFaturaItens,
+                            pagamentos: pagamentosCartaoConta,
+                          })
+                        : null
+
                     const faturaGroupRow: FaturaCartaoGroup | null =
                       aceitaCredito && cicloFatura && conta.dia_fechamento
                         ? {
@@ -1872,17 +1907,14 @@ export default function Despesas() {
                             competencia: currentCompetencia,
                             dataFechamento: cicloFatura.dataFechamento,
                             dataVencimento: cicloFatura.dataVencimento,
-                            totalFatura:
-                              totalCreditoFatura > 0 ? totalCreditoFatura : totalPrevistoMes,
-                            paga:
-                              (totalCreditoFatura > 0 ? totalCreditoFatura : totalPrevistoMes) >
-                                0 &&
-                              (totalCreditoPago >= totalCreditoFatura ||
-                                totalPagoMes >= totalPrevistoMes),
-                            itens: (ocorrenciasCredito.length > 0
-                              ? ocorrenciasCredito
-                              : todasOcorrenciasConta
-                            ).map(
+                            totalFatura: totalBrutoFatura,
+                            paga: estadoCicloFaturaCalc
+                              ? estadoCicloFaturaCalc.status === 'pago'
+                              : totalBrutoFatura > 0 &&
+                                (totalCreditoPago >= totalCreditoFatura ||
+                                  totalPagoMes >= totalPrevistoMes),
+                            estadoCiclo: estadoCicloFaturaCalc || undefined,
+                            itens: ocorrenciasFaturaItens.map(
                               (oc) =>
                                 ({
                                   id: oc.id,
@@ -2073,21 +2105,56 @@ export default function Despesas() {
                             )}
 
                             {/* Botão de pagamento de fatura para contas que aceitam crédito (Modo Completo / Parcial) */}
-                            {aceitaCredito && faturaGroupRow && (
-                              <PermissionButton
-                                size="sm"
-                                variant="default"
-                                allowed={can(user?.role, 'writeFinance')}
-                                onClick={() => {
-                                  setFaturaToPay(faturaGroupRow)
-                                  setModoPagamentoFatura('pagamento_completo')
-                                  setPayFaturaOpen(true)
-                                }}
-                                className="h-8 gap-1 text-xs bg-primary hover:bg-primary/90 text-white"
-                              >
-                                <Receipt className="h-3.5 w-3.5" /> Gerar pagamento da fatura
-                              </PermissionButton>
-                            )}
+                            {aceitaCredito &&
+                              faturaGroupRow &&
+                              (() => {
+                                const est = faturaGroupRow.estadoCiclo
+                                const isPago = est?.status === 'pago' || faturaGroupRow.paga
+                                const isParcial = est?.status === 'parcialmente_pago'
+
+                                if (isPago) {
+                                  return (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      disabled
+                                      className="h-8 gap-1.5 text-xs border-emerald-300 bg-emerald-50 text-emerald-700 opacity-90 cursor-not-allowed"
+                                      title={
+                                        est?.dataUltimoPagamento
+                                          ? `Fatura já quitada em ${formatDate(est.dataUltimoPagamento)}`
+                                          : 'Fatura já quitada para este ciclo'
+                                      }
+                                    >
+                                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                                      <span>
+                                        Fatura Paga
+                                        {est?.dataUltimoPagamento
+                                          ? ` (${formatDate(est.dataUltimoPagamento)})`
+                                          : ''}
+                                      </span>
+                                    </Button>
+                                  )
+                                }
+
+                                return (
+                                  <PermissionButton
+                                    size="sm"
+                                    variant="default"
+                                    allowed={can(user?.role, 'writeFinance')}
+                                    onClick={() => {
+                                      setFaturaToPay(faturaGroupRow)
+                                      setModoPagamentoFatura('pagamento_completo')
+                                      setPayFaturaOpen(true)
+                                    }}
+                                    className="h-8 gap-1 text-xs bg-primary hover:bg-primary/90 text-white"
+                                  >
+                                    <Receipt className="h-3.5 w-3.5" />
+                                    {isParcial && est
+                                      ? `Pagar restante da fatura (${formatCurrency(est.valorRestante)})`
+                                      : 'Gerar pagamento da fatura'}
+                                  </PermissionButton>
+                                )
+                              })()}
 
                             {/* Botão + Adicionar nesta conta (em TODAS as contas ativas) */}
                             <PermissionButton
@@ -2118,48 +2185,125 @@ export default function Despesas() {
                         {/* Conteúdo expandido da conta */}
                         {isExpanded && (
                           <div className="p-4 sm:p-5">
-                            {/* Se a conta aceita crédito: exibir aviso do ciclo e vencimento */}
-                            {aceitaCredito && (
-                              <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-2.5 text-xs">
-                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
-                                  <span className="font-semibold text-foreground flex items-center gap-1">
-                                    <CreditCard className="h-3.5 w-3.5 text-primary" />
-                                    Ciclo da Fatura:
-                                  </span>
-                                  <span>
-                                    Fechamento dia <strong>{conta.dia_fechamento || 10}</strong>
-                                  </span>
-                                  <span>•</span>
-                                  <span className="font-semibold text-foreground flex items-center gap-1">
-                                    <Calendar className="h-3.5 w-3.5 text-primary" />
-                                    Vencimento dia <strong>{conta.dia_vencimento || 20}</strong>
-                                  </span>
-                                  {conta.bandeira && (
-                                    <>
-                                      <span>•</span>
-                                      <span>
-                                        Bandeira: <strong>{conta.bandeira}</strong>
-                                      </span>
-                                    </>
-                                  )}
-                                </div>
+                            {/* Se a conta aceita crédito: exibir aviso do ciclo, vencimento e estado de liquidação */}
+                            {aceitaCredito &&
+                              (() => {
+                                const est = faturaGroupRow?.estadoCiclo
+                                const isPago = est?.status === 'pago' || faturaGroupRow?.paga
+                                const isParcial = est?.status === 'parcialmente_pago'
 
-                                {faturaGroupRow && (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-7 text-xs font-bold text-primary hover:text-primary/80 p-0"
-                                    onClick={() => {
-                                      setFaturaToPay(faturaGroupRow)
-                                      setModoPagamentoFatura('quitar_ciclo')
-                                      setPayFaturaOpen(true)
-                                    }}
+                                return (
+                                  <div
+                                    className={`mb-4 flex flex-col gap-2.5 rounded-xl border px-4 py-3 text-xs transition ${
+                                      isPago
+                                        ? 'border-emerald-300 bg-emerald-50/70 text-emerald-950'
+                                        : isParcial
+                                          ? 'border-amber-300 bg-amber-50/70 text-amber-950'
+                                          : 'border-primary/20 bg-primary/5 text-foreground'
+                                    }`}
                                   >
-                                    <Receipt className="mr-1 h-3.5 w-3.5" /> Quitar ciclo atual
-                                  </Button>
-                                )}
-                              </div>
-                            )}
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+                                        <span className="font-semibold text-foreground flex items-center gap-1">
+                                          <CreditCard className="h-3.5 w-3.5 text-primary" />
+                                          Ciclo da Fatura:
+                                        </span>
+                                        <span>
+                                          Fechamento dia{' '}
+                                          <strong>{conta.dia_fechamento || 10}</strong>
+                                        </span>
+                                        <span>•</span>
+                                        <span className="font-semibold text-foreground flex items-center gap-1">
+                                          <Calendar className="h-3.5 w-3.5 text-primary" />
+                                          Vencimento dia{' '}
+                                          <strong>{conta.dia_vencimento || 20}</strong>
+                                        </span>
+                                        {conta.bandeira && (
+                                          <>
+                                            <span>•</span>
+                                            <span>
+                                              Bandeira: <strong>{conta.bandeira}</strong>
+                                            </span>
+                                          </>
+                                        )}
+
+                                        {/* Selos de estado da fatura */}
+                                        {isPago ? (
+                                          <Badge
+                                            variant="outline"
+                                            className="border-emerald-400 bg-emerald-100 text-emerald-800 font-bold flex items-center gap-1 text-[11px] py-0.5"
+                                          >
+                                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />
+                                            {est?.dataUltimoPagamento
+                                              ? `Fatura quitada em ${formatDate(est.dataUltimoPagamento)}`
+                                              : 'Fatura quitada'}
+                                          </Badge>
+                                        ) : isParcial && est ? (
+                                          <Badge
+                                            variant="outline"
+                                            className="border-amber-400 bg-amber-100 text-amber-900 font-bold text-[11px] py-0.5"
+                                          >
+                                            Pago {formatCurrency(est.totalPago)} de{' '}
+                                            {formatCurrency(est.totalFatura)} • Restante{' '}
+                                            {formatCurrency(est.valorRestante)}
+                                          </Badge>
+                                        ) : null}
+                                      </div>
+
+                                      {faturaGroupRow &&
+                                        (isPago ? (
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            disabled
+                                            className="h-7 text-xs font-semibold text-emerald-800 p-0 cursor-not-allowed opacity-80"
+                                            title="Fatura já quitada para este ciclo"
+                                          >
+                                            <CheckCircle2 className="mr-1 h-3.5 w-3.5 text-emerald-600" />{' '}
+                                            Ciclo liquidado
+                                          </Button>
+                                        ) : (
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-7 text-xs font-bold text-primary hover:text-primary/80 p-0"
+                                            onClick={() => {
+                                              setFaturaToPay(faturaGroupRow)
+                                              setModoPagamentoFatura('quitar_ciclo')
+                                              setPayFaturaOpen(true)
+                                            }}
+                                          >
+                                            <Receipt className="mr-1 h-3.5 w-3.5" />
+                                            {isParcial && est
+                                              ? `Quitar restante (${formatCurrency(est.valorRestante)})`
+                                              : 'Quitar ciclo atual'}
+                                          </Button>
+                                        ))}
+                                    </div>
+
+                                    {/* Barra de progresso do pagamento parcial */}
+                                    {isParcial && est && (
+                                      <div className="space-y-1 pt-1">
+                                        <div className="flex justify-between items-center text-[10px] text-amber-900 font-medium">
+                                          <span>Progresso da quitação ({est.percentualPago}%)</span>
+                                          <span>
+                                            Restante:{' '}
+                                            <strong>{formatCurrency(est.valorRestante)}</strong>
+                                          </span>
+                                        </div>
+                                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-amber-200">
+                                          <div
+                                            className="h-full bg-primary transition-all duration-300"
+                                            style={{
+                                              width: `${Math.min(100, Math.max(0, est.percentualPago))}%`,
+                                            }}
+                                          />
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })()}
 
                             {/* Renderização com Abas (2+ tipos) ou Direta (1 tipo) */}
                             {!hasMultipleTabs ? (
