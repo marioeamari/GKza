@@ -304,7 +304,8 @@ export function DespesaCompromissoDialog({
           return true
         })
 
-        const defaultCard = contas.find((c) => c.tipo === 'cartao' && c.ativa)?.id || ''
+        const defaultCardConta = contas.find((c) => c.tipo === 'cartao' && c.ativa)
+        const defaultCard = defaultCardConta?.id || ''
         const resolvedDefaultConta =
           defaultContaId ||
           (isCartao ? defaultCard : contas.find((c) => c.ativa && c.tipo !== 'cartao')?.id || '')
@@ -319,7 +320,14 @@ export function DespesaCompromissoDialog({
         const preferCnpj = activeContext.hasEmpresas && !activeContext.hasPessoas
 
         const todayStr = new Date().toISOString().slice(0, 10)
-        const todayDay = new Date().getDate()
+        const defaultContaObj = contas.find((c) => c.id === resolvedDefaultConta)
+        const isDefaultContaCartao =
+          (defaultContaObj?.tipo === 'cartao' || contaAceitaCredito(defaultContaObj)) &&
+          isMetodoCredito(resolvedDefaultMetodo, metodosPagamento)
+        const todayDay =
+          isDefaultContaCartao && defaultContaObj?.dia_vencimento
+            ? defaultContaObj.dia_vencimento
+            : new Date().getDate()
 
         setForm({
           descricao: '',
@@ -788,17 +796,19 @@ export function DespesaCompromissoDialog({
           fd.append('valor_parcela', String(Number(form.valor_estimado)))
         }
         const diaVencNum =
-          form.regra_repeticao === 'avulso'
-            ? parseInt(form.data_inicio.slice(8, 10), 10)
-            : Number(form.dia_vencimento) || 10
+          isSelectedContaCartao && selectedConta?.dia_vencimento
+            ? Number(selectedConta.dia_vencimento)
+            : form.regra_repeticao === 'avulso'
+              ? parseInt(form.data_inicio.slice(8, 10), 10)
+              : Number(form.dia_vencimento) || 10
         fd.append('dia_vencimento', String(diaVencNum))
         fd.append(
           'regra_vencimento_texto',
           form.regra_repeticao === 'avulso'
             ? 'Único'
             : isParcelado
-              ? `${form.dia_vencimento}/m (${totalParcelasNum}x)`
-              : `${form.dia_vencimento}/m`,
+              ? `${diaVencNum}/m (${totalParcelasNum}x)`
+              : `${diaVencNum}/m`,
         )
         fd.append('data_inicio', `${form.data_inicio} 00:00:00.000Z`)
         if (dataFimIso) fd.append('data_fim_calculada', dataFimIso)
@@ -830,6 +840,13 @@ export function DespesaCompromissoDialog({
           isDuplicating ? undefined : compromisso?.id,
         )
       } else {
+        const diaVencNumPayload =
+          isSelectedContaCartao && selectedConta?.dia_vencimento
+            ? Number(selectedConta.dia_vencimento)
+            : form.regra_repeticao === 'avulso'
+              ? parseInt(form.data_inicio.slice(8, 10), 10)
+              : Number(form.dia_vencimento) || 10
+
         const payload: Partial<DespesaCompromisso> = {
           descricao: form.descricao.trim(),
           fornecedor: form.fornecedor.trim() || (null as unknown as string),
@@ -867,16 +884,13 @@ export function DespesaCompromissoDialog({
           total_parcelas: totalParcelasNum,
           parcela_inicial: parcelaInicialNum,
           valor_parcela: isParcelado ? Number(form.valor_estimado) : (null as unknown as number),
-          dia_vencimento:
-            form.regra_repeticao === 'avulso'
-              ? parseInt(form.data_inicio.slice(8, 10), 10)
-              : Number(form.dia_vencimento) || 10,
+          dia_vencimento: diaVencNumPayload,
           regra_vencimento_texto:
             form.regra_repeticao === 'avulso'
               ? 'Único'
               : isParcelado
-                ? `${form.dia_vencimento}/m (${totalParcelasNum}x)`
-                : `${form.dia_vencimento}/m`,
+                ? `${diaVencNumPayload}/m (${totalParcelasNum}x)`
+                : `${diaVencNumPayload}/m`,
           data_inicio: `${form.data_inicio} 00:00:00.000Z`,
           data_fim_calculada: dataFimIso as unknown as string,
           valor_estimado: Number(form.valor_estimado),
@@ -1402,7 +1416,9 @@ export function DespesaCompromissoDialog({
                   onChange={(e) => {
                     const newDate = e.target.value
                     let newDay = form.dia_vencimento
-                    if (newDate && !isSelectedContaCartao) {
+                    if (isSelectedContaCartao && selectedConta?.dia_vencimento) {
+                      newDay = Number(selectedConta.dia_vencimento)
+                    } else if (newDate && !isSelectedContaCartao) {
                       newDay = parseInt(newDate.slice(8, 10), 10) || form.dia_vencimento
                     }
                     setForm({
@@ -1591,9 +1607,17 @@ export function DespesaCompromissoDialog({
                 <Label className="font-semibold">Método de pagamento</Label>
                 <Select
                   value={form.metodo_pagamento || 'none'}
-                  onValueChange={(v) =>
-                    setForm({ ...form, metodo_pagamento: v === 'none' ? '' : v })
-                  }
+                  onValueChange={(v) => {
+                    const metodoId = v === 'none' ? '' : v
+                    const isCred = isMetodoCredito(metodoId, metodosPagamento)
+                    let updated = { ...form, metodo_pagamento: metodoId }
+                    if (isCred && selectedConta && (selectedConta.tipo === 'cartao' || temCredito)) {
+                      if (selectedConta.dia_vencimento) {
+                        updated.dia_vencimento = selectedConta.dia_vencimento
+                      }
+                    }
+                    setForm(updated)
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Pix, Boleto, Cartão, Débito..." />

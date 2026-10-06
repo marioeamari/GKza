@@ -335,17 +335,62 @@ export const despesasService = {
       /* intentionally ignored */
     }
 
-    // Busca dados prévios da ocorrência para conferir o método de pagamento
+    // Busca dados prévios da ocorrência para conferir o compromisso e método de pagamento
     const ocorrAtual = await pb
       .collection<DespesaOcorrencia>('despesas_ocorrencias')
       .getOne(params.ocorrenciaId)
 
-    const metodoCompId =
+    // Busca o registro completo do compromisso para obter data_inicio, regra, parcelas e dia_vencimento
+    let compRecord: DespesaCompromisso | null = null
+    const compId =
       typeof ocorrAtual.compromisso === 'object' && ocorrAtual.compromisso !== null
+        ? (ocorrAtual.compromisso as any).id
+        : ocorrAtual.compromisso
+    if (compId) {
+      try {
+        compRecord = await pb.collection<DespesaCompromisso>('despesas_compromisso').getOne(compId)
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const metodoCompId =
+      compRecord?.metodo_pagamento ||
+      (typeof ocorrAtual.compromisso === 'object' && ocorrAtual.compromisso !== null
         ? (ocorrAtual.compromisso as any).metodo_pagamento
-        : null
-    // REGRA v0.0.128: APENAS o método Crédito entra no ciclo da fatura do cartão
+        : null)
+
+    // REGRA ÚNICA: APENAS o método Crédito entra no ciclo da fatura do cartão
     const metodoEfetivoEhCredito = isCartao && isMetodoCredito(metodoCompId)
+
+    // Determina a data da compra original (prioriza compromisso.data_inicio, cai para params.dataPagamento)
+    const dataCompraBase = compRecord?.data_inicio
+      ? compRecord.data_inicio.slice(0, 10)
+      : params.dataPagamento
+
+    const numParcela =
+      ocorrAtual.numero_parcela && ocorrAtual.numero_parcela > 0
+        ? ocorrAtual.numero_parcela
+        : compRecord?.parcela_inicial || 1
+    const totParcelas =
+      ocorrAtual.total_parcelas && ocorrAtual.total_parcelas > 0
+        ? ocorrAtual.total_parcelas
+        : compRecord?.total_parcelas || 1
+
+    // REGRA ÚNICA DE COMPETÊNCIA E VENCIMENTO:
+    // Utiliza calcularCompetenciaEVencimento para garantir consistência total entre compra,
+    // fechamento do cartão, competência e vencimento.
+    const resRegraUnica = calcularCompetenciaEVencimento({
+      dataCompra: dataCompraBase,
+      conta: contaObj,
+      metodoEhCredito: metodoEfetivoEhCredito,
+      diaVencimento: compRecord?.dia_vencimento,
+      numeroParcela: numParcela,
+      totalParcelas: totParcelas,
+    })
+
+    const competenciaFinal = resRegraUnica.competencia
+    const vencimentoFinalIso = resRegraUnica.dataVencimentoIso
 
     let lancamentoId: string | null = null
     let lancamento: any = null
@@ -354,9 +399,7 @@ export const despesasService = {
     if (metodoEfetivoEhCredito && contaObj) {
       // Para cartão de crédito: a despesa entra na fatura do cartão referente ao ciclo.
       // O lançamento financeiro é criado como pendente de fatura (sem saída imediata de caixa)
-      // até que a fatura inteira seja baixada/paga.
-      const ciclo = calcularFaturaCartao(contaObj, params.dataPagamento)
-
+      // até que a fatura inteira seja baixada/paga. O lançamento assume a competência da fatura.
       if (params.comprovanteArquivo) {
         const fd = new FormData()
         fd.append('descricao', params.descricao)
@@ -368,12 +411,12 @@ export const despesasService = {
         if (params.categoriaId) fd.append('categoria', params.categoriaId)
         if (params.empresaId) fd.append('empresa', params.empresaId)
         if (params.pessoaId) fd.append('pessoa', params.pessoaId)
-        fd.append('competencia', ciclo.competencia)
+        fd.append('competencia', competenciaFinal)
         fd.append('fatura_paga', 'false')
         fd.append(
           'observacoes',
           params.observacoes ||
-            `Despesa no cartão ${contaObj.nome} (integrada à fatura de ${ciclo.competencia})`,
+            `Despesa no cartão ${contaObj.nome} (integrada à fatura de ${competenciaFinal})`,
         )
         fd.append('comprovante', params.comprovanteArquivo)
         lancamento = await pb.collection('lancamentos').create(fd)
@@ -388,11 +431,11 @@ export const despesasService = {
           categoria: params.categoriaId || null,
           empresa: params.empresaId || null,
           pessoa: params.pessoaId || null,
-          competencia: ciclo.competencia,
+          competencia: competenciaFinal,
           fatura_paga: false,
           observacoes:
             params.observacoes ||
-            `Despesa no cartão ${contaObj.nome} (integrada à fatura de ${ciclo.competencia})`,
+            `Despesa no cartão ${contaObj.nome} (integrada à fatura de ${competenciaFinal})`,
         })
       }
       lancamentoId = lancamento.id
@@ -409,7 +452,7 @@ export const despesasService = {
         if (params.categoriaId) fd.append('categoria', params.categoriaId)
         if (params.empresaId) fd.append('empresa', params.empresaId)
         if (params.pessoaId) fd.append('pessoa', params.pessoaId)
-        fd.append('competencia', params.dataPagamento.slice(0, 7))
+        fd.append('competencia', competenciaFinal)
         fd.append('observacoes', params.observacoes || 'Baixa automática de despesa recorrente')
         fd.append('comprovante', params.comprovanteArquivo)
         lancamento = await pb.collection('lancamentos').create(fd)
@@ -424,7 +467,7 @@ export const despesasService = {
           categoria: params.categoriaId || null,
           empresa: params.empresaId || null,
           pessoa: params.pessoaId || null,
-          competencia: params.dataPagamento.slice(0, 7),
+          competencia: competenciaFinal,
           observacoes: params.observacoes || 'Baixa automática de despesa recorrente',
         })
       }
@@ -433,76 +476,6 @@ export const despesasService = {
 
     // 2. Atualizar ocorrência (permitindo ajustar valor real da ocorrência sem afetar as demais)
     const diferencaValor = params.valorPago !== ocorrAtual.valor_previsto
-
-    // Se a ocorrência foi paga com data retroativa diferente de sua competência original,
-    // atualizamos a competência se for uma assinatura ou ajuste manual correspondente
-    const compDataPag = params.dataPagamento.slice(0, 7)
-
-    // Se a conta for tipo cartão E a despesa for de método crédito, calcula o ciclo da fatura para a dataPagamento informada.
-    // REGRA v0.0.128: APENAS compras/despesas no método Crédito seguem o ciclo da fatura do cartão.
-    // Pix, Débito, Transferência, Boletos e Dinheiro mantêm competência = mês da despesa (compDataPag).
-    let cardCicloCompetencia: string | null = null
-    let cardCicloVencimentoIso: string | null = null
-
-    if (metodoEfetivoEhCredito && contaObj) {
-      const ciclo = calcularFaturaCartao(contaObj, params.dataPagamento)
-      // Verifica se já não existe outra ocorrência para o mesmo compromisso ocupando essa competência
-      const compromissoId =
-        typeof ocorrAtual.compromisso === 'object' && ocorrAtual.compromisso !== null
-          ? (ocorrAtual.compromisso as any).id
-          : ocorrAtual.compromisso
-
-      let ocupada = false
-      if (compromissoId && ciclo.competencia !== ocorrAtual.competencia) {
-        try {
-          const conflito = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-            filter: `compromisso = '${compromissoId}' && competencia = '${ciclo.competencia}' && id != '${params.ocorrenciaId}'`,
-          })
-          if (conflito.totalItems > 0) {
-            ocupada = true
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-
-      if (!ocupada) {
-        cardCicloCompetencia = ciclo.competencia
-        cardCicloVencimentoIso = `${ciclo.dataVencimento}T12:00:00.000Z`
-      }
-    }
-
-    // REGRA DE PRODUTO (vencimento retroativo para NÃO crédito):
-    // Para métodos de pagamento imediato (tudo que NÃO é crédito), o vencimento de uma
-    // ocorrência paga nunca pode ser posterior ao mês do pagamento.
-    // Se a data_vencimento atual for de mês posterior ao pagamento, recalcular o vencimento
-    // no mês do pagamento usando o dia_vencimento do compromisso vinculado (clamp ao último dia do mês).
-    let naoCreditoVencimentoAjustadoIso: string | null = null
-    if (!metodoEfetivoEhCredito) {
-      const mesVencAtual = (ocorrAtual.data_vencimento || '').slice(0, 7)
-      if (mesVencAtual && mesVencAtual > compDataPag) {
-        const [pAnoStr, pMesStr] = compDataPag.split('-')
-        const pAno = parseInt(pAnoStr, 10)
-        const pMesZero = parseInt(pMesStr, 10) - 1
-
-        let diaCompromisso = 10
-        if (typeof ocorrAtual.compromisso === 'object' && ocorrAtual.compromisso !== null) {
-          diaCompromisso = (ocorrAtual.compromisso as any).dia_vencimento || 10
-        } else if (ocorrAtual.compromisso) {
-          try {
-            const c = await pb
-              .collection<DespesaCompromisso>('despesas_compromisso')
-              .getOne(ocorrAtual.compromisso)
-            diaCompromisso = c.dia_vencimento || 10
-          } catch {
-            /* ignore */
-          }
-        }
-
-        const dataVenc = despesasService.calcularDataVencimentoNoMes(pAno, pMesZero, diaCompromisso)
-        naoCreditoVencimentoAjustadoIso = dataVenc.toISOString()
-      }
-    }
 
     let ocorr: DespesaOcorrencia
     if (params.comprovanteArquivo) {
@@ -517,17 +490,8 @@ export const despesasService = {
         fdOcorr.append('dizimo_percentual', String(params.dizimoPercentual))
       }
       if (lancamentoId) fdOcorr.append('lancamento', lancamentoId)
-      if (cardCicloCompetencia && cardCicloVencimentoIso) {
-        fdOcorr.append('competencia', cardCicloCompetencia)
-        fdOcorr.append('data_vencimento', cardCicloVencimentoIso)
-      } else {
-        if (compDataPag && !metodoEfetivoEhCredito) {
-          fdOcorr.append('competencia', compDataPag)
-        }
-        if (naoCreditoVencimentoAjustadoIso) {
-          fdOcorr.append('data_vencimento', naoCreditoVencimentoAjustadoIso)
-        }
-      }
+      fdOcorr.append('competencia', competenciaFinal)
+      fdOcorr.append('data_vencimento', vencimentoFinalIso)
       fdOcorr.append('comprovante_pagamento', params.comprovanteArquivo)
 
       ocorr = await pb
@@ -544,22 +508,12 @@ export const despesasService = {
         valor_ajustado_manualmente: diferencaValor,
         data_pagamento: `${params.dataPagamento} 12:00:00`,
         conta: params.contaId,
+        competencia: competenciaFinal,
+        data_vencimento: vencimentoFinalIso,
         ...(params.dizimoPercentual !== undefined
           ? { dizimo_percentual: params.dizimoPercentual }
           : {}),
         lancamento: lancamentoId,
-      }
-
-      if (cardCicloCompetencia && cardCicloVencimentoIso) {
-        updatesOcorr.competencia = cardCicloCompetencia
-        updatesOcorr.data_vencimento = cardCicloVencimentoIso
-      } else {
-        if (compDataPag && !metodoEfetivoEhCredito) {
-          updatesOcorr.competencia = compDataPag
-        }
-        if (naoCreditoVencimentoAjustadoIso) {
-          updatesOcorr.data_vencimento = naoCreditoVencimentoAjustadoIso
-        }
       }
 
       ocorr = await pb
@@ -616,14 +570,27 @@ export const despesasService = {
     const metodoCompId = compRecord?.metodo_pagamento
     const metodoEfetivoEhCredito = isCartao && isMetodoCredito(metodoCompId)
 
-    let competenciaEfetiva = params.dataPagamento.slice(0, 7) // 'YYYY-MM'
-    let vencimentoRegistradoIso = `${params.dataPagamento} 12:00:00.000Z`
+    // Data da compra base: se o compromisso possuir data_inicio, usamos como referência de compra
+    const dataCompraBase = compRecord?.data_inicio
+      ? compRecord.data_inicio.slice(0, 10)
+      : params.dataPagamento
 
-    if (metodoEfetivoEhCredito && contaObj) {
-      const ciclo = calcularFaturaCartao(contaObj, params.dataPagamento)
-      competenciaEfetiva = ciclo.competencia
-      vencimentoRegistradoIso = `${ciclo.dataVencimento}T12:00:00.000Z`
-    } else if (compRecord) {
+    const numParcela = compRecord?.parcela_inicial || 1
+    const totParcelas = compRecord?.total_parcelas || 1
+
+    const resRegraUnica = calcularCompetenciaEVencimento({
+      dataCompra: dataCompraBase,
+      conta: contaObj,
+      metodoEhCredito: metodoEfetivoEhCredito,
+      diaVencimento: compRecord?.dia_vencimento,
+      numeroParcela: numParcela,
+      totalParcelas: totParcelas,
+    })
+
+    const competenciaEfetiva = resRegraUnica.competencia
+    let vencimentoRegistradoIso = resRegraUnica.dataVencimentoIso
+
+    if (!metodoEfetivoEhCredito && compRecord) {
       const diaComp = compRecord.dia_vencimento || 10
       const [pAnoStr, pMesStr] = competenciaEfetiva.split('-')
       const pAno = parseInt(pAnoStr, 10)

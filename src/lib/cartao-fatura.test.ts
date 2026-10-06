@@ -556,5 +556,39 @@ describe('calcularEstadoCicloFatura — Estado Financeiro Puro do Ciclo da Fatur
       expect(cronograma[3].competencia).toBe('2027-01')
       expect(cronograma[3].dataVencimento).toBe('2027-01-23')
     })
+
+    it('compra parcelada 2x no cartão NuBank após o fechamento: parcela 1 em M+1 e parcela 2 em M+2', () => {
+      const contaNubank: Conta = {
+        ...contaCartao,
+        dia_fechamento: 16,
+        dia_vencimento: 23,
+      }
+      // Compra dia 17/09/2026 (após o fechamento 16)
+      const dataCompra = '2026-09-17'
+
+      // Parcela 1 de 2: fatura de Outubro (2026-10), vence 23/10
+      const p1 = calcularCompetenciaEVencimento({
+        dataCompra,
+        conta: contaNubank,
+        metodoEhCredito: true,
+        diaVencimento: 23,
+        numeroParcela: 1,
+        totalParcelas: 2,
+      })
+      expect(p1.competencia).toBe('2026-10')
+      expect(p1.dataVencimento).toBe('2026-10-23')
+
+      // Parcela 2 de 2: fatura de Novembro (2026-11), vence 23/11
+      const p2 = calcularCompetenciaEVencimento({
+        dataCompra,
+        conta: contaNubank,
+        metodoEhCredito: true,
+        diaVencimento: 23,
+        numeroParcela: 2,
+        totalParcelas: 2,
+      })
+      expect(p2.competencia).toBe('2026-11')
+      expect(p2.dataVencimento).toBe('2026-11-23')
+    })
   })
 })

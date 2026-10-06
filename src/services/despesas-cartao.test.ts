@@ -1401,4 +1401,144 @@ describe('despesasService - anti-retroatividade e deduplicação no gerador e si
     expect(ciclo.competencia).toBe('2026-10')
     expect(ciclo.dataVencimento).toBe('2026-10-23')
   })
+
+  it('criação + baixa imediata de despesa parcelada no cartão após fechamento: parcela 1 no ciclo do mês seguinte, vencimento da fatura e lançamento com mesma competência', async () => {
+    const mockContaNuBank: Conta = {
+      id: 'sglo7dfsqvgfsni',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: 'NuBank',
+      tipo: 'cartao',
+      saldo_inicial: 0,
+      cor: '#8A05BE',
+      ativa: true,
+      dia_fechamento: 16,
+      dia_vencimento: 23,
+    }
+
+    const mockCompromisso = {
+      id: 'mst4cfpt34j7hpy',
+      descricao: 'Curso Batera',
+      data_inicio: '2026-09-17 00:00:00.000Z',
+      dia_vencimento: 23,
+      conta_padrao: 'sglo7dfsqvgfsni',
+      metodo_pagamento: 'r9qdfpwfe5143oe',
+      modalidade_parcelamento: 'parcelado',
+      regra_repeticao: 'mensal',
+      total_parcelas: 2,
+      parcela_inicial: 1,
+      valor_parcela: 72.09,
+      valor_estimado: 72.09,
+      secao: 'cartoes_credito',
+    }
+
+    const mockMetodoCredito = {
+      id: 'r9qdfpwfe5143oe',
+      nome: 'Crédito',
+      codigo: 'credito',
+      tipo: 'cartao',
+    }
+
+    // 1. Testar geração de ocorrências (gerarOcorrenciasParaCompromisso)
+    const ocorrenciasCriadas: any[] = []
+    const mockCreateOcorrencia = vi.fn().mockImplementation((payload) => {
+      ocorrenciasCriadas.push(payload)
+      return Promise.resolve({ id: `ocorr_${payload.numero_parcela}`, ...payload })
+    })
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: vi.fn().mockResolvedValue(mockContaNuBank) } as any
+      }
+      if (name === 'metodos_pagamento') {
+        return { getOne: vi.fn().mockResolvedValue(mockMetodoCredito) } as any
+      }
+      if (name === 'despesas_compromisso') {
+        return { getOne: vi.fn().mockResolvedValue(mockCompromisso) } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getList: vi.fn().mockResolvedValue({ items: [], totalItems: 0 }),
+          create: mockCreateOcorrencia,
+          update: vi.fn().mockImplementation((id, data) => Promise.resolve({ id, ...data })),
+        } as any
+      }
+      return {} as any
+    })
+
+    await despesasService.gerarOcorrenciasParaCompromisso(mockCompromisso as any)
+
+    expect(ocorrenciasCriadas).toHaveLength(2)
+    // Parcela 1: ciclo 2026-10 (compra 17/09 após fechamento dia 16), vencimento 23/10
+    expect(ocorrenciasCriadas[0].numero_parcela).toBe(1)
+    expect(ocorrenciasCriadas[0].competencia).toBe('2026-10')
+    expect(ocorrenciasCriadas[0].data_vencimento).toBe('2026-10-23T12:00:00.000Z')
+
+    // Parcela 2: ciclo 2026-11, vencimento 23/11
+    expect(ocorrenciasCriadas[1].numero_parcela).toBe(2)
+    expect(ocorrenciasCriadas[1].competencia).toBe('2026-11')
+    expect(ocorrenciasCriadas[1].data_vencimento).toBe('2026-11-23T12:00:00.000Z')
+
+    // 2. Testar baixa imediata da Parcela 1
+    const mockOcorr1 = {
+      id: 'ocorr_p1',
+      compromisso: 'mst4cfpt34j7hpy',
+      numero_parcela: 1,
+      total_parcelas: 2,
+      competencia: '2026-10',
+      data_vencimento: '2026-10-23T12:00:00.000Z',
+      valor_previsto: 72.09,
+      status: 'prevista',
+    }
+
+    const mockCreateLanc = vi.fn().mockResolvedValue({ id: 'lanc_batera_p1' })
+    const mockUpdateOcorr = vi.fn().mockResolvedValue({ id: 'ocorr_p1', status: 'paga' })
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: vi.fn().mockResolvedValue(mockContaNuBank) } as any
+      }
+      if (name === 'despesas_compromisso') {
+        return { getOne: vi.fn().mockResolvedValue(mockCompromisso) } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getOne: vi.fn().mockResolvedValue(mockOcorr1),
+          update: mockUpdateOcorr,
+          getList: vi.fn().mockResolvedValue({ items: [], totalItems: 0 }),
+        } as any
+      }
+      if (name === 'lancamentos') {
+        return { create: mockCreateLanc } as any
+      }
+      if (name === 'metodos_pagamento') {
+        return { getOne: vi.fn().mockResolvedValue(mockMetodoCredito) } as any
+      }
+      return {} as any
+    })
+
+    await despesasService.baixarOcorrencia({
+      ocorrenciaId: 'ocorr_p1',
+      valorPago: 72.09,
+      dataPagamento: '2026-09-17',
+      contaId: 'sglo7dfsqvgfsni',
+      descricao: 'Curso Batera (1/2)',
+    })
+
+    // Lançamento herda competência 2026-10 da fatura
+    expect(mockCreateLanc).toHaveBeenCalledTimes(1)
+    const lancData = mockCreateLanc.mock.calls[0][0]
+    expect(lancData.competencia).toBe('2026-10')
+    expect(lancData.status).toBe('pendente')
+
+    // Ocorrência atualizada com competência 2026-10 e vencimento 2026-10-23T12:00:00.000Z
+    expect(mockUpdateOcorr).toHaveBeenCalledTimes(1)
+    const ocUpdates = mockUpdateOcorr.mock.calls[0][1]
+    expect(ocUpdates.status).toBe('paga')
+    expect(ocUpdates.competencia).toBe('2026-10')
+    expect(ocUpdates.data_vencimento).toBe('2026-10-23T12:00:00.000Z')
+    expect(ocUpdates.valor_pago).toBe(72.09)
+  })
 })
