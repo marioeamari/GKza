@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   calcularEstadoCicloFatura,
   calcularFaturaCartao,
+  calcularCicloParcelaCartao,
+  simularCronogramaParcelas,
   getAvisoFaturaCartao,
   type PagamentoFaturaItem,
   type OcorrenciaFaturaItem,
@@ -266,9 +268,98 @@ describe('calcularEstadoCicloFatura — Estado Financeiro Puro do Ciclo da Fatur
       expect(ciclo.dataVencimento).toBe('2026-10-20')
     })
 
+    it('calcularCicloParcelaCartao calcula ciclo da parcela N com avanço correto', () => {
+      // Compra em 19/09/2026 na conta com fechamento 16 e vencimento 23
+      const contaNubank: Conta = {
+        ...contaCartao,
+        dia_fechamento: 16,
+        dia_vencimento: 23,
+      }
+      const p1 = calcularCicloParcelaCartao(contaNubank, '2026-09-19', 1, 4)
+      expect(p1.competencia).toBe('2026-10')
+      expect(p1.dataVencimento).toBe('2026-10-23')
+
+      const p2 = calcularCicloParcelaCartao(contaNubank, '2026-09-19', 2, 4)
+      expect(p2.competencia).toBe('2026-11')
+      expect(p2.dataVencimento).toBe('2026-11-23')
+
+      const p4 = calcularCicloParcelaCartao(contaNubank, '2026-09-19', 4, 4)
+      expect(p4.competencia).toBe('2027-01')
+      expect(p4.dataVencimento).toBe('2027-01-23')
+    })
+
+    it('calcularCicloParcelaCartao quando compra é antes do fechamento', () => {
+      const contaNubank: Conta = {
+        ...contaCartao,
+        dia_fechamento: 16,
+        dia_vencimento: 23,
+      }
+      const p1 = calcularCicloParcelaCartao(contaNubank, '2026-09-10', 1, 3)
+      expect(p1.competencia).toBe('2026-09')
+      expect(p1.dataVencimento).toBe('2026-09-23')
+
+      const p2 = calcularCicloParcelaCartao(contaNubank, '2026-09-10', 2, 3)
+      expect(p2.competencia).toBe('2026-10')
+      expect(p2.dataVencimento).toBe('2026-10-23')
+    })
+
     it('gera texto amigável com getAvisoFaturaCartao', () => {
       const aviso = getAvisoFaturaCartao(contaCartao, '2026-09-05')
       expect(aviso).toContain('vence 20/09')
+    })
+
+    it('simularCronogramaParcelas mescla ocorrências existentes e simula parcelas futuras de cartão', () => {
+      const contaNubank: Conta = {
+        ...contaCartao,
+        dia_fechamento: 16,
+        dia_vencimento: 23,
+      }
+      const compromisso = {
+        id: 'comp_toro',
+        descricao: 'Conserto TORO',
+        data_inicio: '2026-09-19',
+        total_parcelas: 4,
+        parcela_inicial: 1,
+        valor_parcela: 356.75,
+      }
+      const ocorrenciasReais = [
+        {
+          id: 'oc_1',
+          numero_parcela: 1,
+          total_parcelas: 4,
+          competencia: '2026-10',
+          data_vencimento: '2026-10-23T12:00:00.000Z',
+          data_pagamento: '2026-10-20T12:00:00.000Z',
+          valor_previsto: 356.75,
+          valor_pago: 356.75,
+          status: 'paga',
+        },
+      ]
+
+      const cronograma = simularCronogramaParcelas({
+        compromisso,
+        conta: contaNubank,
+        ocorrenciasReais,
+        dataReferenciaHoje: '2026-10-25',
+      })
+
+      expect(cronograma).toHaveLength(4)
+      // Parcela 1: real e paga
+      expect(cronograma[0].numeroParcela).toBe(1)
+      expect(cronograma[0].isSimulada).toBe(false)
+      expect(cronograma[0].status).toBe('paga')
+      expect(cronograma[0].dataPagamento).toBe('2026-10-20')
+
+      // Parcela 2: simulada para 2026-11
+      expect(cronograma[1].numeroParcela).toBe(2)
+      expect(cronograma[1].isSimulada).toBe(true)
+      expect(cronograma[1].competencia).toBe('2026-11')
+      expect(cronograma[1].dataVencimento).toBe('2026-11-23')
+
+      // Parcela 4: simulada para 2027-01
+      expect(cronograma[3].numeroParcela).toBe(4)
+      expect(cronograma[3].competencia).toBe('2027-01')
+      expect(cronograma[3].dataVencimento).toBe('2027-01-23')
     })
   })
 })

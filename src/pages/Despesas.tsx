@@ -49,6 +49,7 @@ import { PageHeader } from '@/components/PageHeader'
 import { PermissionButton } from '@/components/PermissionButton'
 import { BaixaOcorrenciaDialog } from '@/components/despesas/BaixaOcorrenciaDialog'
 import { DespesaCompromissoDialog } from '@/components/despesas/DespesaCompromissoDialog'
+import { CronogramaParcelasDialog } from '@/components/despesas/CronogramaParcelasDialog'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -511,6 +512,30 @@ export default function Despesas() {
   const [compromissoParaBaixar, setCompromissoParaBaixar] = useState<DespesaCompromisso | null>(
     null,
   )
+
+  // Cronograma de Parcelas Modal
+  const [cronogramaModalOpen, setCronogramaModalOpen] = useState(false)
+  const [cronogramaCompromisso, setCronogramaCompromisso] = useState<DespesaCompromisso | null>(
+    null,
+  )
+  const [cronogramaConta, setCronogramaConta] = useState<Conta | undefined>()
+  const [cronogramaOcorrencia, setCronogramaOcorrencia] = useState<DespesaOcorrencia | undefined>()
+
+  const handleOpenCronograma = (oc: DespesaOcorrencia, fallbackComp?: DespesaCompromisso) => {
+    const compObj =
+      oc.expand?.compromisso ||
+      fallbackComp ||
+      (oc.compromisso ? compromissosMap.get(oc.compromisso) : null)
+    if (!compObj) return
+    const contaObj =
+      oc.expand?.conta ||
+      compObj.expand?.conta_padrao ||
+      (compObj.conta_padrao ? contas.find((c) => c.id === compObj.conta_padrao) : undefined)
+    setCronogramaCompromisso(compObj)
+    setCronogramaConta(contaObj)
+    setCronogramaOcorrencia(oc)
+    setCronogramaModalOpen(true)
+  }
 
   const [compromissoModal, setCompromissoModal] = useState(false)
   const [compromissoEditando, setCompromissoEditando] = useState<DespesaCompromisso | null>(null)
@@ -1798,6 +1823,7 @@ export default function Despesas() {
                       compObj && handleOpenDesativarCompromisso(compObj)
                     }
                     onReativarCompromisso={() => compObj && handleReativarCompromisso(compObj)}
+                    onVerCronograma={() => handleOpenCronograma(oc, compObj)}
                     canEdit={can(user?.role, 'writeFinance')}
                   />
                 )
@@ -1989,6 +2015,7 @@ export default function Despesas() {
                                 onReativarCompromisso={() =>
                                   compObj && handleReativarCompromisso(compObj)
                                 }
+                                onVerCronograma={() => handleOpenCronograma(oc, compObj)}
                                 canEdit={can(user?.role, 'writeFinance')}
                               />
                             )
@@ -2651,6 +2678,7 @@ export default function Despesas() {
                                   onReativarCompromisso={() =>
                                     compObj && handleReativarCompromisso(compObj)
                                   }
+                                  onVerCronograma={() => handleOpenCronograma(oc, compObj)}
                                   canEdit={can(user?.role, 'writeFinance')}
                                 />
                               )
@@ -2723,6 +2751,7 @@ export default function Despesas() {
                           compObj && handleOpenDesativarCompromisso(compObj)
                         }
                         onReativarCompromisso={() => compObj && handleReativarCompromisso(compObj)}
+                        onVerCronograma={() => handleOpenCronograma(oc, compObj)}
                         canEdit={can(user?.role, 'writeFinance')}
                       />
                     )
@@ -2734,6 +2763,15 @@ export default function Despesas() {
       </div>
 
       {/* MODAIS */}
+      {/* Modal Cronograma de Parcelas */}
+      <CronogramaParcelasDialog
+        open={cronogramaModalOpen}
+        onOpenChange={setCronogramaModalOpen}
+        compromisso={cronogramaCompromisso}
+        conta={cronogramaConta}
+        ocorrenciaContexto={cronogramaOcorrencia}
+      />
+
       <BaixaOcorrenciaDialog
         open={baixaModal}
         onOpenChange={setBaixaModal}
@@ -2940,6 +2978,7 @@ interface OcorrenciaRowProps {
   onExcluirOcorrencia?: () => void
   onDesativarCompromisso?: () => void
   onReativarCompromisso?: () => void
+  onVerCronograma?: () => void
   canEdit: boolean
 }
 
@@ -2956,6 +2995,7 @@ function OcorrenciaRow({
   onExcluirOcorrencia,
   onDesativarCompromisso,
   onReativarCompromisso,
+  onVerCronograma,
   canEdit,
 }: OcorrenciaRowProps) {
   const comp = ocorrencia.expand?.compromisso || compromissoFallback
@@ -3129,7 +3169,13 @@ function OcorrenciaRow({
             )}
 
             {parcelaLabel && (
-              <Badge variant="outline" className="font-mono text-[10px] font-bold">
+              <Badge
+                variant="outline"
+                className="font-mono text-[10px] font-bold cursor-pointer hover:bg-primary/10 hover:border-primary transition"
+                onClick={onVerCronograma}
+                title="Clique para ver o cronograma completo de parcelas"
+              >
+                <Calendar className="mr-1 h-3 w-3 text-primary inline" />
                 Parc. {parcelaLabel}
               </Badge>
             )}
@@ -3352,6 +3398,20 @@ function OcorrenciaRow({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
+                  {(parcelaLabel ||
+                    comp?.modalidade_parcelamento === 'parcelado' ||
+                    comp?.regra_repeticao === 'parcelado') && (
+                    <>
+                      <DropdownMenuItem
+                        onClick={onVerCronograma}
+                        className="cursor-pointer font-medium"
+                      >
+                        <Calendar className="mr-2 h-4 w-4 text-[#DF5830]" />
+                        Cronograma de parcelas
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
                   {comp && (
                     <>
                       {comp.ativo === false ? (

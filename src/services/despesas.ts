@@ -1,6 +1,10 @@
 import { ClientResponseError, type RecordListOptions, type RecordOptions } from 'pocketbase'
 import pb from '@/lib/pocketbase/client'
-import { calcularFaturaCartao } from '@/lib/cartao-fatura'
+import {
+  calcularFaturaCartao,
+  calcularCicloParcelaCartao,
+  calcularVencimentoFatura,
+} from '@/lib/cartao-fatura'
 import type {
   Conta,
   ContaTipoPagamento,
@@ -955,25 +959,19 @@ export const despesasService = {
 
         if (isParcelado) {
           const pNum = oc.numero_parcela && oc.numero_parcela > 0 ? oc.numero_parcela : 1
-          const mesOffset = pNum - 1
-          const diaVenc = compromisso.dia_vencimento || cDia || 10
-          const parcelaDate = despesasService.calcularDataVencimentoNoMes(
-            cAno,
-            cMesZero + mesOffset,
-            diaVenc,
+          const cicloParcela = calcularCicloParcelaCartao(
+            contaCartaoObj,
+            dataCompraStr,
+            pNum,
+            compromisso.total_parcelas || 1,
           )
-          const pYear = parcelaDate.getUTCFullYear()
-          const pMonth = parcelaDate.getUTCMonth()
-          const expectedComp = `${pYear}-${String(pMonth + 1).padStart(2, '0')}`
-          const expectedDueIso = parcelaDate.toISOString()
 
-          if (oc.competencia !== expectedComp) {
-            updates.competencia = expectedComp
+          if (oc.competencia !== cicloParcela.competencia) {
+            updates.competencia = cicloParcela.competencia
           }
           const currentDueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
-          const expectedDueStr = expectedDueIso.slice(0, 10)
-          if (currentDueStr !== expectedDueStr) {
-            updates.data_vencimento = expectedDueIso
+          if (currentDueStr !== cicloParcela.dataVencimento) {
+            updates.data_vencimento = cicloParcela.dataVencimentoIso
           }
         } else {
           const parcelaDate = despesasService.calcularDataVencimentoNoMes(cAno, cMesZero, cDia)
@@ -1156,18 +1154,11 @@ export const despesasService = {
       const diaVenc = compromisso.dia_vencimento || parseInt(diaStr, 10) || 10
 
       if (contaCartaoObj) {
-        // Para cartão: cada parcela N vence no dia_vencimento do mês de compra + (N - 1) meses
+        // Para cartão: segue o ciclo da fatura do cartão
+        // Parcela 1 vai para a fatura em que a data de compra cai (após fechamento -> fatura seguinte)
+        // Parcela N avança 1 ciclo de fatura por parcela e vence no dia_vencimento do cartão
         for (let p = inicial; p <= total; p++) {
-          const mesOffset = p - 1
-          const parcelaDate = despesasService.calcularDataVencimentoNoMes(
-            cAno,
-            cMesZero + mesOffset,
-            diaVenc,
-          )
-          const pYear = parcelaDate.getUTCFullYear()
-          const pMonth = parcelaDate.getUTCMonth()
-          const compStr = `${pYear}-${String(pMonth + 1).padStart(2, '0')}`
-          const dueDateIso = parcelaDate.toISOString()
+          const cicloParcela = calcularCicloParcelaCartao(contaCartaoObj, dataCompraStr, p, total)
 
           const exists = await hasExistingOcorrencia({ numero_parcela: p })
 
@@ -1180,10 +1171,10 @@ export const despesasService = {
                 empresa: compromisso.empresa || null,
                 secao: compromisso.secao,
                 conta: contaIdEfetiva,
-                competencia: compStr,
+                competencia: cicloParcela.competencia,
                 numero_parcela: p,
                 total_parcelas: total,
-                data_vencimento: dueDateIso,
+                data_vencimento: cicloParcela.dataVencimentoIso,
                 valor_previsto: valorUnitario,
                 valor_estimado_original: valorUnitario,
                 valor_ajustado_manualmente: false,

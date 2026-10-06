@@ -171,6 +171,235 @@ export function calcularFaturaCartao(conta: Conta, dataTransacao: string): Carta
  * Retorna texto explicativo para ser exibido no formulário de compra:
  * Ex: "Este gasto entra na fatura de Setembro/2026 (vence 20/09)"
  */
+/**
+ * Adiciona um número de meses (offset) a uma competência 'YYYY-MM', retornando a nova competência 'YYYY-MM'.
+ */
+export function adicionarMesesCompetencia(competencia: string, offsetMeses: number): string {
+  const [yStr, mStr] = competencia.split('-')
+  const y = parseInt(yStr, 10)
+  const m = parseInt(mStr, 10) - 1
+  return formatYearMonth(y, m + offsetMeses)
+}
+
+/**
+ * Calcula a data de vencimento da fatura para uma determinada competência e conta tipo cartão.
+ * A competência representa o mês de fechamento da fatura ('YYYY-MM').
+ * Se dia_vencimento >= dia_fechamento, vence no mesmo mês da competência.
+ * Se dia_vencimento < dia_fechamento, vence no mês seguinte.
+ */
+export function calcularVencimentoFatura(conta: Conta, competencia: string): string {
+  const diaFechamento = conta.dia_fechamento || 10
+  const diaVencimento = conta.dia_vencimento || 20
+
+  const [yStr, mStr] = competencia.split('-')
+  const fYear = parseInt(yStr, 10)
+  const fMonth = parseInt(mStr, 10) - 1
+
+  let vencYear = fYear
+  let vencMonth = fMonth
+  if (diaVencimento < diaFechamento) {
+    vencMonth += 1
+  }
+
+  const vencComp = formatYearMonth(vencYear, vencMonth)
+  const [vYearStr, vMonthStr] = vencComp.split('-')
+  const vYear = parseInt(vYearStr, 10)
+  const vMonth = parseInt(vMonthStr, 10) - 1
+  const maxDiasVenc = getDaysInMonth(vYear, vMonth)
+  const realDiaVencimento = Math.min(diaVencimento, maxDiasVenc)
+  return `${vYear}-${String(vMonth + 1).padStart(2, '0')}-${String(realDiaVencimento).padStart(2, '0')}`
+}
+
+export interface ParcelaCicloSimulada {
+  numeroParcela: number
+  totalParcelas: number
+  competencia: string
+  dataVencimento: string // 'YYYY-MM-DD'
+  dataVencimentoIso: string // 'YYYY-MM-DDTHH:mm:ss.000Z'
+}
+
+export interface ItemCronogramaParcela {
+  numeroParcela: number
+  totalParcelas: number
+  competencia: string
+  cicloDescricao?: string
+  dataVencimento: string // 'YYYY-MM-DD' ou formatada
+  dataVencimentoIso: string
+  valor: number
+  status: 'paga' | 'prevista' | 'atrasada'
+  dataPagamento?: string
+  valorPago?: number
+  ocorrenciaId?: string
+  isSimulada: boolean
+}
+
+/**
+ * Simula o cronograma completo das N parcelas de um compromisso parcelado,
+ * integrando ocorrências reais já existentes no banco e preenchendo as parcelas
+ * futuras/faltantes com a regra de ciclo da fatura (cartão) ou mensal simples (não-cartão).
+ */
+export function simularCronogramaParcelas(params: {
+  compromisso: {
+    id?: string
+    descricao?: string
+    data_inicio?: string
+    created?: string
+    total_parcelas?: number
+    parcela_inicial?: number
+    valor_parcela?: number
+    valor_estimado?: number
+    dia_vencimento?: number
+    modalidade_parcelamento?: string
+    regra_repeticao?: string
+  }
+  conta?: Conta
+  ocorrenciasReais?: Array<{
+    id?: string
+    numero_parcela?: number
+    total_parcelas?: number
+    competencia?: string
+    data_vencimento?: string
+    data_pagamento?: string
+    valor_previsto?: number
+    valor_pago?: number
+    status?: string
+  }>
+  dataReferenciaHoje?: string // 'YYYY-MM-DD'
+}): ItemCronogramaParcela[] {
+  const { compromisso, conta, ocorrenciasReais = [], dataReferenciaHoje = '' } = params
+  const total = Math.max(1, compromisso.total_parcelas || 1)
+  const inicial = Math.max(1, compromisso.parcela_inicial || 1)
+  const valorUnitario =
+    compromisso.valor_parcela && compromisso.valor_parcela > 0
+      ? compromisso.valor_parcela
+      : compromisso.valor_estimado || 0
+
+  const dataCompraStr = compromisso.data_inicio
+    ? compromisso.data_inicio.slice(0, 10)
+    : compromisso.created
+      ? compromisso.created.slice(0, 10)
+      : '2026-09-01'
+
+  const isCartao =
+    conta &&
+    (conta.tipo === 'cartao' ||
+      (conta.tipos_pagamento && conta.tipos_pagamento.includes('credito')))
+
+  // Mapa de ocorrências reais por número de parcela
+  const reaisMap = new Map<number, (typeof ocorrenciasReais)[0]>()
+  for (const oc of ocorrenciasReais) {
+    if (oc.numero_parcela && oc.numero_parcela > 0) {
+      reaisMap.set(oc.numero_parcela, oc)
+    }
+  }
+
+  const itens: ItemCronogramaParcela[] = []
+
+  // Componentes de data base para não-cartão
+  const [anoStr, mesStr, diaStr] = dataCompraStr.split('-')
+  const cAno = parseInt(anoStr, 10) || 2026
+  const cMesZero = (parseInt(mesStr, 10) || 1) - 1
+  const diaVencComp = compromisso.dia_vencimento || parseInt(diaStr, 10) || 10
+
+  for (let p = inicial; p <= total; p++) {
+    const real = reaisMap.get(p)
+
+    if (real) {
+      const isPaga = real.status === 'paga' || real.status === 'pago'
+      const dueStr = real.data_vencimento ? real.data_vencimento.slice(0, 10) : ''
+      const isAtrasada =
+        !isPaga && dataReferenciaHoje !== '' && dueStr !== '' && dueStr < dataReferenciaHoje
+
+      itens.push({
+        numeroParcela: p,
+        totalParcelas: total,
+        competencia: real.competencia || '',
+        dataVencimento: dueStr,
+        dataVencimentoIso: real.data_vencimento || `${dueStr}T12:00:00.000Z`,
+        valor: Number(real.valor_previsto ?? valorUnitario),
+        status: isPaga ? 'paga' : isAtrasada ? 'atrasada' : 'prevista',
+        dataPagamento: real.data_pagamento ? real.data_pagamento.slice(0, 10) : undefined,
+        valorPago: real.valor_pago !== undefined ? Number(real.valor_pago) : undefined,
+        ocorrenciaId: real.id,
+        isSimulada: false,
+      })
+    } else {
+      // Parcela simulada
+      if (isCartao && conta) {
+        const cicloParcela = calcularCicloParcelaCartao(conta, dataCompraStr, p, total)
+        const isAtrasada =
+          dataReferenciaHoje !== '' &&
+          cicloParcela.dataVencimento !== '' &&
+          cicloParcela.dataVencimento < dataReferenciaHoje
+
+        itens.push({
+          numeroParcela: p,
+          totalParcelas: total,
+          competencia: cicloParcela.competencia,
+          dataVencimento: cicloParcela.dataVencimento,
+          dataVencimentoIso: cicloParcela.dataVencimentoIso,
+          valor: valorUnitario,
+          status: isAtrasada ? 'atrasada' : 'prevista',
+          isSimulada: true,
+        })
+      } else {
+        // Não-cartão: mês base compra + (p - inicial)
+        const offset = p - inicial
+        const norm = new Date(Date.UTC(cAno, cMesZero + offset, 1))
+        const pYear = norm.getUTCFullYear()
+        const pMonth = norm.getUTCMonth()
+        const maxDias = getDaysInMonth(pYear, pMonth)
+        const realDia = Math.min(diaVencComp, maxDias)
+        const dueStr = `${pYear}-${String(pMonth + 1).padStart(2, '0')}-${String(realDia).padStart(2, '0')}`
+        const compStr = `${pYear}-${String(pMonth + 1).padStart(2, '0')}`
+        const isAtrasada = dataReferenciaHoje !== '' && dueStr < dataReferenciaHoje
+
+        itens.push({
+          numeroParcela: p,
+          totalParcelas: total,
+          competencia: compStr,
+          dataVencimento: dueStr,
+          dataVencimentoIso: `${dueStr}T12:00:00.000Z`,
+          valor: valorUnitario,
+          status: isAtrasada ? 'atrasada' : 'prevista',
+          isSimulada: true,
+        })
+      }
+    }
+  }
+
+  return itens
+}
+
+/**
+ * Calcula a competência e data de vencimento de uma parcela N de uma compra parcelada no cartão de crédito.
+ * Regra:
+ * - Parcela 1 vai para o ciclo da fatura em que a data de compra cai:
+ *   se dia_compra > dia_fechamento, fatura do mês seguinte; se <=, fatura do próprio mês.
+ * - Parcela N (N >= 1) avança (N - 1) ciclos a partir do ciclo inicial da parcela 1.
+ * - Vencimento da parcela = vencimento da fatura do ciclo correspondente (dia_vencimento da conta).
+ */
+export function calcularCicloParcelaCartao(
+  conta: Conta,
+  dataCompraStr: string,
+  numeroParcela: number,
+  totalParcelas: number = 1,
+): ParcelaCicloSimulada {
+  const cicloInicial = calcularFaturaCartao(conta, dataCompraStr)
+  const offset = Math.max(0, numeroParcela - 1)
+  const competencia = adicionarMesesCompetencia(cicloInicial.competencia, offset)
+  const dataVencimento = calcularVencimentoFatura(conta, competencia)
+  const dataVencimentoIso = `${dataVencimento}T12:00:00.000Z`
+
+  return {
+    numeroParcela,
+    totalParcelas,
+    competencia,
+    dataVencimento,
+    dataVencimentoIso,
+  }
+}
+
 export function getAvisoFaturaCartao(
   conta: Conta | undefined,
   dataTransacao: string,
