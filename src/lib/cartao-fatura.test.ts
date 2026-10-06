@@ -308,6 +308,50 @@ describe('calcularEstadoCicloFatura — Estado Financeiro Puro do Ciclo da Fatur
       expect(aviso).toContain('vence 20/09')
     })
 
+    describe('Compras avulsas no cartão de crédito', () => {
+      const contaNubank: Conta = {
+        ...contaCartao,
+        dia_fechamento: 16,
+        dia_vencimento: 23,
+      }
+
+      it('compra avulsa após fechamento (ex: 22/09) vai para a fatura de outubro com venc. 23/10', () => {
+        // Caso concreto: Multi Carnes R$ 67,79 em 22/09/2026
+        const ciclo = calcularFaturaCartao(contaNubank, '2026-09-22')
+        expect(ciclo.competencia).toBe('2026-10')
+        expect(ciclo.dataFechamento).toBe('2026-10-16')
+        expect(ciclo.dataVencimento).toBe('2026-10-23')
+      })
+
+      it('compra avulsa exatamente no dia do fechamento (16/09) pertence à fatura do próprio mês (setembro)', () => {
+        const ciclo = calcularFaturaCartao(contaNubank, '2026-09-16')
+        expect(ciclo.competencia).toBe('2026-09')
+        expect(ciclo.dataFechamento).toBe('2026-09-16')
+        expect(ciclo.dataVencimento).toBe('2026-09-23')
+      })
+
+      it('compra avulsa antes do fechamento (15/09) pertence à fatura do próprio mês (setembro)', () => {
+        const ciclo = calcularFaturaCartao(contaNubank, '2026-09-15')
+        expect(ciclo.competencia).toBe('2026-09')
+        expect(ciclo.dataFechamento).toBe('2026-09-16')
+        expect(ciclo.dataVencimento).toBe('2026-09-23')
+      })
+
+      it('compra avulsa em dezembro após fechamento avança ciclo para janeiro do próximo ano (virada de ano)', () => {
+        const ciclo = calcularFaturaCartao(contaNubank, '2026-12-20')
+        expect(ciclo.competencia).toBe('2027-01')
+        expect(ciclo.dataFechamento).toBe('2027-01-16')
+        expect(ciclo.dataVencimento).toBe('2027-01-23')
+      })
+
+      it('compra avulsa em dezembro antes do fechamento permanece na fatura de dezembro', () => {
+        const ciclo = calcularFaturaCartao(contaNubank, '2026-12-10')
+        expect(ciclo.competencia).toBe('2026-12')
+        expect(ciclo.dataFechamento).toBe('2026-12-16')
+        expect(ciclo.dataVencimento).toBe('2026-12-23')
+      })
+    })
+
     it('simularCronogramaParcelas mescla ocorrências existentes e simula parcelas futuras de cartão', () => {
       const contaNubank: Conta = {
         ...contaCartao,

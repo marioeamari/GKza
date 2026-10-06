@@ -135,6 +135,124 @@ describe('despesasService - gerarOcorrenciasParaCompromisso em cartão', () => {
     expect(payload.valor_previsto).toBe(23.15)
   })
 
+  it('compra avulsa em cartão após fechamento vai para a fatura do mês seguinte (ex: Multi Carnes 22/09 -> fatura outubro, venc 23/10)', async () => {
+    const mockContaNuBank: Conta = {
+      id: 'cartao_nubank_multi',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: 'NuBank',
+      tipo: 'cartao',
+      saldo_inicial: 0,
+      cor: '#8A05BE',
+      ativa: true,
+      dia_fechamento: 16,
+      dia_vencimento: 23,
+    }
+
+    const mockCreate = vi.fn().mockResolvedValue({ id: 'ocorr_carne_67' })
+    const mockGetList = vi.fn().mockResolvedValue({ items: [], totalItems: 0 })
+    const mockGetOneConta = vi.fn().mockResolvedValue(mockContaNuBank)
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: mockGetOneConta } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getList: mockGetList,
+          create: mockCreate,
+        } as any
+      }
+      return {} as any
+    })
+
+    const compromissoCarne: DespesaCompromisso = {
+      id: 'comp_carne_multi',
+      collectionId: 'despesas_compromisso',
+      collectionName: 'despesas_compromisso',
+      created: '2026-10-05T12:00:00.000Z',
+      updated: '2026-10-05T12:00:00.000Z',
+      descricao: 'Carne',
+      secao: 'cartoes_credito',
+      regra_repeticao: 'avulso',
+      modalidade_parcelamento: 'a_vista',
+      data_inicio: '2026-09-22 00:00:00.000Z',
+      valor_estimado: 67.79,
+      conta_padrao: 'cartao_nubank_multi',
+      contexto_tipo: 'pessoal',
+      ativo: true,
+    }
+
+    await despesasService.gerarOcorrenciasParaCompromisso(compromissoCarne)
+
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+    const payload = mockCreate.mock.calls[0][0]
+    expect(payload.competencia).toBe('2026-10')
+    expect(payload.data_vencimento).toBe('2026-10-23T12:00:00.000Z')
+    expect(payload.valor_previsto).toBe(67.79)
+  })
+
+  it('compra avulsa em cartão antes ou no fechamento permanece na fatura do próprio mês', async () => {
+    const mockContaNuBank: Conta = {
+      id: 'cartao_nubank_multi',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: 'NuBank',
+      tipo: 'cartao',
+      saldo_inicial: 0,
+      cor: '#8A05BE',
+      ativa: true,
+      dia_fechamento: 16,
+      dia_vencimento: 23,
+    }
+
+    const mockCreate = vi.fn().mockResolvedValue({ id: 'ocorr_carne_antes' })
+    const mockGetList = vi.fn().mockResolvedValue({ items: [], totalItems: 0 })
+    const mockGetOneConta = vi.fn().mockResolvedValue(mockContaNuBank)
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: mockGetOneConta } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getList: mockGetList,
+          create: mockCreate,
+        } as any
+      }
+      return {} as any
+    })
+
+    const compromissoAntes: DespesaCompromisso = {
+      id: 'comp_carne_antes',
+      collectionId: 'despesas_compromisso',
+      collectionName: 'despesas_compromisso',
+      created: '2026-09-15T12:00:00.000Z',
+      updated: '2026-09-15T12:00:00.000Z',
+      descricao: 'Carne Antes Fechamento',
+      secao: 'cartoes_credito',
+      regra_repeticao: 'avulso',
+      modalidade_parcelamento: 'a_vista',
+      data_inicio: '2026-09-15 00:00:00.000Z',
+      valor_estimado: 50.0,
+      conta_padrao: 'cartao_nubank_multi',
+      contexto_tipo: 'pessoal',
+      ativo: true,
+    }
+
+    await despesasService.gerarOcorrenciasParaCompromisso(compromissoAntes)
+
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+    const payload = mockCreate.mock.calls[0][0]
+    expect(payload.competencia).toBe('2026-09')
+    expect(payload.data_vencimento).toBe('2026-09-23T12:00:00.000Z')
+    expect(payload.valor_previsto).toBe(50.0)
+  })
+
   it('gera ocorrências parceladas cada uma em seu ciclo de fatura (compra após fechamento pula ciclo)', async () => {
     const mockContaCartao: Conta = {
       id: 'cartao_nu',

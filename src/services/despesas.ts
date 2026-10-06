@@ -846,6 +846,7 @@ export const despesasService = {
     const isParcelado =
       compromisso.modalidade_parcelamento === 'parcelado' ||
       compromisso.regra_repeticao === 'parcelado'
+    const isAvulso = compromisso.regra_repeticao === 'avulso'
 
     const novoValorUnitario =
       isParcelado && compromisso.valor_parcela && compromisso.valor_parcela > 0
@@ -972,6 +973,19 @@ export const despesasService = {
           const currentDueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
           if (currentDueStr !== cicloParcela.dataVencimento) {
             updates.data_vencimento = cicloParcela.dataVencimentoIso
+          }
+        } else if (isAvulso) {
+          // Despesa avulsa no cartão: competência e vencimento regidos pelo ciclo da fatura
+          // usando diretamente dataCompraStr
+          const ciclo = calcularFaturaCartao(contaCartaoObj, dataCompraStr)
+          const expectedDueIso = `${ciclo.dataVencimento}T12:00:00.000Z`
+
+          if (oc.competencia !== ciclo.competencia) {
+            updates.competencia = ciclo.competencia
+          }
+          const currentDueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
+          if (currentDueStr !== ciclo.dataVencimento) {
+            updates.data_vencimento = expectedDueIso
           }
         } else {
           const parcelaDate = despesasService.calcularDataVencimentoNoMes(cAno, cMesZero, cDia)
