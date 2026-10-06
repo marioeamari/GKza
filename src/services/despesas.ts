@@ -389,22 +389,8 @@ export const despesasService = {
       }
     }
 
-    // (d) Defensive fallback: primeira categoria de tipo "despesa" no banco
-    try {
-      const catPadrao = await pb
-        .collection('categorias')
-        .getFirstListItem('tipo = "despesa"', { sort: 'created' })
-      if (catPadrao?.id) {
-        return catPadrao.id
-      }
-    } catch {
-      /* ignore */
-    }
-
-    // (e) Se tudo falhar, nunca enviar null
-    throw new Error(
-      'Não foi possível identificar a categoria para o lançamento financeiro da despesa.',
-    )
+    // Se tudo vazio, aborta com erro amigável (sem fallback silencioso)
+    throw new Error('O compromisso não tem categoria definida — edite-o antes de baixar')
   },
 
   /**

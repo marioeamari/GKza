@@ -160,9 +160,7 @@ export function BaixaOcorrenciaDialog({
         (ocorrencia as any)?.expand?.compromisso?.expand?.categoria
 
       const categoriaIdResolvida =
-        typeof rawCategoria === 'string'
-          ? rawCategoria
-          : (rawCategoria as any)?.id || undefined
+        typeof rawCategoria === 'string' ? rawCategoria : (rawCategoria as any)?.id || undefined
 
       if (ocorrencia) {
         await despesasService.baixarOcorrencia({

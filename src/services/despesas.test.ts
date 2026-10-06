@@ -2624,4 +2624,121 @@ describe('despesasService - Agrupador de Despesas e Helpers', () => {
       expect(mockCreate).not.toHaveBeenCalled()
     })
   })
+
+  describe('Resolução de categoria na baixa de despesa e pagamento de compromisso', () => {
+    it('baixa sem categoriaId -> lançamento criado com a categoria herdada do compromisso vinculado (não null)', async () => {
+      const mockConta = {
+        id: 'sglo7dfsqvgfsni',
+        nome: 'NuBank',
+        tipo: 'cartao',
+        tipos_pagamento: ['credito'],
+        dia_fechamento: 15,
+        dia_vencimento: 22,
+      }
+      const mockOcorrencia = {
+        id: 'ocorr_amendoim',
+        compromisso: 'comp_amendoim_id',
+        valor_previsto: 5,
+        numero_parcela: 1,
+        total_parcelas: 1,
+      }
+      const mockCompromisso = {
+        id: 'comp_amendoim_id',
+        descricao: 'Amendoim',
+        categoria: 'qvh2817a1z1j45j',
+        dia_vencimento: 22,
+      }
+
+      const mockLancamentoCreate = vi.fn().mockResolvedValue({ id: 'lanc_amendoim' })
+      const mockOcorrenciaUpdate = vi
+        .fn()
+        .mockResolvedValue({ id: 'ocorr_amendoim', status: 'paga' })
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') {
+          return { getOne: vi.fn().mockResolvedValue(mockConta) } as any
+        }
+        if (name === 'despesas_ocorrencias') {
+          return {
+            getOne: vi.fn().mockResolvedValue(mockOcorrencia),
+            update: mockOcorrenciaUpdate,
+          } as any
+        }
+        if (name === 'despesas_compromisso') {
+          return {
+            getOne: vi.fn().mockResolvedValue(mockCompromisso),
+          } as any
+        }
+        if (name === 'lancamentos') {
+          return {
+            create: mockLancamentoCreate,
+          } as any
+        }
+        return {} as any
+      })
+
+      await despesasService.baixarOcorrencia({
+        ocorrenciaId: 'ocorr_amendoim',
+        contaId: 'sglo7dfsqvgfsni',
+        descricao: 'Amendoim',
+        valorPago: 5,
+        dataPagamento: '2026-10-06',
+      })
+
+      expect(mockLancamentoCreate).toHaveBeenCalled()
+      const lancPayload = mockLancamentoCreate.mock.calls[0][0]
+      expect(lancPayload.categoria).toBe('qvh2817a1z1j45j')
+      expect(lancPayload.categoria).not.toBeNull()
+    })
+
+    it('sem categoria em lugar nenhum -> rejeita com mensagem amigável', async () => {
+      const mockConta = {
+        id: 'c_corrente',
+        nome: 'Conta Corrente',
+        tipo: 'corrente',
+      }
+      const mockOcorrencia = {
+        id: 'ocorr_sem_cat',
+        compromisso: 'comp_sem_cat_id',
+        valor_previsto: 50,
+      }
+      const mockCompromisso = {
+        id: 'comp_sem_cat_id',
+        descricao: 'Sem Categoria',
+        categoria: null,
+      }
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') {
+          return { getOne: vi.fn().mockResolvedValue(mockConta) } as any
+        }
+        if (name === 'despesas_ocorrencias') {
+          return {
+            getOne: vi.fn().mockResolvedValue(mockOcorrencia),
+          } as any
+        }
+        if (name === 'despesas_compromisso') {
+          return {
+            getOne: vi.fn().mockResolvedValue(mockCompromisso),
+          } as any
+        }
+        if (name === 'lancamentos') {
+          return {
+            create: vi.fn(),
+          } as any
+        }
+        return {} as any
+      })
+
+      await expect(
+        despesasService.baixarOcorrencia({
+          ocorrenciaId: 'ocorr_sem_cat',
+          contaId: 'c_corrente',
+          descricao: 'Sem Categoria',
+          valorPago: 50,
+          dataPagamento: '2026-10-06',
+        }),
+      ).rejects.toThrow('O compromisso não tem categoria definida — edite-o antes de baixar')
+    })
+  })
 })
