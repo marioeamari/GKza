@@ -1132,3 +1132,172 @@ describe('financeService - pagarFaturaCartao com baixa cronológica parcial', ()
     expect(mockUpdate).toHaveBeenCalledWith('item_valido', expect.anything())
   })
 })
+
+describe('despesasService - anti-retroatividade e deduplicação no gerador e sincronizador', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('compromisso anual com data_inicio no passado gera apenas a partir do mês de criação em diante', async () => {
+    const mockCreate = vi
+      .fn()
+      .mockImplementation((payload) => Promise.resolve({ id: 'ocorr_anual_1', ...payload }))
+    const mockGetList = vi.fn().mockResolvedValue({ items: [], totalItems: 0 })
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getList: mockGetList,
+          create: mockCreate,
+        } as any
+      }
+      return {} as any
+    })
+
+    // Compromisso anual criado em setembro/2026 com data_inicio em janeiro/2026 (ex.: IPTU Costa Rica)
+    const compromissoAnual: DespesaCompromisso = {
+      id: 'comp_iptu_anual',
+      collectionId: 'despesas_compromisso',
+      collectionName: 'despesas_compromisso',
+      created: '2026-09-25T11:00:40.957Z',
+      updated: '2026-09-25T11:00:40.957Z',
+      descricao: 'IPTU - Costa Rica',
+      secao: 'assinaturas_anuais',
+      regra_repeticao: 'anual',
+      modalidade_parcelamento: 'a_vista',
+      data_inicio: '2026-01-28 00:00:00.000Z',
+      dia_vencimento: 28,
+      valor_estimado: 554,
+      contexto_tipo: 'pessoal',
+      ativo: true,
+    }
+
+    await despesasService.gerarOcorrenciasParaCompromisso(compromissoAnual)
+
+    // Deve ter chamado create
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+    const createdPayload = mockCreate.mock.calls[0][0]
+    // A competência gerada NÃO pode ser retroativa ao mês de criação (2026-09)
+    // Para janeiro, deve avançar para o próximo ciclo válido (2027-01), nunca 2026-01
+    expect(createdPayload.competencia >= '2026-09').toBe(true)
+    expect(createdPayload.competencia).toBe('2027-01')
+  })
+
+  it('sincronização repetida (gerarOcorrenciasParaCompromisso e lote) não duplica ocorrências existentes', async () => {
+    const mockCreate = vi
+      .fn()
+      .mockImplementation((payload) => Promise.resolve({ id: 'ocorr_nova', ...payload }))
+
+    // Simula que a ocorrência de competência 2026-10 já existe no banco
+    const mockGetList = vi.fn().mockImplementation((page, perPage, opts) => {
+      const filter = opts?.filter || ''
+      if (
+        filter.includes("competencia = '2026-10'") ||
+        filter.includes("competencia = '2026-09'")
+      ) {
+        return Promise.resolve({
+          items: [{ id: 'ocorr_ja_existe', competencia: '2026-10', numero_parcela: 0 }],
+          totalItems: 1,
+        })
+      }
+      return Promise.resolve({ items: [], totalItems: 0 })
+    })
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getList: mockGetList,
+          create: mockCreate,
+        } as any
+      }
+      return {} as any
+    })
+
+    const compromissoMensal: DespesaCompromisso = {
+      id: 'comp_cartao_protegido',
+      collectionId: 'despesas_compromisso',
+      collectionName: 'despesas_compromisso',
+      created: '2026-10-04T02:00:29.927Z',
+      updated: '2026-10-04T02:00:29.927Z',
+      descricao: 'Cartão Protegido',
+      secao: 'cartoes_credito',
+      regra_repeticao: 'mensal',
+      modalidade_parcelamento: 'a_vista',
+      data_inicio: '2026-09-14 00:00:00.000Z',
+      dia_vencimento: 3,
+      valor_estimado: 14.9,
+      contexto_tipo: 'pessoal',
+      ativo: true,
+    }
+
+    // Executa a primeira vez para competência 2026-10
+    await despesasService.gerarOcorrenciasParaCompromisso(compromissoMensal, ['2026-10'])
+
+    // Como já existe no getList, mockCreate NÃO deve ter sido chamado para 2026-10
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+
+  it('sincronizarOcorrenciasCompromisso não cria duplicatas quando chamada repetidamente', async () => {
+    const mockContaCartao: Conta = {
+      id: 'cartao_porto',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: 'Porto Seguro',
+      tipo: 'cartao',
+      saldo_inicial: 0,
+      cor: '#004A97',
+      ativa: true,
+      dia_fechamento: 13,
+      dia_vencimento: 20,
+    }
+
+    const mockCreate = vi.fn().mockResolvedValue({ id: 'ocorr_nova' })
+
+    // Na primeira checagem diz que já existe ocorrência inicial
+    const mockGetList = vi.fn().mockResolvedValue({ items: [{ id: 'existente' }], totalItems: 1 })
+    const mockGetFullList = vi.fn().mockResolvedValue([])
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: vi.fn().mockResolvedValue(mockContaCartao) } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getList: mockGetList,
+          getFullList: mockGetFullList,
+          create: mockCreate,
+          update: vi.fn().mockResolvedValue({}),
+        } as any
+      }
+      return {} as any
+    })
+
+    const compromisso: DespesaCompromisso = {
+      id: 'comp_cartao_repetido',
+      collectionId: 'despesas_compromisso',
+      collectionName: 'despesas_compromisso',
+      created: '2026-10-04T02:00:29.927Z',
+      updated: '2026-10-04T02:00:29.927Z',
+      descricao: 'Cartão Protegido Repetido',
+      secao: 'cartoes_credito',
+      regra_repeticao: 'mensal',
+      modalidade_parcelamento: 'a_vista',
+      data_inicio: '2026-09-14 00:00:00.000Z',
+      dia_vencimento: 20,
+      valor_estimado: 14.9,
+      conta_padrao: 'cartao_porto',
+      contexto_tipo: 'pessoal',
+      ativo: true,
+    }
+
+    // Primeira sincronização: já existe ocorrência
+    await despesasService.sincronizarOcorrenciasCompromisso(compromisso)
+    // Segunda sincronização idêntica
+    await despesasService.sincronizarOcorrenciasCompromisso(compromisso)
+
+    // Não deve criar cópias extras
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+})

@@ -865,23 +865,41 @@ export const despesasService = {
     const contaEfetivaId = compromisso.conta_padrao || (contaCartaoObj ? contaCartaoObj.id : null)
 
     // Se for cartão de crédito e tiver data_inicio, verifica se existe ocorrência (prevista OU paga)
-    // para o ciclo inicial da fatura; se faltar, cria-a de forma idempotente.
+    // para o ciclo inicial da fatura; se faltar, cria-a de forma estritamente idempotente e sem retroagir
+    // além do ciclo de criação do compromisso.
     if (contaCartaoObj && compromisso.data_inicio) {
       const dataInicioStr = compromisso.data_inicio.slice(0, 10)
       const cicloInicial = calcularFaturaCartao(contaCartaoObj, dataInicioStr)
+
+      // Regra anti-retroatividade: não criar ocorrência anterior ao ciclo de criação do compromisso
+      const createdStr = compromisso.created ? compromisso.created.slice(0, 10) : ''
+      const cicloCreated = createdStr
+        ? calcularFaturaCartao(contaCartaoObj, createdStr).competencia
+        : ''
+      const competenciaPermitida =
+        cicloCreated && cicloInicial.competencia < cicloCreated
+          ? cicloCreated
+          : cicloInicial.competencia
+
+      const numParcelaCheck = isParcelado ? compromisso.parcela_inicial || 1 : 0
       const jaExisteInicial = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-        filter: `compromisso = '${compromisso.id}' && competencia = '${cicloInicial.competencia}'`,
+        filter: `compromisso = '${compromisso.id}' && competencia = '${competenciaPermitida}' && numero_parcela = ${numParcelaCheck}`,
       })
 
       if (jaExisteInicial.totalItems === 0) {
-        const dueDateIso = `${cicloInicial.dataVencimento}T12:00:00.000Z`
+        // Se a competência foi ajustada para o ciclo de criação, calcula o vencimento desse ciclo
+        const cicloEfetivo =
+          competenciaPermitida === cicloInicial.competencia
+            ? cicloInicial
+            : calcularFaturaCartao(contaCartaoObj, `${competenciaPermitida}-01`)
+        const dueDateIso = `${cicloEfetivo.dataVencimento}T12:00:00.000Z`
         await pb.collection('despesas_ocorrencias').create({
           compromisso: compromisso.id,
           contexto_tipo: compromisso.contexto_tipo,
           empresa: compromisso.empresa || null,
           secao: compromisso.secao,
           conta: contaEfetivaId,
-          competencia: cicloInicial.competencia,
+          competencia: competenciaPermitida,
           data_vencimento: dueDateIso,
           valor_previsto: novoValorUnitario,
           valor_estimado_original: novoValorUnitario,
@@ -894,7 +912,7 @@ export const despesasService = {
           direcionamento: compromisso.direcionamento || null,
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || null,
-          numero_parcela: isParcelado ? compromisso.parcela_inicial || 1 : 0,
+          numero_parcela: numParcelaCheck,
           total_parcelas: isParcelado ? compromisso.total_parcelas || 1 : 0,
         })
       }
@@ -1110,15 +1128,44 @@ export const despesasService = {
       let dueDateIso: string
 
       if (contaCartaoObj) {
-        // Alinhado ao ciclo da fatura do cartão
+        // Alinhado ao ciclo da fatura do cartão com limite inferior no mês/ciclo de criação
         const ciclo = calcularFaturaCartao(contaCartaoObj, dataCompraStr)
-        compStr = ciclo.competencia
-        dueDateIso = `${ciclo.dataVencimento}T12:00:00.000Z`
+        let compFinal = ciclo.competencia
+        let dueFinalIso = `${ciclo.dataVencimento}T12:00:00.000Z`
+
+        if (compromisso.created) {
+          const cicloCreated = calcularFaturaCartao(
+            contaCartaoObj,
+            compromisso.created.slice(0, 10),
+          )
+          if (compFinal < cicloCreated.competencia) {
+            compFinal = cicloCreated.competencia
+            dueFinalIso = `${cicloCreated.dataVencimento}T12:00:00.000Z`
+          }
+        }
+
+        compStr = compFinal
+        dueDateIso = dueFinalIso
       } else {
         const rawDate = compromisso.data_inicio || compromisso.created
         const startDate = rawDate ? new Date(rawDate) : new Date()
-        compStr = `${startDate.getUTCFullYear()}-${(startDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
-        dueDateIso = startDate.toISOString()
+        let compCalculada = `${startDate.getUTCFullYear()}-${(startDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
+        let dueCalculadaIso = startDate.toISOString()
+
+        if (compromisso.created && compromisso.created.length >= 7) {
+          const compCreated = compromisso.created.slice(0, 7)
+          if (compCalculada < compCreated) {
+            compCalculada = compCreated
+            const [cYStr, cMStr] = compCreated.split('-')
+            const day = compromisso.dia_vencimento || startDate.getUTCDate() || 10
+            dueCalculadaIso = despesasService
+              .calcularDataVencimentoNoMes(parseInt(cYStr, 10), parseInt(cMStr, 10) - 1, day)
+              .toISOString()
+          }
+        }
+
+        compStr = compCalculada
+        dueDateIso = dueCalculadaIso
       }
 
       const exists = await hasExistingOcorrencia({ onlyCompromisso: true })
@@ -1256,36 +1303,40 @@ export const despesasService = {
     // 3. Pagamento Anual
     if (isAnual) {
       const now = new Date()
-      const hoje = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0),
-      )
       const rawStart = new Date(compromisso.data_inicio)
       const dayDesejado = compromisso.dia_vencimento || rawStart.getUTCDate() || 10
       const mesOriginal = rawStart.getUTCMonth()
 
-      // Se a data de início (ou vencimento no ano de início) já passou em relação a hoje,
-      // avança para o próximo ano em que a data seja >= hoje (ou data futura correspondente).
+      // Limite inferior estrito: nunca gerar ocorrência com competência < mês de criação do compromisso.
+      const compCreatedMonth =
+        compromisso.created && compromisso.created.length >= 7
+          ? compromisso.created.slice(0, 7)
+          : `${now.getUTCFullYear()}-${(now.getUTCMonth() + 1).toString().padStart(2, '0')}`
+
       let targetYear = rawStart.getUTCFullYear()
       let dueDate = despesasService.calcularDataVencimentoNoMes(
         targetYear,
         mesOriginal,
         dayDesejado,
       )
+      let compStrCalc = `${dueDate.getUTCFullYear()}-${(dueDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
 
-      // Se targetCompetencias foram passadas explicitamente, use a primeira compatível
+      // Se a data inicial do compromisso anual for anterior ao mês de criação, avança para o próximo ciclo válido
+      while (compStrCalc < compCreatedMonth) {
+        targetYear += 1
+        dueDate = despesasService.calcularDataVencimentoNoMes(targetYear, mesOriginal, dayDesejado)
+        compStrCalc = `${dueDate.getUTCFullYear()}-${(dueDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
+      }
+
+      // Se targetCompetencias foram passadas explicitamente e houver alguma válida >= compCreatedMonth, respeita
       if (targetCompetencias && targetCompetencias.length > 0) {
-        const [yStr, mStr] = targetCompetencias[0].split('-')
-        targetYear = parseInt(yStr, 10)
-        const targetMes = parseInt(mStr, 10) - 1
-        dueDate = despesasService.calcularDataVencimentoNoMes(targetYear, targetMes, dayDesejado)
-      } else {
-        while (dueDate.getTime() < hoje.getTime()) {
-          targetYear += 1
-          dueDate = despesasService.calcularDataVencimentoNoMes(
-            targetYear,
-            mesOriginal,
-            dayDesejado,
-          )
+        const valids = targetCompetencias.filter((tc) => tc >= compCreatedMonth)
+        if (valids.length > 0) {
+          const [yStr, mStr] = valids[0].split('-')
+          const tY = parseInt(yStr, 10)
+          const tM = parseInt(mStr, 10) - 1
+          targetYear = tY
+          dueDate = despesasService.calcularDataVencimentoNoMes(targetYear, tM, dayDesejado)
         }
       }
 
@@ -1322,7 +1373,7 @@ export const despesasService = {
     // 4. Regra Mensal Recorrente (contínua até ser encerrada)
     if (contaCartaoObj) {
       // Compromissos recorrentes de cartão de crédito:
-      // O ciclo da fatura inicial é calculado a partir de data_inicio (ou created / now).
+      // O ciclo da fatura inicial é calculado a partir de data_inicio, mas nunca anterior ao ciclo de criação.
       const dataInicioStr = compromisso.data_inicio
         ? compromisso.data_inicio.slice(0, 10)
         : compromisso.created
@@ -1330,7 +1381,16 @@ export const despesasService = {
           : new Date().toISOString().slice(0, 10)
 
       const cicloInicial = calcularFaturaCartao(contaCartaoObj, dataInicioStr)
-      const startCompStr = cicloInicial.competencia
+      let minCompStr = cicloInicial.competencia
+
+      if (compromisso.created) {
+        const cicloCreated = calcularFaturaCartao(contaCartaoObj, compromisso.created.slice(0, 10))
+        if (cicloCreated.competencia > minCompStr) {
+          minCompStr = cicloCreated.competencia
+        }
+      }
+
+      const startCompStr = minCompStr
 
       const meses =
         targetCompetencias && targetCompetencias.length > 0
@@ -1409,20 +1469,33 @@ export const despesasService = {
     }
 
     // Regra mensal não-cartão (comportamento original)
-    // Extrai o mês e ano de início de forma robusta e independente de fuso
+    // Extrai o mês e ano de início de forma robusta e independente de fuso,
+    // garantindo que nunca seja anterior ao mês de criação do compromisso.
     const startCompStr = (() => {
+      let candidate = ''
       if (compromisso.data_inicio) {
         const str = String(compromisso.data_inicio).trim()
         if (str.length >= 7 && str[4] === '-') {
-          return str.slice(0, 7)
-        }
-        const d = new Date(str)
-        if (!isNaN(d.getTime())) {
-          return `${d.getUTCFullYear()}-${(d.getUTCMonth() + 1).toString().padStart(2, '0')}`
+          candidate = str.slice(0, 7)
+        } else {
+          const d = new Date(str)
+          if (!isNaN(d.getTime())) {
+            candidate = `${d.getUTCFullYear()}-${(d.getUTCMonth() + 1).toString().padStart(2, '0')}`
+          }
         }
       }
-      const now = new Date()
-      return `${now.getUTCFullYear()}-${(now.getUTCMonth() + 1).toString().padStart(2, '0')}`
+      if (!candidate) {
+        const now = new Date()
+        candidate = `${now.getUTCFullYear()}-${(now.getUTCMonth() + 1).toString().padStart(2, '0')}`
+      }
+
+      if (compromisso.created && compromisso.created.length >= 7) {
+        const createdMonth = compromisso.created.slice(0, 7)
+        if (candidate < createdMonth) {
+          return createdMonth
+        }
+      }
+      return candidate
     })()
 
     const meses = (() => {
