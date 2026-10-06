@@ -445,31 +445,29 @@ export const despesasService = {
 
     if (metodoEfetivoEhCredito && contaObj) {
       const ciclo = calcularFaturaCartao(contaObj, params.dataPagamento)
-      if (ciclo.competencia !== ocorrAtual.competencia) {
-        // Verifica se já não existe outra ocorrência para o mesmo compromisso ocupando essa competência
-        const compromissoId =
-          typeof ocorrAtual.compromisso === 'object' && ocorrAtual.compromisso !== null
-            ? (ocorrAtual.compromisso as any).id
-            : ocorrAtual.compromisso
+      // Verifica se já não existe outra ocorrência para o mesmo compromisso ocupando essa competência
+      const compromissoId =
+        typeof ocorrAtual.compromisso === 'object' && ocorrAtual.compromisso !== null
+          ? (ocorrAtual.compromisso as any).id
+          : ocorrAtual.compromisso
 
-        let ocupada = false
-        if (compromissoId) {
-          try {
-            const conflito = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-              filter: `compromisso = '${compromissoId}' && competencia = '${ciclo.competencia}' && id != '${params.ocorrenciaId}'`,
-            })
-            if (conflito.totalItems > 0) {
-              ocupada = true
-            }
-          } catch {
-            /* ignore */
+      let ocupada = false
+      if (compromissoId && ciclo.competencia !== ocorrAtual.competencia) {
+        try {
+          const conflito = await pb.collection('despesas_ocorrencias').getList(1, 1, {
+            filter: `compromisso = '${compromissoId}' && competencia = '${ciclo.competencia}' && id != '${params.ocorrenciaId}'`,
+          })
+          if (conflito.totalItems > 0) {
+            ocupada = true
           }
+        } catch {
+          /* ignore */
         }
+      }
 
-        if (!ocupada) {
-          cardCicloCompetencia = ciclo.competencia
-          cardCicloVencimentoIso = `${ciclo.dataVencimento}T12:00:00.000Z`
-        }
+      if (!ocupada) {
+        cardCicloCompetencia = ciclo.competencia
+        cardCicloVencimentoIso = `${ciclo.dataVencimento}T12:00:00.000Z`
       }
     }
 
@@ -522,11 +520,7 @@ export const despesasService = {
         fdOcorr.append('competencia', cardCicloCompetencia)
         fdOcorr.append('data_vencimento', cardCicloVencimentoIso)
       } else {
-        if (
-          compDataPag &&
-          compDataPag !== ocorrAtual.competencia &&
-          (ocorrAtual.secao === 'assinaturas_anuais' || !metodoEfetivoEhCredito)
-        ) {
+        if (compDataPag && !metodoEfetivoEhCredito) {
           fdOcorr.append('competencia', compDataPag)
         }
         if (naoCreditoVencimentoAjustadoIso) {
@@ -559,11 +553,7 @@ export const despesasService = {
         updatesOcorr.competencia = cardCicloCompetencia
         updatesOcorr.data_vencimento = cardCicloVencimentoIso
       } else {
-        if (
-          compDataPag &&
-          compDataPag !== ocorrAtual.competencia &&
-          (ocorrAtual.secao === 'assinaturas_anuais' || !metodoEfetivoEhCredito)
-        ) {
+        if (compDataPag && !metodoEfetivoEhCredito) {
           updatesOcorr.competencia = compDataPag
         }
         if (naoCreditoVencimentoAjustadoIso) {
@@ -604,60 +594,118 @@ export const despesasService = {
     direcionamento?: string
     dizimoPercentual?: number
   }) => {
-    const compStr = params.dataPagamento.slice(0, 7) // 'YYYY-MM'
-
-    // 1. Criar lançamento financeiro
-    let lancamento: any
-    if (params.comprovanteArquivo) {
-      const fdLanc = new FormData()
-      fdLanc.append('descricao', params.descricao)
-      fdLanc.append('valor', String(params.valorPago))
-      fdLanc.append('tipo', 'despesa')
-      fdLanc.append('data', `${params.dataPagamento} 12:00:00`)
-      fdLanc.append('status', 'pago')
-      fdLanc.append('conta', params.contaId)
-      if (params.categoriaId) fdLanc.append('categoria', params.categoriaId)
-      if (params.empresaId) fdLanc.append('empresa', params.empresaId)
-      if (params.pessoaId) fdLanc.append('pessoa', params.pessoaId)
-      fdLanc.append(
-        'observacoes',
-        params.observacoes || 'Pagamento registrado diretamente de compromisso',
-      )
-      fdLanc.append('comprovante', params.comprovanteArquivo)
-      lancamento = await pb.collection('lancamentos').create(fdLanc)
-    } else {
-      lancamento = await pb.collection('lancamentos').create({
-        descricao: params.descricao,
-        valor: params.valorPago,
-        tipo: 'despesa',
-        data: `${params.dataPagamento} 12:00:00`,
-        status: 'pago',
-        conta: params.contaId,
-        categoria: params.categoriaId || null,
-        empresa: params.empresaId || null,
-        pessoa: params.pessoaId || null,
-        observacoes: params.observacoes || 'Pagamento registrado diretamente de compromisso',
-      })
-    }
-
-    // 2. Criar ocorrência já como 'paga'
-    // REGRA DE PRODUTO: para métodos de pagamento imediato (tudo que NÃO é crédito),
-    // o vencimento nunca pode ser posterior ao mês do pagamento.
-    // Se o compromisso tem dia_vencimento, usamos o dia_vencimento no mês do pagamento (clamp ao último dia do mês).
-    // Caso contrário (ou fallback), usamos a própria data do pagamento.
-    let vencimentoRegistradoIso = `${params.dataPagamento} 12:00:00.000Z`
+    let compRecord: DespesaCompromisso | null = null
     try {
-      const compRecord = await pb
+      compRecord = await pb
         .collection<DespesaCompromisso>('despesas_compromisso')
         .getOne(params.compromissoId)
+    } catch {
+      /* ignore */
+    }
+
+    let isCartao = false
+    let contaObj: Conta | null = null
+    try {
+      contaObj = await pb.collection<Conta>('contas').getOne(params.contaId)
+      isCartao = contaObj.tipo === 'cartao'
+    } catch {
+      /* ignore */
+    }
+
+    const metodoCompId = compRecord?.metodo_pagamento
+    const metodoEfetivoEhCredito = isCartao && isMetodoCredito(metodoCompId)
+
+    let competenciaEfetiva = params.dataPagamento.slice(0, 7) // 'YYYY-MM'
+    let vencimentoRegistradoIso = `${params.dataPagamento} 12:00:00.000Z`
+
+    if (metodoEfetivoEhCredito && contaObj) {
+      const ciclo = calcularFaturaCartao(contaObj, params.dataPagamento)
+      competenciaEfetiva = ciclo.competencia
+      vencimentoRegistradoIso = `${ciclo.dataVencimento}T12:00:00.000Z`
+    } else if (compRecord) {
       const diaComp = compRecord.dia_vencimento || 10
-      const [pAnoStr, pMesStr] = compStr.split('-')
+      const [pAnoStr, pMesStr] = competenciaEfetiva.split('-')
       const pAno = parseInt(pAnoStr, 10)
       const pMesZero = parseInt(pMesStr, 10) - 1
       const dataVenc = despesasService.calcularDataVencimentoNoMes(pAno, pMesZero, diaComp)
       vencimentoRegistradoIso = dataVenc.toISOString()
-    } catch {
-      /* fallback para params.dataPagamento */
+    }
+
+    // 1. Criar lançamento financeiro
+    let lancamento: any
+    if (metodoEfetivoEhCredito && contaObj) {
+      if (params.comprovanteArquivo) {
+        const fdLanc = new FormData()
+        fdLanc.append('descricao', params.descricao)
+        fdLanc.append('valor', String(params.valorPago))
+        fdLanc.append('tipo', 'despesa')
+        fdLanc.append('data', `${params.dataPagamento} 12:00:00`)
+        fdLanc.append('status', 'pendente')
+        fdLanc.append('conta', params.contaId)
+        if (params.categoriaId) fdLanc.append('categoria', params.categoriaId)
+        if (params.empresaId) fdLanc.append('empresa', params.empresaId)
+        if (params.pessoaId) fdLanc.append('pessoa', params.pessoaId)
+        fdLanc.append('competencia', competenciaEfetiva)
+        fdLanc.append('fatura_paga', 'false')
+        fdLanc.append(
+          'observacoes',
+          params.observacoes ||
+            `Despesa no cartão ${contaObj.nome} (integrada à fatura de ${competenciaEfetiva})`,
+        )
+        fdLanc.append('comprovante', params.comprovanteArquivo)
+        lancamento = await pb.collection('lancamentos').create(fdLanc)
+      } else {
+        lancamento = await pb.collection('lancamentos').create({
+          descricao: params.descricao,
+          valor: params.valorPago,
+          tipo: 'despesa',
+          data: `${params.dataPagamento} 12:00:00`,
+          status: 'pendente',
+          conta: params.contaId,
+          categoria: params.categoriaId || null,
+          empresa: params.empresaId || null,
+          pessoa: params.pessoaId || null,
+          competencia: competenciaEfetiva,
+          fatura_paga: false,
+          observacoes:
+            params.observacoes ||
+            `Despesa no cartão ${contaObj.nome} (integrada à fatura de ${competenciaEfetiva})`,
+        })
+      }
+    } else {
+      if (params.comprovanteArquivo) {
+        const fdLanc = new FormData()
+        fdLanc.append('descricao', params.descricao)
+        fdLanc.append('valor', String(params.valorPago))
+        fdLanc.append('tipo', 'despesa')
+        fdLanc.append('data', `${params.dataPagamento} 12:00:00`)
+        fdLanc.append('status', 'pago')
+        fdLanc.append('conta', params.contaId)
+        if (params.categoriaId) fdLanc.append('categoria', params.categoriaId)
+        if (params.empresaId) fdLanc.append('empresa', params.empresaId)
+        if (params.pessoaId) fdLanc.append('pessoa', params.pessoaId)
+        fdLanc.append('competencia', competenciaEfetiva)
+        fdLanc.append(
+          'observacoes',
+          params.observacoes || 'Pagamento registrado diretamente de compromisso',
+        )
+        fdLanc.append('comprovante', params.comprovanteArquivo)
+        lancamento = await pb.collection('lancamentos').create(fdLanc)
+      } else {
+        lancamento = await pb.collection('lancamentos').create({
+          descricao: params.descricao,
+          valor: params.valorPago,
+          tipo: 'despesa',
+          data: `${params.dataPagamento} 12:00:00`,
+          status: 'pago',
+          conta: params.contaId,
+          categoria: params.categoriaId || null,
+          empresa: params.empresaId || null,
+          pessoa: params.pessoaId || null,
+          competencia: competenciaEfetiva,
+          observacoes: params.observacoes || 'Pagamento registrado diretamente de compromisso',
+        })
+      }
     }
 
     let ocorrencia: DespesaOcorrencia
@@ -668,7 +716,7 @@ export const despesasService = {
       if (params.empresaId) fdOcorr.append('empresa', params.empresaId)
       fdOcorr.append('secao', params.secao || 'assinaturas_anuais')
       fdOcorr.append('conta', params.contaId)
-      fdOcorr.append('competencia', compStr)
+      fdOcorr.append('competencia', competenciaEfetiva)
       fdOcorr.append('data_vencimento', vencimentoRegistradoIso)
       fdOcorr.append('data_pagamento', `${params.dataPagamento} 12:00:00`)
       fdOcorr.append('valor_previsto', String(params.valorPago))
@@ -698,7 +746,7 @@ export const despesasService = {
           empresa: params.empresaId || null,
           secao: params.secao || 'assinaturas_anuais',
           conta: params.contaId,
-          competencia: compStr,
+          competencia: competenciaEfetiva,
           data_vencimento: vencimentoRegistradoIso,
           data_pagamento: `${params.dataPagamento} 12:00:00`,
           valor_previsto: params.valorPago,

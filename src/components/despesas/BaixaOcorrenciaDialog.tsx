@@ -25,7 +25,7 @@ import { useToast } from '@/hooks/use-toast'
 import { Badge } from '@/components/ui/badge'
 import { apiMessage } from '@/lib/api-error'
 import { calcularFaturaCartao, getAvisoFaturaCartao } from '@/lib/cartao-fatura'
-import { formatCurrency, formatDate } from '@/lib/format'
+import { formatCurrency, formatDate, getLocalDateStr } from '@/lib/format'
 import { despesasService, isMetodoCredito } from '@/services/despesas'
 import { ContaContextoWarning } from '@/components/ContaContextoWarning'
 import { AnexoUploadField } from '@/components/despesas/AnexoUploadField'
@@ -76,14 +76,12 @@ export function BaixaOcorrenciaDialog({
       setComprovanteArquivo(null)
       if (ocorrencia) {
         setValorPago(ocorrencia.valor_pago || ocorrencia.valor_previsto || 0)
-        // Para ocorrências pendentes, inicializar prioritariamente com a data da compra (comp.data_inicio),
-        // preservando data_pagamento quando já baixada/paga.
-        const dataCompraComp = comp?.data_inicio?.slice(0, 10)
+        // Pré-carregar data de pagamento com HOJE por padrão (não a data da compra/vencimento antigo),
+        // preservando data_pagamento apenas se a ocorrência já tiver sido baixada/paga anteriormente.
         const dataInicial =
-          ocorrencia.data_pagamento?.slice(0, 10) ||
-          dataCompraComp ||
-          ocorrencia.data_vencimento?.slice(0, 10) ||
-          new Date().toISOString().slice(0, 10)
+          ocorrencia.status === 'paga' && ocorrencia.data_pagamento
+            ? ocorrencia.data_pagamento.slice(0, 10)
+            : getLocalDateStr()
         setDataPagamento(dataInicial)
         const linkedConta = ocorrencia.conta || ocorrencia.expand?.compromisso?.conta_padrao
         const defaultConta =
@@ -102,8 +100,7 @@ export function BaixaOcorrenciaDialog({
         setDizimoPercentual(pct)
       } else if (compromisso) {
         setValorPago(compromisso.valor_estimado || compromisso.valor_parcela || 0)
-        const dataInicial =
-          compromisso.data_inicio?.slice(0, 10) || new Date().toISOString().slice(0, 10)
+        const dataInicial = getLocalDateStr()
         setDataPagamento(dataInicial)
         const linkedConta = compromisso.conta_padrao
         const defaultConta =
