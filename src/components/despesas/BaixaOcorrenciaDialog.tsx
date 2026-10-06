@@ -150,13 +150,27 @@ export function BaixaOcorrenciaDialog({
 
     setSubmitting(true)
     try {
+      // Resolução robusta da categoria da despesa (string id, objeto expandido, ou compromisso/ocorrência)
+      const rawCategoria =
+        comp?.categoria ??
+        comp?.expand?.categoria ??
+        (compromisso as any)?.categoria ??
+        (compromisso as any)?.expand?.categoria ??
+        (ocorrencia as any)?.expand?.compromisso?.categoria ??
+        (ocorrencia as any)?.expand?.compromisso?.expand?.categoria
+
+      const categoriaIdResolvida =
+        typeof rawCategoria === 'string'
+          ? rawCategoria
+          : (rawCategoria as any)?.id || undefined
+
       if (ocorrencia) {
         await despesasService.baixarOcorrencia({
           ocorrenciaId: ocorrencia.id,
           valorPago,
           dataPagamento,
           contaId,
-          categoriaId: comp?.categoria,
+          categoriaId: categoriaIdResolvida,
           empresaId: ocorrencia.empresa,
           pessoaId: comp?.pessoa,
           observacoes,
@@ -174,7 +188,7 @@ export function BaixaOcorrenciaDialog({
           valorPago,
           dataPagamento,
           contaId,
-          categoriaId: compromisso.categoria,
+          categoriaId: categoriaIdResolvida,
           empresaId: compromisso.empresa,
           pessoaId: compromisso.pessoa,
           observacoes,

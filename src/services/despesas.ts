@@ -312,6 +312,102 @@ export const despesasService = {
   },
 
   /**
+   * Helper interno para resolver com máxima robustez o ID da categoria
+   * para o lançamento financeiro da despesa.
+   *
+   * Ordem de prioridade:
+   * (a) Categoria explícita informada no parâmetro (se string não-vazia);
+   * (b) compRecord?.categoria (string ou objeto expandido com .id);
+   * (c) ocorrAtual?.expand?.compromisso?.categoria (string ou objeto expandido com .id);
+   * (d) Fallback defensivo: primeira categoria de tipo "despesa" no banco;
+   * (e) Se tudo falhar, lança erro claro em pt-BR (nunca envia null/blank para lancamentos).
+   */
+  resolverCategoriaDespesa: async (
+    categoriaParam?: unknown,
+    compRecord?: unknown,
+    ocorrAtual?: unknown,
+  ): Promise<string> => {
+    // (a) Parâmetro explícito
+    if (typeof categoriaParam === 'string' && categoriaParam.trim() !== '') {
+      return categoriaParam.trim()
+    }
+    if (
+      categoriaParam &&
+      typeof categoriaParam === 'object' &&
+      typeof (categoriaParam as any).id === 'string' &&
+      (categoriaParam as any).id.trim() !== ''
+    ) {
+      return (categoriaParam as any).id.trim()
+    }
+
+    // (b) compRecord.categoria
+    const comp = compRecord as any
+    if (comp) {
+      if (typeof comp.categoria === 'string' && comp.categoria.trim() !== '') {
+        return comp.categoria.trim()
+      }
+      if (
+        comp.categoria &&
+        typeof comp.categoria === 'object' &&
+        typeof comp.categoria.id === 'string' &&
+        comp.categoria.id.trim() !== ''
+      ) {
+        return comp.categoria.id.trim()
+      }
+      if (
+        comp.expand?.categoria &&
+        typeof comp.expand.categoria === 'object' &&
+        typeof comp.expand.categoria.id === 'string' &&
+        comp.expand.categoria.id.trim() !== ''
+      ) {
+        return comp.expand.categoria.id.trim()
+      }
+    }
+
+    // (c) ocorrAtual.expand.compromisso.categoria
+    const oc = ocorrAtual as any
+    const ocComp = oc?.expand?.compromisso
+    if (ocComp) {
+      if (typeof ocComp.categoria === 'string' && ocComp.categoria.trim() !== '') {
+        return ocComp.categoria.trim()
+      }
+      if (
+        ocComp.categoria &&
+        typeof ocComp.categoria === 'object' &&
+        typeof ocComp.categoria.id === 'string' &&
+        ocComp.categoria.id.trim() !== ''
+      ) {
+        return ocComp.categoria.id.trim()
+      }
+      if (
+        ocComp.expand?.categoria &&
+        typeof ocComp.expand.categoria === 'object' &&
+        typeof ocComp.expand.categoria.id === 'string' &&
+        ocComp.expand.categoria.id.trim() !== ''
+      ) {
+        return ocComp.expand.categoria.id.trim()
+      }
+    }
+
+    // (d) Defensive fallback: primeira categoria de tipo "despesa" no banco
+    try {
+      const catPadrao = await pb
+        .collection('categorias')
+        .getFirstListItem('tipo = "despesa"', { sort: 'created' })
+      if (catPadrao?.id) {
+        return catPadrao.id
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // (e) Se tudo falhar, nunca enviar null
+    throw new Error(
+      'Não foi possível identificar a categoria para o lançamento financeiro da despesa.',
+    )
+  },
+
+  /**
    * Baixa uma ocorrência:
    * 1. Atualiza a ocorrência para 'paga' com data_pagamento e valor_pago
    * 2. Cria lançamento financeiro no caixa/banco correspondente
@@ -401,6 +497,13 @@ export const despesasService = {
     const competenciaFinal = resRegraUnica.competencia
     const vencimentoFinalIso = resRegraUnica.dataVencimentoIso
 
+    // Resolução robusta da categoria obrigatória do lançamento
+    const categoriaEfetiva = await despesasService.resolverCategoriaDespesa(
+      params.categoriaId,
+      compRecord,
+      ocorrAtual,
+    )
+
     let lancamentoId: string | null = null
     let lancamento: any = null
 
@@ -417,7 +520,7 @@ export const despesasService = {
         fd.append('data', `${params.dataPagamento} 12:00:00`)
         fd.append('status', 'pendente')
         fd.append('conta', params.contaId)
-        if (params.categoriaId) fd.append('categoria', params.categoriaId)
+        fd.append('categoria', categoriaEfetiva)
         if (params.empresaId) fd.append('empresa', params.empresaId)
         if (params.pessoaId) fd.append('pessoa', params.pessoaId)
         fd.append('competencia', competenciaFinal)
@@ -437,7 +540,7 @@ export const despesasService = {
           data: `${params.dataPagamento} 12:00:00`,
           status: 'pendente',
           conta: params.contaId,
-          categoria: params.categoriaId || null,
+          categoria: categoriaEfetiva,
           empresa: params.empresaId || null,
           pessoa: params.pessoaId || null,
           competencia: competenciaFinal,
@@ -458,7 +561,7 @@ export const despesasService = {
         fd.append('data', `${params.dataPagamento} 12:00:00`)
         fd.append('status', 'pago')
         fd.append('conta', params.contaId)
-        if (params.categoriaId) fd.append('categoria', params.categoriaId)
+        fd.append('categoria', categoriaEfetiva)
         if (params.empresaId) fd.append('empresa', params.empresaId)
         if (params.pessoaId) fd.append('pessoa', params.pessoaId)
         fd.append('competencia', competenciaFinal)
@@ -473,7 +576,7 @@ export const despesasService = {
           data: `${params.dataPagamento} 12:00:00`,
           status: 'pago',
           conta: params.contaId,
-          categoria: params.categoriaId || null,
+          categoria: categoriaEfetiva,
           empresa: params.empresaId || null,
           pessoa: params.pessoaId || null,
           competencia: competenciaFinal,
@@ -612,6 +715,12 @@ export const despesasService = {
       vencimentoRegistradoIso = dataVenc.toISOString()
     }
 
+    // Resolução robusta da categoria obrigatória do lançamento
+    const categoriaEfetiva = await despesasService.resolverCategoriaDespesa(
+      params.categoriaId,
+      compRecord,
+    )
+
     // 1. Criar lançamento financeiro
     let lancamento: any
     if (metodoEfetivoEhCredito && contaObj) {
@@ -623,7 +732,7 @@ export const despesasService = {
         fdLanc.append('data', `${params.dataPagamento} 12:00:00`)
         fdLanc.append('status', 'pendente')
         fdLanc.append('conta', params.contaId)
-        if (params.categoriaId) fdLanc.append('categoria', params.categoriaId)
+        fdLanc.append('categoria', categoriaEfetiva)
         if (params.empresaId) fdLanc.append('empresa', params.empresaId)
         if (params.pessoaId) fdLanc.append('pessoa', params.pessoaId)
         fdLanc.append('competencia', competenciaEfetiva)
@@ -643,7 +752,7 @@ export const despesasService = {
           data: `${params.dataPagamento} 12:00:00`,
           status: 'pendente',
           conta: params.contaId,
-          categoria: params.categoriaId || null,
+          categoria: categoriaEfetiva,
           empresa: params.empresaId || null,
           pessoa: params.pessoaId || null,
           competencia: competenciaEfetiva,
@@ -662,7 +771,7 @@ export const despesasService = {
         fdLanc.append('data', `${params.dataPagamento} 12:00:00`)
         fdLanc.append('status', 'pago')
         fdLanc.append('conta', params.contaId)
-        if (params.categoriaId) fdLanc.append('categoria', params.categoriaId)
+        fdLanc.append('categoria', categoriaEfetiva)
         if (params.empresaId) fdLanc.append('empresa', params.empresaId)
         if (params.pessoaId) fdLanc.append('pessoa', params.pessoaId)
         fdLanc.append('competencia', competenciaEfetiva)
@@ -680,7 +789,7 @@ export const despesasService = {
           data: `${params.dataPagamento} 12:00:00`,
           status: 'pago',
           conta: params.contaId,
-          categoria: params.categoriaId || null,
+          categoria: categoriaEfetiva,
           empresa: params.empresaId || null,
           pessoa: params.pessoaId || null,
           competencia: competenciaEfetiva,
