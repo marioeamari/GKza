@@ -101,8 +101,10 @@ function formatYearMonth(year: number, month: number): string {
  *   Se dia_vencimento < dia_fechamento, vence no mês seguinte ao fechamento.
  */
 export function calcularFaturaCartao(conta: Conta, dataTransacao: string): CartaoFaturaCiclo {
-  const diaFechamento = conta.dia_fechamento || 10
-  const diaVencimento = conta.dia_vencimento || 20
+  const rawFech = Number((conta as any)?.dia_fechamento)
+  const diaFechamento = !isNaN(rawFech) && rawFech > 0 ? rawFech : 10
+  const rawVenc = Number((conta as any)?.dia_vencimento)
+  const diaVencimento = !isNaN(rawVenc) && rawVenc > 0 ? rawVenc : 20
 
   const { year, month, day } = parseDateParts(dataTransacao)
 
@@ -188,8 +190,10 @@ export function adicionarMesesCompetencia(competencia: string, offsetMeses: numb
  * Se dia_vencimento < dia_fechamento, vence no mês seguinte.
  */
 export function calcularVencimentoFatura(conta: Conta, competencia: string): string {
-  const diaFechamento = conta.dia_fechamento || 10
-  const diaVencimento = conta.dia_vencimento || 20
+  const rawFech = Number((conta as any)?.dia_fechamento)
+  const diaFechamento = !isNaN(rawFech) && rawFech > 0 ? rawFech : 10
+  const rawVenc = Number((conta as any)?.dia_vencimento)
+  const diaVencimento = !isNaN(rawVenc) && rawVenc > 0 ? rawVenc : 20
 
   const [yStr, mStr] = competencia.split('-')
   const fYear = parseInt(yStr, 10)
@@ -428,13 +432,22 @@ export function calcularCompetenciaEVencimento(params: {
   const cleanDate = (dataCompra || '').slice(0, 10)
   const { year: cAno, month: cMesZero, day: cDia } = parseDateParts(cleanDate)
 
-  // Verifica se é cartão de crédito efetivo (conta aceita crédito + tem dia_fechamento + método crédito se aplicável)
-  const isContaCartao =
+  // Coerção robusta de dia_fechamento e dia_vencimento (trata string "16", number, undefined, NaN)
+  const rawFech = Number((conta as any)?.dia_fechamento)
+  const diaFechamentoNum = !isNaN(rawFech) && rawFech > 0 ? rawFech : 0
+
+  // Verifica se é conta do tipo cartão ou aceita crédito.
+  // Se a conta for explicitamente do tipo 'cartao', ou aceitar crédito em tipos_pagamento:
+  const isTipoCartao = conta?.tipo === 'cartao'
+  const aceitaCredito = Boolean(
     conta &&
-    (conta.tipo === 'cartao' ||
-      (conta.tipos_pagamento && conta.tipos_pagamento.includes('credito'))) &&
-    typeof conta.dia_fechamento === 'number' &&
-    conta.dia_fechamento > 0
+    (isTipoCartao ||
+      (Array.isArray(conta.tipos_pagamento) && conta.tipos_pagamento.includes('credito')) ||
+      (typeof (conta as any).tipos_pagamento === 'string' &&
+        (conta as any).tipos_pagamento.includes('credito'))),
+  )
+
+  const isContaCartao = Boolean(conta && aceitaCredito && diaFechamentoNum > 0)
 
   const ehCredito = isContaCartao && (metodoEhCredito === undefined ? true : metodoEhCredito)
 
@@ -483,9 +496,14 @@ export function getAvisoFaturaCartao(
   dataTransacao: string,
 ): string | null {
   if (!conta) return null
+  const rawFech = Number((conta as any).dia_fechamento)
+  if (isNaN(rawFech) || rawFech <= 0) return null
   const aceitaCredito =
-    (conta.tipos_pagamento && conta.tipos_pagamento.includes('credito')) || conta.tipo === 'cartao'
-  if (!aceitaCredito || !conta.dia_fechamento) return null
+    conta.tipo === 'cartao' ||
+    (Array.isArray(conta.tipos_pagamento) && conta.tipos_pagamento.includes('credito')) ||
+    (typeof (conta as any).tipos_pagamento === 'string' &&
+      (conta as any).tipos_pagamento.includes('credito'))
+  if (!aceitaCredito) return null
   const fatura = calcularFaturaCartao(conta, dataTransacao)
   const dateObj = new Date(fatura.dataFechamento + 'T12:00:00')
   const mesAno = dateObj.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })

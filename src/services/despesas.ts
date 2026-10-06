@@ -28,11 +28,15 @@ import { CONTA_TIPOS_PAGAMENTO_FALLBACK } from '@/types/domain'
  */
 export const contaAceitaCredito = (conta?: Conta | null): boolean => {
   if (!conta) return false
+  if (conta.tipo === 'cartao') return true
+  const rawTipos = conta.tipos_pagamento
   const tipos =
-    conta.tipos_pagamento && conta.tipos_pagamento.length > 0
-      ? conta.tipos_pagamento
-      : CONTA_TIPOS_PAGAMENTO_FALLBACK[conta.tipo] || []
-  return tipos.includes('credito')
+    Array.isArray(rawTipos) && rawTipos.length > 0
+      ? rawTipos
+      : typeof rawTipos === 'string'
+        ? [rawTipos]
+        : CONTA_TIPOS_PAGAMENTO_FALLBACK[conta.tipo] || []
+  return tipos.some((t) => String(t).toLowerCase().includes('credito'))
 }
 
 /**
@@ -361,8 +365,12 @@ export const despesasService = {
         ? (ocorrAtual.compromisso as any).metodo_pagamento
         : null)
 
-    // REGRA ÚNICA: APENAS o método Crédito entra no ciclo da fatura do cartão
-    const metodoEfetivoEhCredito = isCartao && isMetodoCredito(metodoCompId)
+    // Se a conta for tipo 'cartao', ou aceitar crédito com método crédito (ou método ausente)
+    const contaAceitaCred = contaObj ? contaAceitaCredito(contaObj) : false
+    const metodoEfetivoEhCredito =
+      Boolean(contaObj) &&
+      (contaObj?.tipo === 'cartao' ||
+        (contaAceitaCred && (metodoCompId ? isMetodoCredito(metodoCompId) : true)))
 
     // Determina a data da compra original (prioriza compromisso.data_inicio, cai para params.dataPagamento)
     const dataCompraBase = compRecord?.data_inicio
@@ -568,8 +576,12 @@ export const despesasService = {
       /* ignore */
     }
 
+    const contaAceitaCred = contaObj ? contaAceitaCredito(contaObj) : false
     const metodoCompId = compRecord?.metodo_pagamento
-    const metodoEfetivoEhCredito = isCartao && isMetodoCredito(metodoCompId)
+    const metodoEfetivoEhCredito =
+      Boolean(contaObj) &&
+      (contaObj?.tipo === 'cartao' ||
+        (contaAceitaCred && (metodoCompId ? isMetodoCredito(metodoCompId) : true)))
 
     // Data da compra base: se o compromisso possuir data_inicio, usamos como referência de compra
     const dataCompraBase = compRecord?.data_inicio
@@ -788,41 +800,50 @@ export const despesasService = {
   obterContaCartaoCompromisso: async (
     compromisso: Pick<DespesaCompromisso, 'conta_padrao' | 'metodo_pagamento'>,
   ): Promise<Conta | null> => {
-    // REGRA NOVA: O ciclo da fatura só se aplica quando o método do compromisso é Crédito.
-    // Se o método estiver definido e não for crédito (ex: Pix, Débito, Boleto, Transferência),
-    // a despesa NÃO entra no ciclo da fatura nem vira cartão_credito.
-    if (!compromisso.metodo_pagamento) {
-      return null
-    }
-
-    let metodoObj: MetodoPagamento | null = null
-    try {
-      metodoObj = await pb
-        .collection<MetodoPagamento>('metodos_pagamento')
-        .getOne(compromisso.metodo_pagamento, { expand: 'conta_padrao' })
-    } catch {
-      /* ignore */
-    }
-
-    if (!isMetodoCredito(metodoObj || compromisso.metodo_pagamento)) {
-      return null
-    }
-
     const isContaCredito = (c: Conta | null | undefined): boolean => {
-      return !!c && contaAceitaCredito(c) && !!c.dia_fechamento
+      if (!c) return false
+      const rawFech = Number((c as any).dia_fechamento)
+      const temFechamento = !isNaN(rawFech) && rawFech > 0
+      return temFechamento && (c.tipo === 'cartao' || contaAceitaCredito(c))
     }
 
+    // 1. Busca conta padrão se informada
+    let contaPadraoObj: Conta | null = null
     if (compromisso.conta_padrao) {
       try {
-        const c = await pb.collection<Conta>('contas').getOne(compromisso.conta_padrao)
-        if (isContaCredito(c)) {
-          return c
-        }
+        contaPadraoObj = await pb.collection<Conta>('contas').getOne(compromisso.conta_padrao)
       } catch {
         /* ignore */
       }
     }
 
+    // 2. Busca método de pagamento se informado
+    let metodoObj: MetodoPagamento | null = null
+    if (compromisso.metodo_pagamento) {
+      try {
+        metodoObj = await pb
+          .collection<MetodoPagamento>('metodos_pagamento')
+          .getOne(compromisso.metodo_pagamento, { expand: 'conta_padrao' })
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // Se houver método de pagamento explícito E ele NÃO for crédito (ex: Pix, Débito, Boleto),
+    // a despesa NÃO entra no ciclo da fatura mesmo que a conta seja cartão.
+    if (compromisso.metodo_pagamento || metodoObj) {
+      const metodoEhCredito = isMetodoCredito(metodoObj || compromisso.metodo_pagamento)
+      if (!metodoEhCredito) {
+        return null
+      }
+    }
+
+    // 3. Se a conta padrão é uma conta de cartão com dia_fechamento, retorna-a imediatamente
+    if (contaPadraoObj && isContaCredito(contaPadraoObj)) {
+      return contaPadraoObj
+    }
+
+    // 4. Fallback secundário: conta padrão expandida a partir do método de pagamento
     if (metodoObj) {
       if (metodoObj.expand?.conta_padrao && isContaCredito(metodoObj.expand.conta_padrao)) {
         return metodoObj.expand.conta_padrao

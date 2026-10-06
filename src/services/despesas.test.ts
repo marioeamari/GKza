@@ -2030,6 +2030,38 @@ describe('despesasService - Agrupador de Despesas e Helpers', () => {
       expect(resultado?.id).toBe('c_sicredi_cartao')
     })
 
+    it('obterContaCartaoCompromisso: conta com dia_fechamento STRING "16" sem método expandido retorna a conta', async () => {
+      const mockContaNubank = {
+        id: 'sglo7dfsqvgfsni',
+        nome: 'NuBank',
+        tipo: 'cartao',
+        tipos_pagamento: ['debito', 'transferencia', 'boletos', 'pix', 'credito'],
+        dia_fechamento: '16', // string vinda do SQLite
+        dia_vencimento: '23',
+      }
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') {
+          return {
+            getOne: vi.fn().mockResolvedValue(mockContaNubank),
+          } as any
+        }
+        if (name === 'metodos_pagamento') {
+          return {
+            getOne: vi.fn().mockRejectedValue(new Error('Not found')),
+          } as any
+        }
+        return {} as any
+      })
+
+      const resultado = await despesasService.obterContaCartaoCompromisso({
+        conta_padrao: 'sglo7dfsqvgfsni',
+      })
+
+      expect(resultado).not.toBeNull()
+      expect(resultado?.id).toBe('sglo7dfsqvgfsni')
+    })
+
     it('gerarOcorrenciasParaCompromisso: despesa avulsa em conta com crédito + Pix gera competência normal e vencimento na própria data', async () => {
       const mockContaSicredi = {
         id: 'c_sicredi_cartao',

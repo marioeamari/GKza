@@ -419,6 +419,52 @@ describe('calcularEstadoCicloFatura — Estado Financeiro Puro do Ciclo da Fatur
         expect(res.isCartaoCredito).toBe(true)
       })
 
+      it('Coerção robusta: conta com dia_fechamento como string "16" e compra dia 17 -> fatura do mês seguinte (outubro)', () => {
+        const contaString: any = {
+          ...contaNubank,
+          dia_fechamento: '16',
+          dia_vencimento: '23',
+        }
+        const res = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-17',
+          conta: contaString,
+        })
+        expect(res.competencia).toBe('2026-10')
+        expect(res.dataVencimento).toBe('2026-10-23')
+        expect(res.isCartaoCredito).toBe(true)
+      })
+
+      it('Coerção robusta: conta com dia_fechamento como string "16" e compra dia 16 -> fatura do mês corrente (setembro)', () => {
+        const contaString: any = {
+          ...contaNubank,
+          dia_fechamento: '16',
+          dia_vencimento: '23',
+        }
+        const res = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-16',
+          conta: contaString,
+        })
+        expect(res.competencia).toBe('2026-09')
+        expect(res.dataVencimento).toBe('2026-09-23')
+        expect(res.isCartaoCredito).toBe(true)
+      })
+
+      it('Coerção robusta: conta tipo "cartao" sem método de pagamento informado -> ainda assim entra no ciclo da fatura', () => {
+        const contaCartaoSemMetodo: any = {
+          ...contaNubank,
+          dia_fechamento: 16,
+          dia_vencimento: 23,
+        }
+        const res = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-17',
+          conta: contaCartaoSemMetodo,
+          // metodoEhCredito ausente
+        })
+        expect(res.competencia).toBe('2026-10')
+        expect(res.dataVencimento).toBe('2026-10-23')
+        expect(res.isCartaoCredito).toBe(true)
+      })
+
       it('Caso Curso Batera como fixture: compra 17/09 em 4 parcelas no NuBank (fech 16, venc 23)', () => {
         const p1 = calcularCompetenciaEVencimento({
           dataCompra: '2026-09-17',
