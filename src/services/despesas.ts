@@ -12,6 +12,7 @@ import type {
   ContextoTipo,
   DespesaCompromisso,
   DespesaOcorrencia,
+  Lancamento,
   MetodoPagamento,
   SecaoDespesa,
   TagItem,
@@ -869,9 +870,12 @@ export const despesasService = {
         ? compromisso.valor_parcela
         : compromisso.valor_estimado
 
-    // Busca todas as ocorrências deste compromisso que ainda estão previstas
-    const ocorrenciasPrevistas = await listAll<DespesaOcorrencia>('despesas_ocorrencias', {
-      filter: `compromisso = '${compromisso.id}' && status = 'prevista'`,
+    // Busca TODAS as ocorrências deste compromisso (previstas, pagas, etc.)
+    // REQUISITO DO USUÁRIO: Ao editar a data de compra de um compromisso, as ocorrências já geradas
+    // (e seus lançamentos vinculados) DEVEM ser recalculadas pela função única de competência,
+    // preservando status de pagamento (paga/parcial), valor pago e anexos.
+    const todasOcorrencias = await listAll<DespesaOcorrencia>('despesas_ocorrencias', {
+      filter: `compromisso = '${compromisso.id}'`,
     })
 
     const diaVencimentoCompromisso = compromisso.dia_vencimento
@@ -881,8 +885,7 @@ export const despesasService = {
     const contaEfetivaId = compromisso.conta_padrao || (contaCartaoObj ? contaCartaoObj.id : null)
 
     // Se for cartão de crédito e tiver data_inicio, verifica se existe ocorrência (prevista OU paga)
-    // para o ciclo inicial da fatura; se faltar, cria-a de forma estritamente idempotente e sem retroagir
-    // além do ciclo de criação do compromisso.
+    // para o ciclo inicial da fatura; se faltar, cria-a de forma estritamente idempotente.
     if (contaCartaoObj && compromisso.data_inicio) {
       const dataInicioStr = compromisso.data_inicio.slice(0, 10)
       const numParcelaCheck = isParcelado ? compromisso.parcela_inicial || 1 : 0
@@ -897,35 +900,21 @@ export const despesasService = {
         totalParcelas: isParcelado ? compromisso.total_parcelas || 1 : 1,
       })
 
-      // Regra anti-retroatividade: não criar ocorrência anterior ao ciclo de criação do compromisso
-      const createdStr = compromisso.created ? compromisso.created.slice(0, 10) : ''
-      const cicloCreated = createdStr
-        ? calcularFaturaCartao(contaCartaoObj, createdStr).competencia
-        : ''
-      const competenciaPermitida =
-        cicloCreated && resInicial.competencia < cicloCreated
-          ? cicloCreated
-          : resInicial.competencia
+      const jaExisteInicial = todasOcorrencias.some(
+        (oc) =>
+          oc.competencia === resInicial.competencia &&
+          (numParcelaCheck === 0 || oc.numero_parcela === numParcelaCheck),
+      )
 
-      const jaExisteInicial = await pb.collection('despesas_ocorrencias').getList(1, 1, {
-        filter: `compromisso = '${compromisso.id}' && competencia = '${competenciaPermitida}' && numero_parcela = ${numParcelaCheck}`,
-      })
-
-      if (jaExisteInicial.totalItems === 0) {
-        // Se a competência foi ajustada para o ciclo de criação, calcula o vencimento desse ciclo
-        const dueDateIso =
-          competenciaPermitida === resInicial.competencia
-            ? resInicial.dataVencimentoIso
-            : `${calcularVencimentoFatura(contaCartaoObj, competenciaPermitida)}T12:00:00.000Z`
-
+      if (!jaExisteInicial && todasOcorrencias.length === 0) {
         await pb.collection('despesas_ocorrencias').create({
           compromisso: compromisso.id,
           contexto_tipo: compromisso.contexto_tipo,
           empresa: compromisso.empresa || null,
           secao: compromisso.secao,
           conta: contaEfetivaId,
-          competencia: competenciaPermitida,
-          data_vencimento: dueDateIso,
+          competencia: resInicial.competencia,
+          data_vencimento: resInicial.dataVencimentoIso,
           valor_previsto: novoValorUnitario,
           valor_estimado_original: novoValorUnitario,
           valor_ajustado_manualmente: false,
@@ -949,11 +938,12 @@ export const despesasService = {
         ? compromisso.created.slice(0, 10)
         : new Date().toISOString().slice(0, 10)
 
-    for (const oc of ocorrenciasPrevistas) {
+    for (const oc of todasOcorrencias) {
       const updates: Partial<DespesaOcorrencia> = {}
+      const isPrevista = oc.status === 'prevista'
 
-      // Só atualiza o valor se a ocorrência não tiver sido ajustada manualmente
-      if (!oc.valor_ajustado_manualmente) {
+      // Só atualiza o valor previsto se a ocorrência estiver prevista e não tiver sido ajustada manualmente
+      if (isPrevista && !oc.valor_ajustado_manualmente) {
         updates.valor_previsto = novoValorUnitario
         updates.valor_estimado_original = novoValorUnitario
       }
@@ -994,7 +984,10 @@ export const despesasService = {
         updates.link_pagamento = compromisso.link_pagamento || null
       }
 
-      // Aplica a REGRA ÚNICA para competência e vencimento
+      // Aplica a REGRA ÚNICA para competência e vencimento em TODAS as ocorrências (previstas e pagas)
+      let novaCompetencia: string | undefined
+      let novaDataVencimentoIso: string | undefined
+
       if (isParcelado) {
         const pNum = oc.numero_parcela && oc.numero_parcela > 0 ? oc.numero_parcela : 1
         const res = calcularCompetenciaEVencimento({
@@ -1005,13 +998,8 @@ export const despesasService = {
           numeroParcela: pNum,
           totalParcelas: compromisso.total_parcelas || 1,
         })
-        if (oc.competencia !== res.competencia) {
-          updates.competencia = res.competencia
-        }
-        const currentDueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
-        if (currentDueStr !== res.dataVencimento) {
-          updates.data_vencimento = res.dataVencimentoIso
-        }
+        novaCompetencia = res.competencia
+        novaDataVencimentoIso = res.dataVencimentoIso
       } else if (isAvulso) {
         const res = calcularCompetenciaEVencimento({
           dataCompra: dataCompraBase,
@@ -1021,23 +1009,14 @@ export const despesasService = {
           numeroParcela: 1,
           totalParcelas: 1,
         })
-        if (oc.competencia !== res.competencia) {
-          updates.competencia = res.competencia
-        }
-        const currentDueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
-        if (currentDueStr !== res.dataVencimento) {
-          updates.data_vencimento = res.dataVencimentoIso
-        }
+        novaCompetencia = res.competencia
+        novaDataVencimentoIso = res.dataVencimentoIso
       } else if (contaCartaoObj) {
-        // Recorrente no cartão: a competência da ocorrência prevista deve ter seu vencimento
+        // Recorrente no cartão: a competência da ocorrência deve ter seu vencimento
         // alinhado ao dia_vencimento do ciclo da fatura
         if (oc.competencia && oc.competencia.includes('-')) {
           const expectedVenc = calcularVencimentoFatura(contaCartaoObj, oc.competencia)
-          const expectedIso = `${expectedVenc}T12:00:00.000Z`
-          const currentDueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
-          if (currentDueStr !== expectedVenc) {
-            updates.data_vencimento = expectedIso
-          }
+          novaDataVencimentoIso = `${expectedVenc}T12:00:00.000Z`
         }
       } else if (diaVencimentoCompromisso && oc.competencia && oc.competencia.includes('-')) {
         // Recorrente não-cartão
@@ -1050,17 +1029,63 @@ export const despesasService = {
             m,
             diaVencimentoCompromisso,
           )
-          const expectedIso = expectedDate.toISOString()
-          const currentDueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
-          const expectedDueStr = expectedIso.slice(0, 10)
-          if (currentDueStr !== expectedDueStr) {
-            updates.data_vencimento = expectedIso
-          }
+          novaDataVencimentoIso = expectedDate.toISOString()
         }
       }
 
+      if (novaCompetencia && oc.competencia !== novaCompetencia) {
+        updates.competencia = novaCompetencia
+      }
+      if (novaDataVencimentoIso) {
+        const currentDueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
+        const newDueStr = novaDataVencimentoIso.slice(0, 10)
+        if (currentDueStr !== newDueStr) {
+          updates.data_vencimento = novaDataVencimentoIso
+        }
+      }
+
+      const competenciaEfetiva = novaCompetencia || oc.competencia
+
+      // Se houver atualizações na ocorrência, persiste mantendo status, valor_pago e data_pagamento intactos
       if (Object.keys(updates).length > 0) {
         await pb.collection('despesas_ocorrencias').update(oc.id, updates)
+      }
+
+      // RECALCULO DO LANÇAMENTO VINCULADO:
+      // Se a ocorrência possuir lançamento vinculado, realinha a competência do lançamento
+      // e alinha a data à nova realidade da compra/ciclo, preservando valor, status e comprovantes.
+      const lancamentoId =
+        typeof oc.lancamento === 'object' && oc.lancamento !== null
+          ? (oc.lancamento as any).id
+          : oc.lancamento
+
+      if (lancamentoId) {
+        try {
+          const lancAtual = await pb.collection<Lancamento>('lancamentos').getOne(lancamentoId)
+          const updatesLanc: Partial<Lancamento> = {}
+
+          if (competenciaEfetiva && lancAtual.competencia !== competenciaEfetiva) {
+            updatesLanc.competencia = competenciaEfetiva
+          }
+
+          // Para compras no cartão de crédito, alinha a data do lançamento à data da compra atualizada do compromisso
+          if (contaCartaoObj && compromisso.data_inicio) {
+            const novaDataStr = `${dataCompraBase} 12:00:00`
+            const lancDataCurrentStr = (lancAtual.data || '').slice(0, 10)
+            if (lancDataCurrentStr !== dataCompraBase) {
+              updatesLanc.data = novaDataStr
+            }
+          }
+
+          if (Object.keys(updatesLanc).length > 0) {
+            await pb.collection('lancamentos').update(lancamentoId, updatesLanc)
+          }
+        } catch (errLanc) {
+          console.warn(
+            `[sincronizarOcorrenciasCompromisso] Falha ao sincronizar lançamento vinculado ${lancamentoId}:`,
+            errLanc,
+          )
+        }
       }
     }
   },

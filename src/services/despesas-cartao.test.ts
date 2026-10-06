@@ -772,6 +772,117 @@ describe('despesasService - gerarOcorrenciasParaCompromisso em cartão', () => {
     )
   })
 
+  it('sincronizarOcorrenciasCompromisso recalcula ocorrência paga e seu lançamento vinculado ao editar data de compra', async () => {
+    // Caso concreto do bug reportado: "Carne", compra no NuBank fechamento 16 vencimento 23.
+    // Originalmente comprada em 16/09 (ciclo 2026-09), ocorrência paga e lançamento com data 17/09.
+    // Compromisso é editado para 16/10 (ciclo 2026-10).
+    // Ocorrência deve ser atualizada para competência 2026-10 e vencimento 23/10/2026,
+    // preservando status "paga" e valor_pago.
+    // Lançamento vinculado deve ter competência 2026-10 e data alinhada à data da compra 16/10/2026.
+    const mockContaCartaoNu: Conta = {
+      id: 'sglo7dfsqvgfsni',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: 'NuBank Cred.',
+      tipo: 'cartao',
+      saldo_inicial: 0,
+      cor: '#8A05BE',
+      ativa: true,
+      dia_fechamento: 16,
+      dia_vencimento: 23,
+    }
+
+    const ocorrenciaPaga = {
+      id: 'biguqh6vd2qppc0',
+      compromisso: 'g4nyxs2v8v4i96g',
+      competencia: '2026-09',
+      data_vencimento: '2026-09-23T12:00:00.000Z',
+      data_pagamento: '2026-09-17T12:00:00.000Z',
+      valor_previsto: 87.49,
+      valor_pago: 87.49,
+      status: 'paga' as const,
+      lancamento: 'zytolsrk7f2nd5b',
+      numero_parcela: 0,
+      total_parcelas: 0,
+    }
+
+    const lancamentoVinculado = {
+      id: 'zytolsrk7f2nd5b',
+      descricao: 'Carne',
+      competencia: '2026-09',
+      data: '2026-09-17 12:00:00.000Z',
+      valor: 87.49,
+      status: 'pago',
+      tipo: 'despesa',
+      conta: 'sglo7dfsqvgfsni',
+    }
+
+    const mockUpdateOcorrencia = vi.fn().mockResolvedValue({})
+    const mockGetFullListOcorrencias = vi.fn().mockResolvedValue([ocorrenciaPaga])
+    const mockGetOneConta = vi.fn().mockResolvedValue(mockContaCartaoNu)
+    const mockGetOneLancamento = vi.fn().mockResolvedValue(lancamentoVinculado)
+    const mockUpdateLancamento = vi.fn().mockResolvedValue({})
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: mockGetOneConta } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getFullList: mockGetFullListOcorrencias,
+          update: mockUpdateOcorrencia,
+        } as any
+      }
+      if (name === 'lancamentos') {
+        return {
+          getOne: mockGetOneLancamento,
+          update: mockUpdateLancamento,
+        } as any
+      }
+      return {} as any
+    })
+
+    const compromissoEditado: DespesaCompromisso = {
+      id: 'g4nyxs2v8v4i96g',
+      collectionId: 'despesas_compromisso',
+      collectionName: 'despesas_compromisso',
+      created: '2026-10-06T01:34:35.000Z',
+      updated: '2026-10-06T12:41:00.000Z',
+      descricao: 'Carne',
+      secao: 'cartoes_credito',
+      regra_repeticao: 'avulso',
+      modalidade_parcelamento: 'a_vista',
+      valor_estimado: 87.49,
+      data_inicio: '2026-10-16 00:00:00.000Z', // Data da compra alterada de 16/09 para 16/10
+      conta_padrao: 'sglo7dfsqvgfsni',
+      contexto_tipo: 'pessoal',
+      ativo: true,
+    }
+
+    await despesasService.sincronizarOcorrenciasCompromisso(compromissoEditado)
+
+    // A ocorrência existente (mesmo já paga) deve ser atualizada para competência 2026-10 e vencimento 23/10
+    expect(mockUpdateOcorrencia).toHaveBeenCalledWith(
+      'biguqh6vd2qppc0',
+      expect.objectContaining({
+        competencia: '2026-10',
+        data_vencimento: '2026-10-23T12:00:00.000Z',
+      }),
+    )
+
+    // O lançamento vinculado deve ser atualizado para competência 2026-10 e data alinhada a 16/10
+    expect(mockGetOneLancamento).toHaveBeenCalledWith('zytolsrk7f2nd5b')
+    expect(mockUpdateLancamento).toHaveBeenCalledWith(
+      'zytolsrk7f2nd5b',
+      expect.objectContaining({
+        competencia: '2026-10',
+        data: '2026-10-16 12:00:00',
+      }),
+    )
+  })
+
   it('gerarOcorrenciasParaCompromissosLote evita N+1 usando ocorrências em cache e respeita throttling', async () => {
     const mockContaCartao: Conta = {
       id: 'cartao_nu',

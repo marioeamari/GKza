@@ -1611,7 +1611,11 @@ export function DespesaCompromissoDialog({
                     const metodoId = v === 'none' ? '' : v
                     const isCred = isMetodoCredito(metodoId, metodosPagamento)
                     let updated = { ...form, metodo_pagamento: metodoId }
-                    if (isCred && selectedConta && (selectedConta.tipo === 'cartao' || temCredito)) {
+                    if (
+                      isCred &&
+                      selectedConta &&
+                      (selectedConta.tipo === 'cartao' || temCredito)
+                    ) {
                       if (selectedConta.dia_vencimento) {
                         updated.dia_vencimento = selectedConta.dia_vencimento
                       }
