@@ -3,6 +3,7 @@ import {
   calcularEstadoCicloFatura,
   calcularFaturaCartao,
   calcularCicloParcelaCartao,
+  calcularCompetenciaEVencimento,
   simularCronogramaParcelas,
   getAvisoFaturaCartao,
   type PagamentoFaturaItem,
@@ -349,6 +350,156 @@ describe('calcularEstadoCicloFatura — Estado Financeiro Puro do Ciclo da Fatur
         expect(ciclo.competencia).toBe('2026-12')
         expect(ciclo.dataFechamento).toBe('2026-12-16')
         expect(ciclo.dataVencimento).toBe('2026-12-23')
+      })
+    })
+
+    describe('calcularCompetenciaEVencimento (REGRA ÚNICA)', () => {
+      const contaNubank: Conta = {
+        ...contaCartao,
+        id: 'sglo7dfsqvgfsni',
+        nome: 'NuBank PJ',
+        tipo: 'cartao',
+        dia_fechamento: 16,
+        dia_vencimento: 23,
+      }
+
+      const contaBancaria: Conta = {
+        ...contaCartao,
+        id: 'conta_corrente_1',
+        nome: 'Sicredi CC',
+        tipo: 'bancaria',
+        tipos_pagamento: ['debito', 'transferencia', 'boletos', 'pix'],
+        dia_fechamento: undefined,
+        dia_vencimento: undefined,
+      }
+
+      it('Não-cartão (débito, transferência, boletos, pix): compra em 01/09 -> competência 2026-09', () => {
+        const res = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-01',
+          conta: contaBancaria,
+          metodoEhCredito: false,
+          diaVencimento: 10,
+        })
+        expect(res.competencia).toBe('2026-09')
+        expect(res.dataVencimento).toBe('2026-09-10')
+        expect(res.isCartaoCredito).toBe(false)
+      })
+
+      it('Não-cartão: compra em 30/09 -> competência 2026-09', () => {
+        const res = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-30',
+          conta: contaBancaria,
+          metodoEhCredito: false,
+          diaVencimento: 25,
+        })
+        expect(res.competencia).toBe('2026-09')
+        expect(res.dataVencimento).toBe('2026-09-25')
+        expect(res.isCartaoCredito).toBe(false)
+      })
+
+      it('Cartão de crédito: compra em 16/09 com fechamento 16 -> setembro (2026-09, venc 2026-09-23)', () => {
+        const res = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-16',
+          conta: contaNubank,
+          metodoEhCredito: true,
+        })
+        expect(res.competencia).toBe('2026-09')
+        expect(res.dataVencimento).toBe('2026-09-23')
+        expect(res.isCartaoCredito).toBe(true)
+      })
+
+      it('Cartão de crédito: compra em 17/09 com fechamento 16 -> outubro (2026-10, venc 2026-10-23)', () => {
+        const res = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-17',
+          conta: contaNubank,
+          metodoEhCredito: true,
+        })
+        expect(res.competencia).toBe('2026-10')
+        expect(res.dataVencimento).toBe('2026-10-23')
+        expect(res.isCartaoCredito).toBe(true)
+      })
+
+      it('Caso Curso Batera como fixture: compra 17/09 em 4 parcelas no NuBank (fech 16, venc 23)', () => {
+        const p1 = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-17',
+          conta: contaNubank,
+          metodoEhCredito: true,
+          numeroParcela: 1,
+          totalParcelas: 4,
+        })
+        const p2 = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-17',
+          conta: contaNubank,
+          metodoEhCredito: true,
+          numeroParcela: 2,
+          totalParcelas: 4,
+        })
+        const p3 = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-17',
+          conta: contaNubank,
+          metodoEhCredito: true,
+          numeroParcela: 3,
+          totalParcelas: 4,
+        })
+        const p4 = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-17',
+          conta: contaNubank,
+          metodoEhCredito: true,
+          numeroParcela: 4,
+          totalParcelas: 4,
+        })
+
+        // Parcela 1: fatura outubro/2026, venc 23/10
+        expect(p1.competencia).toBe('2026-10')
+        expect(p1.dataVencimento).toBe('2026-10-23')
+
+        // Parcela 2: fatura novembro/2026, venc 23/11
+        expect(p2.competencia).toBe('2026-11')
+        expect(p2.dataVencimento).toBe('2026-11-23')
+
+        // Parcela 3: fatura dezembro/2026, venc 23/12
+        expect(p3.competencia).toBe('2026-12')
+        expect(p3.dataVencimento).toBe('2026-12-23')
+
+        // Parcela 4: fatura janeiro/2027, venc 23/01/2027
+        expect(p4.competencia).toBe('2027-01')
+        expect(p4.dataVencimento).toBe('2027-01-23')
+      })
+
+      it('Não-cartão parcelado avança mês a mês a partir do mês da compra', () => {
+        const p1 = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-20',
+          conta: contaBancaria,
+          metodoEhCredito: false,
+          diaVencimento: 20,
+          numeroParcela: 1,
+          totalParcelas: 3,
+        })
+        const p2 = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-20',
+          conta: contaBancaria,
+          metodoEhCredito: false,
+          diaVencimento: 20,
+          numeroParcela: 2,
+          totalParcelas: 3,
+        })
+        const p3 = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-20',
+          conta: contaBancaria,
+          metodoEhCredito: false,
+          diaVencimento: 20,
+          numeroParcela: 3,
+          totalParcelas: 3,
+        })
+
+        expect(p1.competencia).toBe('2026-09')
+        expect(p1.dataVencimento).toBe('2026-09-20')
+
+        expect(p2.competencia).toBe('2026-10')
+        expect(p2.dataVencimento).toBe('2026-10-20')
+
+        expect(p3.competencia).toBe('2026-11')
+        expect(p3.dataVencimento).toBe('2026-11-20')
       })
     })
 

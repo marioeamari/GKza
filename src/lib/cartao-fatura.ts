@@ -324,47 +324,30 @@ export function simularCronogramaParcelas(params: {
         isSimulada: false,
       })
     } else {
-      // Parcela simulada
-      if (isCartao && conta) {
-        const cicloParcela = calcularCicloParcelaCartao(conta, dataCompraStr, p, total)
-        const isAtrasada =
-          dataReferenciaHoje !== '' &&
-          cicloParcela.dataVencimento !== '' &&
-          cicloParcela.dataVencimento < dataReferenciaHoje
+      // Parcela simulada usando a regra única de competência e vencimento
+      const res = calcularCompetenciaEVencimento({
+        dataCompra: dataCompraStr,
+        conta,
+        metodoEhCredito: isCartao,
+        diaVencimento: diaVencComp,
+        numeroParcela: p,
+        totalParcelas: total,
+      })
+      const isAtrasada =
+        dataReferenciaHoje !== '' &&
+        res.dataVencimento !== '' &&
+        res.dataVencimento < dataReferenciaHoje
 
-        itens.push({
-          numeroParcela: p,
-          totalParcelas: total,
-          competencia: cicloParcela.competencia,
-          dataVencimento: cicloParcela.dataVencimento,
-          dataVencimentoIso: cicloParcela.dataVencimentoIso,
-          valor: valorUnitario,
-          status: isAtrasada ? 'atrasada' : 'prevista',
-          isSimulada: true,
-        })
-      } else {
-        // Não-cartão: mês base compra + (p - inicial)
-        const offset = p - inicial
-        const norm = new Date(Date.UTC(cAno, cMesZero + offset, 1))
-        const pYear = norm.getUTCFullYear()
-        const pMonth = norm.getUTCMonth()
-        const maxDias = getDaysInMonth(pYear, pMonth)
-        const realDia = Math.min(diaVencComp, maxDias)
-        const dueStr = `${pYear}-${String(pMonth + 1).padStart(2, '0')}-${String(realDia).padStart(2, '0')}`
-        const compStr = `${pYear}-${String(pMonth + 1).padStart(2, '0')}`
-        const isAtrasada = dataReferenciaHoje !== '' && dueStr < dataReferenciaHoje
-
-        itens.push({
-          numeroParcela: p,
-          totalParcelas: total,
-          competencia: compStr,
-          dataVencimento: dueStr,
-          dataVencimentoIso: `${dueStr}T12:00:00.000Z`,
-          valor: valorUnitario,
-          status: isAtrasada ? 'atrasada' : 'prevista',
-          isSimulada: true,
-        })
-      }
+      itens.push({
+        numeroParcela: p,
+        totalParcelas: total,
+        competencia: res.competencia,
+        dataVencimento: res.dataVencimento,
+        dataVencimentoIso: res.dataVencimentoIso,
+        valor: valorUnitario,
+        status: isAtrasada ? 'atrasada' : 'prevista',
+        isSimulada: true,
+      })
     }
   }
 
@@ -397,6 +380,101 @@ export function calcularCicloParcelaCartao(
     competencia,
     dataVencimento,
     dataVencimentoIso,
+  }
+}
+
+/**
+ * REGRA ÚNICA DE COMPETÊNCIA E VENCIMENTO (ERP GKza):
+ * A base de orientação é SEMPRE a "Data da compra" (data_inicio).
+ *
+ * 1. Não-cartão (débito, transferência bancária, boletos, pix, dinheiro, contas bancárias/caixa):
+ *    - Competência = mês da data da compra. Se a compra foi em 01/09 ou 30/09, competência = '2026-09'.
+ *    - Vencimento = dia_vencimento informado dentro do mês da competência (com clamp para meses curtos).
+ *
+ * 2. Crédito (conta tipo "cartao" com dia_fechamento e dia_vencimento):
+ *    - Competência = ciclo da fatura definido por dia_fechamento/dia_vencimento da conta.
+ *      Compra <= dia_fechamento -> fatura do mês corrente ('YYYY-MM').
+ *      Compra > dia_fechamento -> fatura do mês seguinte.
+ *    - Vencimento = dia_vencimento da fatura do ciclo correspondente (calcularVencimentoFatura).
+ *
+ * 3. Parcelas e recorrências:
+ *    - Para parcela N (N >= 1), calcula a data de compra da parcela avançando (N - 1) meses a partir da
+ *      data da compra original, e então aplica a regra 1 ou 2 de competência e vencimento.
+ */
+export interface CompetenciaVencimentoResultado {
+  competencia: string // 'YYYY-MM'
+  dataVencimento: string // 'YYYY-MM-DD'
+  dataVencimentoIso: string // 'YYYY-MM-DDTHH:mm:ss.000Z'
+  isCartaoCredito: boolean
+}
+
+export function calcularCompetenciaEVencimento(params: {
+  dataCompra: string // 'YYYY-MM-DD' ou ISO
+  conta?: Conta | null
+  metodoEhCredito?: boolean
+  diaVencimento?: number // dia de vencimento desejado para não-cartão
+  numeroParcela?: number // default 1
+  totalParcelas?: number // default 1
+}): CompetenciaVencimentoResultado {
+  const {
+    dataCompra,
+    conta,
+    metodoEhCredito,
+    diaVencimento,
+    numeroParcela = 1,
+    totalParcelas = 1,
+  } = params
+
+  const cleanDate = (dataCompra || '').slice(0, 10)
+  const { year: cAno, month: cMesZero, day: cDia } = parseDateParts(cleanDate)
+
+  // Verifica se é cartão de crédito efetivo (conta aceita crédito + tem dia_fechamento + método crédito se aplicável)
+  const isContaCartao =
+    conta &&
+    (conta.tipo === 'cartao' ||
+      (conta.tipos_pagamento && conta.tipos_pagamento.includes('credito'))) &&
+    typeof conta.dia_fechamento === 'number' &&
+    conta.dia_fechamento > 0
+
+  const ehCredito = isContaCartao && (metodoEhCredito === undefined ? true : metodoEhCredito)
+
+  const offsetParcela = Math.max(0, numeroParcela - 1)
+
+  if (ehCredito && conta) {
+    // Para cartão de crédito:
+    // Ciclo inicial derivado da data da compra original
+    const cicloInicial = calcularFaturaCartao(conta, cleanDate)
+    const competencia = adicionarMesesCompetencia(cicloInicial.competencia, offsetParcela)
+    const dataVencimento = calcularVencimentoFatura(conta, competencia)
+    const dataVencimentoIso = `${dataVencimento}T12:00:00.000Z`
+
+    return {
+      competencia,
+      dataVencimento,
+      dataVencimentoIso,
+      isCartaoCredito: true,
+    }
+  }
+
+  // Não-cartão (débito, transferência, boletos, pix, etc.):
+  // Compra em mês cMesZero + offsetParcela
+  const normDate = new Date(Date.UTC(cAno, cMesZero + offsetParcela, 1))
+  const pAno = normDate.getUTCFullYear()
+  const pMesZero = normDate.getUTCMonth()
+  const competencia = formatYearMonth(pAno, pMesZero)
+
+  const maxDias = getDaysInMonth(pAno, pMesZero)
+  const diaDesejado = diaVencimento && diaVencimento > 0 ? diaVencimento : cDia || 10
+  const realDia = Math.min(diaDesejado, maxDias)
+
+  const dataVencimento = `${pAno}-${String(pMesZero + 1).padStart(2, '0')}-${String(realDia).padStart(2, '0')}`
+  const dataVencimentoIso = `${dataVencimento}T12:00:00.000Z`
+
+  return {
+    competencia,
+    dataVencimento,
+    dataVencimentoIso,
+    isCartaoCredito: false,
   }
 }
 
