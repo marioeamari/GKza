@@ -192,23 +192,168 @@ describe('despesasService - gerarOcorrenciasParaCompromisso em cartão', () => {
 
     expect(mockCreate).toHaveBeenCalledTimes(3)
 
-    // Parcela 1: 16/08/2026 -> competencia 2026-09, vencimento 2026-09-20
+    // Parcela 1: mês da compra (2026-08) -> competencia 2026-08, vencimento 2026-08-20
     const p1 = mockCreate.mock.calls[0][0]
     expect(p1.numero_parcela).toBe(1)
-    expect(p1.competencia).toBe('2026-09')
-    expect(p1.data_vencimento).toBe('2026-09-20T12:00:00.000Z')
+    expect(p1.competencia).toBe('2026-08')
+    expect(p1.data_vencimento).toBe('2026-08-20T12:00:00.000Z')
 
-    // Parcela 2: 16/09/2026 -> competencia 2026-10, vencimento 2026-10-20
+    // Parcela 2: mês seguinte (2026-09) -> competencia 2026-09, vencimento 2026-09-20
     const p2 = mockCreate.mock.calls[1][0]
     expect(p2.numero_parcela).toBe(2)
-    expect(p2.competencia).toBe('2026-10')
-    expect(p2.data_vencimento).toBe('2026-10-20T12:00:00.000Z')
+    expect(p2.competencia).toBe('2026-09')
+    expect(p2.data_vencimento).toBe('2026-09-20T12:00:00.000Z')
 
-    // Parcela 3: 16/10/2026 -> competencia 2026-11, vencimento 2026-11-20
+    // Parcela 3: dois meses depois (2026-10) -> competencia 2026-10, vencimento 2026-10-20
     const p3 = mockCreate.mock.calls[2][0]
     expect(p3.numero_parcela).toBe(3)
-    expect(p3.competencia).toBe('2026-11')
-    expect(p3.data_vencimento).toBe('2026-11-20T12:00:00.000Z')
+    expect(p3.competencia).toBe('2026-10')
+    expect(p3.data_vencimento).toBe('2026-10-20T12:00:00.000Z')
+  })
+
+  it('gera 12 parcelas corretamente a partir de compra 08/09/2026 com dia_vencimento 20 (caso Brasil Paralelo e virada de ano)', async () => {
+    const mockContaCartao: Conta = {
+      id: 'cartao_sicred',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: 'Sicred Cartão',
+      tipo: 'cartao',
+      saldo_inicial: 0,
+      cor: '#008000',
+      ativa: true,
+      dia_fechamento: 13,
+      dia_vencimento: 20,
+    }
+
+    const mockCreate = vi.fn().mockResolvedValue({ id: 'ocorr_bp' })
+    const mockGetList = vi.fn().mockResolvedValue({ items: [], totalItems: 0 })
+    const mockGetOneConta = vi.fn().mockResolvedValue(mockContaCartao)
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: mockGetOneConta } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getList: mockGetList,
+          create: mockCreate,
+        } as any
+      }
+      return {} as any
+    })
+
+    const compromissoBP: DespesaCompromisso = {
+      id: 'comp_bp_12x',
+      collectionId: 'despesas_compromisso',
+      collectionName: 'despesas_compromisso',
+      created: '2026-10-02T12:00:00.000Z',
+      updated: '2026-10-02T12:00:00.000Z',
+      descricao: 'Assinatura Brasil Paralelo',
+      secao: 'cartoes_credito',
+      regra_repeticao: 'mensal',
+      modalidade_parcelamento: 'parcelado',
+      total_parcelas: 12,
+      parcela_inicial: 1,
+      valor_parcela: 16.6,
+      valor_estimado: 199.2,
+      data_inicio: '2026-09-08 00:00:00.000Z',
+      dia_vencimento: 20,
+      conta_padrao: 'cartao_sicred',
+      contexto_tipo: 'pessoal',
+      ativo: true,
+    }
+
+    await despesasService.gerarOcorrenciasParaCompromisso(compromissoBP)
+
+    expect(mockCreate).toHaveBeenCalledTimes(12)
+
+    const expectedParcelas = [
+      { p: 1, comp: '2026-09', venc: '2026-09-20T12:00:00.000Z' },
+      { p: 2, comp: '2026-10', venc: '2026-10-20T12:00:00.000Z' },
+      { p: 3, comp: '2026-11', venc: '2026-11-20T12:00:00.000Z' },
+      { p: 4, comp: '2026-12', venc: '2026-12-20T12:00:00.000Z' },
+      { p: 5, comp: '2027-01', venc: '2027-01-20T12:00:00.000Z' }, // virada de ano
+      { p: 6, comp: '2027-02', venc: '2027-02-20T12:00:00.000Z' },
+      { p: 7, comp: '2027-03', venc: '2027-03-20T12:00:00.000Z' },
+      { p: 8, comp: '2027-04', venc: '2027-04-20T12:00:00.000Z' },
+      { p: 9, comp: '2027-05', venc: '2027-05-20T12:00:00.000Z' },
+      { p: 10, comp: '2027-06', venc: '2027-06-20T12:00:00.000Z' },
+      { p: 11, comp: '2027-07', venc: '2027-07-20T12:00:00.000Z' },
+      { p: 12, comp: '2027-08', venc: '2027-08-20T12:00:00.000Z' },
+    ]
+
+    for (let i = 0; i < 12; i++) {
+      const call = mockCreate.mock.calls[i][0]
+      const exp = expectedParcelas[i]
+      expect(call.numero_parcela).toBe(exp.p)
+      expect(call.competencia).toBe(exp.comp)
+      expect(call.data_vencimento).toBe(exp.venc)
+    }
+  })
+
+  it('gera parcelas corretamente para conta não-cartão com virada de ano', async () => {
+    const mockCreate = vi.fn().mockResolvedValue({ id: 'ocorr_nao_cartao' })
+    const mockGetList = vi.fn().mockResolvedValue({ items: [], totalItems: 0 })
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getList: mockGetList,
+          create: mockCreate,
+        } as any
+      }
+      return {} as any
+    })
+
+    const compromissoNaoCartao: DespesaCompromisso = {
+      id: 'comp_boleto_4x',
+      collectionId: 'despesas_compromisso',
+      collectionName: 'despesas_compromisso',
+      created: '2026-11-10T12:00:00.000Z',
+      updated: '2026-11-10T12:00:00.000Z',
+      descricao: 'Curso em 4x',
+      secao: 'contas_mensais_pix_boleto',
+      regra_repeticao: 'parcelado',
+      modalidade_parcelamento: 'parcelado',
+      total_parcelas: 4,
+      parcela_inicial: 1,
+      valor_parcela: 250,
+      valor_estimado: 1000,
+      data_inicio: '2026-11-15 00:00:00.000Z',
+      dia_vencimento: 10,
+      contexto_tipo: 'pessoal',
+      ativo: true,
+    }
+
+    await despesasService.gerarOcorrenciasParaCompromisso(compromissoNaoCartao)
+
+    expect(mockCreate).toHaveBeenCalledTimes(4)
+
+    // Parcela 1: 2026-11, venc 10/11/2026
+    const p1 = mockCreate.mock.calls[0][0]
+    expect(p1.numero_parcela).toBe(1)
+    expect(p1.competencia).toBe('2026-11')
+    expect(p1.data_vencimento).toBe('2026-11-10T12:00:00.000Z')
+
+    // Parcela 2: 2026-12, venc 10/12/2026
+    const p2 = mockCreate.mock.calls[1][0]
+    expect(p2.numero_parcela).toBe(2)
+    expect(p2.competencia).toBe('2026-12')
+    expect(p2.data_vencimento).toBe('2026-12-10T12:00:00.000Z')
+
+    // Parcela 3: 2027-01, venc 10/01/2027
+    const p3 = mockCreate.mock.calls[2][0]
+    expect(p3.numero_parcela).toBe(3)
+    expect(p3.competencia).toBe('2027-01')
+    expect(p3.data_vencimento).toBe('2027-01-10T12:00:00.000Z')
+
+    // Parcela 4: 2027-02, venc 10/02/2027
+    const p4 = mockCreate.mock.calls[3][0]
+    expect(p4.numero_parcela).toBe(4)
+    expect(p4.competencia).toBe('2027-02')
+    expect(p4.data_vencimento).toBe('2027-02-10T12:00:00.000Z')
   })
 
   it('gera ocorrências mensais de cartão a partir do ciclo inicial da fatura até meses futuros', async () => {

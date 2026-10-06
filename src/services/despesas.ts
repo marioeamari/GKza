@@ -953,28 +953,44 @@ export const despesasService = {
         const cMesZero = parseInt(mesStr, 10) - 1
         const cDia = parseInt(diaStr, 10)
 
-        const pNum = oc.numero_parcela && oc.numero_parcela > 0 ? oc.numero_parcela : 1
-        const pInicial = compromisso.parcela_inicial || 1
-        const offset = isParcelado ? pNum - pInicial : 0
+        if (isParcelado) {
+          const pNum = oc.numero_parcela && oc.numero_parcela > 0 ? oc.numero_parcela : 1
+          const mesOffset = pNum - 1
+          const diaVenc = compromisso.dia_vencimento || cDia || 10
+          const parcelaDate = despesasService.calcularDataVencimentoNoMes(
+            cAno,
+            cMesZero + mesOffset,
+            diaVenc,
+          )
+          const pYear = parcelaDate.getUTCFullYear()
+          const pMonth = parcelaDate.getUTCMonth()
+          const expectedComp = `${pYear}-${String(pMonth + 1).padStart(2, '0')}`
+          const expectedDueIso = parcelaDate.toISOString()
 
-        const parcelaDate = despesasService.calcularDataVencimentoNoMes(
-          cAno,
-          cMesZero + offset,
-          cDia,
-        )
-        const parcelaDataIso = `${parcelaDate.getUTCFullYear()}-${String(
-          parcelaDate.getUTCMonth() + 1,
-        ).padStart(2, '0')}-${String(parcelaDate.getUTCDate()).padStart(2, '0')}`
+          if (oc.competencia !== expectedComp) {
+            updates.competencia = expectedComp
+          }
+          const currentDueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
+          const expectedDueStr = expectedDueIso.slice(0, 10)
+          if (currentDueStr !== expectedDueStr) {
+            updates.data_vencimento = expectedDueIso
+          }
+        } else {
+          const parcelaDate = despesasService.calcularDataVencimentoNoMes(cAno, cMesZero, cDia)
+          const parcelaDataIso = `${parcelaDate.getUTCFullYear()}-${String(
+            parcelaDate.getUTCMonth() + 1,
+          ).padStart(2, '0')}-${String(parcelaDate.getUTCDate()).padStart(2, '0')}`
 
-        const ciclo = calcularFaturaCartao(contaCartaoObj, parcelaDataIso)
-        const expectedDueIso = `${ciclo.dataVencimento}T12:00:00.000Z`
+          const ciclo = calcularFaturaCartao(contaCartaoObj, parcelaDataIso)
+          const expectedDueIso = `${ciclo.dataVencimento}T12:00:00.000Z`
 
-        if (oc.competencia !== ciclo.competencia) {
-          updates.competencia = ciclo.competencia
-        }
-        const currentDueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
-        if (currentDueStr !== ciclo.dataVencimento) {
-          updates.data_vencimento = expectedDueIso
+          if (oc.competencia !== ciclo.competencia) {
+            updates.competencia = ciclo.competencia
+          }
+          const currentDueStr = oc.data_vencimento ? oc.data_vencimento.slice(0, 10) : ''
+          if (currentDueStr !== ciclo.dataVencimento) {
+            updates.data_vencimento = expectedDueIso
+          }
         }
       } else if (diaVencimentoCompromisso && oc.competencia && oc.competencia.includes('-')) {
         // Se houver dia_vencimento e a ocorrência tiver competência, verifica se a data de vencimento precisa alinhar
@@ -1132,28 +1148,26 @@ export const despesasService = {
           ? compromisso.created.slice(0, 10)
           : new Date().toISOString().slice(0, 10)
 
-      if (contaCartaoObj) {
-        // Para cartão: cada parcela avança um mês em relação à compra e calcula o ciclo da fatura
-        const [anoStr, mesStr, diaStr] = dataCompraStr.split('-')
-        const cAno = parseInt(anoStr, 10)
-        const cMesZero = parseInt(mesStr, 10) - 1
-        const cDia = parseInt(diaStr, 10)
+      // Para parcelados: parcela N tem mês base = mês da data de compra + (N - 1) meses.
+      // Se houver dia_vencimento configurado no compromisso, utiliza o dia_vencimento (ex: dia 20).
+      const [anoStr, mesStr, diaStr] = dataCompraStr.split('-')
+      const cAno = parseInt(anoStr, 10)
+      const cMesZero = parseInt(mesStr, 10) - 1
+      const diaVenc = compromisso.dia_vencimento || parseInt(diaStr, 10) || 10
 
+      if (contaCartaoObj) {
+        // Para cartão: cada parcela N vence no dia_vencimento do mês de compra + (N - 1) meses
         for (let p = inicial; p <= total; p++) {
-          const offset = p - inicial
+          const mesOffset = p - 1
           const parcelaDate = despesasService.calcularDataVencimentoNoMes(
             cAno,
-            cMesZero + offset,
-            cDia,
+            cMesZero + mesOffset,
+            diaVenc,
           )
           const pYear = parcelaDate.getUTCFullYear()
           const pMonth = parcelaDate.getUTCMonth()
-          const pDay = parcelaDate.getUTCDate()
-          const parcelaDataIso = `${pYear}-${String(pMonth + 1).padStart(2, '0')}-${String(pDay).padStart(2, '0')}`
-
-          const ciclo = calcularFaturaCartao(contaCartaoObj, parcelaDataIso)
-          const compStr = ciclo.competencia
-          const dueDateIso = `${ciclo.dataVencimento}T12:00:00.000Z`
+          const compStr = `${pYear}-${String(pMonth + 1).padStart(2, '0')}`
+          const dueDateIso = parcelaDate.toISOString()
 
           const exists = await hasExistingOcorrencia({ numero_parcela: p })
 
@@ -1188,16 +1202,14 @@ export const despesasService = {
           }
         }
       } else {
-        // Contas não-cartão: lógica padrão com dia_vencimento
-        const rawDate = compromisso.data_inicio || compromisso.created
-        const startDate = rawDate ? new Date(rawDate) : new Date()
-        const day = compromisso.dia_vencimento || startDate.getUTCDate() || 10
-
+        // Contas não-cartão: parcela N tem mês base = mês da compra + (N - 1) meses
         for (let p = inicial; p <= total; p++) {
-          const offset = p - inicial
-          const ano = startDate.getUTCFullYear()
-          const mes = startDate.getUTCMonth() + offset
-          const dueDate = despesasService.calcularDataVencimentoNoMes(ano, mes, day)
+          const mesOffset = p - 1
+          const dueDate = despesasService.calcularDataVencimentoNoMes(
+            cAno,
+            cMesZero + mesOffset,
+            diaVenc,
+          )
           const compStr = `${dueDate.getUTCFullYear()}-${(dueDate.getUTCMonth() + 1).toString().padStart(2, '0')}`
 
           const exists = await hasExistingOcorrencia({ numero_parcela: p })
