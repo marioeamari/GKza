@@ -89,6 +89,7 @@ import { formatCurrency, formatCompactCurrency, formatDate, getLocalDateStr } fr
 import {
   calcularEstadoCicloFatura,
   calcularFaturaCartao,
+  formatarSeloFaturaOcorrencia,
   type EstadoCicloFatura,
 } from '@/lib/cartao-fatura'
 import { can } from '@/lib/permissions'
@@ -3015,24 +3016,23 @@ function OcorrenciaRow({
     (contaPag?.tipo === 'cartao' || ocorrencia.secao === 'cartoes_credito') && metodoEhCredito
 
   // Badge do ciclo da fatura do cartão (apenas para despesas em método Crédito)
+  // O selo deve SEMPRE refletir a fatura da própria ocorrência clicada / exibida na linha
+  // (competência da parcela + vencimento dela), e não recalcular a partir da data_inicio do compromisso.
   const faturaCicloBadge = useMemo(() => {
-    if (!contaPag || contaPag.tipo !== 'cartao' || !metodoEhCredito) return null
-    const dataRef =
-      ocorrencia.data_pagamento?.slice(0, 10) ||
-      ocorrencia.data_vencimento?.slice(0, 10) ||
-      comp?.data_inicio?.slice(0, 10) ||
-      getLocalDateStr()
-    const ciclo = calcularFaturaCartao(contaPag, dataRef)
-    const dateObj = new Date(ciclo.dataFechamento + 'T12:00:00')
-    const mesAno = dateObj.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
-    const mesCap = mesAno.charAt(0).toUpperCase() + mesAno.slice(1)
-    const [vy, vm, vd] = ciclo.dataVencimento.split('-')
-    return `Fatura de ${mesCap} · vence ${vd}/${vm}`
+    return formatarSeloFaturaOcorrencia({
+      conta: contaPag,
+      metodoEhCredito,
+      competencia: ocorrencia.competencia,
+      dataVencimento: ocorrencia.data_vencimento,
+      dataPagamento: ocorrencia.data_pagamento,
+      dataCompraFallback: comp?.data_inicio,
+    })
   }, [
     contaPag,
     metodoEhCredito,
-    ocorrencia.data_pagamento,
+    ocorrencia.competencia,
     ocorrencia.data_vencimento,
+    ocorrencia.data_pagamento,
     comp?.data_inicio,
   ])
 
@@ -3120,7 +3120,7 @@ function OcorrenciaRow({
               <Badge
                 variant="outline"
                 className="border-primary/40 bg-primary/10 text-primary font-bold text-[10px] px-2 py-0.5"
-                title="Ciclo da fatura correspondente a esta compra"
+                title="Fatura em que esta parcela cai"
               >
                 {faturaCicloBadge}
               </Badge>

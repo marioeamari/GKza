@@ -6,6 +6,7 @@ import {
   calcularCompetenciaEVencimento,
   simularCronogramaParcelas,
   getAvisoFaturaCartao,
+  formatarSeloFaturaOcorrencia,
   type PagamentoFaturaItem,
   type OcorrenciaFaturaItem,
 } from './cartao-fatura'
@@ -635,6 +636,101 @@ describe('calcularEstadoCicloFatura — Estado Financeiro Puro do Ciclo da Fatur
       })
       expect(p2.competencia).toBe('2026-11')
       expect(p2.dataVencimento).toBe('2026-11-23')
+    })
+
+    it('formatarSeloFaturaOcorrencia reflete a competência e vencimento da própria ocorrência clicada', () => {
+      // Caso Celular Lara: compra em 25/09 no cartão com fechamento 10 e vencimento 10.
+      // A primeira parcela cairia na fatura de Setembro (vence 10/10).
+      // Porém a parcela 3 tem competência 2026-11 e vencimento 2026-12-10.
+      // O selo da parcela 3 DEVE mostrar "Fatura de Novembro de 2026 · vence 10/12", e NÃO a primeira parcela!
+      const contaNubank: Conta = {
+        ...contaCartao,
+        dia_fechamento: 10,
+        dia_vencimento: 10,
+      }
+
+      const seloParcela3 = formatarSeloFaturaOcorrencia({
+        conta: contaNubank,
+        metodoEhCredito: true,
+        competencia: '2026-11',
+        dataVencimento: '2026-12-10T12:00:00.000Z',
+        dataCompraFallback: '2026-09-25',
+      })
+
+      expect(seloParcela3).toBe('Fatura de Novembro de 2026 · vence 10/12')
+
+      // Parcela 4 com competência 2026-12 e vencimento 2027-01-10
+      const seloParcela4 = formatarSeloFaturaOcorrencia({
+        conta: contaNubank,
+        metodoEhCredito: true,
+        competencia: '2026-12',
+        dataVencimento: '2027-01-10T12:00:00.000Z',
+        dataCompraFallback: '2026-09-25',
+      })
+
+      expect(seloParcela4).toBe('Fatura de Dezembro de 2026 · vence 10/01')
+    })
+
+    it('simularCronogramaParcelas exibe parcelas anteriores a parcela_inicial com status anterior_ao_controle', () => {
+      // Caso idêntico a Celular Lara: parcela_inicial 3, total_parcelas 4
+      const compromisso = {
+        id: 'comp_lara',
+        descricao: 'Celular Lara',
+        data_inicio: '2026-09-25',
+        total_parcelas: 4,
+        parcela_inicial: 3,
+        valor_parcela: 360,
+      }
+      const ocorrenciasReais = [
+        {
+          id: 'oc_3',
+          numero_parcela: 3,
+          total_parcelas: 4,
+          competencia: '2026-11',
+          data_vencimento: '2026-12-10T12:00:00.000Z',
+          valor_previsto: 360,
+          status: 'prevista',
+        },
+        {
+          id: 'oc_4',
+          numero_parcela: 4,
+          total_parcelas: 4,
+          competencia: '2026-12',
+          data_vencimento: '2027-01-10T12:00:00.000Z',
+          valor_previsto: 360,
+          status: 'prevista',
+        },
+      ]
+
+      const cronograma = simularCronogramaParcelas({
+        compromisso,
+        conta: contaCartao,
+        ocorrenciasReais,
+        dataReferenciaHoje: '2026-10-06',
+      })
+
+      // O cronograma completo deve ter 4 parcelas (1, 2, 3 e 4)
+      expect(cronograma).toHaveLength(4)
+
+      // Parcelas 1 e 2 devem vir marcadas como 'anterior_ao_controle'
+      expect(cronograma[0].numeroParcela).toBe(1)
+      expect(cronograma[0].status).toBe('anterior_ao_controle')
+      expect(cronograma[0].isAnteriorAoControle).toBe(true)
+
+      expect(cronograma[1].numeroParcela).toBe(2)
+      expect(cronograma[1].status).toBe('anterior_ao_controle')
+      expect(cronograma[1].isAnteriorAoControle).toBe(true)
+
+      // Parcelas 3 e 4 são as reais existentes no banco
+      expect(cronograma[2].numeroParcela).toBe(3)
+      expect(cronograma[2].status).toBe('prevista')
+      expect(cronograma[2].isSimulada).toBe(false)
+      expect(cronograma[2].competencia).toBe('2026-11')
+
+      expect(cronograma[3].numeroParcela).toBe(4)
+      expect(cronograma[3].status).toBe('prevista')
+      expect(cronograma[3].isSimulada).toBe(false)
+      expect(cronograma[3].competencia).toBe('2026-12')
     })
   })
 })

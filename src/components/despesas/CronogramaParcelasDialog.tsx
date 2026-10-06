@@ -285,6 +285,14 @@ export function CronogramaParcelasDialog({
                         <Badge className="bg-success/15 text-success hover:bg-success/20 text-[10px] font-bold border-0">
                           <CheckCircle2 className="mr-1 h-3 w-3" /> Paga
                         </Badge>
+                      ) : item.status === 'anterior_ao_controle' ? (
+                        <Badge
+                          variant="outline"
+                          className="border-muted-foreground/30 bg-muted/60 text-muted-foreground text-[10px] font-medium"
+                          title="Parcela quitada ou liquidada antes do início do controle no sistema"
+                        >
+                          Anterior ao início do controle
+                        </Badge>
                       ) : item.status === 'atrasada' ? (
                         <Badge
                           variant="destructive"

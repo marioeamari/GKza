@@ -222,6 +222,8 @@ export interface ParcelaCicloSimulada {
   dataVencimentoIso: string // 'YYYY-MM-DDTHH:mm:ss.000Z'
 }
 
+export type StatusItemCronograma = 'paga' | 'prevista' | 'atrasada' | 'anterior_ao_controle'
+
 export interface ItemCronogramaParcela {
   numeroParcela: number
   totalParcelas: number
@@ -230,11 +232,12 @@ export interface ItemCronogramaParcela {
   dataVencimento: string // 'YYYY-MM-DD' ou formatada
   dataVencimentoIso: string
   valor: number
-  status: 'paga' | 'prevista' | 'atrasada'
+  status: StatusItemCronograma
   dataPagamento?: string
   valorPago?: number
   ocorrenciaId?: string
   isSimulada: boolean
+  isAnteriorAoControle?: boolean
 }
 
 /**
@@ -305,8 +308,11 @@ export function simularCronogramaParcelas(params: {
   const cMesZero = (parseInt(mesStr, 10) || 1) - 1
   const diaVencComp = compromisso.dia_vencimento || parseInt(diaStr, 10) || 10
 
-  for (let p = inicial; p <= total; p++) {
+  // Exibe TODAS as parcelas de 1 até total, incluindo as anteriores à parcela_inicial
+  // (ex.: quando o parcelamento começou a ser controlado a partir da parcela 3 de 4)
+  for (let p = 1; p <= total; p++) {
     const real = reaisMap.get(p)
+    const ehAnteriorAoControle = p < inicial && !real
 
     if (real) {
       const isPaga = real.status === 'paga' || real.status === 'pago'
@@ -326,9 +332,10 @@ export function simularCronogramaParcelas(params: {
         valorPago: real.valor_pago !== undefined ? Number(real.valor_pago) : undefined,
         ocorrenciaId: real.id,
         isSimulada: false,
+        isAnteriorAoControle: false,
       })
     } else {
-      // Parcela simulada usando a regra única de competência e vencimento
+      // Parcela calculada usando a regra única de competência e vencimento
       const res = calcularCompetenciaEVencimento({
         dataCompra: dataCompraStr,
         conta,
@@ -338,6 +345,7 @@ export function simularCronogramaParcelas(params: {
         totalParcelas: total,
       })
       const isAtrasada =
+        !ehAnteriorAoControle &&
         dataReferenciaHoje !== '' &&
         res.dataVencimento !== '' &&
         res.dataVencimento < dataReferenciaHoje
@@ -349,8 +357,13 @@ export function simularCronogramaParcelas(params: {
         dataVencimento: res.dataVencimento,
         dataVencimentoIso: res.dataVencimentoIso,
         valor: valorUnitario,
-        status: isAtrasada ? 'atrasada' : 'prevista',
+        status: ehAnteriorAoControle
+          ? 'anterior_ao_controle'
+          : isAtrasada
+            ? 'atrasada'
+            : 'prevista',
         isSimulada: true,
+        isAnteriorAoControle: ehAnteriorAoControle,
       })
     }
   }
@@ -489,6 +502,72 @@ export function calcularCompetenciaEVencimento(params: {
     dataVencimentoIso,
     isCartaoCredito: false,
   }
+}
+
+/**
+ * Formata o texto do selo da fatura do cartão para exibição na linha da ocorrência.
+ * O selo reflete SEMPRE a competência e o vencimento da própria ocorrência clicada/exibida.
+ * Exemplo: "Fatura de Novembro de 2026 · vence 10/12"
+ */
+export function formatarSeloFaturaOcorrencia(params: {
+  conta?: Conta | null
+  metodoEhCredito?: boolean
+  competencia?: string
+  dataVencimento?: string
+  dataPagamento?: string
+  dataCompraFallback?: string
+}): string | null {
+  const {
+    conta,
+    metodoEhCredito = true,
+    competencia,
+    dataVencimento,
+    dataPagamento,
+    dataCompraFallback,
+  } = params
+
+  if (!conta || conta.tipo !== 'cartao' || !metodoEhCredito) return null
+
+  // 1. Prioridade: competência da própria ocorrência
+  const compStr = competencia?.trim()
+  if (compStr && compStr.length >= 7) {
+    const [cyStr, cmStr] = compStr.split('-')
+    const cYear = parseInt(cyStr, 10)
+    const cMonth = parseInt(cmStr, 10) - 1
+    if (!isNaN(cYear) && !isNaN(cMonth) && cMonth >= 0 && cMonth <= 11) {
+      const dateObj = new Date(cYear, cMonth, 1)
+      const mesAno = dateObj.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+      const mesCap = mesAno.charAt(0).toUpperCase() + mesAno.slice(1)
+
+      let diaMesVenc = ''
+      if (dataVencimento) {
+        const [vy, vm, vd] = dataVencimento.slice(0, 10).split('-')
+        if (vd && vm) {
+          diaMesVenc = `${vd}/${vm}`
+        }
+      }
+      if (!diaMesVenc) {
+        const vencCalculado = calcularVencimentoFatura(conta, compStr.slice(0, 7))
+        const [, vm, vd] = vencCalculado.split('-')
+        diaMesVenc = `${vd}/${vm}`
+      }
+
+      return `Fatura de ${mesCap} · vence ${diaMesVenc}`
+    }
+  }
+
+  // 2. Fallback: calcula o ciclo a partir da data da transação/compra
+  const dataRef =
+    dataPagamento?.slice(0, 10) ||
+    dataVencimento?.slice(0, 10) ||
+    dataCompraFallback?.slice(0, 10) ||
+    '2026-09-01'
+  const ciclo = calcularFaturaCartao(conta, dataRef)
+  const dateObj = new Date(ciclo.dataFechamento + 'T12:00:00')
+  const mesAno = dateObj.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+  const mesCap = mesAno.charAt(0).toUpperCase() + mesAno.slice(1)
+  const [vy, vm, vd] = ciclo.dataVencimento.split('-')
+  return `Fatura de ${mesCap} · vence ${vd}/${vm}`
 }
 
 export function getAvisoFaturaCartao(
