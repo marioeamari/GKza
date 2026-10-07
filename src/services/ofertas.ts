@@ -95,33 +95,80 @@ export const ofertasService = {
   },
 
   // Sincroniza regras recorrentes para o mês de forma idempotente
+  // Importante: NÃO ressuscita ocorrências excluídas ou meses após o cancelamento da regra
   async sincronizarRecorrenciasMes(anoMes: string): Promise<void> {
     try {
-      // Busca todas as ofertas matrizes recorrentes (recorrente = true && regra_id != '')
-      const matrizes = await pb.collection('ofertas_voluntarias').getFullList<OfertaVoluntaria>({
-        filter: "recorrente = true && dia_semana != '' && regra_id != ''",
-      })
+      // Busca todas as ocorrências recorrentes existentes com regra_id
+      const todasRecorrentes = await pb
+        .collection('ofertas_voluntarias')
+        .getFullList<OfertaVoluntaria>({
+          filter: "recorrente = true && dia_semana != '' && regra_id != ''",
+          sort: '-data',
+        })
 
-      // Agrupa por regra_id para obter a definição de cada regra (a mais recente ou a matriz)
-      const regrasUnicas = new Map<string, OfertaVoluntaria>()
-      for (const m of matrizes) {
-        if (m.regra_id && !regrasUnicas.has(m.regra_id)) {
-          regrasUnicas.set(m.regra_id, m)
+      // Agrupa por regra_id para obter a definição de cada regra e o histórico de datas existentes
+      const regrasDef = new Map<string, OfertaVoluntaria>()
+      const datasPorRegra = new Map<string, Set<string>>()
+      const minDataPorRegra = new Map<string, string>()
+
+      for (const of of todasRecorrentes) {
+        if (!of.regra_id) continue
+        if (!regrasDef.has(of.regra_id)) {
+          regrasDef.set(of.regra_id, of)
         }
+        const setDatas = datasPorRegra.get(of.regra_id) || new Set<string>()
+        const dataDia = of.data ? of.data.slice(0, 10) : ''
+        if (dataDia) {
+          setDatas.add(dataDia)
+          const minAtual = minDataPorRegra.get(of.regra_id)
+          if (!minAtual || dataDia < minAtual) {
+            minDataPorRegra.set(of.regra_id, dataDia)
+          }
+        }
+        datasPorRegra.set(of.regra_id, setDatas)
       }
 
-      for (const [regraId, def] of regrasUnicas.entries()) {
+      for (const [regraId, def] of regrasDef.entries()) {
         if (!def.dia_semana) continue
+
+        // Se uma regra foi criada com data inicial posterior a este mês, não antecipa
+        const minData = minDataPorRegra.get(regraId)
+        if (minData && minData.slice(0, 7) > anoMes) {
+          continue
+        }
+
+        const datasJaCriadas = datasPorRegra.get(regraId) || new Set<string>()
+
+        // Se para este mês já existe ao menos 1 registro da regra, não autocompleta datas ausentes
+        // para respeitar ocorrências pontuais que o usuário deletou intencionalmente naquele mês!
+        const temRegistroNoMes = Array.from(datasJaCriadas).some((d) => d.startsWith(anoMes))
+        if (temRegistroNoMes) {
+          continue
+        }
+
+        // Se o mês ainda não tem nenhuma ocorrência dessa regra, verifica se a regra é ativa
+        // (existe alguma ocorrência no mês atual ou meses futuros da regra).
+        // Se a regra não tem nenhuma ocorrência >= anoMes, significa que foi encerrada/excluída deste ponto em diante!
+        const temOcorrenciasFuturasOuPresentes = Array.from(datasJaCriadas).some(
+          (d) => d.slice(0, 7) >= anoMes,
+        )
+        if (!temOcorrenciasFuturasOuPresentes) {
+          // Regra foi encerrada antes ou neste mês
+          continue
+        }
+
         const datasEsperadas = getDatasDiaSemanaNoMes(anoMes, def.dia_semana)
 
-        // Busca o que já existe para essa regra no mês
-        const existentes = await pb
-          .collection('ofertas_voluntarias')
-          .getFullList<OfertaVoluntaria>({
-            filter: `regra_id = '${regraId}' && data >= '${anoMes}-01' && data <= '${anoMes}-31 23:59:59'`,
+        // Verifica se a matriz/regra gerava caixa
+        let geraCaixa = false
+        try {
+          const caixaMatriz = await pb.collection('caixa_ofertas').getList(1, 1, {
+            filter: `referencia_oferta.regra_id = '${regraId}'`,
           })
-
-        const datasJaCriadas = new Set(existentes.map((e) => e.data.slice(0, 10)))
+          geraCaixa = caixaMatriz.totalItems > 0
+        } catch (_) {
+          geraCaixa = false
+        }
 
         for (const dataStr of datasEsperadas) {
           if (!datasJaCriadas.has(dataStr)) {
@@ -138,12 +185,9 @@ export const ofertasService = {
               contexto_tipo: def.contexto_tipo || 'pessoal',
             })
 
-            // Se a regra original tiver movimentação no caixa, registra a entrada no caixa
-            // Verificamos se a matriz gerou entrada no caixa
-            const caixaMatriz = await pb.collection('caixa_ofertas').getList(1, 1, {
-              filter: `referencia_oferta.regra_id = '${regraId}'`,
-            })
-            if (caixaMatriz.totalItems > 0) {
+            datasJaCriadas.add(dataStr)
+
+            if (geraCaixa) {
               await pb.collection('caixa_ofertas').create({
                 tipo: 'entrada',
                 data: `${dataStr} 12:00:00`,
@@ -295,22 +339,79 @@ export const ofertasService = {
     return updated
   },
 
-  // Exclui uma oferta voluntária (e opcionalmente sua movimentação no caixa)
+  // Exclui uma oferta voluntária pontual (e remove qualquer movimentação vinculada no caixa)
   async deleteOfertaVoluntaria(id: string): Promise<void> {
-    // 1. Remover movimentação vinculada no caixa se existir
+    // 1. Remover movimentações vinculadas no caixa se existirem
     try {
       const caixaItens = await pb.collection('caixa_ofertas').getFullList<MovimentacaoCaixaOferta>({
         filter: `referencia_oferta = '${id}'`,
       })
       for (const cx of caixaItens) {
-        await pb.collection('caixa_ofertas').delete(cx.id)
+        try {
+          await pb.collection('caixa_ofertas').delete(cx.id)
+        } catch (err) {
+          console.warn(`Erro ao excluir movimentação ${cx.id} do caixa:`, err)
+        }
       }
     } catch (err) {
-      console.warn('Erro ao excluir do caixa de ofertas:', err)
+      console.warn('Erro ao buscar movimentações vinculadas no caixa de ofertas:', err)
     }
 
     // 2. Excluir a oferta voluntária
     await pb.collection('ofertas_voluntarias').delete(id)
+  },
+
+  // Exclui todas as ocorrências de uma regra recorrente (ou a partir de uma data de referência)
+  // e remove todas as movimentações no caixa correspondentes
+  async deleteRegraRecorrente(
+    regraId: string,
+    options?: { aPartirDeData?: string; apenasFuturas?: boolean },
+  ): Promise<{ ofertasRemovidas: number; caixaRemovidos: number }> {
+    if (!regraId) {
+      return { ofertasRemovidas: 0, caixaRemovidos: 0 }
+    }
+
+    let filtroOfertas = `regra_id = '${regraId}'`
+    if (options?.aPartirDeData) {
+      filtroOfertas += ` && data >= '${options.aPartirDeData}'`
+    }
+
+    const ofertas = await pb.collection('ofertas_voluntarias').getFullList<OfertaVoluntaria>({
+      filter: filtroOfertas,
+    })
+
+    let ofertasRemovidas = 0
+    let caixaRemovidos = 0
+
+    // Para cada oferta a remover, limpar o caixa correspondente
+    for (const of of ofertas) {
+      try {
+        const caixaItens = await pb
+          .collection('caixa_ofertas')
+          .getFullList<MovimentacaoCaixaOferta>({
+            filter: `referencia_oferta = '${of.id}'`,
+          })
+        for (const cx of caixaItens) {
+          try {
+            await pb.collection('caixa_ofertas').delete(cx.id)
+            caixaRemovidos++
+          } catch (cxErr) {
+            console.warn(`Erro ao excluir caixa ${cx.id}:`, cxErr)
+          }
+        }
+      } catch (err) {
+        console.warn(`Erro ao consultar caixa para oferta ${of.id}:`, err)
+      }
+
+      try {
+        await pb.collection('ofertas_voluntarias').delete(of.id)
+        ofertasRemovidas++
+      } catch (ofErr) {
+        console.warn(`Erro ao excluir oferta ${of.id}:`, ofErr)
+      }
+    }
+
+    return { ofertasRemovidas, caixaRemovidos }
   },
 
   // Vincula / lança uma oferta voluntária existente no caixa

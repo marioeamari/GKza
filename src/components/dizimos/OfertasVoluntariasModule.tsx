@@ -121,7 +121,10 @@ export function OfertasVoluntariasModule({
   const [savingOferta, setSavingOferta] = useState(false)
 
   // Modal de exclusão de oferta
-  const [deleteOfertaId, setDeleteOfertaId] = useState<string | null>(null)
+  const [deleteOferta, setDeleteOferta] = useState<OfertaVoluntaria | null>(null)
+  const [deleteModoRecorrente, setDeleteModoRecorrente] = useState<'apenas_esta' | 'todas_regra'>(
+    'apenas_esta',
+  )
   const [deletingOferta, setDeletingOferta] = useState(false)
 
   // Modal de movimentação do caixa (Entrada avulsa ou Saída/Aplicação)
@@ -227,17 +230,29 @@ export function OfertasVoluntariasModule({
     }
   }
 
-  // Confirmar exclusão de oferta
+  // Confirmar exclusão de oferta (avulsa ou recorrente)
   const handleConfirmDeleteOferta = async () => {
-    if (!deleteOfertaId) return
+    if (!deleteOferta) return
     setDeletingOferta(true)
     try {
-      await ofertasService.deleteOfertaVoluntaria(deleteOfertaId)
-      toast({
-        title: 'Oferta removida com sucesso',
-        description: 'A oferta e eventual lançamento vinculado no caixa foram removidos.',
-      })
-      setDeleteOfertaId(null)
+      const isRecorrente = Boolean(deleteOferta.recorrente && deleteOferta.regra_id)
+
+      if (isRecorrente && deleteModoRecorrente === 'todas_regra') {
+        const { ofertasRemovidas } = await ofertasService.deleteRegraRecorrente(
+          deleteOferta.regra_id!,
+        )
+        toast({
+          title: 'Regra recorrente excluída',
+          description: `${ofertasRemovidas} ocorrência(s) e movimentações vinculadas no caixa foram removidas.`,
+        })
+      } else {
+        await ofertasService.deleteOfertaVoluntaria(deleteOferta.id)
+        toast({
+          title: 'Oferta removida com sucesso',
+          description: 'A oferta e eventual lançamento vinculado no caixa foram removidos.',
+        })
+      }
+      setDeleteOferta(null)
       await onReload()
     } catch (err) {
       toast({
@@ -818,7 +833,10 @@ export function OfertasVoluntariasModule({
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                                onClick={() => setDeleteOfertaId(of.id)}
+                                onClick={() => {
+                                  setDeleteOferta(of)
+                                  setDeleteModoRecorrente('apenas_esta')
+                                }}
                                 title="Excluir oferta"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
@@ -1128,19 +1146,95 @@ export function OfertasVoluntariasModule({
 
       {/* CONFIRMAÇÃO DE EXCLUSÃO DE OFERTA */}
       <AlertDialog
-        open={Boolean(deleteOfertaId)}
-        onOpenChange={(open) => !open && setDeleteOfertaId(null)}
+        open={Boolean(deleteOferta)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteOferta(null)
+            setDeleteModoRecorrente('apenas_esta')
+          }
+        }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-md">
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir oferta voluntária?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta ação removerá esta oferta voluntária. Se ela já tiver sido lançada como entrada
-              no Caixa de Ofertas, a movimentação vinculada também será desfeita. (Nota: caso seja
-              item de uma recorrência, a exclusão deste item não cancela os demais dias).
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              Excluir oferta voluntária?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 pt-1 text-xs text-muted-foreground">
+                <p>
+                  Você está excluindo a oferta de{' '}
+                  <strong className="text-foreground">
+                    {formatCurrency(deleteOferta?.valor || 0)}
+                  </strong>{' '}
+                  referente a{' '}
+                  <strong className="text-foreground">
+                    {deleteOferta?.data ? formatDate(deleteOferta.data.slice(0, 10)) : ''}
+                  </strong>
+                  {deleteOferta?.direcionamento && (
+                    <>
+                      {' '}
+                      (Direcionamento: <em>{deleteOferta.direcionamento}</em>)
+                    </>
+                  )}
+                  . Se houver entrada lançada no Caixa de Ofertas, ela será automaticamente
+                  desfeita.
+                </p>
+
+                {deleteOferta?.recorrente && deleteOferta.regra_id && (
+                  <div className="rounded-xl border border-border bg-secondary/30 p-3 space-y-2">
+                    <p className="font-semibold text-foreground flex items-center gap-1.5">
+                      <Repeat className="h-3.5 w-3.5 text-[#DF5830]" />
+                      Esta oferta faz parte de uma recorrência semanal
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Escolha como deseja aplicar a exclusão:
+                    </p>
+                    <div className="space-y-2 pt-1">
+                      <label className="flex items-start gap-2.5 p-2 rounded-lg border cursor-pointer transition hover:bg-background/80 has-[:checked]:border-primary has-[:checked]:bg-primary/5">
+                        <input
+                          type="radio"
+                          name="modo-exclusao-oferta"
+                          className="mt-0.5 text-primary focus:ring-primary"
+                          checked={deleteModoRecorrente === 'apenas_esta'}
+                          onChange={() => setDeleteModoRecorrente('apenas_esta')}
+                        />
+                        <div className="text-xs">
+                          <strong className="block text-foreground">
+                            Excluir apenas esta ocorrência (
+                            {deleteOferta.data ? formatDate(deleteOferta.data.slice(0, 10)) : ''})
+                          </strong>
+                          <span className="text-[11px] text-muted-foreground">
+                            Mantém as outras semanas e a regra recorrente ativas.
+                          </span>
+                        </div>
+                      </label>
+
+                      <label className="flex items-start gap-2.5 p-2 rounded-lg border cursor-pointer transition hover:bg-background/80 has-[:checked]:border-destructive has-[:checked]:bg-destructive/5">
+                        <input
+                          type="radio"
+                          name="modo-exclusao-oferta"
+                          className="mt-0.5 text-destructive focus:ring-destructive"
+                          checked={deleteModoRecorrente === 'todas_regra'}
+                          onChange={() => setDeleteModoRecorrente('todas_regra')}
+                        />
+                        <div className="text-xs">
+                          <strong className="block text-destructive">
+                            Excluir a regra e todas as suas ocorrências
+                          </strong>
+                          <span className="text-[11px] text-muted-foreground">
+                            Cancela definitivamente a série semanal e remove todos os lançamentos
+                            vinculados no caixa.
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="mt-2">
             <AlertDialogCancel disabled={deletingOferta}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmDeleteOferta}
@@ -1148,7 +1242,9 @@ export function OfertasVoluntariasModule({
               className="bg-destructive hover:bg-destructive/90 text-white"
             >
               {deletingOferta && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
-              Excluir
+              {deleteOferta?.recorrente && deleteModoRecorrente === 'todas_regra'
+                ? 'Excluir regra completa'
+                : 'Excluir oferta'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
