@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  AlertCircle,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -57,14 +58,27 @@ import {
   filtrarOcorrenciasDizimoMes,
   calcularBaseCompartilhadaDizimo,
   filtrarOcorrenciasAbertoDizimoMes,
+  calcularValorPorTipo,
+  getDiasNoMes,
+  getStatusPagamentoMinisterial,
+  formatDescricaoMinisterial,
 } from '@/lib/dizimoCalculo'
 import { BaixaOcorrenciaDialog } from '@/components/despesas/BaixaOcorrenciaDialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import type {
   Categoria,
   Conta,
   ConfigCalculo,
   DespesaCompromisso,
   DespesaOcorrencia,
+  Lancamento,
   MovimentacaoCaixaOferta,
   OfertaVoluntaria,
   ResumoCaixaOfertas,
@@ -118,6 +132,7 @@ export default function Dizimos() {
   const [compromissosDizimo, setCompromissosDizimo] = useState<DespesaCompromisso[]>([])
   const [contas, setContas] = useState<Conta[]>([])
   const [categorias, setCategorias] = useState<Categoria[]>([])
+  const [lancamentosMes, setLancamentosMes] = useState<Lancamento[]>([])
 
   // Estado para fluxo oficial de baixa reutilizando BaixaOcorrenciaDialog
   const [baixaModalOpen, setBaixaModalOpen] = useState(false)
@@ -126,6 +141,26 @@ export default function Dizimos() {
     null,
   )
   const [sincronizandoMes, setSincronizandoMes] = useState(false)
+
+  // Diálogo de Pagamento Ministerial Único do Mês (Dízimo, Oferta ou Primícias)
+  const [pagamentoModalOpen, setPagamentoModalOpen] = useState(false)
+  const [tipoParaPagar, setTipoParaPagar] = useState<TipoCalculoDizimo>('dizimo')
+  const [pagamentoValorInput, setPagamentoValorInput] = useState<number>(0)
+  const [pagamentoContaId, setPagamentoContaId] = useState<string>('')
+  const [pagamentoData, setPagamentoData] = useState<string>(() => getLocalDateStr(new Date()))
+  const [pagamentoObservacoes, setPagamentoObservacoes] = useState<string>('')
+  const [savingPagamento, setSavingPagamento] = useState(false)
+
+  // Diálogo de Ajuste do Pagamento Ministerial
+  const [ajusteModalOpen, setAjusteModalOpen] = useState(false)
+  const [lancamentoParaAjustar, setLancamentoParaAjustar] = useState<Lancamento | null>(null)
+  const [ajusteTipo, setAjusteTipo] = useState<TipoCalculoDizimo>('dizimo')
+  const [ajusteValorInput, setAjusteValorInput] = useState<number>(0)
+  const [ajusteContaId, setAjusteContaId] = useState<string>('')
+  const [ajusteData, setAjusteData] = useState<string>('')
+  const [ajusteObservacoes, setAjusteObservacoes] = useState<string>('')
+  const [savingAjuste, setSavingAjuste] = useState(false)
+  const [estornandoPagamento, setEstornandoPagamento] = useState(false)
 
   // Ofertas Voluntárias & Caixa de Ofertas
   const [ofertasVoluntarias, setOfertasVoluntarias] = useState<OfertaVoluntaria[]>([])
@@ -161,6 +196,7 @@ export default function Dizimos() {
         ocorrenciasPagasRes,
         ocorrenciasAbertasRes,
         compromissosDizimoRes,
+        lancamentosRes,
         ofVoluntarias,
         cxMovs,
         cxResumo,
@@ -183,6 +219,9 @@ export default function Dizimos() {
           filter: `dizimo = true && ativo = true`,
           expand: 'categoria,tipo_dizimo,conta_padrao',
         }),
+        financeService.listLancamentos({
+          filter: `competencia = '${selectedMonth}'`,
+        }),
         ofertasService.getOfertasMes(selectedMonth),
         ofertasService.listMovimentacoesMes(selectedMonth),
         ofertasService.getResumoCaixa(selectedMonth),
@@ -194,6 +233,7 @@ export default function Dizimos() {
       setOcorrenciasPagas(ocorrenciasPagasRes)
       setOcorrenciasAbertas(ocorrenciasAbertasRes)
       setCompromissosDizimo(compromissosDizimoRes)
+      setLancamentosMes(lancamentosRes)
       setOfertasVoluntarias(ofVoluntarias)
       setMovimentacoesCaixa(cxMovs)
       setResumoCaixa(cxResumo)
@@ -312,9 +352,224 @@ export default function Dizimos() {
   const fatorPrimicias = 1 / diasNoMes
 
   // Valores calculados resultantes sobre a MESMA base
-  const resultadoDizimo = (baseCompartilhada * percentualDizimo) / 100
-  const resultadoOferta = (baseCompartilhada * percentualOferta) / 100
-  const resultadoPrimicias = baseCompartilhada * fatorPrimicias
+  const resultadoDizimo = useMemo(
+    () =>
+      calcularValorPorTipo('dizimo', baseCompartilhada, {
+        percentualDizimo,
+      }),
+    [baseCompartilhada, percentualDizimo],
+  )
+
+  const resultadoOferta = useMemo(
+    () =>
+      calcularValorPorTipo('oferta', baseCompartilhada, {
+        percentualOferta,
+      }),
+    [baseCompartilhada, percentualOferta],
+  )
+
+  const resultadoPrimicias = useMemo(
+    () =>
+      calcularValorPorTipo('primicias', baseCompartilhada, {
+        diasNoMes,
+        mes: selectedMonth,
+      }),
+    [baseCompartilhada, diasNoMes, selectedMonth],
+  )
+
+  // Estado de pagamento de cada um dos 3 tipos no mês selecionado
+  const statusDizimo = useMemo(
+    () => getStatusPagamentoMinisterial(lancamentosMes, 'dizimo', selectedMonth, resultadoDizimo),
+    [lancamentosMes, selectedMonth, resultadoDizimo],
+  )
+
+  const statusOferta = useMemo(
+    () => getStatusPagamentoMinisterial(lancamentosMes, 'oferta', selectedMonth, resultadoOferta),
+    [lancamentosMes, selectedMonth, resultadoOferta],
+  )
+
+  const statusPrimicias = useMemo(
+    () =>
+      getStatusPagamentoMinisterial(lancamentosMes, 'primicias', selectedMonth, resultadoPrimicias),
+    [lancamentosMes, selectedMonth, resultadoPrimicias],
+  )
+
+  // Conta padrão sensível (primeira conta bancária/caixa ativa ou primeira ativa)
+  const contaPadraoId = useMemo(() => {
+    const bancaria = contas.find((c) => c.ativa && (c.tipo === 'bancaria' || c.tipo === 'caixa'))
+    if (bancaria) return bancaria.id
+    const ativa = contas.find((c) => c.ativa)
+    return ativa?.id || contas[0]?.id || ''
+  }, [contas])
+
+  // Abrir modal de pagamento ministerial
+  const handleOpenRegistrarPagamento = (tipo: TipoCalculoDizimo) => {
+    setTipoParaPagar(tipo)
+    const valorCalculado =
+      tipo === 'dizimo' ? resultadoDizimo : tipo === 'oferta' ? resultadoOferta : resultadoPrimicias
+    setPagamentoValorInput(Number(valorCalculado.toFixed(2)))
+    setPagamentoContaId(contaPadraoId)
+    setPagamentoData(getLocalDateStr(new Date()))
+    setPagamentoObservacoes('')
+    setPagamentoModalOpen(true)
+  }
+
+  // Confirmar pagamento ministerial único
+  const handleConfirmarPagamento = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!pagamentoContaId) {
+      toast({
+        variant: 'destructive',
+        title: 'Selecione uma conta',
+        description: 'É necessário selecionar a conta bancária ou de caixa para débito.',
+      })
+      return
+    }
+
+    if (pagamentoValorInput <= 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Valor inválido',
+        description: 'O valor do pagamento deve ser maior que zero.',
+      })
+      return
+    }
+
+    setSavingPagamento(true)
+    try {
+      await despesasService.registrarPagamentoMinisterialMes({
+        tipo: tipoParaPagar,
+        competencia: selectedMonth,
+        monthLabel,
+        valor: pagamentoValorInput,
+        dataPagamento: pagamentoData,
+        contaId: pagamentoContaId,
+        observacoes: pagamentoObservacoes,
+      })
+
+      toast({
+        title: 'Pagamento registrado com sucesso!',
+        description: `Lançamento de ${
+          tipoParaPagar === 'dizimo'
+            ? 'Dízimo'
+            : tipoParaPagar === 'oferta'
+              ? 'Oferta'
+              : 'Primícias'
+        } criado em /lancamentos para ${monthLabel}.`,
+      })
+      setPagamentoModalOpen(false)
+      await loadData()
+    } catch (err) {
+      console.error('Erro ao registrar pagamento ministerial:', err)
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao registrar pagamento',
+        description: apiMessage(err),
+      })
+    } finally {
+      setSavingPagamento(false)
+    }
+  }
+
+  // Abrir modal de ajuste do lançamento ministerial pago
+  const handleOpenAjustePagamento = (
+    tipo: TipoCalculoDizimo,
+    lancamento: Lancamento,
+    valorCalculadoAtual: number,
+  ) => {
+    setAjusteTipo(tipo)
+    setLancamentoParaAjustar(lancamento)
+    // Sugere o valor da base recalculada
+    setAjusteValorInput(Number(valorCalculadoAtual.toFixed(2)))
+    setAjusteContaId(lancamento.conta || contaPadraoId)
+    setAjusteData(lancamento.data ? lancamento.data.slice(0, 10) : getLocalDateStr(new Date()))
+    setAjusteObservacoes(lancamento.observacoes || '')
+    setAjusteModalOpen(true)
+  }
+
+  // Salvar ajuste do pagamento
+  const handleConfirmarAjuste = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!lancamentoParaAjustar) return
+    if (!ajusteContaId) {
+      toast({
+        variant: 'destructive',
+        title: 'Selecione uma conta',
+        description: 'É necessário selecionar a conta para o lançamento.',
+      })
+      return
+    }
+    if (ajusteValorInput <= 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Valor inválido',
+        description: 'O valor deve ser maior que zero.',
+      })
+      return
+    }
+
+    setSavingAjuste(true)
+    try {
+      await despesasService.ajustarPagamentoMinisterial(lancamentoParaAjustar.id, {
+        valor: ajusteValorInput,
+        contaId: ajusteContaId,
+        dataPagamento: ajusteData,
+        observacoes: ajusteObservacoes,
+      })
+
+      toast({
+        title: 'Pagamento ajustado com sucesso!',
+        description: `O valor do lançamento foi atualizado para ${formatCurrency(ajusteValorInput)}.`,
+      })
+      setAjusteModalOpen(false)
+      setLancamentoParaAjustar(null)
+      await loadData()
+    } catch (err) {
+      console.error('Erro ao ajustar pagamento:', err)
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao ajustar pagamento',
+        description: apiMessage(err),
+      })
+    } finally {
+      setSavingAjuste(false)
+    }
+  }
+
+  // Estornar pagamento ministerial (remover lançamento)
+  const handleEstornarPagamento = async (lancamentoId: string, tipo: TipoCalculoDizimo) => {
+    const rotulo = tipo === 'dizimo' ? 'Dízimo' : tipo === 'oferta' ? 'Oferta' : 'Primícias'
+    if (
+      !window.confirm(
+        `Deseja realmente estornar o pagamento de ${rotulo} de ${monthLabel}? O lançamento financeiro será excluído de /lancamentos.`,
+      )
+    ) {
+      return
+    }
+
+    setEstornandoPagamento(true)
+    try {
+      await despesasService.estornarPagamentoMinisterial(lancamentoId)
+      toast({
+        title: 'Pagamento estornado com sucesso!',
+        description: `O lançamento de ${rotulo} foi removido e o mês está novamente em aberto.`,
+      })
+      if (ajusteModalOpen) {
+        setAjusteModalOpen(false)
+        setLancamentoParaAjustar(null)
+      }
+      await loadData()
+    } catch (err) {
+      console.error('Erro ao estornar pagamento:', err)
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao estornar pagamento',
+        description: apiMessage(err),
+      })
+    } finally {
+      setEstornandoPagamento(false)
+    }
+  }
 
   // Abrir modal de edição de percentual (dízimo ou oferta)
   const handleOpenEdit = (tipo: TipoCalculoDizimo) => {
@@ -529,170 +784,6 @@ export default function Dizimos() {
   }
 
   if (loading) return <LoadingState label="Carregando cálculos de dízimos e ofertas..." />
-
-  // Renderiza a lista de ocorrências em aberto (status != 'paga') com o botão "Registrar pagamento"
-  const renderSecaoOcorrenciasAbertas = (tipo: TipoCalculoDizimo) => {
-    const abertasDoTipo = filtrarOcorrenciasAbertoDizimoMes(
-      ocorrenciasAbertas,
-      selectedMonth,
-      tipo,
-      tiposDizimo,
-    )
-
-    const labelTipo = tipo === 'dizimo' ? 'Dízimo' : tipo === 'oferta' ? 'Oferta' : 'Primícias'
-    const corTema = tipo === 'dizimo' ? '#DF5830' : tipo === 'oferta' ? '#B7791F' : '#1E6F5C'
-
-    return (
-      <Card className="border border-border shadow-soft">
-        <CardHeader className="flex flex-col gap-2 pb-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base font-bold text-foreground">
-              <Receipt className="h-4 w-4" style={{ color: corTema }} />
-              Ocorrências em Aberto — {labelTipo} ({monthLabel})
-            </CardTitle>
-            <CardDescription>
-              Contribuições e despesas com marcação de {labelTipo.toLowerCase()} previstas para a
-              competência <strong>{selectedMonth}</strong> aguardando confirmação de baixa.
-            </CardDescription>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Badge
-              variant={abertasDoTipo.length > 0 ? 'default' : 'secondary'}
-              className="font-bold"
-              style={
-                abertasDoTipo.length > 0 ? { backgroundColor: corTema, color: '#fff' } : undefined
-              }
-            >
-              {abertasDoTipo.length} {abertasDoTipo.length === 1 ? 'em aberto' : 'em aberto'}
-            </Badge>
-          </div>
-        </CardHeader>
-
-        <CardContent>
-          {abertasDoTipo.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-8 text-center text-muted-foreground">
-              <CheckCircle2 className="mb-2 h-8 w-8 stroke-[1.5] text-success/80" />
-              <p className="font-semibold text-foreground text-sm">
-                Nenhuma ocorrência em aberto de {labelTipo.toLowerCase()} em {monthLabel}
-              </p>
-              <p className="mt-1 max-w-md text-xs text-muted-foreground">
-                Todas as ocorrências deste mês já estão baixadas e integradas à base ministerial, ou
-                ainda não foram geradas a partir dos compromissos recorrentes.
-              </p>
-              {compromissosDizimo.length > 0 && can(user?.role, 'writeFinance') && (
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleSincronizarMes}
-                    disabled={sincronizandoMes}
-                    className="gap-1.5 text-xs font-semibold"
-                  >
-                    <RefreshCw
-                      className={`h-3.5 w-3.5 ${sincronizandoMes ? 'animate-spin' : ''}`}
-                    />
-                    Sincronizar ocorrências do mês
-                  </Button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {abertasDoTipo.map((oc) => {
-                const comp = oc.expand?.compromisso
-                const catNome =
-                  oc.expand?.compromisso?.expand?.categoria?.nome ||
-                  getCategoriaNome(comp?.categoria)
-                const rotuloNome = getTipoDizimoNome(oc.tipo_dizimo, oc.expand?.tipo_dizimo)
-                const contaNome = getContaNome(oc.conta || comp?.conta_padrao)
-                const valorExibir = oc.valor_previsto || comp?.valor_estimado || 0
-                const vencimentoFormatado = oc.data_vencimento
-                  ? formatDate(oc.data_vencimento)
-                  : '—'
-
-                return (
-                  <div
-                    key={oc.id}
-                    className="group flex flex-col gap-3 rounded-xl border border-border bg-card p-3.5 transition-all hover:bg-muted/40 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-bold text-foreground text-sm">
-                          {comp?.descricao || oc.observacoes || `Contribuição de ${labelTipo}`}
-                        </span>
-
-                        <Badge
-                          variant="outline"
-                          className="text-[11px] font-semibold border-primary/30 bg-primary/5 text-primary"
-                        >
-                          {rotuloNome}
-                        </Badge>
-
-                        {catNome && (
-                          <Badge variant="outline" className="text-[11px] text-muted-foreground">
-                            {catNome}
-                          </Badge>
-                        )}
-
-                        <Badge
-                          variant="secondary"
-                          className="text-[11px] font-mono bg-muted text-muted-foreground"
-                          title="Competência da ocorrência"
-                        >
-                          Ref: {oc.competencia || selectedMonth}
-                        </Badge>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                        {comp?.fornecedor && (
-                          <span>
-                            Favorecido:{' '}
-                            <strong className="text-foreground">{comp.fornecedor}</strong>
-                          </span>
-                        )}
-                        <span>
-                          Conta prevista: <strong className="text-foreground">{contaNome}</strong>
-                        </span>
-                        <span>
-                          Vencimento:{' '}
-                          <strong className="text-foreground">{vencimentoFormatado}</strong>
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3 border-t border-border pt-2.5 sm:border-0 sm:pt-0 sm:justify-end">
-                      <div className="text-left sm:text-right">
-                        <span className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                          Valor Previsto
-                        </span>
-                        <span className="text-base font-black tabular-nums text-foreground sm:text-lg">
-                          {formatCurrency(valorExibir)}
-                        </span>
-                      </div>
-
-                      {can(user?.role, 'writeFinance') && (
-                        <Button
-                          size="sm"
-                          onClick={() => handleOpenBaixaOcorrencia(oc)}
-                          className="gap-1.5 text-xs font-bold shadow-xs"
-                          style={{ backgroundColor: corTema, color: '#fff' }}
-                        >
-                          <CheckCircle2 className="h-4 w-4" />
-                          <span>Registrar pagamento</span>
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    )
-  }
 
   // Renderiza a memória de cálculo da fórmula por seção
   const renderCardCalculo = (tipo: TipoCalculoDizimo) => {
@@ -1303,7 +1394,7 @@ export default function Dizimos() {
         {/* Card Dízimo */}
         <Card
           onClick={() => setActiveTab('dizimo')}
-          className={`cursor-pointer border-l-4 transition-all hover:shadow-md ${
+          className={`cursor-pointer border-l-4 transition-all hover:shadow-md flex flex-col justify-between ${
             activeTab === 'dizimo' ? 'ring-2 ring-[#DF5830]/40' : ''
           }`}
           style={{ borderLeftColor: '#DF5830' }}
@@ -1324,16 +1415,107 @@ export default function Dizimos() {
               {formatCurrency(resultadoDizimo)}
             </CardTitle>
           </CardHeader>
-          <CardContent className="pt-0 text-xs text-muted-foreground">
-            {ocorrenciasFiltradas.length}{' '}
-            {ocorrenciasFiltradas.length === 1 ? 'despesa paga na base' : 'despesas pagas na base'}
+          <CardContent className="pt-0 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              {ocorrenciasFiltradas.length}{' '}
+              {ocorrenciasFiltradas.length === 1
+                ? 'despesa paga na base'
+                : 'despesas pagas na base'}
+            </p>
+
+            {/* Linha de status de pagamento e Botão de Ação */}
+            <div className="border-t border-border pt-3">
+              {statusDizimo.pago ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge className="bg-success text-white hover:bg-success/90 font-bold gap-1 text-xs">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Pago{' '}
+                      {statusDizimo.dataPagamento
+                        ? `em ${formatDate(statusDizimo.dataPagamento)}`
+                        : '✓'}
+                    </Badge>
+                    <span className="text-xs font-bold text-foreground tabular-nums">
+                      {formatCurrency(statusDizimo.valorPago)}
+                    </span>
+                  </div>
+
+                  {statusDizimo.baseMudou && (
+                    <div className="rounded-lg bg-amber-500/10 border border-amber-300 p-2 text-[11px] text-amber-800 space-y-1">
+                      <p className="font-semibold flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3 shrink-0" />
+                        Base atualizada após o pagamento
+                      </p>
+                      <p className="text-[10px] text-amber-700">
+                        Novo total apurado: {formatCurrency(resultadoDizimo)} (dif:{' '}
+                        {statusDizimo.diferenca > 0 ? '+' : ''}
+                        {formatCurrency(statusDizimo.diferenca)})
+                      </p>
+                    </div>
+                  )}
+
+                  {can(user?.role, 'writeFinance') && statusDizimo.lancamento && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleOpenAjustePagamento(
+                            'dizimo',
+                            statusDizimo.lancamento!,
+                            resultadoDizimo,
+                          )
+                        }}
+                        className="h-7 text-xs flex-1 border-border font-semibold hover:bg-muted"
+                      >
+                        Ajustar pagamento
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleEstornarPagamento(statusDizimo.lancamento!.id, 'dizimo')
+                        }}
+                        disabled={estornandoPagamento}
+                        className="h-7 text-xs text-destructive hover:bg-destructive/10"
+                        title="Estornar lançamento de dízimo deste mês"
+                      >
+                        Estornar
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                can(user?.role, 'writeFinance') && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleOpenRegistrarPagamento('dizimo')
+                    }}
+                    disabled={resultadoDizimo <= 0}
+                    className="w-full gap-1.5 text-xs font-bold shadow-xs text-white"
+                    style={{ backgroundColor: '#DF5830' }}
+                    title={`Registrar pagamento do dízimo de ${monthLabel}`}
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>Registrar pagamento ({formatCurrency(resultadoDizimo)})</span>
+                  </Button>
+                )
+              )}
+            </div>
           </CardContent>
         </Card>
 
         {/* Card Oferta */}
         <Card
           onClick={() => setActiveTab('oferta')}
-          className={`cursor-pointer border-l-4 transition-all hover:shadow-md ${
+          className={`cursor-pointer border-l-4 transition-all hover:shadow-md flex flex-col justify-between ${
             activeTab === 'oferta' ? 'ring-2 ring-[#B7791F]/40' : ''
           }`}
           style={{ borderLeftColor: '#B7791F' }}
@@ -1354,16 +1536,107 @@ export default function Dizimos() {
               {formatCurrency(resultadoOferta)}
             </CardTitle>
           </CardHeader>
-          <CardContent className="pt-0 text-xs text-muted-foreground">
-            {ocorrenciasFiltradas.length}{' '}
-            {ocorrenciasFiltradas.length === 1 ? 'despesa paga na base' : 'despesas pagas na base'}
+          <CardContent className="pt-0 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              {ocorrenciasFiltradas.length}{' '}
+              {ocorrenciasFiltradas.length === 1
+                ? 'despesa paga na base'
+                : 'despesas pagas na base'}
+            </p>
+
+            {/* Linha de status de pagamento e Botão de Ação */}
+            <div className="border-t border-border pt-3">
+              {statusOferta.pago ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge className="bg-success text-white hover:bg-success/90 font-bold gap-1 text-xs">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Pago{' '}
+                      {statusOferta.dataPagamento
+                        ? `em ${formatDate(statusOferta.dataPagamento)}`
+                        : '✓'}
+                    </Badge>
+                    <span className="text-xs font-bold text-foreground tabular-nums">
+                      {formatCurrency(statusOferta.valorPago)}
+                    </span>
+                  </div>
+
+                  {statusOferta.baseMudou && (
+                    <div className="rounded-lg bg-amber-500/10 border border-amber-300 p-2 text-[11px] text-amber-800 space-y-1">
+                      <p className="font-semibold flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3 shrink-0" />
+                        Base atualizada após o pagamento
+                      </p>
+                      <p className="text-[10px] text-amber-700">
+                        Novo total apurado: {formatCurrency(resultadoOferta)} (dif:{' '}
+                        {statusOferta.diferenca > 0 ? '+' : ''}
+                        {formatCurrency(statusOferta.diferenca)})
+                      </p>
+                    </div>
+                  )}
+
+                  {can(user?.role, 'writeFinance') && statusOferta.lancamento && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleOpenAjustePagamento(
+                            'oferta',
+                            statusOferta.lancamento!,
+                            resultadoOferta,
+                          )
+                        }}
+                        className="h-7 text-xs flex-1 border-border font-semibold hover:bg-muted"
+                      >
+                        Ajustar pagamento
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleEstornarPagamento(statusOferta.lancamento!.id, 'oferta')
+                        }}
+                        disabled={estornandoPagamento}
+                        className="h-7 text-xs text-destructive hover:bg-destructive/10"
+                        title="Estornar lançamento de oferta deste mês"
+                      >
+                        Estornar
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                can(user?.role, 'writeFinance') && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleOpenRegistrarPagamento('oferta')
+                    }}
+                    disabled={resultadoOferta <= 0}
+                    className="w-full gap-1.5 text-xs font-bold shadow-xs text-white"
+                    style={{ backgroundColor: '#B7791F' }}
+                    title={`Registrar pagamento da oferta de ${monthLabel}`}
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>Registrar pagamento ({formatCurrency(resultadoOferta)})</span>
+                  </Button>
+                )
+              )}
+            </div>
           </CardContent>
         </Card>
 
         {/* Card Primícias */}
         <Card
           onClick={() => setActiveTab('primicias')}
-          className={`cursor-pointer border-l-4 transition-all hover:shadow-md ${
+          className={`cursor-pointer border-l-4 transition-all hover:shadow-md flex flex-col justify-between ${
             activeTab === 'primicias' ? 'ring-2 ring-[#1E6F5C]/40' : ''
           }`}
           style={{ borderLeftColor: '#1E6F5C' }}
@@ -1384,9 +1657,100 @@ export default function Dizimos() {
               {formatCurrency(resultadoPrimicias)}
             </CardTitle>
           </CardHeader>
-          <CardContent className="pt-0 text-xs text-muted-foreground">
-            {ocorrenciasFiltradas.length}{' '}
-            {ocorrenciasFiltradas.length === 1 ? 'despesa paga na base' : 'despesas pagas na base'}
+          <CardContent className="pt-0 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              {ocorrenciasFiltradas.length}{' '}
+              {ocorrenciasFiltradas.length === 1
+                ? 'despesa paga na base'
+                : 'despesas pagas na base'}
+            </p>
+
+            {/* Linha de status de pagamento e Botão de Ação */}
+            <div className="border-t border-border pt-3">
+              {statusPrimicias.pago ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge className="bg-success text-white hover:bg-success/90 font-bold gap-1 text-xs">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Pago{' '}
+                      {statusPrimicias.dataPagamento
+                        ? `em ${formatDate(statusPrimicias.dataPagamento)}`
+                        : '✓'}
+                    </Badge>
+                    <span className="text-xs font-bold text-foreground tabular-nums">
+                      {formatCurrency(statusPrimicias.valorPago)}
+                    </span>
+                  </div>
+
+                  {statusPrimicias.baseMudou && (
+                    <div className="rounded-lg bg-amber-500/10 border border-amber-300 p-2 text-[11px] text-amber-800 space-y-1">
+                      <p className="font-semibold flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3 shrink-0" />
+                        Base atualizada após o pagamento
+                      </p>
+                      <p className="text-[10px] text-amber-700">
+                        Novo total apurado: {formatCurrency(resultadoPrimicias)} (dif:{' '}
+                        {statusPrimicias.diferenca > 0 ? '+' : ''}
+                        {formatCurrency(statusPrimicias.diferenca)})
+                      </p>
+                    </div>
+                  )}
+
+                  {can(user?.role, 'writeFinance') && statusPrimicias.lancamento && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleOpenAjustePagamento(
+                            'primicias',
+                            statusPrimicias.lancamento!,
+                            resultadoPrimicias,
+                          )
+                        }}
+                        className="h-7 text-xs flex-1 border-border font-semibold hover:bg-muted"
+                      >
+                        Ajustar pagamento
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleEstornarPagamento(statusPrimicias.lancamento!.id, 'primicias')
+                        }}
+                        disabled={estornandoPagamento}
+                        className="h-7 text-xs text-destructive hover:bg-destructive/10"
+                        title="Estornar lançamento de primícias deste mês"
+                      >
+                        Estornar
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                can(user?.role, 'writeFinance') && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleOpenRegistrarPagamento('primicias')
+                    }}
+                    disabled={resultadoPrimicias <= 0}
+                    className="w-full gap-1.5 text-xs font-bold shadow-xs text-white"
+                    style={{ backgroundColor: '#1E6F5C' }}
+                    title={`Registrar pagamento de primícias de ${monthLabel}`}
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>Registrar pagamento ({formatCurrency(resultadoPrimicias)})</span>
+                  </Button>
+                )
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -1424,14 +1788,12 @@ export default function Dizimos() {
         {/* TAB 1: DÍZIMO */}
         <TabsContent value="dizimo" className="space-y-6">
           {renderCardCalculo('dizimo')}
-          {renderSecaoOcorrenciasAbertas('dizimo')}
           {renderTabelaAuditoria('dizimo')}
         </TabsContent>
 
         {/* TAB 2: OFERTA */}
         <TabsContent value="oferta" className="space-y-6">
           {renderCardCalculo('oferta')}
-          {renderSecaoOcorrenciasAbertas('oferta')}
           {renderTabelaAuditoria('oferta')}
           <OfertasVoluntariasModule
             selectedMonth={selectedMonth}
@@ -1447,7 +1809,6 @@ export default function Dizimos() {
         {/* TAB 3: PRIMÍCIAS */}
         <TabsContent value="primicias" className="space-y-6">
           {renderCardCalculo('primicias')}
-          {renderSecaoOcorrenciasAbertas('primicias')}
           {renderTabelaAuditoria('primicias')}
         </TabsContent>
       </Tabs>
@@ -1697,6 +2058,294 @@ export default function Dizimos() {
           })
         }}
       />
+
+      {/* DIALOG: REGISTRAR PAGAMENTO MINISTERIAL DO MÊS */}
+      <Dialog open={pagamentoModalOpen} onOpenChange={setPagamentoModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2
+                className="h-5 w-5"
+                style={{
+                  color:
+                    tipoParaPagar === 'dizimo'
+                      ? '#DF5830'
+                      : tipoParaPagar === 'oferta'
+                        ? '#B7791F'
+                        : '#1E6F5C',
+                }}
+              />
+              Registrar pagamento de{' '}
+              {tipoParaPagar === 'dizimo'
+                ? 'Dízimo'
+                : tipoParaPagar === 'oferta'
+                  ? 'Oferta'
+                  : 'Primícias'}
+            </DialogTitle>
+            <DialogDescription>
+              Confirmação de pagamento único referente a <strong>{monthLabel}</strong>. Será gerado
+              um lançamento financeiro em <strong>/lancamentos</strong> debitado da conta
+              selecionada.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleConfirmarPagamento} className="space-y-4">
+            <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Descrição do lançamento:</span>
+                <strong className="text-foreground">
+                  {formatDescricaoMinisterial(tipoParaPagar, monthLabel)}
+                </strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Competência:</span>
+                <span className="font-mono font-semibold text-foreground">{selectedMonth}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Base apurada:</span>
+                <span className="font-semibold text-foreground">
+                  {formatCurrency(baseCompartilhada)}
+                </span>
+              </div>
+            </div>
+
+            {/* Valor preenchido */}
+            <div className="space-y-1.5">
+              <Label htmlFor="valor-pagamento">Valor a Pagar (R$)</Label>
+              <Input
+                id="valor-pagamento"
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={pagamentoValorInput}
+                onChange={(e) => setPagamentoValorInput(Number(e.target.value) || 0)}
+                className="text-lg font-black"
+                required
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Valor pré-calculado sobre a base de {formatCurrency(baseCompartilhada)}.
+              </p>
+            </div>
+
+            {/* Conta de Débito */}
+            <div className="space-y-1.5">
+              <Label htmlFor="conta-pagamento">Conta de Débito (Saída do recurso)</Label>
+              <Select value={pagamentoContaId} onValueChange={setPagamentoContaId}>
+                <SelectTrigger id="conta-pagamento">
+                  <SelectValue placeholder="Selecione a conta bancária ou de caixa" />
+                </SelectTrigger>
+                <SelectContent>
+                  {contas
+                    .filter((c) => c.ativa)
+                    .map((cta) => (
+                      <SelectItem key={cta.id} value={cta.id}>
+                        {cta.nome} {cta.banco ? `(${cta.banco})` : ''} — Saldo:{' '}
+                        {formatCurrency(cta.saldo_atual || 0)}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Data do Pagamento */}
+            <div className="space-y-1.5">
+              <Label htmlFor="data-pagamento">Data do Pagamento</Label>
+              <Input
+                id="data-pagamento"
+                type="date"
+                value={pagamentoData}
+                onChange={(e) => setPagamentoData(e.target.value)}
+                required
+              />
+            </div>
+
+            {/* Observações opcionais */}
+            <div className="space-y-1.5">
+              <Label htmlFor="obs-pagamento">Observações (Opcional)</Label>
+              <Textarea
+                id="obs-pagamento"
+                rows={2}
+                placeholder="Ex.: Pago via PIX pelo banco Santander..."
+                value={pagamentoObservacoes}
+                onChange={(e) => setPagamentoObservacoes(e.target.value)}
+              />
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPagamentoModalOpen(false)}
+                disabled={savingPagamento}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={savingPagamento}
+                style={{
+                  backgroundColor:
+                    tipoParaPagar === 'dizimo'
+                      ? '#DF5830'
+                      : tipoParaPagar === 'oferta'
+                        ? '#B7791F'
+                        : '#1E6F5C',
+                  color: '#fff',
+                }}
+              >
+                {savingPagamento ? (
+                  <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                )}
+                Confirmar pagamento
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG: AJUSTAR PAGAMENTO MINISTERIAL DO MÊS */}
+      <Dialog open={ajusteModalOpen} onOpenChange={setAjusteModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-primary" />
+              Ajustar pagamento de{' '}
+              {ajusteTipo === 'dizimo'
+                ? 'Dízimo'
+                : ajusteTipo === 'oferta'
+                  ? 'Oferta'
+                  : 'Primícias'}
+            </DialogTitle>
+            <DialogDescription>
+              Edite os dados do lançamento de {monthLabel}. Você também pode estornar o lançamento
+              se desejar cancelá-lo.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleConfirmarAjuste} className="space-y-4">
+            <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Lançamento:</span>
+                <strong className="text-foreground">{lancamentoParaAjustar?.descricao}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Valor pago atualmente:</span>
+                <span className="font-semibold text-foreground">
+                  {formatCurrency(lancamentoParaAjustar?.valor || 0)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Total apurado recalculado:</span>
+                <span className="font-bold text-primary">
+                  {formatCurrency(
+                    ajusteTipo === 'dizimo'
+                      ? resultadoDizimo
+                      : ajusteTipo === 'oferta'
+                        ? resultadoOferta
+                        : resultadoPrimicias,
+                  )}
+                </span>
+              </div>
+            </div>
+
+            {/* Valor ajustado */}
+            <div className="space-y-1.5">
+              <Label htmlFor="valor-ajuste">Novo Valor (R$)</Label>
+              <Input
+                id="valor-ajuste"
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={ajusteValorInput}
+                onChange={(e) => setAjusteValorInput(Number(e.target.value) || 0)}
+                className="text-lg font-black"
+                required
+              />
+            </div>
+
+            {/* Conta */}
+            <div className="space-y-1.5">
+              <Label htmlFor="conta-ajuste">Conta</Label>
+              <Select value={ajusteContaId} onValueChange={setAjusteContaId}>
+                <SelectTrigger id="conta-ajuste">
+                  <SelectValue placeholder="Selecione a conta" />
+                </SelectTrigger>
+                <SelectContent>
+                  {contas
+                    .filter((c) => c.ativa)
+                    .map((cta) => (
+                      <SelectItem key={cta.id} value={cta.id}>
+                        {cta.nome} {cta.banco ? `(${cta.banco})` : ''}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Data */}
+            <div className="space-y-1.5">
+              <Label htmlFor="data-ajuste">Data</Label>
+              <Input
+                id="data-ajuste"
+                type="date"
+                value={ajusteData}
+                onChange={(e) => setAjusteData(e.target.value)}
+                required
+              />
+            </div>
+
+            {/* Observações */}
+            <div className="space-y-1.5">
+              <Label htmlFor="obs-ajuste">Observações</Label>
+              <Textarea
+                id="obs-ajuste"
+                rows={2}
+                value={ajusteObservacoes}
+                onChange={(e) => setAjusteObservacoes(e.target.value)}
+              />
+            </div>
+
+            <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-between gap-2">
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => {
+                  if (lancamentoParaAjustar) {
+                    handleEstornarPagamento(lancamentoParaAjustar.id, ajusteTipo)
+                  }
+                }}
+                disabled={savingAjuste || estornandoPagamento}
+              >
+                {estornandoPagamento ? (
+                  <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                ) : null}
+                Estornar pagamento
+              </Button>
+
+              <div className="flex items-center gap-2 justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setAjusteModalOpen(false)}
+                  disabled={savingAjuste}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={savingAjuste}>
+                  {savingAjuste ? (
+                    <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                  )}
+                  Salvar alteração
+                </Button>
+              </div>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -7,6 +7,7 @@ import {
   calcularVencimentoFatura,
 } from '@/lib/cartao-fatura'
 import type {
+  Categoria,
   Conta,
   ContaTipoPagamento,
   ContextoTipo,
@@ -2142,5 +2143,106 @@ export const despesasService = {
       dinheiro: sorter(ocorrenciasDinheiro),
       semConta: sorter(ocorrenciasSemConta),
     }
+  },
+
+  /**
+   * Registra pagamento único ministerial referente a um tipo e mês:
+   * Cria um lançamento de despesa em `lancamentos` (status: 'pago') com saída da conta selecionada.
+   * Se houver categoria ministerial informada ou cadastrada, vincula-a.
+   */
+  registrarPagamentoMinisterialMes: async (params: {
+    tipo: 'dizimo' | 'oferta' | 'primicias'
+    competencia: string // 'YYYY-MM'
+    monthLabel: string
+    valor: number
+    dataPagamento: string // 'YYYY-MM-DD'
+    contaId: string
+    categoriaId?: string
+    observacoes?: string
+    empresaId?: string
+    pessoaId?: string
+  }) => {
+    // 1. Resolve ou busca a categoria ministerial adequada
+    let categoriaId = params.categoriaId
+    if (!categoriaId) {
+      try {
+        const cats = await pb.collection<Categoria>('categorias').getFullList({
+          filter: `tipo = 'despesa' && (nome ~ 'Dízimo' || nome ~ 'Dizimo' || nome ~ 'Oferta' || nome ~ 'Ministerial')`,
+          sort: 'nome',
+        })
+        if (cats.length > 0) {
+          categoriaId = cats[0].id
+        }
+      } catch {
+        /* fallback */
+      }
+    }
+
+    if (!categoriaId) {
+      // Fallback para qualquer categoria de despesa existente
+      try {
+        const anyCat = await pb
+          .collection<Categoria>('categorias')
+          .getFirstListItem(`tipo = 'despesa'`, {
+            sort: 'nome',
+          })
+        categoriaId = anyCat.id
+      } catch {
+        /* sem categoria */
+      }
+    }
+
+    const rotuloTipo =
+      params.tipo === 'dizimo' ? 'Dízimo' : params.tipo === 'oferta' ? 'Oferta' : 'Primícias'
+    const descricao = `${rotuloTipo} — ${params.monthLabel}`
+
+    const obsTexto =
+      params.observacoes?.trim() ||
+      `Pagamento ministerial de ${rotuloTipo.toLowerCase()} referente à competência ${params.competencia}`
+
+    // 2. Cria o lançamento financeiro único
+    const lancamento = await pb.collection<Lancamento>('lancamentos').create({
+      descricao,
+      valor: params.valor,
+      tipo: 'despesa',
+      data: `${params.dataPagamento} 12:00:00`,
+      status: 'pago',
+      conta: params.contaId,
+      categoria: categoriaId || null,
+      competencia: params.competencia,
+      observacoes: obsTexto,
+      ...(params.empresaId ? { empresa: params.empresaId } : {}),
+      ...(params.pessoaId ? { pessoa: params.pessoaId } : {}),
+    })
+
+    return lancamento
+  },
+
+  /**
+   * Atualiza o valor ou dados do pagamento ministerial de um determinado mês:
+   */
+  ajustarPagamentoMinisterial: async (
+    lancamentoId: string,
+    params: {
+      valor?: number
+      contaId?: string
+      dataPagamento?: string
+      observacoes?: string
+    },
+  ) => {
+    const updates: Record<string, any> = {}
+    if (params.valor !== undefined) updates.valor = params.valor
+    if (params.contaId) updates.conta = params.contaId
+    if (params.dataPagamento) updates.data = `${params.dataPagamento} 12:00:00`
+    if (params.observacoes !== undefined) updates.observacoes = params.observacoes
+
+    return pb.collection<Lancamento>('lancamentos').update(lancamentoId, updates)
+  },
+
+  /**
+   * Estorna o pagamento ministerial removendo o lançamento de despesa.
+   */
+  estornarPagamentoMinisterial: async (lancamentoId: string) => {
+    return pb.collection('lancamentos').delete(lancamentoId)
   },
 }

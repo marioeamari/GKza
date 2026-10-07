@@ -6,6 +6,11 @@ import {
   filtrarOcorrenciasDizimoMes,
   calcularBaseCompartilhadaDizimo,
   filtrarOcorrenciasAbertoDizimoMes,
+  calcularValorPorTipo,
+  getDiasNoMes,
+  encontrarLancamentoMinisterial,
+  getStatusPagamentoMinisterial,
+  formatDescricaoMinisterial,
 } from './dizimoCalculo'
 import type { DespesaOcorrencia } from '@/types/domain'
 
@@ -325,6 +330,127 @@ describe('Motor de Cálculo de Dízimo e Regras de Base Compartilhada', () => {
         'oc_dizimo_prevista',
         'oc_oferta_prevista',
       ])
+    })
+  })
+
+  // (f) Cálculo do valor do botão (10% / 5% / 1/30 sobre a base) e estado pago/não pago
+  describe('(f) Cálculo do valor do botão (10%/5%/1/30 sobre a base) e estado pago por mês/tipo', () => {
+    const baseExemplo = 6253.97
+
+    it('calcula 10% da base para dízimo usando calcularValorPorTipo', () => {
+      const valorDizimo = calcularValorPorTipo('dizimo', baseExemplo, { percentualDizimo: 10 })
+      expect(Number(valorDizimo.toFixed(2))).toBe(625.4)
+    })
+
+    it('calcula 5% da base para oferta usando calcularValorPorTipo', () => {
+      const valorOferta = calcularValorPorTipo('oferta', baseExemplo, { percentualOferta: 5 })
+      expect(Number(valorOferta.toFixed(2))).toBe(312.7)
+    })
+
+    it('calcula 1/30 avos da base para primícias em mês de 30 dias usando calcularValorPorTipo', () => {
+      expect(getDiasNoMes('2026-09')).toBe(30)
+      const valorPrimicias = calcularValorPorTipo('primicias', baseExemplo, { mes: '2026-09' })
+      expect(Number(valorPrimicias.toFixed(2))).toBe(208.47)
+    })
+
+    it('calcula primícias com base nos dias reais do mês (ex: 31 dias em outubro) usando calcularValorPorTipo', () => {
+      expect(getDiasNoMes('2026-10')).toBe(31)
+      const valorPrimiciasOutubro = calcularValorPorTipo('primicias', baseExemplo, {
+        mes: '2026-10',
+      })
+      expect(Number(valorPrimiciasOutubro.toFixed(2))).toBe(201.74)
+    })
+
+    it('formata descrição amigável do lançamento ministerial', () => {
+      expect(formatDescricaoMinisterial('dizimo', 'Setembro de 2026')).toBe(
+        'Dízimo — Setembro de 2026',
+      )
+      expect(formatDescricaoMinisterial('oferta', 'Setembro de 2026')).toBe(
+        'Oferta — Setembro de 2026',
+      )
+      expect(formatDescricaoMinisterial('primicias', 'Setembro de 2026')).toBe(
+        'Primícias — Setembro de 2026',
+      )
+    })
+
+    it('identifica corretamente estado pago usando encontrarLancamentoMinisterial e getStatusPagamentoMinisterial', () => {
+      const lancamentosMock = [
+        {
+          id: 'lanc_1',
+          descricao: 'Dízimo — Setembro de 2026',
+          valor: 625.4,
+          data: '2026-09-30 12:00:00',
+          status: 'pago',
+          competencia: '2026-09',
+        },
+        {
+          id: 'lanc_2',
+          descricao: 'Oferta — Setembro de 2026',
+          valor: 312.7,
+          data: '2026-09-30 12:00:00',
+          status: 'pago',
+          competencia: '2026-09',
+        },
+      ]
+
+      // Dízimo de 2026-09 está pago
+      const statusDizimo = getStatusPagamentoMinisterial(
+        lancamentosMock,
+        'dizimo',
+        '2026-09',
+        625.4,
+      )
+      expect(statusDizimo.pago).toBe(true)
+      expect(statusDizimo.valorPago).toBe(625.4)
+      expect(statusDizimo.dataPagamento).toBe('2026-09-30')
+      expect(statusDizimo.baseMudou).toBe(false)
+      expect(statusDizimo.lancamento?.id).toBe('lanc_1')
+
+      // Primícias de 2026-09 NÃO está pago
+      const statusPrimicias = getStatusPagamentoMinisterial(
+        lancamentosMock,
+        'primicias',
+        '2026-09',
+        208.47,
+      )
+      expect(statusPrimicias.pago).toBe(false)
+      expect(statusPrimicias.valorPago).toBe(0)
+      expect(statusPrimicias.lancamento).toBeNull()
+
+      // Dízimo de 2026-10 NÃO está pago
+      const statusDizimoOutubro = getStatusPagamentoMinisterial(
+        lancamentosMock,
+        'dizimo',
+        '2026-10',
+        100,
+      )
+      expect(statusDizimoOutubro.pago).toBe(false)
+    })
+
+    it('detecta quando nova despesa entra na base após o pagamento (baseMudou = true)', () => {
+      const lancamentosMock = [
+        {
+          id: 'lanc_1',
+          descricao: 'Dízimo — Setembro de 2026',
+          valor: 625.4,
+          data: '2026-09-30 12:00:00',
+          status: 'pago',
+          competencia: '2026-09',
+        },
+      ]
+
+      // Base recalculada aumentou para 7000 (novo total calculado = 700)
+      const statusComBaseMudada = getStatusPagamentoMinisterial(
+        lancamentosMock,
+        'dizimo',
+        '2026-09',
+        700,
+      )
+
+      expect(statusComBaseMudada.pago).toBe(true)
+      expect(statusComBaseMudada.valorPago).toBe(625.4)
+      expect(statusComBaseMudada.baseMudou).toBe(true)
+      expect(Number(statusComBaseMudada.diferenca.toFixed(2))).toBe(74.6)
     })
   })
 })
