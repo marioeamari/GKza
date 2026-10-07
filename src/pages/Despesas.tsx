@@ -93,6 +93,7 @@ import {
   type EstadoCicloFatura,
 } from '@/lib/cartao-fatura'
 import { can } from '@/lib/permissions'
+import { prepararDuplicacaoCompromisso } from '@/lib/despesas-pipeline'
 import { cadastrosService } from '@/services/cadastros'
 import { useRealtime } from '@/hooks/use-realtime'
 import { despesasService } from '@/services/despesas'
@@ -1283,10 +1284,11 @@ export default function Despesas() {
 
   const handleOpenDuplicarCompromisso = (comp: DespesaCompromisso) => {
     setIsDuplicandoCompromisso(true)
-    setCompromissoEditando(comp)
-    setDefaultSecaoCompromisso(comp.secao || 'contas_mensais_pix_boleto')
-    setDefaultContaCompromissoId(comp.conta_padrao)
-    setDefaultMetodoCompromissoId(comp.metodo_pagamento)
+    const compSanitizado = prepararDuplicacaoCompromisso(comp) as DespesaCompromisso
+    setCompromissoEditando(compSanitizado)
+    setDefaultSecaoCompromisso(compSanitizado.secao || 'contas_mensais_pix_boleto')
+    setDefaultContaCompromissoId(compSanitizado.conta_padrao)
+    setDefaultMetodoCompromissoId(compSanitizado.metodo_pagamento)
     setCompromissoModal(true)
   }
 

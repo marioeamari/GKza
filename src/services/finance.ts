@@ -1,6 +1,7 @@
 import { ClientResponseError, type RecordListOptions, type RecordOptions } from 'pocketbase'
 
 import pb from '@/lib/pocketbase/client'
+import { alocarPagamentoFaturaFifo } from '@/lib/despesas-pipeline'
 import type { Categoria, Conta, Lancamento } from '@/types/domain'
 
 const listAll = <T>(collection: string, options?: RecordListOptions) =>
@@ -62,29 +63,16 @@ export const financeService = {
         return valA - valB
       })
 
-      const totalItens = itensOrdenados.reduce((s, it) => s + (Number(it.valor) || 0), 0)
-      const isParcial = params.valorPago < totalItens - 0.009 // tolerância de centavos
-
-      if (isParcial) {
-        let acumulado = 0
-        for (const item of itensOrdenados) {
-          const itemVal = Number(item.valor) || 0
-          if (acumulado + itemVal <= params.valorPago + 0.009) {
-            itensParaQuitarIds.push(item.id)
-            acumulado += itemVal
-          } else {
-            // Se o primeiro item já é maior que o valor pago, ainda assim quita pelo menos 1
-            // caso o usuário tenha pago algum valor e nenhuma compra caiba por inteiro?
-            // A especificação diz: "quita as ocorrências do ciclo em ordem cronológica (mais antigas primeiro)
-            // até esgotar o valor pago; as restantes continuam em aberto na fatura."
-            // Se acumulado + itemVal > valorPago, interrompe a baixa.
-            break
-          }
-        }
-      } else {
-        // Quitação total ou superior: todos os itens do ciclo são quitados
-        itensParaQuitarIds = itensOrdenados.map((it) => it.id)
-      }
+      const fifoRes = alocarPagamentoFaturaFifo(
+        itensOrdenados.map((it) => ({
+          id: it.id,
+          valor: Number(it.valor) || 0,
+          data: it.data,
+          created: it.created,
+        })),
+        params.valorPago,
+      )
+      itensParaQuitarIds = fifoRes.itensQuitadosIds
     } else if (params.itensIds && params.itensIds.length > 0) {
       itensParaQuitarIds = [...params.itensIds]
     }

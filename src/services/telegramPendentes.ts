@@ -1,6 +1,6 @@
 import type { RecordListOptions } from 'pocketbase'
 import pb from '@/lib/pocketbase/client'
-import { calcularCompetenciaEVencimento } from '@/lib/cartao-fatura'
+import { buildTriagemCartaoPayload } from '@/lib/despesas-pipeline'
 import { despesasService } from '@/services/despesas'
 import type {
   Conta,
@@ -218,36 +218,20 @@ export const telegramPendentesService = {
     )
 
     if (checkCartao.ehCartao && checkCartao.conta) {
-      const rawVenc = Number((checkCartao.conta as any)?.dia_vencimento)
-      const diaVencimentoNum = !isNaN(rawVenc) && rawVenc > 0 ? rawVenc : undefined
-      const compVenc = calcularCompetenciaEVencimento({
+      const payloadCartao = buildTriagemCartaoPayload({
+        descricao: input.descricao,
+        valor: Number(input.valor_estimado),
         dataCompra: input.data_inicio,
+        contaId: input.conta_padrao || '',
         conta: checkCartao.conta,
-        metodoEhCredito: true,
-        diaVencimento: diaVencimentoNum,
+        categoriaId: input.categoria || '',
+        titularTipo,
+        titularEmpresaId: input.titular_empresa || input.empresa,
+        titularPessoaId: input.titular_pessoa || input.pessoa,
+        observacoes: input.observacoes,
       })
 
-      const lancamento = await pb.collection<Lancamento>('lancamentos').create({
-        descricao: input.descricao.trim(),
-        valor: Number(input.valor_estimado),
-        tipo: 'despesa',
-        data: `${input.data_inicio} 12:00:00`,
-        competencia: compVenc.competencia,
-        status: 'pago',
-        conta: input.conta_padrao || '',
-        categoria: input.categoria || '',
-        empresa:
-          titularTipo === 'cnpj' && (input.titular_empresa || input.empresa)
-            ? input.titular_empresa || input.empresa
-            : '',
-        pessoa:
-          titularTipo === 'cpf' && (input.titular_pessoa || input.pessoa)
-            ? input.titular_pessoa || input.pessoa
-            : input.pessoa || '',
-        observacoes:
-          input.observacoes ||
-          `Compra cartão Telegram (competência ${compVenc.competencia}, venc. fatura ${compVenc.dataVencimento})`,
-      })
+      const lancamento = await pb.collection<Lancamento>('lancamentos').create(payloadCartao)
 
       await pb.collection('telegram_registros_pendentes').update(pendenteId, {
         status: 'aprovado',
@@ -256,7 +240,7 @@ export const telegramPendentesService = {
         categoria: input.categoria || '',
         descricao: input.descricao,
         valor: Number(input.valor_estimado),
-        data: `${input.data_inicio} 12:00:00`,
+        data: payloadCartao.data,
         empresa: input.empresa || input.titular_empresa || '',
         pessoa: input.pessoa || input.titular_pessoa || '',
       })
@@ -358,32 +342,24 @@ export const telegramPendentesService = {
     )
 
     if (checkCartao.ehCartao && checkCartao.conta) {
-      const rawVenc = Number((checkCartao.conta as any)?.dia_vencimento)
-      const diaVencimentoNum = !isNaN(rawVenc) && rawVenc > 0 ? rawVenc : undefined
       const dataRef = lancamentoInput.data || despesaInput.data_inicio
-      const compVenc = calcularCompetenciaEVencimento({
+      const titularTipoAmbos = despesaInput.titular_tipo || (despesaInput.empresa ? 'cnpj' : 'cpf')
+      const payloadCartao = buildTriagemCartaoPayload({
+        descricao: lancamentoInput.descricao || despesaInput.descricao,
+        valor: Number(lancamentoInput.valor || despesaInput.valor_estimado),
         dataCompra: dataRef,
+        contaId: contaCheckId,
         conta: checkCartao.conta,
-        metodoEhCredito: true,
-        diaVencimento: diaVencimentoNum,
+        categoriaId: lancamentoInput.categoria || despesaInput.categoria || '',
+        titularTipo: titularTipoAmbos,
+        titularEmpresaId:
+          lancamentoInput.empresa || despesaInput.empresa || despesaInput.titular_empresa,
+        titularPessoaId:
+          lancamentoInput.pessoa || despesaInput.pessoa || despesaInput.titular_pessoa,
+        observacoes: lancamentoInput.observacoes || despesaInput.observacoes,
       })
 
-      const lancamento = await pb.collection<Lancamento>('lancamentos').create({
-        descricao: lancamentoInput.descricao.trim(),
-        valor: lancamentoInput.valor,
-        tipo: lancamentoInput.tipo,
-        data: `${dataRef.slice(0, 10)} 12:00:00`,
-        competencia: compVenc.competencia,
-        status: 'pago',
-        conta: contaCheckId,
-        categoria: lancamentoInput.categoria || despesaInput.categoria || '',
-        empresa:
-          lancamentoInput.empresa || despesaInput.empresa || despesaInput.titular_empresa || '',
-        pessoa: lancamentoInput.pessoa || despesaInput.pessoa || despesaInput.titular_pessoa || '',
-        observacoes:
-          lancamentoInput.observacoes ||
-          `Compra cartão Telegram (competência ${compVenc.competencia}, venc. fatura ${compVenc.dataVencimento})`,
-      })
+      const lancamento = await pb.collection<Lancamento>('lancamentos').create(payloadCartao)
 
       await pb.collection('telegram_registros_pendentes').update(pendenteId, {
         status: 'aprovado',
@@ -392,7 +368,7 @@ export const telegramPendentesService = {
         categoria: lancamentoInput.categoria || despesaInput.categoria || '',
         descricao: lancamentoInput.descricao,
         valor: lancamentoInput.valor,
-        data: `${dataRef.slice(0, 10)} 12:00:00`,
+        data: payloadCartao.data,
         empresa: lancamentoInput.empresa || despesaInput.empresa || '',
         pessoa: lancamentoInput.pessoa || despesaInput.pessoa || '',
       })

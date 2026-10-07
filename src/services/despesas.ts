@@ -6,6 +6,7 @@ import {
   calcularCompetenciaEVencimento,
   calcularVencimentoFatura,
 } from '@/lib/cartao-fatura'
+import { verificarPodeGerarOcorrencia } from '@/lib/despesas-pipeline'
 import type {
   Categoria,
   Conta,
@@ -1457,7 +1458,17 @@ export const despesasService = {
         }
       }
 
-      // Se já existe ocorrência paga ou qualquer ocorrência para este compromisso avulso, não recria
+      // Barreira pura de geração: não recria se já paga, se já existe para avulso ou retroativa
+      const podeGerarAvulso = verificarPodeGerarOcorrencia({
+        competenciaAlvo: compStr,
+        isCompromissoAvulso: true,
+        hasAnyOcorrencia: await hasExistingOcorrencia({ onlyCompromisso: true }),
+        ocorrenciasExistentes: cachedOcorrencias,
+      })
+      if (!podeGerarAvulso) {
+        return
+      }
+
       const jaPago = await hasOcorrenciaPagaNoMes(compStr)
       if (jaPago) {
         return
@@ -1515,6 +1526,16 @@ export const despesasService = {
           numeroParcela: p,
           totalParcelas: total,
         })
+
+        // Barreira pura de geração: verifica se pode gerar parcela
+        const podeGerarParcela = verificarPodeGerarOcorrencia({
+          competenciaAlvo: res.competencia,
+          numeroParcela: p,
+          ocorrenciasExistentes: cachedOcorrencias,
+        })
+        if (!podeGerarParcela) {
+          continue
+        }
 
         // Se a competência ou parcela já tiver ocorrência paga, pula
         const jaPago = await hasOcorrenciaPagaNoMes(res.competencia, p)
@@ -1617,6 +1638,15 @@ export const despesasService = {
       }
 
       const compStr = res.competencia
+      const podeGerarAnual = verificarPodeGerarOcorrencia({
+        competenciaAlvo: compStr,
+        competenciaCorrente: compCreatedMonth,
+        ocorrenciasExistentes: cachedOcorrencias,
+      })
+      if (!podeGerarAnual) {
+        return
+      }
+
       const jaPago = await hasOcorrenciaPagaNoMes(compStr)
       if (jaPago) {
         return
@@ -1714,6 +1744,15 @@ export const despesasService = {
 
       for (const compStr of meses) {
         if (compStr < startCompStr) {
+          continue
+        }
+
+        const podeGerar = verificarPodeGerarOcorrencia({
+          competenciaAlvo: compStr,
+          competenciaCorrente: startCompStr,
+          ocorrenciasExistentes: cachedOcorrencias,
+        })
+        if (!podeGerar) {
           continue
         }
 
@@ -1849,6 +1888,15 @@ export const despesasService = {
     for (const compStr of meses) {
       // NUNCA gerar ocorrência anterior ao mês/competência de data_inicio do compromisso
       if (compStr < startCompStr) {
+        continue
+      }
+
+      const podeGerar = verificarPodeGerarOcorrencia({
+        competenciaAlvo: compStr,
+        competenciaCorrente: startCompStr,
+        ocorrenciasExistentes: cachedOcorrencias,
+      })
+      if (!podeGerar) {
         continue
       }
 
