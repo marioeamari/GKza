@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  AlertTriangle,
   CalendarDays,
+  CheckCircle2,
   FileText,
   Filter,
   Link2,
@@ -8,6 +10,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Send,
   Trash2,
   X,
 } from 'lucide-react'
@@ -96,6 +99,7 @@ export default function Lancamentos() {
   const [mobileFilters, setMobileFilters] = useState(false)
   const [faturaToPay, setFaturaToPay] = useState<FaturaCartaoGroup | null>(null)
   const [payFaturaOpen, setPayFaturaOpen] = useState(false)
+  const [apenasTelegramPendentes, setApenasTelegramPendentes] = useState(false)
   const loaderRef = useRef<HTMLDivElement>(null)
 
   const filter = useMemo(() => {
@@ -113,6 +117,12 @@ export default function Lancamentos() {
     if (conta) filters.push(`conta = '${conta}'`)
     if (categoria) filters.push(`categoria = '${categoria}'`)
 
+    if (apenasTelegramPendentes) {
+      filters.push(
+        "status = 'pendente' && (observacoes ~ 'Telegram' || observacoes ~ 'Extraído do comprovante')",
+      )
+    }
+
     if (activeContext.contaIds.length > 0) {
       const contaClauses = activeContext.contaIds.map((id) => `conta = '${id}'`)
       // Rede de segurança: contas sem nenhum grupo vinculado não podem ficar invisíveis
@@ -126,7 +136,7 @@ export default function Lancamentos() {
     }
 
     return filters.join(' && ')
-  }, [params, activeContext])
+  }, [params, activeContext, apenasTelegramPendentes])
   const loadLancamentos = useCallback(
     async (targetPage = 1, append = false) => {
       if (append) setLoadingMore(true)
@@ -265,6 +275,15 @@ export default function Lancamentos() {
 
   // Mapa de contas por ID para consulta rápida
   const contasMap = useMemo(() => new Map(contas.map((c) => [c.id, c])), [contas])
+
+  // Lançamentos pendentes do Telegram dentro da lista carregada
+  const telegramPendentesList = useMemo(() => {
+    return records.filter((r) => {
+      const obs = (r.observacoes || '').toLowerCase()
+      const ehTelegram = obs.includes('telegram') || obs.includes('extraído do comprovante')
+      return r.status === 'pendente' && ehTelegram
+    })
+  }, [records])
 
   /**
    * Separação de Lançamentos:
@@ -429,18 +448,49 @@ export default function Lancamentos() {
         <div className={`${mobileFilters ? 'mt-3 block' : 'hidden'} lg:mt-3 lg:block`}>
           {filterControls}
         </div>
-        {[...params.keys()].some((key) => key !== 'editar') && (
-          <button
-            onClick={() => {
-              const next = new URLSearchParams()
-              setParams(next)
-            }}
-            className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-primary"
-          >
-            <X className="h-3.5 w-3.5" />
-            Limpar filtros
-          </button>
-        )}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={apenasTelegramPendentes ? 'default' : 'outline'}
+              className={`h-8 text-xs font-bold gap-1.5 ${
+                apenasTelegramPendentes
+                  ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                  : 'border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30'
+              }`}
+              onClick={() => setApenasTelegramPendentes((prev) => !prev)}
+            >
+              <Send className="h-3.5 w-3.5" />
+              Pendentes do Telegram
+              {telegramPendentesList.length > 0 && !apenasTelegramPendentes && (
+                <span className="ml-1 rounded-full bg-amber-500/20 px-1.5 py-0.2 text-[10px] font-extrabold text-amber-800 dark:text-amber-200">
+                  {telegramPendentesList.length}
+                </span>
+              )}
+            </Button>
+            {apenasTelegramPendentes && (
+              <span className="text-[11px] text-muted-foreground">
+                Exibindo apenas lançamentos pendentes originados do comprovante Telegram para
+                revisão e exclusão manual.
+              </span>
+            )}
+          </div>
+
+          {[...params.keys()].some((key) => key !== 'editar') && (
+            <button
+              onClick={() => {
+                const next = new URLSearchParams()
+                setParams(next)
+                setApenasTelegramPendentes(false)
+              }}
+              className="inline-flex items-center gap-1 text-xs font-bold text-primary"
+            >
+              <X className="h-3.5 w-3.5" />
+              Limpar filtros
+            </button>
+          )}
+        </div>
       </div>
 
       {loading ? (
@@ -457,6 +507,96 @@ export default function Lancamentos() {
         />
       ) : (
         <div className="space-y-6">
+          {/* Seção destacada: Pendentes do Telegram para Revisão e Exclusão Manual */}
+          {telegramPendentesList.length > 0 && !apenasTelegramPendentes && (
+            <div className="rounded-2xl border border-amber-300/70 bg-amber-50/60 p-4 dark:border-amber-900/60 dark:bg-amber-950/20 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-amber-200 dark:border-amber-900/40">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500 text-white">
+                    <Send className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <h3 className="text-sm font-bold text-amber-950 dark:text-amber-200">
+                      Pendentes do Telegram ({telegramPendentesList.length})
+                    </h3>
+                    <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                      Revise estes lançamentos pendentes extraídos via Telegram. Exclua manualmente
+                      apenas os que duplicarem seus próprios registros.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs border-amber-400/80 text-amber-900 dark:text-amber-200 hover:bg-amber-100"
+                  onClick={() => setApenasTelegramPendentes(true)}
+                >
+                  Filtrar apenas estes
+                </Button>
+              </div>
+
+              <div className="mt-3 divide-y divide-amber-200/60 dark:divide-amber-900/40">
+                {telegramPendentesList.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-xs first:pt-1 last:pb-0"
+                  >
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-foreground truncate">{item.descricao}</span>
+                        <span className="rounded bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-900 dark:text-amber-200">
+                          {item.id}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-muted-foreground text-[11px]">
+                        <span>{formatDate(item.data)}</span>
+                        <span>•</span>
+                        <span>
+                          {item.expand?.conta?.nome || contasMap.get(item.conta)?.nome || 'Conta'}
+                        </span>
+                        <span>•</span>
+                        <span className="italic truncate max-w-[260px]">
+                          {item.observacoes || 'Telegram'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <span className="font-extrabold text-sm tabular-nums text-primary">
+                        {formatCurrency(item.valor)}
+                      </span>
+                      {can(user?.role, 'writeFinance') && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                          title="Editar lançamento"
+                          onClick={() => {
+                            setEditing(item)
+                            setDialog(true)
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      {can(user?.role, 'deleteFinance') && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                          title="Excluir lançamento duplicado"
+                          onClick={() => setDeleting(item)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Se houver Faturas de Cartão de Crédito agrupadas, exibi-las em destaque no topo */}
           {faturasGrouped.length > 0 && (
             <div className="space-y-3">
