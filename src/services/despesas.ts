@@ -23,6 +23,7 @@ import type {
   TipoCalculoDizimo,
 } from '@/types/domain'
 import { CONTA_TIPOS_PAGAMENTO_FALLBACK } from '@/types/domain'
+import { getLocalDateStr } from '@/lib/format'
 
 /**
  * Verifica se a conta aceita pagamentos via Crédito (baseado exclusivamente em tipos_pagamento)
@@ -1094,6 +1095,7 @@ export const despesasService = {
     // Se for cartão de crédito e tiver data_inicio, verifica se existe ocorrência (prevista OU paga)
     // para o ciclo inicial da fatura; se faltar, cria-a de forma estritamente idempotente.
     if (contaCartaoObj && compromisso.data_inicio) {
+      const currentComp = getLocalDateStr().slice(0, 7)
       const dataInicioStr = compromisso.data_inicio.slice(0, 10)
       const numParcelaCheck = isParcelado ? compromisso.parcela_inicial || 1 : 0
 
@@ -1113,7 +1115,12 @@ export const despesasService = {
           (numParcelaCheck === 0 || oc.numero_parcela === numParcelaCheck),
       )
 
-      if (!jaExisteInicial && todasOcorrencias.length === 0) {
+      // Regra de prevenção: nunca recriar ocorrência de competência passada
+      if (
+        !jaExisteInicial &&
+        todasOcorrencias.length === 0 &&
+        resInicial.competencia >= currentComp
+      ) {
         await pb.collection('despesas_ocorrencias').create({
           compromisso: compromisso.id,
           contexto_tipo: compromisso.contexto_tipo,
@@ -1302,7 +1309,9 @@ export const despesasService = {
     targetCompetencias?: string[],
     cachedOcorrencias?: DespesaOcorrencia[],
   ) => {
-    // Helper para verificar se já existe ocorrência em memória ou via PocketBase
+    // Helper para verificar se já existe ocorrência em memória ou via PocketBase.
+    // REGRA DE OURO: "Paga vence prevista" — se já existe ocorrência (em especial paga/com lançamento)
+    // para o mesmo compromisso e competência (ou número de parcela), NUNCA deve ser gerada ocorrência prevista.
     const hasExistingOcorrencia = async (matcher: {
       competencia?: string
       numero_parcela?: number
@@ -1346,6 +1355,42 @@ export const despesasService = {
           )
         }
         throw err
+      }
+    }
+
+    // REGRA DE PREVENÇÃO (1): Se já existe ocorrência paga no mesmo mês/compromisso (ou parcela),
+    // nunca criar ocorrência prevista. Paga vence prevista!
+    const hasOcorrenciaPagaNoMes = async (
+      compStr: string,
+      numeroParcela?: number,
+    ): Promise<boolean> => {
+      if (cachedOcorrencias !== undefined) {
+        return cachedOcorrencias.some((oc) => {
+          const compId =
+            typeof oc.compromisso === 'object' && oc.compromisso
+              ? (oc.compromisso as any).id
+              : oc.compromisso
+          if (compId !== compromisso.id) return false
+          if (oc.competencia !== compStr) return false
+          if (numeroParcela !== undefined && oc.numero_parcela !== numeroParcela) return false
+          const isPaga =
+            oc.status === 'paga' ||
+            !!oc.data_pagamento ||
+            !!oc.lancamento ||
+            (oc.valor_pago !== undefined && oc.valor_pago !== null && oc.valor_pago > 0)
+          return isPaga
+        })
+      }
+
+      let filter = `compromisso = '${compromisso.id}' && competencia = '${compStr}' && (status = 'paga' || data_pagamento != '' || lancamento != '' || valor_pago > 0)`
+      if (numeroParcela !== undefined) {
+        filter += ` && numero_parcela = ${numeroParcela}`
+      }
+      try {
+        const existing = await pb.collection('despesas_ocorrencias').getList(1, 1, { filter })
+        return existing.totalItems > 0
+      } catch {
+        return false
       }
     }
     const isParcelado =
@@ -1403,6 +1448,12 @@ export const despesasService = {
         }
       }
 
+      // Se já existe ocorrência paga ou qualquer ocorrência para este compromisso avulso, não recria
+      const jaPago = await hasOcorrenciaPagaNoMes(compStr)
+      if (jaPago) {
+        return
+      }
+
       const exists = await hasExistingOcorrencia({ onlyCompromisso: true })
       if (!exists) {
         const newRecord = await pb.collection<DespesaOcorrencia>('despesas_ocorrencias').create({
@@ -1451,6 +1502,12 @@ export const despesasService = {
           numeroParcela: p,
           totalParcelas: total,
         })
+
+        // Se a competência ou parcela já tiver ocorrência paga, pula
+        const jaPago = await hasOcorrenciaPagaNoMes(res.competencia, p)
+        if (jaPago) {
+          continue
+        }
 
         const exists = await hasExistingOcorrencia({ numero_parcela: p })
 
@@ -1543,6 +1600,11 @@ export const despesasService = {
       }
 
       const compStr = res.competencia
+      const jaPago = await hasOcorrenciaPagaNoMes(compStr)
+      if (jaPago) {
+        return
+      }
+
       const exists = await hasExistingOcorrencia({ competencia: compStr })
       if (!exists) {
         const newRecord = await pb.collection<DespesaOcorrencia>('despesas_ocorrencias').create({
@@ -1631,6 +1693,12 @@ export const despesasService = {
 
       for (const compStr of meses) {
         if (compStr < startCompStr) {
+          continue
+        }
+
+        // Paga vence prevista: se já existe ocorrência paga no mesmo mês, nunca cria prevista
+        const jaPago = await hasOcorrenciaPagaNoMes(compStr)
+        if (jaPago) {
           continue
         }
 
@@ -1755,9 +1823,13 @@ export const despesasService = {
 
     for (const compStr of meses) {
       // NUNCA gerar ocorrência anterior ao mês/competência de data_inicio do compromisso
-      // e nunca pular meses cujo dia_vencimento <= dia_atual:
-      // a ocorrência de competência vencida nasce como status 'prevista' e aparecerá nas atrasadas.
       if (compStr < startCompStr) {
+        continue
+      }
+
+      // Paga vence prevista: se já existe ocorrência paga no mesmo mês, nunca cria prevista
+      const jaPago = await hasOcorrenciaPagaNoMes(compStr)
+      if (jaPago) {
         continue
       }
 
@@ -1818,22 +1890,41 @@ export const despesasService = {
     if (ativos.length === 0) return
 
     // Monta a lista completa de competências a verificar/preencher:
-    // competências requisitadas + até 3 meses à frente para blindagem contínua dos compromissos recorrentes
-    const todasCompetenciasSet = new Set<string>(competencias)
+    // REGRA DE OURO DO PROJETO: Não recriar competências anteriores ao mês corrente durante sincronização.
+    // O gerador/sincronizador de ocorrências é para a competência corrente e futuras;
+    // meses passados ficam como estão, históricos.
+    const realCurrentComp = getLocalDateStr().slice(0, 7) // 'YYYY-MM' no fuso oficial
+
+    // Se as competências solicitadas forem anteriores ao mês corrente (ex.: usuário navegando em mês passado),
+    // a sincronização em lote NÃO deve recriar competências passadas.
+    const competenciasFiltradas = competencias.filter((c) => c >= realCurrentComp)
+    if (competenciasFiltradas.length === 0 && !incluirMesesFuturos) {
+      return
+    }
+
+    const todasCompetenciasSet = new Set<string>(competenciasFiltradas)
     if (incluirMesesFuturos) {
-      const baseComp = competencias[0] || new Date().toISOString().slice(0, 7)
+      // Começa da maior entre a base e o mês corrente
+      const baseCandidate = competencias[0] || realCurrentComp
+      const baseComp = baseCandidate < realCurrentComp ? realCurrentComp : baseCandidate
       const [bYStr, bMStr] = baseComp.split('-')
       const bY = parseInt(bYStr, 10)
       const bM = parseInt(bMStr, 10) - 1
       for (let offset = 0; offset <= 3; offset++) {
         const d = new Date(Date.UTC(bY, bM + offset, 1))
         const compFutura = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
-        todasCompetenciasSet.add(compFutura)
+        if (compFutura >= realCurrentComp) {
+          todasCompetenciasSet.add(compFutura)
+        }
       }
     }
-    const todasCompetencias = Array.from(todasCompetenciasSet).sort()
+    const todasCompetencias = Array.from(todasCompetenciasSet)
+      .filter((c) => c >= realCurrentComp)
+      .sort()
+    if (todasCompetencias.length === 0) return
 
     // 1. Consulta única em lote (bulk) eliminando a causa raiz N+1 e evitando 429
+    // Busca ocorrências dessas competências OU ocorrências de todos os compromissos ativos
     const filterCompetencias =
       todasCompetencias.length === 1
         ? `competencia = '${todasCompetencias[0]}'`

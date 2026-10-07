@@ -896,6 +896,16 @@ export default function Despesas() {
   // Sincronizar ocorrências pendentes do mês eliminando N+1, throttlando em lotes e tratando 429 amigavelmente
   const handleGerarOcorrenciasMes = async () => {
     setRefreshing(true)
+    const realCurrentComp = getLocalDateStr().slice(0, 7)
+    if (currentCompetencia < realCurrentComp) {
+      toast({
+        title: 'Mês histórico preservado',
+        description: `Competências anteriores a ${formatCompetenciaDisplay(realCurrentComp)} não são recriadas.`,
+      })
+      setRefreshing(false)
+      return
+    }
+
     try {
       await despesasService.gerarOcorrenciasParaCompromissosLote({
         compromissos,
