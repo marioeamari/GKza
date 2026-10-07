@@ -733,4 +733,68 @@ describe('calcularEstadoCicloFatura — Estado Financeiro Puro do Ciclo da Fatur
       expect(cronograma[3].competencia).toBe('2026-12')
     })
   })
+
+  describe('Fluxo Simplificado Cartão: data_pagamento e vencimento de fatura', () => {
+    it('calcula competência e vencimento garantindo que a data de vencimento da fatura é a referência de pagamento', () => {
+      const contaCartao = {
+        id: 'cartao_nubank',
+        nome: 'NuBank',
+        tipo: 'cartao' as const,
+        dia_fechamento: 16,
+        dia_vencimento: 23,
+      } as any
+
+      // Compra feita em 2026-09-19 (após fechamento do dia 16 -> cai na competência 2026-10, vencimento 2026-10-23)
+      const res = calcularCompetenciaEVencimento({
+        dataCompra: '2026-09-19',
+        conta: contaCartao,
+        metodoEhCredito: true,
+      })
+
+      expect(res.competencia).toBe('2026-10')
+      expect(res.dataVencimento.slice(0, 10)).toBe('2026-10-23')
+
+      // Compra feita antes do fechamento (ex: 2026-09-10) -> cai no ciclo de setembro (2026-09-23)
+      const resAntes = calcularCompetenciaEVencimento({
+        dataCompra: '2026-09-10',
+        conta: contaCartao,
+        metodoEhCredito: true,
+      })
+
+      expect(resAntes.competencia).toBe('2026-09')
+      expect(resAntes.dataVencimento.slice(0, 10)).toBe('2026-09-23')
+    })
+
+    it('filtro por pagamento agrupa na competência do ciclo da fatura (vencimento)', () => {
+      // Simula a lógica do filtro em /despesas: ocorrência no cartão com data_pagamento = 2026-10-23
+      const ocorrenciaCartao: {
+        id: string
+        secao: string
+        competencia: string
+        status: string
+        data_pagamento: string
+      } = {
+        id: 'vlrw6md2c4oo8pa',
+        secao: 'cartoes_credito',
+        competencia: '2026-10',
+        status: 'paga',
+        data_pagamento: '2026-10-23 12:00:00.000Z',
+      }
+
+      const currentCompetencia = '2026-10'
+      const dataInicioMes = `${currentCompetencia}-01`
+      const dataFimMes = `${currentCompetencia}-31 23:59:59`
+
+      const matchesFiltroPagamento =
+        (ocorrenciaCartao.status === 'paga' &&
+          ((ocorrenciaCartao.data_pagamento >= dataInicioMes &&
+            ocorrenciaCartao.data_pagamento <= dataFimMes) ||
+            (ocorrenciaCartao.secao === 'cartoes_credito' &&
+              ocorrenciaCartao.competencia === currentCompetencia))) ||
+        (ocorrenciaCartao.status === 'prevista' &&
+          ocorrenciaCartao.competencia === currentCompetencia)
+
+      expect(matchesFiltroPagamento).toBe(true)
+    })
+  })
 })

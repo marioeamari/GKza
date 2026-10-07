@@ -371,17 +371,7 @@ function CompromissoAnualRow({
         <div className="flex items-center gap-1.5">
           {canEdit && (
             <>
-              {isPagaNoMes ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 text-xs text-muted-foreground hover:text-foreground"
-                  onClick={() => ocorrenciaMes && onEstornarOcorrencia(ocorrenciaMes)}
-                  title="Desfazer baixa"
-                >
-                  <Undo2 className="mr-1 h-3.5 w-3.5" /> Estornar
-                </Button>
-              ) : isMesDeRenovacao ? (
+              {isPagaNoMes ? null : isMesDeRenovacao ? (
                 ocorrenciaMes ? (
                   <Button
                     size="sm"
@@ -436,6 +426,30 @@ function CompromissoAnualRow({
               >
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
+
+              {isPagaNoMes && ocorrenciaMes && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100"
+                      title="Mais ações"
+                    >
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem
+                      onClick={() => onEstornarOcorrencia(ocorrenciaMes)}
+                      className="cursor-pointer font-medium text-foreground"
+                    >
+                      <Undo2 className="mr-2 h-4 w-4 text-muted-foreground" />
+                      Desfazer baixa (Estornar)
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
 
               <Button
                 variant="ghost"
@@ -671,9 +685,11 @@ export default function Despesas() {
       const dataFimMes = `${currentCompetencia}-${String(ultimoDiaMes).padStart(2, '0')} 23:59:59`
 
       // Se filtroDataCompetencia === 'pagamento':
-      // Busca ocorrências pagas no mês pela data_pagamento E previstas cuja competência = currentCompetencia
+      // Para cartão de crédito: a data_pagamento reflete o vencimento da fatura da competência do ciclo.
+      // Busca ocorrências pagas no mês pela data_pagamento OU de cartão cuja competência seja a atual,
+      // e previstas cuja competência = currentCompetencia.
       const filterOcorrencias = isModoPagamento
-        ? `(status = 'paga' && data_pagamento >= '${dataInicioMes}' && data_pagamento <= '${dataFimMes}') || (status = 'prevista' && competencia = '${currentCompetencia}')`
+        ? `(status = 'paga' && ((data_pagamento >= '${dataInicioMes}' && data_pagamento <= '${dataFimMes}') || (secao = 'cartoes_credito' && competencia = '${currentCompetencia}'))) || (status = 'prevista' && competencia = '${currentCompetencia}')`
         : `competencia = '${currentCompetencia}'`
 
       const [allComps, allOcs, allPagamentosFatura] = await Promise.all([
@@ -3348,27 +3364,7 @@ function OcorrenciaRow({
         <div className="flex items-center gap-1.5">
           {canEdit && (
             <>
-              {isPaga ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 text-xs text-muted-foreground hover:text-foreground"
-                  onClick={onEstornar}
-                  title="Desfazer baixa"
-                >
-                  <Undo2 className="mr-1 h-3.5 w-3.5" /> Estornar
-                </Button>
-              ) : isCartao ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 border-primary/30 text-primary hover:bg-primary/10 text-xs font-semibold"
-                  onClick={onBaixar}
-                  title="Lançar compra no ciclo da fatura do cartão"
-                >
-                  <CreditCard className="mr-1 h-3.5 w-3.5" /> Lançar na fatura
-                </Button>
-              ) : (
+              {isPaga ? null : (
                 <Button
                   size="sm"
                   className="h-8 bg-success hover:bg-success/90 text-xs font-bold"
@@ -3410,6 +3406,18 @@ function OcorrenciaRow({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
+                  {isPaga && (
+                    <>
+                      <DropdownMenuItem
+                        onClick={onEstornar}
+                        className="cursor-pointer font-medium text-foreground"
+                      >
+                        <Undo2 className="mr-2 h-4 w-4 text-muted-foreground" />
+                        Desfazer baixa (Estornar)
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
                   {(parcelaLabel ||
                     comp?.modalidade_parcelamento === 'parcelado' ||
                     comp?.regra_repeticao === 'parcelado') && (

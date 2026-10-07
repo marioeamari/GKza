@@ -209,8 +209,8 @@ export const telegramPendentesService = {
 
     // REGRA: quando a compra for avulsa em conta tipo cartão, NÃO salvar compromisso
     // em despesas_compromisso e NÃO chamar gerarOcorrenciasParaCompromisso.
-    // Criar somente lancamento com status 'pago', data = data da compra, competência e vencimento
-    // exclusivamente via calcularCompetenciaEVencimento.
+    // Criar somente lancamento com status 'pago', data = vencimento da fatura da competência,
+    // competência e vencimento exclusivamente via calcularCompetenciaEVencimento.
     const checkCartao = await telegramPendentesService.isCompraAvulsaCartao(
       input.conta_padrao,
       input.regra_repeticao,

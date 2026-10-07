@@ -149,7 +149,7 @@ describe('despesas-pipeline - Cobertura dos 8 Fluxos do Usuário', () => {
   // - dizimo: false SEMPRE
   // --------------------------------------------------------------------------
   describe('Fluxo 2: Triagem de Cartão Avulsa', () => {
-    it('produz payload exclusivamente de lançamento pago com dizimo: false e competência do ciclo', () => {
+    it('produz payload exclusivamente de lançamento pago com dizimo: false, competência do ciclo e data = vencimento da fatura', () => {
       const cartao = {
         id: 'cartao_xp',
         nome: 'XP Visa Infinite',
@@ -161,7 +161,7 @@ describe('despesas-pipeline - Cobertura dos 8 Fluxos do Usuário', () => {
       const payload = buildTriagemCartaoPayload({
         descricao: 'Almoço Restaurante',
         valor: 145.5,
-        dataCompra: '2025-04-18', // após fechamento dia 15 -> ciclo 2025-05
+        dataCompra: '2025-04-18', // após fechamento dia 15 -> ciclo 2025-05, vencimento 2025-05-25
         contaId: 'cartao_xp',
         conta: cartao,
         categoriaId: 'cat_alimentacao',
@@ -174,7 +174,7 @@ describe('despesas-pipeline - Cobertura dos 8 Fluxos do Usuário', () => {
       expect(payload.status).toBe('pago')
       expect(payload.valor).toBe(145.5)
       expect(payload.competencia).toBe('2025-05')
-      expect(payload.data).toBe('2025-04-18 12:00:00')
+      expect(payload.data).toBe('2025-05-25 12:00:00')
       expect(payload.dizimo).toBe(false)
       expect(payload.pessoa).toBe('pes_guilherme')
       expect(payload.empresa).toBe('')
@@ -182,7 +182,7 @@ describe('despesas-pipeline - Cobertura dos 8 Fluxos do Usuário', () => {
       expect(payload.categoria).toBe('cat_alimentacao')
     })
 
-    it('mantém default dizimo: false mesmo sem passar titular ou observações', () => {
+    it('mantém default dizimo: false mesmo sem passar titular ou observações e data no vencimento', () => {
       const cartao = {
         id: 'cartao_inter',
         nome: 'Inter Mastercard',
@@ -201,6 +201,7 @@ describe('despesas-pipeline - Cobertura dos 8 Fluxos do Usuário', () => {
 
       expect(payload.dizimo).toBe(false)
       expect(payload.competencia).toBe('2025-05')
+      expect(payload.data).toBe('2025-05-20 12:00:00')
       expect(payload.status).toBe('pago')
       expect(payload.observacoes).toContain('venc. fatura 2025-05-20')
     })

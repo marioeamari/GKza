@@ -67,11 +67,13 @@ export function buildTriagemCartaoPayload(
     params.observacoes ||
     `Compra cartão Telegram (competência ${compVenc.competencia}, venc. fatura ${compVenc.dataVencimento})`
 
+  const dataVencimentoStr = compVenc.dataVencimento.slice(0, 10)
+
   return {
     descricao: params.descricao.trim(),
     valor: Number(params.valor),
     tipo: 'despesa',
-    data: `${dataCompraStr} 12:00:00`,
+    data: `${dataVencimentoStr} 12:00:00`,
     competencia: compVenc.competencia,
     status: 'pago',
     conta: params.contaId,

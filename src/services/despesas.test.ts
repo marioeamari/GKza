@@ -778,7 +778,8 @@ describe('despesasService - baixaOcorrencia data de pagamento', () => {
     const updateCallArg = mockOcorrenciaUpdate.mock.calls[0][1]
     expect(updateCallArg.competencia).toBe('2026-09')
     expect(updateCallArg.data_vencimento).toBe('2026-09-20T12:00:00.000Z')
-    expect(updateCallArg.data_pagamento).toBe('2026-08-23 12:00:00')
+    // No fluxo simplificado de cartão, a data_pagamento é alinhada ao vencimento da fatura da competência (2026-09-20)
+    expect(updateCallArg.data_pagamento).toBe('2026-09-20 12:00:00')
     expect(updateCallArg.status).toBe('paga')
   })
 })

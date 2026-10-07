@@ -485,6 +485,13 @@ export const despesasService = {
 
     const competenciaFinal = resRegraUnica.competencia
     const vencimentoFinalIso = resRegraUnica.dataVencimentoIso
+    const vencimentoDataStr = resRegraUnica.dataVencimento.slice(0, 10)
+
+    // Para cartão de crédito: a data_pagamento da ocorrência e a data do lançamento financeiro
+    // devem ser gravadas com o vencimento da fatura da competência do ciclo.
+    const dataEfetivaPagamentoStr = metodoEfetivoEhCredito
+      ? vencimentoDataStr
+      : params.dataPagamento
 
     // Resolução robusta da categoria obrigatória do lançamento
     const categoriaEfetiva = await despesasService.resolverCategoriaDespesa(
@@ -500,13 +507,13 @@ export const despesasService = {
     if (metodoEfetivoEhCredito && contaObj) {
       // Para cartão de crédito: a despesa entra na fatura do cartão referente ao ciclo.
       // O lançamento financeiro é criado como pendente de fatura (sem saída imediata de caixa)
-      // até que a fatura inteira seja baixada/paga. O lançamento assume a competência da fatura.
+      // até que a fatura inteira seja baixada/paga. O lançamento assume a competência da fatura e a data de vencimento da mesma.
       if (params.comprovanteArquivo) {
         const fd = new FormData()
         fd.append('descricao', params.descricao)
         fd.append('valor', String(params.valorPago))
         fd.append('tipo', 'despesa')
-        fd.append('data', `${params.dataPagamento} 12:00:00`)
+        fd.append('data', `${dataEfetivaPagamentoStr} 12:00:00`)
         fd.append('status', 'pendente')
         fd.append('conta', params.contaId)
         fd.append('categoria', categoriaEfetiva)
@@ -526,7 +533,7 @@ export const despesasService = {
           descricao: params.descricao,
           valor: params.valorPago,
           tipo: 'despesa',
-          data: `${params.dataPagamento} 12:00:00`,
+          data: `${dataEfetivaPagamentoStr} 12:00:00`,
           status: 'pendente',
           conta: params.contaId,
           categoria: categoriaEfetiva,
@@ -547,7 +554,7 @@ export const despesasService = {
         fd.append('descricao', params.descricao)
         fd.append('valor', String(params.valorPago))
         fd.append('tipo', 'despesa')
-        fd.append('data', `${params.dataPagamento} 12:00:00`)
+        fd.append('data', `${dataEfetivaPagamentoStr} 12:00:00`)
         fd.append('status', 'pago')
         fd.append('conta', params.contaId)
         fd.append('categoria', categoriaEfetiva)
@@ -562,7 +569,7 @@ export const despesasService = {
           descricao: params.descricao,
           valor: params.valorPago,
           tipo: 'despesa',
-          data: `${params.dataPagamento} 12:00:00`,
+          data: `${dataEfetivaPagamentoStr} 12:00:00`,
           status: 'pago',
           conta: params.contaId,
           categoria: categoriaEfetiva,
@@ -585,7 +592,7 @@ export const despesasService = {
       fdOcorr.append('valor_pago', String(params.valorPago))
       fdOcorr.append('valor_previsto', String(params.valorPago))
       fdOcorr.append('valor_ajustado_manualmente', String(diferencaValor))
-      fdOcorr.append('data_pagamento', `${params.dataPagamento} 12:00:00`)
+      fdOcorr.append('data_pagamento', `${dataEfetivaPagamentoStr} 12:00:00`)
       fdOcorr.append('conta', params.contaId)
       if (params.dizimoPercentual !== undefined) {
         fdOcorr.append('dizimo_percentual', String(params.dizimoPercentual))
@@ -607,7 +614,7 @@ export const despesasService = {
         valor_pago: params.valorPago,
         valor_previsto: params.valorPago, // valor real da ocorrência atualizado sem mudar as demais
         valor_ajustado_manualmente: diferencaValor,
-        data_pagamento: `${params.dataPagamento} 12:00:00`,
+        data_pagamento: `${dataEfetivaPagamentoStr} 12:00:00`,
         conta: params.contaId,
         competencia: competenciaFinal,
         data_vencimento: vencimentoFinalIso,
@@ -694,6 +701,7 @@ export const despesasService = {
 
     const competenciaEfetiva = resRegraUnica.competencia
     let vencimentoRegistradoIso = resRegraUnica.dataVencimentoIso
+    const vencimentoDataStr = resRegraUnica.dataVencimento.slice(0, 10)
 
     if (!metodoEfetivoEhCredito && compRecord) {
       const diaComp = compRecord.dia_vencimento || 10
@@ -703,6 +711,12 @@ export const despesasService = {
       const dataVenc = despesasService.calcularDataVencimentoNoMes(pAno, pMesZero, diaComp)
       vencimentoRegistradoIso = dataVenc.toISOString()
     }
+
+    // Para cartão de crédito: a data_pagamento da ocorrência e a data do lançamento
+    // financeira refletem o vencimento da fatura da competência do ciclo.
+    const dataEfetivaPagamentoStr = metodoEfetivoEhCredito
+      ? vencimentoDataStr
+      : params.dataPagamento
 
     // Resolução robusta da categoria obrigatória do lançamento
     const categoriaEfetiva = await despesasService.resolverCategoriaDespesa(
@@ -718,7 +732,7 @@ export const despesasService = {
         fdLanc.append('descricao', params.descricao)
         fdLanc.append('valor', String(params.valorPago))
         fdLanc.append('tipo', 'despesa')
-        fdLanc.append('data', `${params.dataPagamento} 12:00:00`)
+        fdLanc.append('data', `${dataEfetivaPagamentoStr} 12:00:00`)
         fdLanc.append('status', 'pendente')
         fdLanc.append('conta', params.contaId)
         fdLanc.append('categoria', categoriaEfetiva)
@@ -738,7 +752,7 @@ export const despesasService = {
           descricao: params.descricao,
           valor: params.valorPago,
           tipo: 'despesa',
-          data: `${params.dataPagamento} 12:00:00`,
+          data: `${dataEfetivaPagamentoStr} 12:00:00`,
           status: 'pendente',
           conta: params.contaId,
           categoria: categoriaEfetiva,
@@ -757,7 +771,7 @@ export const despesasService = {
         fdLanc.append('descricao', params.descricao)
         fdLanc.append('valor', String(params.valorPago))
         fdLanc.append('tipo', 'despesa')
-        fdLanc.append('data', `${params.dataPagamento} 12:00:00`)
+        fdLanc.append('data', `${dataEfetivaPagamentoStr} 12:00:00`)
         fdLanc.append('status', 'pago')
         fdLanc.append('conta', params.contaId)
         fdLanc.append('categoria', categoriaEfetiva)
@@ -775,7 +789,7 @@ export const despesasService = {
           descricao: params.descricao,
           valor: params.valorPago,
           tipo: 'despesa',
-          data: `${params.dataPagamento} 12:00:00`,
+          data: `${dataEfetivaPagamentoStr} 12:00:00`,
           status: 'pago',
           conta: params.contaId,
           categoria: categoriaEfetiva,
@@ -825,7 +839,7 @@ export const despesasService = {
         fdOcorr.append('valor_pago', String(params.valorPago))
         fdOcorr.append('valor_previsto', String(params.valorPago))
         fdOcorr.append('valor_ajustado_manualmente', String(diferencaValor))
-        fdOcorr.append('data_pagamento', `${params.dataPagamento} 12:00:00`)
+        fdOcorr.append('data_pagamento', `${dataEfetivaPagamentoStr} 12:00:00`)
         fdOcorr.append('conta', params.contaId)
         fdOcorr.append('secao', secaoEfetiva)
         if (params.contextoTipo) fdOcorr.append('contexto_tipo', params.contextoTipo)
@@ -854,7 +868,7 @@ export const despesasService = {
           valor_pago: params.valorPago,
           valor_previsto: params.valorPago,
           valor_ajustado_manualmente: diferencaValor,
-          data_pagamento: `${params.dataPagamento} 12:00:00`,
+          data_pagamento: `${dataEfetivaPagamentoStr} 12:00:00`,
           conta: params.contaId,
           secao: secaoEfetiva,
           ...(params.contextoTipo ? { contexto_tipo: params.contextoTipo } : {}),
@@ -887,7 +901,7 @@ export const despesasService = {
       fdOcorr.append('conta', params.contaId)
       fdOcorr.append('competencia', competenciaEfetiva)
       fdOcorr.append('data_vencimento', vencimentoRegistradoIso)
-      fdOcorr.append('data_pagamento', `${params.dataPagamento} 12:00:00`)
+      fdOcorr.append('data_pagamento', `${dataEfetivaPagamentoStr} 12:00:00`)
       fdOcorr.append('valor_previsto', String(params.valorPago))
       fdOcorr.append('valor_pago', String(params.valorPago))
       fdOcorr.append('valor_estimado_original', String(params.valorPago))
@@ -917,7 +931,7 @@ export const despesasService = {
           conta: params.contaId,
           competencia: competenciaEfetiva,
           data_vencimento: vencimentoRegistradoIso,
-          data_pagamento: `${params.dataPagamento} 12:00:00`,
+          data_pagamento: `${dataEfetivaPagamentoStr} 12:00:00`,
           valor_previsto: params.valorPago,
           valor_pago: params.valorPago,
           valor_estimado_original: params.valorPago,
