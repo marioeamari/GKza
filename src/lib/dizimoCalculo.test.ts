@@ -5,6 +5,7 @@ import {
   calcularValorEfetivoBaseDizimo,
   filtrarOcorrenciasDizimoMes,
   calcularBaseCompartilhadaDizimo,
+  filtrarOcorrenciasAbertoDizimoMes,
 } from './dizimoCalculo'
 import type { DespesaOcorrencia } from '@/types/domain'
 
@@ -215,6 +216,115 @@ describe('Motor de Cálculo de Dízimo e Regras de Base Compartilhada', () => {
 
       const filtradas = filtrarOcorrenciasDizimoMes([oc1, oc2, oc3], '2026-09')
       expect(filtradas.map((o) => o.id)).toEqual(['oc_inicio_mes', 'oc_meio_mes', 'oc_fim_mes'])
+    })
+  })
+
+  // (e) Filtragem e identificação de ocorrências em aberto (status != 'paga') por tipo e competência
+  describe('(e) Filtragem de ocorrências em aberto para "Registrar pagamento"', () => {
+    const tiposMock = [
+      { id: 'tipo_dizimo_id', nome: 'Dízimo', codigo: 'dizimo' },
+      { id: 'tipo_oferta_id', nome: 'Oferta', codigo: 'oferta' },
+      { id: 'tipo_primicia_id', nome: 'Primícia', codigo: 'primicia' },
+    ]
+
+    const ocorrenciasAbertasMock: Array<Partial<DespesaOcorrencia>> = [
+      {
+        id: 'oc_dizimo_prevista',
+        status: 'prevista',
+        competencia: '2026-10',
+        valor_previsto: 150,
+        tipo_dizimo: 'tipo_dizimo_id',
+        data_vencimento: '2026-10-10',
+      },
+      {
+        id: 'oc_oferta_prevista',
+        status: 'prevista',
+        competencia: '2026-10',
+        valor_previsto: 50,
+        tipo_dizimo: 'tipo_oferta_id',
+        data_vencimento: '2026-10-15',
+      },
+      {
+        id: 'oc_primicia_prevista',
+        status: 'prevista',
+        competencia: '2026-10',
+        valor_previsto: 80,
+        tipo_dizimo: 'tipo_primicia_id',
+        data_vencimento: '2026-10-05',
+      },
+      {
+        id: 'oc_dizimo_paga',
+        status: 'paga',
+        competencia: '2026-10',
+        valor_pago: 200,
+        tipo_dizimo: 'tipo_dizimo_id',
+      },
+      {
+        id: 'oc_outro_mes',
+        status: 'prevista',
+        competencia: '2026-11',
+        valor_previsto: 120,
+        tipo_dizimo: 'tipo_dizimo_id',
+      },
+    ]
+
+    it('filtra ocorrências de dízimo em aberto da competência 2026-10', () => {
+      const abertasDizimo = filtrarOcorrenciasAbertoDizimoMes(
+        ocorrenciasAbertasMock,
+        '2026-10',
+        'dizimo',
+        tiposMock,
+      )
+      expect(abertasDizimo).toHaveLength(1)
+      expect(abertasDizimo[0].id).toBe('oc_dizimo_prevista')
+    })
+
+    it('filtra ocorrências de oferta em aberto da competência 2026-10', () => {
+      const abertasOferta = filtrarOcorrenciasAbertoDizimoMes(
+        ocorrenciasAbertasMock,
+        '2026-10',
+        'oferta',
+        tiposMock,
+      )
+      expect(abertasOferta).toHaveLength(1)
+      expect(abertasOferta[0].id).toBe('oc_oferta_prevista')
+    })
+
+    it('filtra ocorrências de primícias em aberto da competência 2026-10', () => {
+      const abertasPrimicia = filtrarOcorrenciasAbertoDizimoMes(
+        ocorrenciasAbertasMock,
+        '2026-10',
+        'primicias',
+        tiposMock,
+      )
+      expect(abertasPrimicia).toHaveLength(1)
+      expect(abertasPrimicia[0].id).toBe('oc_primicia_prevista')
+    })
+
+    it('exclui ocorrências pagas e ocorrências de outras competências', () => {
+      const todasAbertas10 = filtrarOcorrenciasAbertoDizimoMes(
+        ocorrenciasAbertasMock,
+        '2026-10',
+        undefined,
+        tiposMock,
+      )
+      expect(todasAbertas10).toHaveLength(3)
+      expect(todasAbertas10.find((o) => o.id === 'oc_dizimo_paga')).toBeUndefined()
+      expect(todasAbertas10.find((o) => o.id === 'oc_outro_mes')).toBeUndefined()
+    })
+
+    it('ordena por data de vencimento', () => {
+      const todasAbertas10 = filtrarOcorrenciasAbertoDizimoMes(
+        ocorrenciasAbertasMock,
+        '2026-10',
+        undefined,
+        tiposMock,
+      )
+      expect(todasAbertas10.map((o) => o.id)).toEqual([
+        'oc_primicia_prevista',
+        'oc_dizimo_prevista',
+        'oc_oferta_prevista',
+      ])
     })
   })
 })

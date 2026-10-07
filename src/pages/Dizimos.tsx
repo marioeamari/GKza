@@ -56,11 +56,14 @@ import {
   calcularValorEfetivoBaseDizimo,
   filtrarOcorrenciasDizimoMes,
   calcularBaseCompartilhadaDizimo,
+  filtrarOcorrenciasAbertoDizimoMes,
 } from '@/lib/dizimoCalculo'
+import { BaixaOcorrenciaDialog } from '@/components/despesas/BaixaOcorrenciaDialog'
 import type {
   Categoria,
   Conta,
   ConfigCalculo,
+  DespesaCompromisso,
   DespesaOcorrencia,
   MovimentacaoCaixaOferta,
   OfertaVoluntaria,
@@ -111,8 +114,18 @@ export default function Dizimos() {
   })
   const [tiposDizimo, setTiposDizimo] = useState<TipoDizimo[]>([])
   const [ocorrenciasPagas, setOcorrenciasPagas] = useState<DespesaOcorrencia[]>([])
+  const [ocorrenciasAbertas, setOcorrenciasAbertas] = useState<DespesaOcorrencia[]>([])
+  const [compromissosDizimo, setCompromissosDizimo] = useState<DespesaCompromisso[]>([])
   const [contas, setContas] = useState<Conta[]>([])
   const [categorias, setCategorias] = useState<Categoria[]>([])
+
+  // Estado para fluxo oficial de baixa reutilizando BaixaOcorrenciaDialog
+  const [baixaModalOpen, setBaixaModalOpen] = useState(false)
+  const [ocorrenciaParaBaixar, setOcorrenciaParaBaixar] = useState<DespesaOcorrencia | null>(null)
+  const [compromissoParaBaixar, setCompromissoParaBaixar] = useState<DespesaCompromisso | null>(
+    null,
+  )
+  const [sincronizandoMes, setSincronizandoMes] = useState(false)
 
   // Ofertas Voluntárias & Caixa de Ofertas
   const [ofertasVoluntarias, setOfertasVoluntarias] = useState<OfertaVoluntaria[]>([])
@@ -140,25 +153,47 @@ export default function Dizimos() {
   const loadData = async () => {
     setLoading(true)
     try {
-      const [tipos, configsList, cts, cats, ocorrencias, ofVoluntarias, cxMovs, cxResumo] =
-        await Promise.all([
-          despesasService.listTiposDizimo(),
-          despesasService.listConfigCalculos(),
-          financeService.listContas(),
-          financeService.listCategorias(),
-          despesasService.listOcorrencias({
-            filter: `status = 'paga' && dizimo = true`,
-            expand: 'compromisso,compromisso.categoria,conta,tipo_dizimo,lancamento',
-          }),
-          ofertasService.getOfertasMes(selectedMonth),
-          ofertasService.listMovimentacoesMes(selectedMonth),
-          ofertasService.getResumoCaixa(selectedMonth),
-        ])
+      const [
+        tipos,
+        configsList,
+        cts,
+        cats,
+        ocorrenciasPagasRes,
+        ocorrenciasAbertasRes,
+        compromissosDizimoRes,
+        ofVoluntarias,
+        cxMovs,
+        cxResumo,
+      ] = await Promise.all([
+        despesasService.listTiposDizimo(),
+        despesasService.listConfigCalculos(),
+        financeService.listContas(),
+        financeService.listCategorias(),
+        despesasService.listOcorrencias({
+          filter: `status = 'paga' && dizimo = true`,
+          expand:
+            'compromisso,compromisso.categoria,compromisso.tipo_dizimo,conta,tipo_dizimo,lancamento',
+        }),
+        despesasService.listOcorrencias({
+          filter: `status != 'paga' && dizimo = true`,
+          expand:
+            'compromisso,compromisso.categoria,compromisso.tipo_dizimo,compromisso.conta_padrao,conta,tipo_dizimo,lancamento',
+        }),
+        despesasService.listCompromissos({
+          filter: `dizimo = true && ativo = true`,
+          expand: 'categoria,tipo_dizimo,conta_padrao',
+        }),
+        ofertasService.getOfertasMes(selectedMonth),
+        ofertasService.listMovimentacoesMes(selectedMonth),
+        ofertasService.getResumoCaixa(selectedMonth),
+      ])
 
       setTiposDizimo(tipos)
       setContas(cts)
       setCategorias(cats)
-      setOcorrenciasPagas(ocorrencias)
+      setOcorrenciasPagas(ocorrenciasPagasRes)
+      setOcorrenciasAbertas(ocorrenciasAbertasRes)
+      setCompromissosDizimo(compromissosDizimoRes)
       setOfertasVoluntarias(ofVoluntarias)
       setMovimentacoesCaixa(cxMovs)
       setResumoCaixa(cxResumo)
@@ -445,7 +480,219 @@ export default function Dizimos() {
     }
   }
 
+  // Abrir fluxo de baixa oficial para uma ocorrência específica em aberto
+  const handleOpenBaixaOcorrencia = (oc: DespesaOcorrencia) => {
+    setCompromissoParaBaixar(null)
+    setOcorrenciaParaBaixar(oc)
+    setBaixaModalOpen(true)
+  }
+
+  // Abrir fluxo de baixa para compromisso sem ocorrência gerada ainda na competência
+  const handleOpenBaixaCompromissoDireto = (comp: DespesaCompromisso) => {
+    setOcorrenciaParaBaixar(null)
+    setCompromissoParaBaixar(comp)
+    setBaixaModalOpen(true)
+  }
+
+  // Sincronizar ocorrências pendentes dos compromissos de dízimo para o mês atual
+  const handleSincronizarMes = async () => {
+    if (compromissosDizimo.length === 0) {
+      toast({
+        title: 'Nenhum compromisso ministerial',
+        description: 'Cadastre compromissos com marcação ministerial para gerar ocorrências.',
+      })
+      return
+    }
+    setSincronizandoMes(true)
+    try {
+      await despesasService.gerarOcorrenciasParaCompromissosLote({
+        compromissos: compromissosDizimo,
+        competencias: [selectedMonth],
+        batchSize: 4,
+        batchDelayMs: 150,
+      })
+      toast({
+        title: 'Ocorrências sincronizadas!',
+        description: `Ocorrências de ${monthLabel} verificadas e sincronizadas com sucesso.`,
+      })
+      await loadData()
+    } catch (err) {
+      console.error('Erro ao sincronizar ocorrências do mês:', err)
+      toast({
+        variant: 'destructive',
+        title: 'Erro ao sincronizar',
+        description: apiMessage(err),
+      })
+    } finally {
+      setSincronizandoMes(false)
+    }
+  }
+
   if (loading) return <LoadingState label="Carregando cálculos de dízimos e ofertas..." />
+
+  // Renderiza a lista de ocorrências em aberto (status != 'paga') com o botão "Registrar pagamento"
+  const renderSecaoOcorrenciasAbertas = (tipo: TipoCalculoDizimo) => {
+    const abertasDoTipo = filtrarOcorrenciasAbertoDizimoMes(
+      ocorrenciasAbertas,
+      selectedMonth,
+      tipo,
+      tiposDizimo,
+    )
+
+    const labelTipo = tipo === 'dizimo' ? 'Dízimo' : tipo === 'oferta' ? 'Oferta' : 'Primícias'
+    const corTema = tipo === 'dizimo' ? '#DF5830' : tipo === 'oferta' ? '#B7791F' : '#1E6F5C'
+
+    return (
+      <Card className="border border-border shadow-soft">
+        <CardHeader className="flex flex-col gap-2 pb-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base font-bold text-foreground">
+              <Receipt className="h-4 w-4" style={{ color: corTema }} />
+              Ocorrências em Aberto — {labelTipo} ({monthLabel})
+            </CardTitle>
+            <CardDescription>
+              Contribuições e despesas com marcação de {labelTipo.toLowerCase()} previstas para a
+              competência <strong>{selectedMonth}</strong> aguardando confirmação de baixa.
+            </CardDescription>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Badge
+              variant={abertasDoTipo.length > 0 ? 'default' : 'secondary'}
+              className="font-bold"
+              style={
+                abertasDoTipo.length > 0 ? { backgroundColor: corTema, color: '#fff' } : undefined
+              }
+            >
+              {abertasDoTipo.length} {abertasDoTipo.length === 1 ? 'em aberto' : 'em aberto'}
+            </Badge>
+          </div>
+        </CardHeader>
+
+        <CardContent>
+          {abertasDoTipo.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-8 text-center text-muted-foreground">
+              <CheckCircle2 className="mb-2 h-8 w-8 stroke-[1.5] text-success/80" />
+              <p className="font-semibold text-foreground text-sm">
+                Nenhuma ocorrência em aberto de {labelTipo.toLowerCase()} em {monthLabel}
+              </p>
+              <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                Todas as ocorrências deste mês já estão baixadas e integradas à base ministerial, ou
+                ainda não foram geradas a partir dos compromissos recorrentes.
+              </p>
+              {compromissosDizimo.length > 0 && can(user?.role, 'writeFinance') && (
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSincronizarMes}
+                    disabled={sincronizandoMes}
+                    className="gap-1.5 text-xs font-semibold"
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${sincronizandoMes ? 'animate-spin' : ''}`}
+                    />
+                    Sincronizar ocorrências do mês
+                  </Button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {abertasDoTipo.map((oc) => {
+                const comp = oc.expand?.compromisso
+                const catNome =
+                  oc.expand?.compromisso?.expand?.categoria?.nome ||
+                  getCategoriaNome(comp?.categoria)
+                const rotuloNome = getTipoDizimoNome(oc.tipo_dizimo, oc.expand?.tipo_dizimo)
+                const contaNome = getContaNome(oc.conta || comp?.conta_padrao)
+                const valorExibir = oc.valor_previsto || comp?.valor_estimado || 0
+                const vencimentoFormatado = oc.data_vencimento
+                  ? formatDate(oc.data_vencimento)
+                  : '—'
+
+                return (
+                  <div
+                    key={oc.id}
+                    className="group flex flex-col gap-3 rounded-xl border border-border bg-card p-3.5 transition-all hover:bg-muted/40 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-foreground text-sm">
+                          {comp?.descricao || oc.observacoes || `Contribuição de ${labelTipo}`}
+                        </span>
+
+                        <Badge
+                          variant="outline"
+                          className="text-[11px] font-semibold border-primary/30 bg-primary/5 text-primary"
+                        >
+                          {rotuloNome}
+                        </Badge>
+
+                        {catNome && (
+                          <Badge variant="outline" className="text-[11px] text-muted-foreground">
+                            {catNome}
+                          </Badge>
+                        )}
+
+                        <Badge
+                          variant="secondary"
+                          className="text-[11px] font-mono bg-muted text-muted-foreground"
+                          title="Competência da ocorrência"
+                        >
+                          Ref: {oc.competencia || selectedMonth}
+                        </Badge>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                        {comp?.fornecedor && (
+                          <span>
+                            Favorecido:{' '}
+                            <strong className="text-foreground">{comp.fornecedor}</strong>
+                          </span>
+                        )}
+                        <span>
+                          Conta prevista: <strong className="text-foreground">{contaNome}</strong>
+                        </span>
+                        <span>
+                          Vencimento:{' '}
+                          <strong className="text-foreground">{vencimentoFormatado}</strong>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3 border-t border-border pt-2.5 sm:border-0 sm:pt-0 sm:justify-end">
+                      <div className="text-left sm:text-right">
+                        <span className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                          Valor Previsto
+                        </span>
+                        <span className="text-base font-black tabular-nums text-foreground sm:text-lg">
+                          {formatCurrency(valorExibir)}
+                        </span>
+                      </div>
+
+                      {can(user?.role, 'writeFinance') && (
+                        <Button
+                          size="sm"
+                          onClick={() => handleOpenBaixaOcorrencia(oc)}
+                          className="gap-1.5 text-xs font-bold shadow-xs"
+                          style={{ backgroundColor: corTema, color: '#fff' }}
+                        >
+                          <CheckCircle2 className="h-4 w-4" />
+                          <span>Registrar pagamento</span>
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
 
   // Renderiza a memória de cálculo da fórmula por seção
   const renderCardCalculo = (tipo: TipoCalculoDizimo) => {
@@ -995,42 +1242,59 @@ export default function Dizimos() {
           description="Base única compartilhada e cálculos independentes de despesas pagas com marcação ministerial."
         />
 
-        {/* Seletor de mês */}
-        <div className="flex items-center gap-2 rounded-xl border border-border bg-white p-1.5 shadow-soft">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            onClick={handlePrevMonth}
-            title="Mês anterior"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <div className="flex items-center gap-2 px-2 text-sm font-bold text-foreground">
-            <CalendarDays className="h-4 w-4 text-primary" />
-            <span>{monthLabel}</span>
+        {/* Seletor de mês e sincronização */}
+        <div className="flex flex-wrap items-center gap-2">
+          {compromissosDizimo.length > 0 && can(user?.role, 'writeFinance') && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleSincronizarMes}
+              disabled={sincronizandoMes}
+              className="h-9 gap-1.5 border-primary/30 text-xs font-semibold text-primary hover:bg-primary/10"
+              title={`Sincronizar ocorrências pendentes de ${monthLabel}`}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${sincronizandoMes ? 'animate-spin' : ''}`} />
+              <span>Sincronizar mês</span>
+            </Button>
+          )}
+
+          <div className="flex items-center gap-2 rounded-xl border border-border bg-white p-1.5 shadow-soft">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              onClick={handlePrevMonth}
+              title="Mês anterior"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div className="flex items-center gap-2 px-2 text-sm font-bold text-foreground">
+              <CalendarDays className="h-4 w-4 text-primary" />
+              <span>{monthLabel}</span>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              onClick={handleNextMonth}
+              title="Próximo mês"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              onClick={loadData}
+              title="Atualizar dados"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            onClick={handleNextMonth}
-            title="Próximo mês"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            onClick={loadData}
-            title="Atualizar dados"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </Button>
         </div>
       </div>
 
@@ -1160,12 +1424,14 @@ export default function Dizimos() {
         {/* TAB 1: DÍZIMO */}
         <TabsContent value="dizimo" className="space-y-6">
           {renderCardCalculo('dizimo')}
+          {renderSecaoOcorrenciasAbertas('dizimo')}
           {renderTabelaAuditoria('dizimo')}
         </TabsContent>
 
         {/* TAB 2: OFERTA */}
         <TabsContent value="oferta" className="space-y-6">
           {renderCardCalculo('oferta')}
+          {renderSecaoOcorrenciasAbertas('oferta')}
           {renderTabelaAuditoria('oferta')}
           <OfertasVoluntariasModule
             selectedMonth={selectedMonth}
@@ -1181,6 +1447,7 @@ export default function Dizimos() {
         {/* TAB 3: PRIMÍCIAS */}
         <TabsContent value="primicias" className="space-y-6">
           {renderCardCalculo('primicias')}
+          {renderSecaoOcorrenciasAbertas('primicias')}
           {renderTabelaAuditoria('primicias')}
         </TabsContent>
       </Tabs>
@@ -1405,6 +1672,31 @@ export default function Dizimos() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* DIALOG DE BAIXA OFICIAL: REUTILIZA BAIXAOCORRENCIADIALOG */}
+      <BaixaOcorrenciaDialog
+        open={baixaModalOpen}
+        onOpenChange={(open) => {
+          setBaixaModalOpen(open)
+          if (!open) {
+            setOcorrenciaParaBaixar(null)
+            setCompromissoParaBaixar(null)
+          }
+        }}
+        ocorrencia={ocorrenciaParaBaixar}
+        compromisso={compromissoParaBaixar}
+        contas={contas}
+        onSuccess={async () => {
+          await loadData()
+          setOcorrenciaParaBaixar(null)
+          setCompromissoParaBaixar(null)
+          toast({
+            title: 'Pagamento ministerial registrado!',
+            description:
+              'A ocorrência foi baixada e integrada automaticamente à base de dízimos e ao saldo da conta.',
+          })
+        }}
+      />
     </div>
   )
 }

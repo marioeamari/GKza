@@ -88,6 +88,106 @@ export function filtrarOcorrenciasDizimoMes<T extends Partial<DespesaOcorrencia>
 }
 
 /**
+ * Normaliza e identifica se uma ocorrência ou compromisso pertence a um determinado
+ * tipo ministerial de contribuição ('dizimo', 'oferta', 'primicias').
+ */
+export function matchesTipoCalculo(
+  tipoAlvo: 'dizimo' | 'oferta' | 'primicias',
+  oc: {
+    tipo_dizimo?: string | null
+    expand?: {
+      tipo_dizimo?: {
+        nome?: string | null
+        codigo?: string | null
+        id?: string | null
+      } | null
+      compromisso?: {
+        tipo_dizimo?: string | null
+        expand?: {
+          tipo_dizimo?: {
+            nome?: string | null
+            codigo?: string | null
+            id?: string | null
+          } | null
+        } | null
+      } | null
+    } | null
+  },
+  tiposDizimoList: Array<{ id: string; nome: string; codigo?: string }> = [],
+): boolean {
+  // Coleta possíveis identificadores e nomes
+  const tipoId =
+    oc.tipo_dizimo ||
+    oc.expand?.tipo_dizimo?.id ||
+    oc.expand?.compromisso?.tipo_dizimo ||
+    oc.expand?.compromisso?.expand?.tipo_dizimo?.id ||
+    ''
+
+  const tipoRecord = tiposDizimoList.find((t) => t.id === tipoId)
+
+  const rawNome = (
+    oc.expand?.tipo_dizimo?.nome ||
+    oc.expand?.compromisso?.expand?.tipo_dizimo?.nome ||
+    tipoRecord?.nome ||
+    ''
+  ).toLowerCase()
+
+  const rawCodigo = (
+    oc.expand?.tipo_dizimo?.codigo ||
+    oc.expand?.compromisso?.expand?.tipo_dizimo?.codigo ||
+    tipoRecord?.codigo ||
+    ''
+  ).toLowerCase()
+
+  const strToTest = `${rawNome} ${rawCodigo}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+  if (tipoAlvo === 'oferta') {
+    return strToTest.includes('oferta')
+  }
+
+  if (tipoAlvo === 'primicias') {
+    return strToTest.includes('primicia')
+  }
+
+  // Para 'dizimo':
+  // Se for explicitamente dízimo, ou se não for nem oferta nem primícia (dízimo é o tipo padrão/predominante)
+  if (strToTest.includes('oferta') || strToTest.includes('primicia')) {
+    return false
+  }
+
+  return true
+}
+
+/**
+ * Filtra ocorrências em aberto (status != 'paga') de um mês específico
+ * que correspondam ao tipo ministerial ('dizimo', 'oferta', 'primicias') ou todas.
+ */
+export function filtrarOcorrenciasAbertoDizimoMes<T extends Partial<DespesaOcorrencia>>(
+  ocorrencias: T[],
+  selectedMonth: string,
+  tipoAlvo?: 'dizimo' | 'oferta' | 'primicias',
+  tiposDizimoList: Array<{ id: string; nome: string; codigo?: string }> = [],
+): T[] {
+  return ocorrencias
+    .filter((oc) => {
+      if (oc.status === 'paga') return false
+      // Verifica competência do mês selecionado
+      const comp = oc.competencia ? oc.competencia.slice(0, 7) : null
+      if (comp !== selectedMonth) return false
+
+      if (tipoAlvo) {
+        return matchesTipoCalculo(tipoAlvo, oc as any, tiposDizimoList)
+      }
+      return true
+    })
+    .sort((a, b) => {
+      const dueA = a.data_vencimento || ''
+      const dueB = b.data_vencimento || ''
+      return dueA.localeCompare(dueB)
+    })
+}
+
+/**
  * Calcula a base única compartilhada ponderada para dízimo, oferta e primícias:
  * Soma valor_efetivo de cada ocorrência do mês.
  */
