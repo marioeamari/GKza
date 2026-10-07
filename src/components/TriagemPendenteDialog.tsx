@@ -281,7 +281,7 @@ export function TriagemPendenteDialog({
       pessoa_responsavel: '',
       link_pagamento: '',
       dizimo: false,
-      tipo_dizimo: defaultDizimoTipo,
+      tipo_dizimo: '',
       ativo: true,
       observacoes: item.comprovante_texto
         ? `Extraído do comprovante Telegram: ${item.comprovante_texto.slice(0, 200)}`
@@ -799,17 +799,36 @@ export function TriagemPendenteDialog({
           description: `“${lancInput.descricao}” entrou nos lançamentos do caixa oficial.`,
         })
       } else if (destino === 'despesa') {
-        await telegramPendentesService.triarComoDespesa(item.id, despInput)
-        toast({
-          title: 'Triagem concluída: Despesa cadastrada!',
-          description: `“${despInput.descricao}” virou compromisso em /despesas com ocorrências geradas.`,
-        })
+        const res = await telegramPendentesService.triarComoDespesa(item.id, despInput)
+        // Se for compra avulsa no cartão, gerou apenas lançamento pago
+        if ((res as any)?.collectionName === 'lancamentos' || !(res as any)?.regra_repeticao) {
+          toast({
+            title: 'Triagem concluída: Lançamento de cartão registrado!',
+            description: `“${despInput.descricao}” foi lançado diretamente no cartão no ciclo correspondente da fatura.`,
+          })
+        } else {
+          toast({
+            title: 'Triagem concluída: Despesa cadastrada!',
+            description: `“${despInput.descricao}” virou compromisso em /despesas com ocorrências geradas.`,
+          })
+        }
       } else {
-        await telegramPendentesService.triarComoAmbos(item.id, lancInput, despInput)
-        toast({
-          title: 'Triagem concluída: Lançamento + Despesa gerados!',
-          description: `Criado o lançamento no caixa e o compromisso em /despesas.`,
-        })
+        const resAmbos = await telegramPendentesService.triarComoAmbos(
+          item.id,
+          lancInput,
+          despInput,
+        )
+        if (!resAmbos.compromisso) {
+          toast({
+            title: 'Triagem concluída: Lançamento no cartão registrado!',
+            description: `“${lancInput.descricao}” foi lançado no cartão no ciclo correto da fatura (sem compromisso duplicado).`,
+          })
+        } else {
+          toast({
+            title: 'Triagem concluída: Lançamento + Despesa gerados!',
+            description: `Criado o lançamento no caixa e o compromisso em /despesas.`,
+          })
+        }
       }
 
       onTriado()

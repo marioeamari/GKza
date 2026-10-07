@@ -55,7 +55,7 @@ export function BaixaOcorrenciaDialog({
   const [contaId, setContaId] = useState<string>('')
   const [observacoes, setObservacoes] = useState<string>('')
   const [comprovanteArquivo, setComprovanteArquivo] = useState<File | null>(null)
-  const [dizimoPercentual, setDizimoPercentual] = useState<number>(100)
+  const [dizimoPercentual, setDizimoPercentual] = useState<number>(0)
 
   // Pode receber ocorrencia existente OU compromisso direto (para registrar pagamento retroativo)
   const comp = ocorrencia?.expand?.compromisso || compromisso
@@ -96,7 +96,9 @@ export function BaixaOcorrenciaDialog({
             ? Number(ocorrencia.dizimo_percentual)
             : comp?.dizimo_percentual !== undefined && comp?.dizimo_percentual !== null
               ? Number(comp.dizimo_percentual)
-              : 100
+              : comp?.dizimo || ocorrencia.dizimo
+                ? 100
+                : 0
         setDizimoPercentual(pct)
       } else if (compromisso) {
         setValorPago(compromisso.valor_estimado || compromisso.valor_parcela || 0)
@@ -113,7 +115,9 @@ export function BaixaOcorrenciaDialog({
         const pct =
           compromisso.dizimo_percentual !== undefined && compromisso.dizimo_percentual !== null
             ? Number(compromisso.dizimo_percentual)
-            : 100
+            : compromisso.dizimo
+              ? 100
+              : 0
         setDizimoPercentual(pct)
       }
     }

@@ -925,7 +925,12 @@ export const despesasService = {
           lancamento: lancamento.id,
           dizimo: params.dizimo || false,
           tipo_dizimo: params.tipoDizimoId || null,
-          dizimo_percentual: params.dizimoPercentual !== undefined ? params.dizimoPercentual : 100,
+          dizimo_percentual:
+            params.dizimoPercentual !== undefined
+              ? params.dizimoPercentual
+              : params.dizimo
+                ? 100
+                : 0,
           direcionamento: params.direcionamento || null,
           observacoes: params.observacoes || null,
         },
@@ -1136,7 +1141,11 @@ export const despesasService = {
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || null,
           dizimo_percentual:
-            compromisso.dizimo_percentual !== undefined ? compromisso.dizimo_percentual : 100,
+            compromisso.dizimo_percentual !== undefined
+              ? compromisso.dizimo_percentual
+              : compromisso.dizimo
+                ? 100
+                : 0,
           direcionamento: compromisso.direcionamento || null,
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || null,
@@ -1471,7 +1480,11 @@ export const despesasService = {
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || null,
           dizimo_percentual:
-            compromisso.dizimo_percentual !== undefined ? compromisso.dizimo_percentual : 100,
+            compromisso.dizimo_percentual !== undefined
+              ? compromisso.dizimo_percentual
+              : compromisso.dizimo
+                ? 100
+                : 0,
           direcionamento: compromisso.direcionamento || null,
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || 'Pagamento único / avulso',
@@ -1529,7 +1542,11 @@ export const despesasService = {
             dizimo: compromisso.dizimo || false,
             tipo_dizimo: compromisso.tipo_dizimo || null,
             dizimo_percentual:
-              compromisso.dizimo_percentual !== undefined ? compromisso.dizimo_percentual : 100,
+              compromisso.dizimo_percentual !== undefined
+                ? compromisso.dizimo_percentual
+                : compromisso.dizimo
+                  ? 100
+                  : 0,
             direcionamento: compromisso.direcionamento || null,
             link_pagamento: compromisso.link_pagamento || null,
             observacoes: `Parcela ${p}/${total}`,
@@ -1622,7 +1639,11 @@ export const despesasService = {
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || null,
           dizimo_percentual:
-            compromisso.dizimo_percentual !== undefined ? compromisso.dizimo_percentual : 100,
+            compromisso.dizimo_percentual !== undefined
+              ? compromisso.dizimo_percentual
+              : compromisso.dizimo
+                ? 100
+                : 0,
           direcionamento: compromisso.direcionamento || null,
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || 'Assinatura anual',
@@ -1723,7 +1744,11 @@ export const despesasService = {
             dizimo: compromisso.dizimo || false,
             tipo_dizimo: compromisso.tipo_dizimo || null,
             dizimo_percentual:
-              compromisso.dizimo_percentual !== undefined ? compromisso.dizimo_percentual : 100,
+              compromisso.dizimo_percentual !== undefined
+                ? compromisso.dizimo_percentual
+                : compromisso.dizimo
+                  ? 100
+                  : 0,
             direcionamento: compromisso.direcionamento || null,
             link_pagamento: compromisso.link_pagamento || null,
             observacoes: compromisso.observacoes || null,
@@ -1855,7 +1880,11 @@ export const despesasService = {
           dizimo: compromisso.dizimo || false,
           tipo_dizimo: compromisso.tipo_dizimo || null,
           dizimo_percentual:
-            compromisso.dizimo_percentual !== undefined ? compromisso.dizimo_percentual : 100,
+            compromisso.dizimo_percentual !== undefined
+              ? compromisso.dizimo_percentual
+              : compromisso.dizimo
+                ? 100
+                : 0,
           direcionamento: compromisso.direcionamento || null,
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || null,
