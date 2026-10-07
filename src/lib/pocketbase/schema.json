@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-06T22:26:36.638Z",
+  "generatedAt": "2026-10-07T00:26:29.756Z",
   "collections": [
     {
       "name": "users",
@@ -4392,6 +4392,62 @@
         "CREATE INDEX idx_lemb_rap_pessoa ON lembretes_rapidos (pessoa)",
         "CREATE INDEX idx_lemb_rap_empresa ON lembretes_rapidos (empresa)",
         "CREATE INDEX idx_lemb_rap_user ON lembretes_rapidos (usuario)"
+      ]
+    },
+    {
+      "name": "backup_remocoes",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "origem_colecao",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "registro_id",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "motivo",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "dados_json",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_bkp_origem ON backup_remocoes (origem_colecao)",
+        "CREATE INDEX idx_bkp_reg_id ON backup_remocoes (registro_id)",
+        "CREATE INDEX idx_bkp_motivo ON backup_remocoes (motivo)"
       ]
     }
   ]

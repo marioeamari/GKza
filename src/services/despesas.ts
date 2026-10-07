@@ -784,13 +784,103 @@ export const despesasService = {
       }
     }
 
+    // PREVENÇÃO DE GÊMEAS: Reaproveitar ocorrência prevista já existente do compromisso
+    // na mesma competência (e parcela), se houver. Caso contrário, criar nova ocorrência paga.
+    let ocorrenciaPrevistaExistente: DespesaOcorrencia | null = null
+    try {
+      const candidatas = await pb
+        .collection<DespesaOcorrencia>('despesas_ocorrencias')
+        .getFullList({
+          filter: `compromisso = '${params.compromissoId}' && competencia = '${competenciaEfetiva}'`,
+          sort: 'created',
+        })
+
+      // Procurar primeira candidata em aberto (status 'prevista' e sem lançamento)
+      ocorrenciaPrevistaExistente =
+        candidatas.find((c) => c.status === 'prevista' && !c.lancamento) || null
+    } catch {
+      /* ignore */
+    }
+
+    const secaoEfetiva =
+      params.secao ||
+      compRecord?.secao ||
+      (metodoEfetivoEhCredito
+        ? 'cartoes_credito'
+        : compRecord?.regra_repeticao === 'anual'
+          ? 'assinaturas_anuais'
+          : 'contas_mensais_pix_boleto')
+
     let ocorrencia: DespesaOcorrencia
-    if (params.comprovanteArquivo) {
+    if (ocorrenciaPrevistaExistente) {
+      // Reaproveitar ocorrência existente atualizando para 'paga'
+      const diferencaValor = params.valorPago !== ocorrenciaPrevistaExistente.valor_previsto
+
+      if (params.comprovanteArquivo) {
+        const fdOcorr = new FormData()
+        fdOcorr.append('status', 'paga')
+        fdOcorr.append('valor_pago', String(params.valorPago))
+        fdOcorr.append('valor_previsto', String(params.valorPago))
+        fdOcorr.append('valor_ajustado_manualmente', String(diferencaValor))
+        fdOcorr.append('data_pagamento', `${params.dataPagamento} 12:00:00`)
+        fdOcorr.append('conta', params.contaId)
+        fdOcorr.append('secao', secaoEfetiva)
+        if (params.contextoTipo) fdOcorr.append('contexto_tipo', params.contextoTipo)
+        if (params.empresaId) fdOcorr.append('empresa', params.empresaId)
+        if (params.dizimo !== undefined) fdOcorr.append('dizimo', String(params.dizimo))
+        if (params.tipoDizimoId) fdOcorr.append('tipo_dizimo', params.tipoDizimoId)
+        if (params.dizimoPercentual !== undefined) {
+          fdOcorr.append('dizimo_percentual', String(params.dizimoPercentual))
+        }
+        if (params.direcionamento) fdOcorr.append('direcionamento', params.direcionamento)
+        if (params.observacoes) fdOcorr.append('observacoes', params.observacoes)
+        fdOcorr.append('lancamento', lancamento.id)
+        fdOcorr.append('competencia', competenciaEfetiva)
+        fdOcorr.append('data_vencimento', vencimentoRegistradoIso)
+        fdOcorr.append('comprovante_pagamento', params.comprovanteArquivo)
+
+        ocorrencia = await pb
+          .collection<DespesaOcorrencia>('despesas_ocorrencias')
+          .update(ocorrenciaPrevistaExistente.id, fdOcorr, {
+            expand:
+              'compromisso,compromisso.tag,compromisso.categoria,compromisso.tipo_despesa,compromisso.metodo_pagamento,compromisso.titular_pessoa,compromisso.titular_empresa,compromisso.conta_padrao,conta,tipo_dizimo,lancamento',
+          })
+      } else {
+        const updates: Partial<DespesaOcorrencia> = {
+          status: 'paga',
+          valor_pago: params.valorPago,
+          valor_previsto: params.valorPago,
+          valor_ajustado_manualmente: diferencaValor,
+          data_pagamento: `${params.dataPagamento} 12:00:00`,
+          conta: params.contaId,
+          secao: secaoEfetiva,
+          ...(params.contextoTipo ? { contexto_tipo: params.contextoTipo } : {}),
+          ...(params.empresaId ? { empresa: params.empresaId } : {}),
+          ...(params.dizimo !== undefined ? { dizimo: params.dizimo } : {}),
+          ...(params.tipoDizimoId ? { tipo_dizimo: params.tipoDizimoId } : {}),
+          ...(params.dizimoPercentual !== undefined
+            ? { dizimo_percentual: params.dizimoPercentual }
+            : {}),
+          ...(params.direcionamento ? { direcionamento: params.direcionamento } : {}),
+          ...(params.observacoes ? { observacoes: params.observacoes } : {}),
+          lancamento: lancamento.id,
+          competencia: competenciaEfetiva,
+          data_vencimento: vencimentoRegistradoIso,
+        }
+
+        ocorrencia = await pb
+          .collection<DespesaOcorrencia>('despesas_ocorrencias')
+          .update(ocorrenciaPrevistaExistente.id, updates, {
+            expand:
+              'compromisso,compromisso.tag,compromisso.categoria,compromisso.tipo_despesa,compromisso.metodo_pagamento,compromisso.titular_pessoa,compromisso.titular_empresa,compromisso.conta_padrao,conta,tipo_dizimo,lancamento',
+          })
+      }
+    } else if (params.comprovanteArquivo) {
       const fdOcorr = new FormData()
       fdOcorr.append('compromisso', params.compromissoId)
       fdOcorr.append('contexto_tipo', params.contextoTipo || 'pessoal')
       if (params.empresaId) fdOcorr.append('empresa', params.empresaId)
-      fdOcorr.append('secao', params.secao || 'assinaturas_anuais')
+      fdOcorr.append('secao', secaoEfetiva)
       fdOcorr.append('conta', params.contaId)
       fdOcorr.append('competencia', competenciaEfetiva)
       fdOcorr.append('data_vencimento', vencimentoRegistradoIso)
@@ -812,7 +902,7 @@ export const despesasService = {
 
       ocorrencia = await pb.collection<DespesaOcorrencia>('despesas_ocorrencias').create(fdOcorr, {
         expand:
-          'compromisso,compromisso.tag,compromisso.categoria,compromisso.tipo_despesa,compromisso.metodo_pagamento,conta,tipo_dizimo,lancamento',
+          'compromisso,compromisso.tag,compromisso.categoria,compromisso.tipo_despesa,compromisso.metodo_pagamento,compromisso.titular_pessoa,compromisso.titular_empresa,compromisso.conta_padrao,conta,tipo_dizimo,lancamento',
       })
     } else {
       ocorrencia = await pb.collection<DespesaOcorrencia>('despesas_ocorrencias').create(
@@ -820,7 +910,7 @@ export const despesasService = {
           compromisso: params.compromissoId,
           contexto_tipo: params.contextoTipo || 'pessoal',
           empresa: params.empresaId || null,
-          secao: params.secao || 'assinaturas_anuais',
+          secao: secaoEfetiva,
           conta: params.contaId,
           competencia: competenciaEfetiva,
           data_vencimento: vencimentoRegistradoIso,

@@ -2740,5 +2740,149 @@ describe('despesasService - Agrupador de Despesas e Helpers', () => {
         }),
       ).rejects.toThrow('O compromisso não tem categoria definida — edite-o antes de baixar')
     })
+
+    it('registrarPagamentoCompromisso: reaproveita ocorrencia prevista existente em vez de criar nova', async () => {
+      const mockConta = { id: 'c_corrente_1', tipo: 'corrente', nome: 'Nubank PF' }
+      const mockCompromisso = {
+        id: 'comp_ballet',
+        descricao: 'Ballet Rafa',
+        categoria: 'cat_dizimos',
+        secao: 'contas_mensais_pix_boleto',
+        dia_vencimento: 5,
+        valor_estimado: 267,
+      }
+      const mockOcorrenciaPrevista = {
+        id: 'ocorr_prevista_existente',
+        compromisso: 'comp_ballet',
+        competencia: '2026-09',
+        status: 'prevista',
+        valor_previsto: 267,
+        lancamento: null,
+      }
+      const mockLancamentoCriado = {
+        id: 'lanc_novo_123',
+        descricao: 'Ballet Rafa',
+        valor: 267,
+      }
+
+      const updateOcorrMock = vi.fn().mockImplementation((id, data) => ({
+        id,
+        ...data,
+        status: 'paga',
+        lancamento: 'lanc_novo_123',
+      }))
+      const createOcorrMock = vi.fn()
+      const createLancMock = vi.fn().mockResolvedValue(mockLancamentoCriado)
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') {
+          return { getOne: vi.fn().mockResolvedValue(mockConta) } as any
+        }
+        if (name === 'despesas_compromisso') {
+          return { getOne: vi.fn().mockResolvedValue(mockCompromisso) } as any
+        }
+        if (name === 'despesas_ocorrencias') {
+          return {
+            getFullList: vi.fn().mockResolvedValue([mockOcorrenciaPrevista]),
+            update: updateOcorrMock,
+            create: createOcorrMock,
+          } as any
+        }
+        if (name === 'lancamentos') {
+          return { create: createLancMock } as any
+        }
+        return {} as any
+      })
+
+      const resultado = await despesasService.registrarPagamentoCompromisso({
+        compromissoId: 'comp_ballet',
+        contaId: 'c_corrente_1',
+        descricao: 'Ballet Rafa',
+        valorPago: 267,
+        dataPagamento: '2026-09-05',
+      })
+
+      expect(createLancMock).toHaveBeenCalledTimes(1)
+      // Garante que update foi chamado na ocorrência prevista existente, e NÃO create
+      expect(updateOcorrMock).toHaveBeenCalledWith(
+        'ocorr_prevista_existente',
+        expect.objectContaining({
+          status: 'paga',
+          valor_pago: 267,
+          lancamento: 'lanc_novo_123',
+          secao: 'contas_mensais_pix_boleto',
+        }),
+        expect.anything(),
+      )
+      expect(createOcorrMock).not.toHaveBeenCalled()
+      expect(resultado.ocorrencia.id).toBe('ocorr_prevista_existente')
+    })
+
+    it('registrarPagamentoCompromisso: cria nova ocorrencia se nao houver prevista disponivel', async () => {
+      const mockConta = { id: 'c_corrente_1', tipo: 'corrente', nome: 'Nubank PF' }
+      const mockCompromisso = {
+        id: 'comp_ballet',
+        descricao: 'Ballet Rafa',
+        categoria: 'cat_dizimos',
+        secao: 'contas_mensais_pix_boleto',
+        dia_vencimento: 5,
+        valor_estimado: 267,
+      }
+      const mockLancamentoCriado = {
+        id: 'lanc_novo_456',
+        descricao: 'Ballet Rafa',
+        valor: 267,
+      }
+      const mockOcorrCriada = {
+        id: 'ocorr_nova_criada',
+        compromisso: 'comp_ballet',
+        status: 'paga',
+      }
+
+      const updateOcorrMock = vi.fn()
+      const createOcorrMock = vi.fn().mockResolvedValue(mockOcorrCriada)
+      const createLancMock = vi.fn().mockResolvedValue(mockLancamentoCriado)
+
+      vi.mocked(pb.collection).mockImplementation((name: string) => {
+        if (name === 'contas') {
+          return { getOne: vi.fn().mockResolvedValue(mockConta) } as any
+        }
+        if (name === 'despesas_compromisso') {
+          return { getOne: vi.fn().mockResolvedValue(mockCompromisso) } as any
+        }
+        if (name === 'despesas_ocorrencias') {
+          return {
+            getFullList: vi.fn().mockResolvedValue([]), // sem ocorrência existente
+            update: updateOcorrMock,
+            create: createOcorrMock,
+          } as any
+        }
+        if (name === 'lancamentos') {
+          return { create: createLancMock } as any
+        }
+        return {} as any
+      })
+
+      const resultado = await despesasService.registrarPagamentoCompromisso({
+        compromissoId: 'comp_ballet',
+        contaId: 'c_corrente_1',
+        descricao: 'Ballet Rafa',
+        valorPago: 267,
+        dataPagamento: '2026-09-05',
+      })
+
+      expect(createLancMock).toHaveBeenCalledTimes(1)
+      expect(updateOcorrMock).not.toHaveBeenCalled()
+      expect(createOcorrMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          compromisso: 'comp_ballet',
+          status: 'paga',
+          secao: 'contas_mensais_pix_boleto',
+          lancamento: 'lanc_novo_456',
+        }),
+        expect.anything(),
+      )
+      expect(resultado.ocorrencia.id).toBe('ocorr_nova_criada')
+    })
   })
 })
