@@ -40,6 +40,7 @@ import TokenAction from '@/pages/auth/TokenAction'
 import DespesaRapida from '@/pages/DespesaRapida'
 import LembreteRapidoPage from '@/pages/LembreteRapidoPage'
 import MobileHubPage from '@/pages/MobileHubPage'
+import DividasPage from '@/pages/DividasPage'
 
 // Redirecionador auxiliar caso algum fluxo do Google bata direto no frontend
 function GoogleCallbackRedirect() {
@@ -74,6 +75,7 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="/pendentes" element={<Pendentes />} />
           <Route path="/despesas" element={<Despesas />} />
+          <Route path="/dividas" element={<DividasPage />} />
           <Route path="/lancamentos" element={<Lancamentos />} />
           <Route path="/contas" element={<Contas />} />
           <Route path="/dizimos" element={<Dizimos />} />

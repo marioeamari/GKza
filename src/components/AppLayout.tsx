@@ -14,6 +14,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Receipt,
+  Coins,
   Settings,
   SlidersHorizontal,
   Sparkles,
@@ -226,6 +227,7 @@ export function AppLayout() {
       highlight: pendentesCount > 0,
     },
     { to: '/despesas', label: 'Despesas', icon: Receipt },
+    { to: '/dividas', label: 'Dívidas & Máquinas', icon: Coins },
     { to: '/lancamentos', label: 'Lançamentos', icon: BadgeDollarSign },
     {
       to: '/precificacao',
@@ -775,6 +777,7 @@ export function AppLayout() {
                   ['/precificacao/produtos', 'Precificação: Produtos & Custos', PackageCheck],
                   ['/precificacao/canais', 'Precificação: Canais & Taxas', Store],
                   ['/metas-agenda', 'Painel Metas & Agenda', Target],
+                  ['/dividas', 'Dívidas de Máquinas & Ativos', Coins],
                   ['/habitos', 'Hábitos & Rotinas', CalendarCheck2],
                   ['/agenda', 'Agenda de Compromissos', CalendarDays],
                   ['/projetos', 'Projetos & Tarefas', ListTodo],
