@@ -570,6 +570,90 @@ export function formatarSeloFaturaOcorrencia(params: {
   return `Fatura de ${mesCap} · vence ${vd}/${vm}`
 }
 
+/**
+ * Determina a exibição de datas nos cards de despesas conforme a modalidade de pagamento.
+ *
+ * Regras acordadas:
+ * 1. Crédito (compras no crédito):
+ *    - Primário (destaque): Data da compra ("Compra: xx/xx/xxxx")
+ *    - Secundário (discreto, menor, sem destaque): Vencimento da fatura / data de pagamento projetada ("Fatura: vence 23/10" ou "Fatura quitada: xx/xx/xxxx")
+ * 2. Demais métodos (débito, Pix, dinheiro, boleto, etc.):
+ *    - Compra e pagamento mantêm o padrão com destaque / peso normal:
+ *      - Compra: xx/xx/xxxx
+ *      - Pago em: xx/xx/xxxx (quando paga)
+ *      - Venc: xx/xx/xxxx (quando pendente)
+ */
+export interface ExibicaoDatasDespesa {
+  isCredito: boolean
+  dataCompraFormatada: string | null
+  // No crédito: destaque primário é a compra
+  destaquePrimario: 'compra' | 'padrao'
+  // No crédito: label discreto secundário para a fatura/pagamento projetado
+  faturaSecundariaLabel: string | null
+  // Nos demais métodos: label tradicional de "Pago em: xx/xx/xxxx"
+  pagoEmLabel: string | null
+  // Data de vencimento para não-cartão
+  vencimentoLabel: string | null
+}
+
+export function formatarExibicaoDatasDespesa(params: {
+  isCredito: boolean
+  dataCompraFormatada: string | null
+  dataPagamento?: string | null
+  dataVencimento?: string | null
+  isPaga: boolean
+  nomeConta?: string | null
+}): ExibicaoDatasDespesa {
+  const {
+    isCredito,
+    dataCompraFormatada,
+    dataPagamento,
+    dataVencimento,
+    isPaga,
+  } = params
+
+  if (isCredito) {
+    let faturaSecundariaLabel: string | null = null
+    const dataRef = dataPagamento || dataVencimento
+    if (dataRef) {
+      const cleanDate = dataRef.slice(0, 10)
+      const parts = cleanDate.split('-')
+      if (parts.length === 3) {
+        const diaMes = `${parts[2]}/${parts[1]}`
+        if (isPaga) {
+          faturaSecundariaLabel = `Fatura: quitada (${diaMes})`
+        } else {
+          faturaSecundariaLabel = `Fatura: vence ${diaMes}`
+        }
+      }
+    }
+
+    return {
+      isCredito: true,
+      dataCompraFormatada,
+      destaquePrimario: 'compra',
+      faturaSecundariaLabel,
+      pagoEmLabel: null,
+      vencimentoLabel: null,
+    }
+  }
+
+  // Demais métodos (débito, Pix, dinheiro, boleto, etc.): padrão vigente
+  const pagoEmLabel =
+    isPaga && dataPagamento ? `Pago em: ${formatDate(dataPagamento)}` : null
+  const vencimentoLabel =
+    !isPaga && dataVencimento ? `Venc: ${formatDate(dataVencimento)}` : null
+
+  return {
+    isCredito: false,
+    dataCompraFormatada,
+    destaquePrimario: 'padrao',
+    faturaSecundariaLabel: null,
+    pagoEmLabel,
+    vencimentoLabel,
+  }
+}
+
 export function getAvisoFaturaCartao(
   conta: Conta | undefined,
   dataTransacao: string,
