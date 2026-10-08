@@ -37,12 +37,160 @@ export interface TriagemCartaoLancamentoPayload {
   dizimo: false
 }
 
+export interface BuildDespesaCanonicaParams {
+  descricao: string
+  valor: number
+  dataCompra: string // 'YYYY-MM-DD' ou ISO
+  contaId: string
+  conta?: CartaoContaParam | null
+  metodoEhCredito?: boolean
+  categoriaId?: string
+  fornecedor?: string
+  titularTipo?: TitularTipo
+  titularEmpresaId?: string
+  titularPessoaId?: string
+  observacoes?: string
+  origemTexto?: string
+}
+
+export interface DespesaCanonicaPayloads {
+  compromisso: Partial<DespesaCompromisso>
+  ocorrencia: Partial<DespesaOcorrencia>
+  lancamento: Partial<Lancamento>
+  competencia: string
+  dataVencimentoStr: string
+}
+
 /**
- * 1. Payload de triagem de compra avulsa de cartão:
- * - Lança SOMENTE lançamento pago (status: 'pago')
- * - Competência e vencimento calculados exclusivamente via calcularCompetenciaEVencimento
- * - dizimo: false SEMPRE como default
- * - Nunca gera compromisso nem ocorrência
+ * REGRA PERMANENTE DE ENTRADA UNIFICADA:
+ * "Independente de onde a despesa é gerada (Telegram, triagem PWA, Despesa Rápida ou /despesa),
+ * tem que ser o mesmo tipo de registro, tanto de origem quanto de finalidade. Não deve haver distinção.
+ * O que varia são os campos vindo sendo preenchidos. Toda despesa gera o modelo canônico:
+ * despesas_compromisso (regra 'avulso' para avulsas) + despesas_ocorrencias (na competência calculada pela
+ * regra única) + lancamentos vinculado à ocorrência."
+ *
+ * buildDespesaAvulsaCanonica calcula o trio de registros consistentes:
+ * - Não-cartão: competência = mês da compra; data_pagamento = data da compra.
+ * - Cartão de crédito: competência via ciclo da fatura (compra até fechamento = mês corrente, após = mês seguinte);
+ *   data_pagamento / data_vencimento = vencimento da fatura da competência.
+ */
+export function buildDespesaAvulsaCanonica(
+  params: BuildDespesaCanonicaParams,
+): DespesaCanonicaPayloads {
+  const dataCompraStr = params.dataCompra.slice(0, 10)
+  const contaObj = params.conta as Conta | undefined
+  const rawFech = Number((contaObj as any)?.dia_fechamento)
+  const diaFechamentoNum = !isNaN(rawFech) && rawFech > 0 ? rawFech : 0
+  const isTipoCartao = contaObj?.tipo === 'cartao'
+  const aceitaCredito = Boolean(
+    isTipoCartao ||
+    (Array.isArray(contaObj?.tipos_pagamento) && contaObj?.tipos_pagamento.includes('credito')) ||
+    (typeof (contaObj as any)?.tipos_pagamento === 'string' &&
+      (contaObj as any).tipos_pagamento.includes('credito')),
+  )
+  const ehCredito =
+    params.metodoEhCredito ?? Boolean(isTipoCartao || (aceitaCredito && diaFechamentoNum > 0))
+
+  const rawVenc = Number((contaObj as any)?.dia_vencimento)
+  const diaVencimentoNum = !isNaN(rawVenc) && rawVenc > 0 ? rawVenc : undefined
+
+  const compVenc = calcularCompetenciaEVencimento({
+    dataCompra: dataCompraStr,
+    conta: contaObj,
+    metodoEhCredito: ehCredito,
+    diaVencimento: diaVencimentoNum,
+  })
+
+  const titularTipo = params.titularTipo || (params.titularEmpresaId ? 'cnpj' : 'cpf')
+  const empresaId = titularTipo === 'cnpj' ? params.titularEmpresaId || '' : ''
+  const pessoaId =
+    titularTipo === 'cpf' ? params.titularPessoaId || '' : params.titularPessoaId || ''
+
+  const dataVencimentoStr = compVenc.dataVencimento.slice(0, 10)
+  const dataPagamentoEfetiva = ehCredito ? dataVencimentoStr : dataCompraStr
+  const secao = ehCredito ? 'cartoes_credito' : 'contas_mensais_pix_boleto'
+
+  const obs =
+    params.observacoes ||
+    (params.origemTexto
+      ? `${params.origemTexto} (competência ${compVenc.competencia})`
+      : `Despesa avulsa (competência ${compVenc.competencia})`)
+
+  const compromisso: Partial<DespesaCompromisso> = {
+    descricao: params.descricao.trim(),
+    fornecedor: params.fornecedor?.trim() || '',
+    categoria: params.categoriaId || '',
+    secao,
+    regra_repeticao: 'avulso',
+    tipo_valor: 'fixo',
+    modalidade_parcelamento: 'a_vista',
+    total_parcelas: 1,
+    parcela_inicial: 1,
+    valor_estimado: Number(params.valor),
+    dia_vencimento: diaVencimentoNum || parseInt(dataVencimentoStr.slice(8, 10), 10) || 10,
+    regra_vencimento_texto: 'Único',
+    data_inicio: `${dataCompraStr} 00:00:00.000Z`,
+    conta_padrao: params.contaId,
+    metodo_pagamento: ehCredito ? 'r9qdfpwfe5143oe' : '',
+    titular_tipo: titularTipo,
+    titular_pessoa: pessoaId,
+    titular_empresa: empresaId,
+    contexto_tipo: titularTipo === 'cnpj' ? 'empresa' : 'pessoal',
+    empresa: empresaId,
+    pessoa: pessoaId,
+    dizimo: false,
+    dizimo_percentual: 0,
+    ativo: true,
+    precisa_revisao: false,
+    observacoes: obs,
+  }
+
+  const ocorrencia: Partial<DespesaOcorrencia> = {
+    contexto_tipo: titularTipo === 'cnpj' ? 'empresa' : 'pessoal',
+    empresa: empresaId || null,
+    secao,
+    conta: params.contaId,
+    competencia: compVenc.competencia,
+    numero_parcela: 0,
+    total_parcelas: 0,
+    data_vencimento: compVenc.dataVencimentoIso,
+    data_pagamento: `${dataPagamentoEfetiva} 12:00:00`,
+    valor_previsto: Number(params.valor),
+    valor_pago: Number(params.valor),
+    valor_estimado_original: Number(params.valor),
+    valor_ajustado_manualmente: false,
+    status: 'paga',
+    dizimo: false,
+    dizimo_percentual: 0,
+    observacoes: obs,
+  }
+
+  const lancamento: Partial<Lancamento> = {
+    descricao: params.descricao.trim(),
+    valor: Number(params.valor),
+    tipo: 'despesa',
+    data: `${dataPagamentoEfetiva} 12:00:00`,
+    competencia: compVenc.competencia,
+    status: 'pago',
+    conta: params.contaId,
+    categoria: params.categoriaId || '',
+    empresa: empresaId,
+    pessoa: pessoaId,
+    observacoes: obs,
+  }
+
+  return {
+    compromisso,
+    ocorrencia,
+    lancamento,
+    competencia: compVenc.competencia,
+    dataVencimentoStr,
+  }
+}
+
+/**
+ * @deprecated Mantido para compatibilidade com testes legados existentes.
+ * O fluxo canônico utiliza buildDespesaAvulsaCanonica garantindo compromisso + ocorrência + lançamento.
  */
 export function buildTriagemCartaoPayload(
   params: BuildTriagemCartaoParams,

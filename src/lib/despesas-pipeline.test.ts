@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildTriagemCartaoPayload,
+  buildDespesaAvulsaCanonica,
   verificarPodeGerarOcorrencia,
   prepararDuplicacaoCompromisso,
   prepararDuplicacaoLancamento,
@@ -144,70 +145,141 @@ describe('despesas-pipeline - Cobertura dos 8 Fluxos do Usuário', () => {
   })
 
   // --------------------------------------------------------------------------
-  // FLUXO 2: Triagem de Cartão Avulsa
-  // - Gera SOMENTE lançamento pago (status: 'pago')
-  // - NUNCA gera compromisso + ocorrência
-  // - dizimo: false SEMPRE
+  // FLUXO 2: Entrada Canônica Unificada de Despesas Avulsas (Telegram, Triagem, /despesas)
+  // - Regra permanente do usuário: todo canal gera o mesmo modelo canônico:
+  //   despesas_compromisso (avulso) + despesas_ocorrencias (competência da regra única) + lancamentos vinculado
+  // - Cartão de crédito: competência pelo ciclo de fechamento, data_pagamento no vencimento da fatura
+  // - Não-cartão: competência no mês da compra, data_pagamento na data da compra
   // --------------------------------------------------------------------------
-  describe('Fluxo 2: Triagem de Cartão Avulsa', () => {
-    it('produz payload exclusivamente de lançamento pago com dizimo: false, competência do ciclo e data = vencimento da fatura', () => {
+  describe('Fluxo 2: Entrada Canônica Unificada de Despesas Avulsas', () => {
+    it('gera compromisso + ocorrencia + lancamento consistentes para compra em cartão (ex: Sorvete rafa)', () => {
+      const contaNubank = {
+        id: 'sglo7dfsqvgfsni',
+        nome: 'NuBank',
+        tipo: 'cartao' as const,
+        dia_fechamento: 16,
+        dia_vencimento: 23,
+      }
+
+      // Compra após o fechamento: 2026-10-23 > dia 16 -> ciclo 2026-11
+      const canonica = buildDespesaAvulsaCanonica({
+        descricao: 'Sorvete rafa',
+        valor: 5.0,
+        dataCompra: '2026-10-23',
+        contaId: contaNubank.id,
+        conta: contaNubank,
+        categoriaId: '5822e1m7g49fgyq',
+        titularTipo: 'cpf',
+        titularPessoaId: 'pes_rafa',
+        origemTexto: 'Telegram',
+      })
+
+      expect(canonica.competencia).toBe('2026-11')
+      expect(canonica.dataVencimentoStr).toBe('2026-11-23')
+
+      // Compromisso
+      expect(canonica.compromisso.regra_repeticao).toBe('avulso')
+      expect(canonica.compromisso.secao).toBe('cartoes_credito')
+      expect(canonica.compromisso.valor_estimado).toBe(5.0)
+      expect(canonica.compromisso.descricao).toBe('Sorvete rafa')
+      expect(canonica.compromisso.dia_vencimento).toBe(23)
+      expect(canonica.compromisso.metodo_pagamento).toBe('r9qdfpwfe5143oe')
+
+      // Ocorrência
+      expect(canonica.ocorrencia.competencia).toBe('2026-11')
+      expect(canonica.ocorrencia.status).toBe('paga')
+      expect(canonica.ocorrencia.valor_pago).toBe(5.0)
+      expect(canonica.ocorrencia.valor_previsto).toBe(5.0)
+      expect(canonica.ocorrencia.data_pagamento).toBe('2026-11-23 12:00:00')
+      expect(canonica.ocorrencia.data_vencimento).toBe('2026-11-23T12:00:00.000Z')
+
+      // Lançamento
+      expect(canonica.lancamento.status).toBe('pago')
+      expect(canonica.lancamento.tipo).toBe('despesa')
+      expect(canonica.lancamento.competencia).toBe('2026-11')
+      expect(canonica.lancamento.data).toBe('2026-11-23 12:00:00')
+      expect(canonica.lancamento.valor).toBe(5.0)
+    })
+
+    it('gera compromisso + ocorrencia + lancamento para compra em cartão antes do fechamento', () => {
+      const contaNubank = {
+        id: 'sglo7dfsqvgfsni',
+        nome: 'NuBank',
+        tipo: 'cartao' as const,
+        dia_fechamento: 16,
+        dia_vencimento: 23,
+      }
+
+      // Compra antes do fechamento: 2026-10-10 <= dia 16 -> ciclo 2026-10
+      const canonica = buildDespesaAvulsaCanonica({
+        descricao: 'Café',
+        valor: 12.0,
+        dataCompra: '2026-10-10',
+        contaId: contaNubank.id,
+        conta: contaNubank,
+        categoriaId: 'cat_cafe',
+      })
+
+      expect(canonica.competencia).toBe('2026-10')
+      expect(canonica.dataVencimentoStr).toBe('2026-10-23')
+      expect(canonica.ocorrencia.competencia).toBe('2026-10')
+      expect(canonica.ocorrencia.data_pagamento).toBe('2026-10-23 12:00:00')
+      expect(canonica.lancamento.competencia).toBe('2026-10')
+      expect(canonica.lancamento.data).toBe('2026-10-23 12:00:00')
+    })
+
+    it('gera compromisso + ocorrencia + lancamento para despesa avulsa não-cartão (PIX/Dinheiro)', () => {
+      const contaCaixa = {
+        id: 'conta_itau',
+        nome: 'Itaú Corrente',
+        tipo: 'bancaria' as const,
+        dia_fechamento: 0,
+        dia_vencimento: 10,
+      }
+
+      const canonica = buildDespesaAvulsaCanonica({
+        descricao: 'Almoço PIX',
+        valor: 45.0,
+        dataCompra: '2026-10-05',
+        contaId: contaCaixa.id,
+        conta: contaCaixa,
+        categoriaId: 'cat_alimentacao',
+      })
+
+      expect(canonica.competencia).toBe('2026-10')
+      expect(canonica.compromisso.secao).toBe('contas_mensais_pix_boleto')
+      expect(canonica.ocorrencia.status).toBe('paga')
+      expect(canonica.ocorrencia.data_pagamento).toBe('2026-10-05 12:00:00')
+      expect(canonica.lancamento.data).toBe('2026-10-05 12:00:00')
+      expect(canonica.lancamento.competencia).toBe('2026-10')
+    })
+
+    it('mantém buildTriagemCartaoPayload para compatibilidade com código legado', () => {
       const cartao = {
         id: 'cartao_xp',
         nome: 'XP Visa Infinite',
         tipo: 'cartao' as const,
-        dia_fechamento: 15,
-        dia_vencimento: 25,
+        dia_fechamento: 5,
+        dia_vencimento: 15,
       }
 
       const payload = buildTriagemCartaoPayload({
         descricao: 'Almoço Restaurante',
-        valor: 145.5,
-        dataCompra: '2025-04-18', // após fechamento dia 15 -> ciclo 2025-05, vencimento 2025-05-25
+        valor: 150.5,
+        dataCompra: '2025-04-10',
         contaId: 'cartao_xp',
         conta: cartao,
         categoriaId: 'cat_alimentacao',
         titularTipo: 'cpf',
         titularPessoaId: 'pes_guilherme',
-        observacoes: 'Comprovante Telegram #1234',
       })
 
       expect(payload.tipo).toBe('despesa')
       expect(payload.status).toBe('pago')
-      expect(payload.valor).toBe(145.5)
       expect(payload.competencia).toBe('2025-05')
-      expect(payload.data).toBe('2025-05-25 12:00:00')
-      expect(payload.dizimo).toBe(false)
-      expect(payload.pessoa).toBe('pes_guilherme')
-      expect(payload.empresa).toBe('')
-      expect(payload.conta).toBe('cartao_xp')
-      expect(payload.categoria).toBe('cat_alimentacao')
-    })
-
-    it('mantém default dizimo: false mesmo sem passar titular ou observações e data no vencimento', () => {
-      const cartao = {
-        id: 'cartao_inter',
-        nome: 'Inter Mastercard',
-        tipo: 'cartao' as const,
-        dia_fechamento: 10,
-        dia_vencimento: 20,
-      }
-
-      const payload = buildTriagemCartaoPayload({
-        descricao: 'Combustível Posto',
-        valor: 200,
-        dataCompra: '2025-05-05',
-        contaId: 'cartao_inter',
-        conta: cartao,
-      })
-
-      expect(payload.dizimo).toBe(false)
-      expect(payload.competencia).toBe('2025-05')
-      expect(payload.data).toBe('2025-05-20 12:00:00')
-      expect(payload.status).toBe('pago')
-      expect(payload.observacoes).toContain('venc. fatura 2025-05-20')
+      expect(payload.data).toBe('2025-05-15 12:00:00')
     })
   })
-
   // --------------------------------------------------------------------------
   // FLUXO 3: Geração de Ocorrências (Barreira de Prevenção)
   // - Nada retroativo em relação ao limite/mês corrente

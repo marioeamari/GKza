@@ -1,10 +1,11 @@
 import type { RecordListOptions } from 'pocketbase'
 import pb from '@/lib/pocketbase/client'
-import { buildTriagemCartaoPayload } from '@/lib/despesas-pipeline'
+import { buildDespesaAvulsaCanonica } from '@/lib/despesas-pipeline'
 import { despesasService } from '@/services/despesas'
 import type {
   Conta,
   DespesaCompromisso,
+  DespesaOcorrencia,
   Lancamento,
   ModalidadeParcelamento,
   RegraRepeticao,
@@ -171,7 +172,7 @@ export const telegramPendentesService = {
     return lancamento
   },
 
-  // Helper interno para verificar se é compra avulsa em conta tipo cartão
+  // Helper interno para verificar se é compra avulsa em conta tipo cartão (mantido para compatibilidade)
   isCompraAvulsaCartao: async (
     contaId?: string,
     regraRepeticao?: string,
@@ -199,55 +200,77 @@ export const telegramPendentesService = {
     }
   },
 
-  // 2. Destino: Apenas Despesa (Compromisso Recorrente em /despesas)
+  // 2. Destino: Despesa (Compromisso em /despesas com ocorrência(s))
+  // REGRA CANÔNICA PERMANENTE: Toda despesa (avulsa, mensal, parcelada ou anual)
+  // salva compromisso em despesas_compromisso e gera suas ocorrências em despesas_ocorrencias.
+  // Quando for compra avulsa (paga), gera também o lançamento financeiro vinculado à ocorrência.
   triarComoDespesa: async (pendenteId: string, input: TriagemDespesaInput) => {
     const isParcelado =
       input.modalidade_parcelamento === 'parcelado' || input.regra_repeticao === 'parcelado'
     const totalParcelasNum = isParcelado ? Math.max(1, Number(input.total_parcelas) || 1) : 1
     const parcelaInicialNum = isParcelado ? Math.max(1, Number(input.parcela_inicial) || 1) : 1
     const titularTipo = input.titular_tipo || (input.empresa ? 'cnpj' : 'cpf')
+    const isAvulso = (input.regra_repeticao === 'avulso' || !input.regra_repeticao) && !isParcelado
 
-    // REGRA: quando a compra for avulsa em conta tipo cartão, NÃO salvar compromisso
-    // em despesas_compromisso e NÃO chamar gerarOcorrenciasParaCompromisso.
-    // Criar somente lancamento com status 'pago', data = vencimento da fatura da competência,
-    // competência e vencimento exclusivamente via calcularCompetenciaEVencimento.
-    const checkCartao = await telegramPendentesService.isCompraAvulsaCartao(
-      input.conta_padrao,
-      input.regra_repeticao,
-      input.modalidade_parcelamento,
-    )
+    let contaObj: Conta | undefined
+    if (input.conta_padrao) {
+      try {
+        contaObj = await pb.collection<Conta>('contas').getOne(input.conta_padrao)
+      } catch {
+        /* ignore */
+      }
+    }
 
-    if (checkCartao.ehCartao && checkCartao.conta) {
-      const payloadCartao = buildTriagemCartaoPayload({
+    if (isAvulso) {
+      const canonica = buildDespesaAvulsaCanonica({
         descricao: input.descricao,
         valor: Number(input.valor_estimado),
         dataCompra: input.data_inicio,
         contaId: input.conta_padrao || '',
-        conta: checkCartao.conta,
+        conta: contaObj,
         categoriaId: input.categoria || '',
+        fornecedor: input.fornecedor,
         titularTipo,
         titularEmpresaId: input.titular_empresa || input.empresa,
         titularPessoaId: input.titular_pessoa || input.pessoa,
         observacoes: input.observacoes,
+        origemTexto: 'Triagem de despesa',
       })
 
-      const lancamento = await pb.collection<Lancamento>('lancamentos').create(payloadCartao)
+      // 1. Cria compromisso avulso
+      const compromisso = await despesasService.saveCompromisso(canonica.compromisso)
 
+      // 2. Cria lançamento financeiro pago
+      const lancamento = await pb.collection<Lancamento>('lancamentos').create(canonica.lancamento)
+
+      // 3. Cria ocorrência paga vinculada ao lançamento
+      const ocorrenciaPayload = {
+        ...canonica.ocorrencia,
+        compromisso: compromisso.id,
+        lancamento: lancamento.id,
+      }
+      const ocorrencia = await pb
+        .collection<DespesaOcorrencia>('despesas_ocorrencias')
+        .create(ocorrenciaPayload)
+
+      // 4. Atualiza registro pendente com ambos os IDs gerados
       await pb.collection('telegram_registros_pendentes').update(pendenteId, {
         status: 'aprovado',
+        compromisso_gerado: compromisso.id,
         lancamento_gerado: lancamento.id,
         conta: input.conta_padrao || '',
         categoria: input.categoria || '',
         descricao: input.descricao,
         valor: Number(input.valor_estimado),
-        data: payloadCartao.data,
+        data: canonica.lancamento.data,
         empresa: input.empresa || input.titular_empresa || '',
         pessoa: input.pessoa || input.titular_pessoa || '',
       })
 
-      return lancamento as any
+      return { compromisso, ocorrencia, lancamento }
     }
 
+    // Fluxo para despesas recorrentes (mensal, anual) ou parceladas
     const payload: Partial<DespesaCompromisso> = {
       descricao: input.descricao.trim(),
       fornecedor: input.fornecedor?.trim() || (null as unknown as string),
@@ -283,17 +306,12 @@ export const telegramPendentesService = {
       total_parcelas: totalParcelasNum,
       parcela_inicial: parcelaInicialNum,
       valor_parcela: isParcelado ? Number(input.valor_estimado) : (null as unknown as number),
-      dia_vencimento:
-        input.regra_repeticao === 'avulso'
-          ? parseInt(input.data_inicio.slice(8, 10), 10) || 10
-          : Number(input.dia_vencimento) || 10,
+      dia_vencimento: Number(input.dia_vencimento) || 10,
       regra_vencimento_texto:
         input.regra_vencimento_texto ||
-        (input.regra_repeticao === 'avulso'
-          ? 'Único'
-          : isParcelado
-            ? `${input.dia_vencimento || 10}/m (${totalParcelasNum}x)`
-            : `${input.dia_vencimento || 10}/m`),
+        (isParcelado
+          ? `${input.dia_vencimento || 10}/m (${totalParcelasNum}x)`
+          : `${input.dia_vencimento || 10}/m`),
       data_inicio: `${input.data_inicio} 00:00:00.000Z`,
       data_fim_calculada: input.data_fim_calculada || (null as unknown as string),
       valor_estimado: Number(input.valor_estimado),
@@ -326,60 +344,79 @@ export const telegramPendentesService = {
     return compromisso
   },
 
-  // 3. Destino: Ambos (Cria o Lançamento do Caixa E o Compromisso Recorrente)
+  // 3. Destino: Ambos (Cria o Lançamento do Caixa E o Compromisso)
+  // Para despesas avulsas, unifica no mesmo modelo canônico vinculando o lançamento à ocorrência
   triarComoAmbos: async (
     pendenteId: string,
     lancamentoInput: TriagemLancamentoInput,
     despesaInput: TriagemDespesaInput,
   ) => {
-    // REGRA: quando a compra for avulsa em conta tipo cartão, NÃO salvar compromisso
-    // em despesas_compromisso e NÃO chamar gerarOcorrenciasParaCompromisso.
-    const contaCheckId = lancamentoInput.conta || despesaInput.conta_padrao
-    const checkCartao = await telegramPendentesService.isCompraAvulsaCartao(
-      contaCheckId,
-      despesaInput.regra_repeticao,
-      despesaInput.modalidade_parcelamento,
-    )
+    const isParcelado =
+      despesaInput.modalidade_parcelamento === 'parcelado' ||
+      despesaInput.regra_repeticao === 'parcelado'
+    const isAvulso =
+      (despesaInput.regra_repeticao === 'avulso' || !despesaInput.regra_repeticao) && !isParcelado
 
-    if (checkCartao.ehCartao && checkCartao.conta) {
+    const contaCheckId = lancamentoInput.conta || despesaInput.conta_padrao || ''
+    let contaObj: Conta | undefined
+    if (contaCheckId) {
+      try {
+        contaObj = await pb.collection<Conta>('contas').getOne(contaCheckId)
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (isAvulso) {
       const dataRef = lancamentoInput.data || despesaInput.data_inicio
       const titularTipoAmbos = despesaInput.titular_tipo || (despesaInput.empresa ? 'cnpj' : 'cpf')
-      const payloadCartao = buildTriagemCartaoPayload({
+
+      const canonica = buildDespesaAvulsaCanonica({
         descricao: lancamentoInput.descricao || despesaInput.descricao,
         valor: Number(lancamentoInput.valor || despesaInput.valor_estimado),
         dataCompra: dataRef,
         contaId: contaCheckId,
-        conta: checkCartao.conta,
+        conta: contaObj,
         categoriaId: lancamentoInput.categoria || despesaInput.categoria || '',
+        fornecedor: despesaInput.fornecedor,
         titularTipo: titularTipoAmbos,
         titularEmpresaId:
           lancamentoInput.empresa || despesaInput.empresa || despesaInput.titular_empresa,
         titularPessoaId:
           lancamentoInput.pessoa || despesaInput.pessoa || despesaInput.titular_pessoa,
         observacoes: lancamentoInput.observacoes || despesaInput.observacoes,
+        origemTexto: 'Triagem Ambos (lançamento + compromisso)',
       })
 
-      const lancamento = await pb.collection<Lancamento>('lancamentos').create(payloadCartao)
+      const compromisso = await despesasService.saveCompromisso(canonica.compromisso)
+      const lancamento = await pb.collection<Lancamento>('lancamentos').create(canonica.lancamento)
+
+      const ocorrenciaPayload = {
+        ...canonica.ocorrencia,
+        compromisso: compromisso.id,
+        lancamento: lancamento.id,
+      }
+      const ocorrencia = await pb
+        .collection<DespesaOcorrencia>('despesas_ocorrencias')
+        .create(ocorrenciaPayload)
 
       await pb.collection('telegram_registros_pendentes').update(pendenteId, {
         status: 'aprovado',
         lancamento_gerado: lancamento.id,
+        compromisso_gerado: compromisso.id,
         conta: contaCheckId,
         categoria: lancamentoInput.categoria || despesaInput.categoria || '',
-        descricao: lancamentoInput.descricao,
-        valor: lancamentoInput.valor,
-        data: payloadCartao.data,
+        descricao: lancamentoInput.descricao || despesaInput.descricao,
+        valor: lancamentoInput.valor || despesaInput.valor_estimado,
+        data: canonica.lancamento.data,
         empresa: lancamentoInput.empresa || despesaInput.empresa || '',
         pessoa: lancamentoInput.pessoa || despesaInput.pessoa || '',
       })
 
-      return { lancamento, compromisso: null }
+      return { lancamento, compromisso, ocorrencia }
     }
 
-    // A. Cria o compromisso e suas ocorrências (para não-cartão)
-    const isParcelado =
-      despesaInput.modalidade_parcelamento === 'parcelado' ||
-      despesaInput.regra_repeticao === 'parcelado'
+    // A. Cria o compromisso e suas ocorrências (para parcelados ou recorrentes)
     const totalParcelasNum = isParcelado ? Math.max(1, Number(despesaInput.total_parcelas) || 1) : 1
     const parcelaInicialNum = isParcelado
       ? Math.max(1, Number(despesaInput.parcela_inicial) || 1)
@@ -423,17 +460,12 @@ export const telegramPendentesService = {
       valor_parcela: isParcelado
         ? Number(despesaInput.valor_estimado)
         : (null as unknown as number),
-      dia_vencimento:
-        despesaInput.regra_repeticao === 'avulso'
-          ? parseInt(despesaInput.data_inicio.slice(8, 10), 10) || 10
-          : Number(despesaInput.dia_vencimento) || 10,
+      dia_vencimento: Number(despesaInput.dia_vencimento) || 10,
       regra_vencimento_texto:
         despesaInput.regra_vencimento_texto ||
-        (despesaInput.regra_repeticao === 'avulso'
-          ? 'Único'
-          : isParcelado
-            ? `${despesaInput.dia_vencimento || 10}/m (${totalParcelasNum}x)`
-            : `${despesaInput.dia_vencimento || 10}/m`),
+        (isParcelado
+          ? `${despesaInput.dia_vencimento || 10}/m (${totalParcelasNum}x)`
+          : `${despesaInput.dia_vencimento || 10}/m`),
       data_inicio: `${despesaInput.data_inicio} 00:00:00.000Z`,
       data_fim_calculada: despesaInput.data_fim_calculada || (null as unknown as string),
       valor_estimado: Number(despesaInput.valor_estimado),
