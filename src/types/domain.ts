@@ -601,6 +601,7 @@ export interface GoogleCalendarStatusResponse {
   last_sync_at?: string
   last_error?: string
   sync_ativo: boolean
+  needs_reconnect?: boolean
 }
 
 export interface PeriodRange {

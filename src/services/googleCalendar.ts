@@ -1,5 +1,27 @@
 import pb from '@/lib/pocketbase/client'
+import { ClientResponseError } from 'pocketbase'
 import type { GoogleCalendarStatusResponse } from '@/types/domain'
+
+export const GOOGLE_RECONNECT_MESSAGE =
+  'A conexão com o Google expirou. Reconecte sua conta Google para voltar a sincronizar.'
+
+/** Detecta, a partir de qualquer erro, que o refresh token Google expirou/foi revogado. */
+export function isGoogleTokenExpiredError(err: unknown): boolean {
+  if (err instanceof ClientResponseError) {
+    const data = (err.response?.data || {}) as Record<string, unknown>
+    if (data.needs_reconnect === true) return true
+    if (data.code === 'google_token_expired') return true
+    const msg = String(data.error || data.detail || err.message || '').toLowerCase()
+    return msg.includes('expired or revoked') || msg.includes('invalid_grant')
+  }
+  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase()
+  return (
+    msg.includes('expired or revoked') ||
+    msg.includes('token has been expired') ||
+    msg.includes('invalid_grant') ||
+    msg.includes('renovar token google')
+  )
+}
 
 export const googleCalendarService = {
   async getStatus(): Promise<GoogleCalendarStatusResponse> {

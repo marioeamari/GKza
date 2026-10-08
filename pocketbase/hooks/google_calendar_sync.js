@@ -63,18 +63,51 @@ routerAdd(
           const expiresIn = refreshRes.json.expires_in || 3600
           configRec.set('access_token', accessToken)
           configRec.set('token_expiry', new Date(Date.now() + expiresIn * 1000).toISOString())
+          configRec.set('last_error', '')
           $app.save(configRec)
         } else {
           const errDetail =
-            (refreshRes.json && refreshRes.json.error_description) || 'Falha ao renovar token'
+            (refreshRes.json && (refreshRes.json.error_description || refreshRes.json.error)) ||
+            'Falha ao renovar token'
+          const errDescLower = (errDetail + '').toLowerCase()
+          const isRevokedOrExpired =
+            errDescLower.includes('expired') ||
+            errDescLower.includes('revoked') ||
+            errDescLower.includes('invalid_grant')
+
           configRec.set('last_error', errDetail)
+          if (isRevokedOrExpired) {
+            configRec.set('access_token', '')
+            // Desativa temporariamente sync automático até nova autorização
+            configRec.set('sync_ativo', false)
+          }
           $app.save(configRec)
-          return e.json(500, { error: 'Erro ao renovar token Google: ' + errDetail })
+
+          if (isRevokedOrExpired) {
+            return e.json(401, {
+              error:
+                'A conexão com o Google expirou. Reconecte sua conta Google para voltar a sincronizar.',
+              code: 'google_token_expired',
+              needs_reconnect: true,
+              detail: errDetail,
+            })
+          }
+
+          return e.json(400, {
+            error: 'Erro ao renovar token Google: ' + errDetail,
+            code: 'google_token_refresh_failed',
+            needs_reconnect: false,
+            detail: errDetail,
+          })
         }
       } catch (err) {
-        configRec.set('last_error', '' + err)
+        const errMsg = '' + err
+        configRec.set('last_error', errMsg)
         $app.save(configRec)
-        return e.json(500, { error: 'Erro de conexão com Google: ' + err })
+        return e.json(502, {
+          error: 'Falha de comunicação temporária com o serviço do Google: ' + errMsg,
+          code: 'google_network_error',
+        })
       }
     }
 

@@ -56,8 +56,23 @@ cronAdd('google_calendar_cron_sync', '0 * * * *', () => {
           const expiresIn = refreshRes.json.expires_in || 3600
           configRec.set('access_token', accessToken)
           configRec.set('token_expiry', new Date(Date.now() + expiresIn * 1000).toISOString())
+          configRec.set('last_error', '')
           $app.save(configRec)
         } else {
+          const errDetail =
+            (refreshRes.json && (refreshRes.json.error_description || refreshRes.json.error)) ||
+            'Falha ao renovar token'
+          const errDescLower = (errDetail + '').toLowerCase()
+          configRec.set('last_error', errDetail)
+          if (
+            errDescLower.includes('expired') ||
+            errDescLower.includes('revoked') ||
+            errDescLower.includes('invalid_grant')
+          ) {
+            configRec.set('access_token', '')
+            configRec.set('sync_ativo', false)
+          }
+          $app.save(configRec)
           continue
         }
       } catch (_) {

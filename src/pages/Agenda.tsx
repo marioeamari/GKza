@@ -10,6 +10,7 @@ import {
   Edit2,
   CalendarRange,
   Repeat,
+  ExternalLink,
 } from 'lucide-react'
 import { PageHeader } from '@/components/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -20,7 +21,11 @@ import { Switch } from '@/components/ui/switch'
 import { ContextBadge } from '@/components/ContextBadge'
 import { EventoDialog } from '@/components/agenda/EventoDialog'
 import { agendaService } from '@/services/agenda'
-import { googleCalendarService } from '@/services/googleCalendar'
+import {
+  googleCalendarService,
+  isGoogleTokenExpiredError,
+  GOOGLE_RECONNECT_MESSAGE,
+} from '@/services/googleCalendar'
 import { lembretesService } from '@/services/lembretes'
 import { useAppContext } from '@/contexts/AppContext'
 import { useAuth } from '@/contexts/AuthContext'
@@ -48,6 +53,8 @@ export default function Agenda() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingEvento, setEditingEvento] = useState<AgendaEvento | null>(null)
   const [syncingGoogle, setSyncingGoogle] = useState(false)
+  const [googleNeedsReconnect, setGoogleNeedsReconnect] = useState(false)
+  const [reconnectingGoogle, setReconnectingGoogle] = useState(false)
   const [actionLembreteId, setActionLembreteId] = useState<string | null>(null)
 
   const loadData = useCallback(async () => {
@@ -87,22 +94,39 @@ export default function Agenda() {
     setSyncingGoogle(true)
     try {
       const status = await googleCalendarService.getStatus()
-      if (!status.is_connected) {
+      if (!status.is_connected || status.needs_reconnect) {
+        setGoogleNeedsReconnect(status.needs_reconnect === true)
         toast({
-          title: 'Google Calendar não conectado',
-          description:
-            'Conecte sua conta em Configurações → Google Calendar → Conectar com Google Calendar.',
+          title: status.needs_reconnect
+            ? 'Conexão com o Google expirada'
+            : 'Google Calendar não conectado',
+          description: status.needs_reconnect
+            ? GOOGLE_RECONNECT_MESSAGE
+            : 'Conecte sua conta em Configurações → Google Calendar → Conectar com Google Calendar.',
+          variant: status.needs_reconnect ? 'destructive' : 'default',
         })
         return
       }
 
       const res = await googleCalendarService.syncNow()
+      setGoogleNeedsReconnect(false)
       toast({
         title: 'Sincronização Google concluída!',
         description: `${res.imported} importados, ${res.exported} exportados.`,
       })
       loadData()
     } catch (err: unknown) {
+      if (isGoogleTokenExpiredError(err)) {
+        setGoogleNeedsReconnect(true)
+        toast({
+          title: 'Conexão com o Google expirada',
+          description: GOOGLE_RECONNECT_MESSAGE,
+          variant: 'destructive',
+          duration: 8000,
+        })
+        return
+      }
+
       const message = err instanceof Error ? err.message : 'Tente novamente.'
       if (message.includes('não conectada')) {
         toast({
@@ -115,12 +139,42 @@ export default function Agenda() {
           title: 'Sincronização pendente',
           description: message.includes('Credenciais')
             ? 'Credenciais OAuth do Google Calendar ainda não cadastradas.'
-            : message,
+            : message.includes('temporária') || message.includes('conexão')
+              ? 'Não foi possível comunicar com o Google neste momento. Tente novamente em instantes.'
+              : message,
           variant: 'destructive',
         })
       }
     } finally {
       setSyncingGoogle(false)
+    }
+  }
+
+  // Fluxo de reconexão OAuth com o Google (mesmo usado em Configurações → Google Calendar)
+  const handleReconnectGoogle = async () => {
+    setReconnectingGoogle(true)
+    try {
+      const res = await googleCalendarService.getAuthUrl()
+      if (res.url) {
+        const popup = window.open(res.url, '_blank', 'noopener')
+        if (!popup) {
+          toast({
+            title: 'Janela bloqueada',
+            description:
+              'Seu navegador bloqueou a janela de autorização. Permita pop-ups e tente novamente, ou use Configurações → Google Calendar → Conectar com Google Calendar.',
+            variant: 'destructive',
+          })
+        }
+      }
+    } catch {
+      toast({
+        title: 'Falha ao iniciar reconexão',
+        description:
+          'Não foi possível iniciar a autorização. Tente em Configurações → Google Calendar → Conectar com Google Calendar.',
+        variant: 'destructive',
+      })
+    } finally {
+      setReconnectingGoogle(false)
     }
   }
 
@@ -601,6 +655,31 @@ export default function Agenda() {
           )}
         </div>
       </PageHeader>
+
+      {/* AVISO DE CONEXÃO GOOGLE EXPIRADA — orienta reconexão OAuth */}
+      {googleNeedsReconnect && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3">
+          <div className="flex items-start gap-2">
+            <CalendarRange className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-amber-900">Conexão com o Google expirada</p>
+              <p className="text-xs text-amber-800">
+                {GOOGLE_RECONNECT_MESSAGE} Use o botão ao lado ou vá em{' '}
+                <strong>Configurações → Google Calendar → Conectar com Google Calendar</strong>.
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            onClick={handleReconnectGoogle}
+            disabled={reconnectingGoogle}
+            className="text-xs gap-1.5 bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+          >
+            <ExternalLink className={`h-3.5 w-3.5 ${reconnectingGoogle ? 'animate-spin' : ''}`} />
+            {reconnectingGoogle ? 'Abrindo autorização...' : 'Reconectar Google'}
+          </Button>
+        </div>
+      )}
 
       {/* BANNER / TOGGLE DE COMPROMISSOS PESSOAIS E GOOGLE EM CONTEXTO EMPRESARIAL */}
       {isContextoEmpresarial && (

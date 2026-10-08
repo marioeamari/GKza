@@ -19,16 +19,28 @@ routerAdd(
     let lastSyncAt = null
     let lastError = null
     let syncAtivo = false
+    let needsReconnect = false
 
     if (auth && auth.id) {
       try {
         const record = $app.findFirstRecordByData('google_calendar_config', 'user', auth.id)
         if (record) {
           connectedEmail = record.getString('email_conectado') || ''
-          isConnected = !!record.getString('refresh_token')
+          const hasRefreshToken = !!record.getString('refresh_token')
           lastSyncAt = record.getString('last_sync_at') || null
           lastError = record.getString('last_error') || null
           syncAtivo = record.getBool('sync_ativo')
+
+          const errLower = (lastError || '').toLowerCase()
+          if (
+            errLower.includes('expired') ||
+            errLower.includes('revoked') ||
+            errLower.includes('invalid_grant')
+          ) {
+            needsReconnect = true
+          }
+
+          isConnected = hasRefreshToken && !needsReconnect
         }
       } catch (_) {
         // Sem configuração salva ainda
@@ -45,6 +57,7 @@ routerAdd(
       last_sync_at: lastSyncAt,
       last_error: lastError,
       sync_ativo: syncAtivo,
+      needs_reconnect: needsReconnect,
     })
   },
   $apis.requireAuth(),
