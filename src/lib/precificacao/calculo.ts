@@ -947,3 +947,67 @@ export function roundComercial(
     return round2(inteiro + 1.9)
   }
 }
+
+// -------------------------------------------------------------
+// Preço Unitário ao Cliente (Kits / Combos e Avulsos)
+// -------------------------------------------------------------
+
+export interface ParametrosTotalUnidadesProduto {
+  tipo?: TipoProduto | string
+  unidade?: string
+  qtd_por_kit?: number
+  kit_itens?: Array<{ qtd_efetiva?: number }> | null
+}
+
+/**
+ * Calcula o total de unidades contidas no produto para rateio do preço pago pelo cliente.
+ * Regra acordada com o usuário:
+ * - Em kits/combos: soma das quantidades dos kit_itens (quantidade efetiva).
+ *   Caso kit_itens esteja vazio/não informado mas haja qtd_por_kit > 0, faz fallback para qtd_por_kit.
+ * - Em produtos avulsos (fabricacao_propria, revenda ou outros): usa as unidades do próprio cadastro;
+ *   se não houver unidades definidas (> 0), trata como 1.
+ */
+export function calcularTotalUnidadesProduto(
+  produto?: ParametrosTotalUnidadesProduto | null,
+): number {
+  if (!produto) return 1
+
+  const isKitOuCombo = produto.tipo === 'kit' || produto.tipo === 'combo'
+
+  if (isKitOuCombo) {
+    if (produto.kit_itens && produto.kit_itens.length > 0) {
+      const soma = produto.kit_itens.reduce((acc, it) => acc + (Number(it.qtd_efetiva) || 0), 0)
+      if (soma > 0) return soma
+    }
+    if (typeof produto.qtd_por_kit === 'number' && produto.qtd_por_kit > 0) {
+      return produto.qtd_por_kit
+    }
+    return 1
+  }
+
+  // Produto avulso
+  if (typeof produto.qtd_por_kit === 'number' && produto.qtd_por_kit > 0) {
+    return produto.qtd_por_kit
+  }
+
+  return 1
+}
+
+/**
+ * Calcula o Preço Unitário ao Cliente:
+ * Preço Unit. Cliente = preco_pago_cliente ÷ total de unidades.
+ * Arredonda para 2 casas decimais. Protege contra divisão por zero / valores inválidos.
+ */
+export function calcularPrecoUnitarioCliente(
+  precoPagoCliente: number,
+  totalUnidades: number,
+): number {
+  const preco = Number(precoPagoCliente) || 0
+  const unidades = Number(totalUnidades) || 0
+
+  if (unidades <= 0) {
+    return round2(Math.max(0, preco))
+  }
+
+  return round2(Math.max(0, preco) / unidades)
+}

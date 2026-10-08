@@ -3,6 +3,8 @@ import {
   avaliarCondicaoTaxa,
   calcularCustoBaseProduto,
   calcularDemonstrativo,
+  calcularPrecoUnitarioCliente,
+  calcularTotalUnidadesProduto,
   formatarResumoCondicao,
   normalizarTextoCategoria,
   resolverPrecoParaMeta,
@@ -571,6 +573,123 @@ describe('Motor de Cálculo de Precificação - ERP GKza', () => {
         'Categoria do produto não definida (condição: cama, mesa e banho)',
       )
       expect(dem.total_taxas_retidas_canal).toBe(0)
+    })
+  })
+
+  describe('Preço Unitário ao Cliente (calcularTotalUnidadesProduto e calcularPrecoUnitarioCliente)', () => {
+    it('deve somar as quantidades dos kit_itens em kits e combos', () => {
+      // Kit com múltiplos itens de toalhas
+      const kitMultiplosItens = {
+        tipo: 'kit' as const,
+        kit_itens: [
+          { nome: 'Toalha Azul', qtd_efetiva: 25 },
+          { nome: 'Toalha Branca', qtd_efetiva: 15 },
+        ],
+      }
+      expect(calcularTotalUnidadesProduto(kitMultiplosItens)).toBe(40)
+
+      // Combo de produtos variados
+      const combo = {
+        tipo: 'combo' as const,
+        kit_itens: [
+          { nome: 'Body', qtd_efetiva: 3 },
+          { nome: 'Calça', qtd_efetiva: 2 },
+        ],
+      }
+      expect(calcularTotalUnidadesProduto(combo)).toBe(5)
+    })
+
+    it('deve usar fallback de qtd_por_kit se kit não tiver kit_itens detalhados', () => {
+      const kitSemItens = {
+        tipo: 'kit' as const,
+        qtd_por_kit: 10,
+        kit_itens: [],
+      }
+      expect(calcularTotalUnidadesProduto(kitSemItens)).toBe(10)
+    })
+
+    it('deve usar unidades de produto avulso se definido (ex.: qtd_por_kit cadastrada)', () => {
+      const avulsoComUnidades = {
+        tipo: 'revenda' as const,
+        qtd_por_kit: 6,
+      }
+      expect(calcularTotalUnidadesProduto(avulsoComUnidades)).toBe(6)
+    })
+
+    it('deve assumir 1 se produto avulso não tiver unidades definidas ou for zero/nulo', () => {
+      const avulsoSemUnidades = {
+        tipo: 'fabricacao_propria' as const,
+      }
+      expect(calcularTotalUnidadesProduto(avulsoSemUnidades)).toBe(1)
+
+      const avulsoZero = {
+        tipo: 'revenda' as const,
+        qtd_por_kit: 0,
+      }
+      expect(calcularTotalUnidadesProduto(avulsoZero)).toBe(1)
+
+      expect(calcularTotalUnidadesProduto(null)).toBe(1)
+      expect(calcularTotalUnidadesProduto(undefined)).toBe(1)
+    })
+
+    it('deve calcular corretamente o caso real do usuário (R$ 199,20 ÷ 10 = R$ 19,92)', () => {
+      // Exemplo do usuário: produto unitário R$ 24,90, kit de 10, com 20% de desconto
+      // R$ 249,00 - 20% (R$ 49,80) = R$ 199,20
+      // Preço pago cliente = 199.20 ÷ 10 = 19.92
+      const precoPagoCliente = 199.2
+      const totalUnidades = 10
+      const precoUnitario = calcularPrecoUnitarioCliente(precoPagoCliente, totalUnidades)
+
+      expect(precoUnitario).toBe(19.92)
+    })
+
+    it('deve calcular caso da toalha de 40 unidades (R$ 796,80 ÷ 40 = R$ 19,92)', () => {
+      const precoPagoCliente = 796.8
+      const totalUnidades = 40
+      const precoUnitario = calcularPrecoUnitarioCliente(precoPagoCliente, totalUnidades)
+
+      expect(precoUnitario).toBe(19.92)
+    })
+
+    it('deve proteger contra divisão por zero e unidades inválidas', () => {
+      expect(calcularPrecoUnitarioCliente(199.2, 0)).toBe(199.2)
+      expect(calcularPrecoUnitarioCliente(199.2, -5)).toBe(199.2)
+      expect(calcularPrecoUnitarioCliente(0, 10)).toBe(0)
+    })
+
+    it('integração: calcularDemonstrativo com descontos e cálculo do unitário cliente', () => {
+      const dem = calcularDemonstrativo({
+        produto: {
+          sku: 'KIT-10-TOALHA',
+          nome: 'Kit 10 Toalhas',
+          tipo: 'kit',
+          kit_itens: [{ nome: 'Toalha', qtd_efetiva: 10, custo_unitario: 10 }],
+        },
+        preco_anunciado: 249.0,
+        descontos: [
+          {
+            nome: 'Desconto Cliente 20%',
+            tipo: 'percentual',
+            valor: 20,
+            financiado_por: 'vendedor',
+          },
+        ],
+        taxas: [],
+      })
+
+      // preco_anunciado = 249.00
+      // total_descontos = 49.80
+      // preco_pago_cliente = 199.20
+      expect(dem.preco_pago_cliente).toBe(199.2)
+
+      const unidades = calcularTotalUnidadesProduto({
+        tipo: 'kit',
+        kit_itens: [{ qtd_efetiva: 10 }],
+      })
+      expect(unidades).toBe(10)
+
+      const precoUnit = calcularPrecoUnitarioCliente(dem.preco_pago_cliente, unidades)
+      expect(precoUnit).toBe(19.92)
     })
   })
 })

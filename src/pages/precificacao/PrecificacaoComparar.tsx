@@ -87,6 +87,8 @@ import {
 import {
   calcularCustoBaseProduto,
   calcularDemonstrativo,
+  calcularPrecoUnitarioCliente,
+  calcularTotalUnidadesProduto,
   DemonstrativoResultado,
   resolverPrecoParaMeta,
   round2,
@@ -384,6 +386,23 @@ export default function PrecificacaoComparar() {
       isMounted = false
     }
   }, [produtoAtual])
+
+  // Total de unidades contidas no produto selecionado (kits/combos somam itens do kit; avulso usa unidades cadastradas ou 1)
+  const totalUnidadesProdutoAtual = useMemo(() => {
+    if (!produtoAtual) return 1
+    const kitValido =
+      kitInfoAtual && kitInfoAtual.produto_pai === produtoAtual.id ? kitInfoAtual : null
+    const itensKitConfig = kitValido?.itens?.map((it) => ({
+      qtd_efetiva: it.qtd_efetiva,
+    }))
+
+    return calcularTotalUnidadesProduto({
+      tipo: produtoAtual.tipo,
+      unidade: produtoAtual.unidade,
+      qtd_por_kit: produtoAtual.qtd_por_kit,
+      kit_itens: itensKitConfig,
+    })
+  }, [produtoAtual, kitInfoAtual])
 
   // Custo base calculado do produto (suporta fabricação própria, revenda, kit e combo)
   const custoBaseAtual = useMemo(() => {
@@ -2719,9 +2738,34 @@ export default function PrecificacaoComparar() {
                         {/* Linhas de Fechamento da Venda */}
                         <div className="space-y-1 text-xs border-t border-border/60 pt-2">
                           <div className="flex items-center justify-between text-muted-foreground text-[11px]">
-                            <span>Preço pago cliente</span>
-                            <span className="font-mono">
+                            <span className="inline-flex items-center gap-1">
+                              <span>Preço pago cliente</span>
+                              {totalUnidadesProdutoAtual > 1 && (
+                                <span className="text-[10px] text-muted-foreground/80 font-normal">
+                                  ({totalUnidadesProdutoAtual} un)
+                                </span>
+                              )}
+                            </span>
+                            <span className="font-mono font-medium text-foreground">
                               {formatCurrency(dem.preco_pago_cliente)}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-[11px] bg-slate-50/80 -mx-1 px-1 py-0.5 rounded border border-slate-200/50">
+                            <span className="text-muted-foreground font-medium flex items-center gap-1">
+                              <span>Preço Unit. Cliente</span>
+                              {totalUnidadesProdutoAtual > 1 && (
+                                <span className="text-[9px] text-muted-foreground font-mono">
+                                  (÷{totalUnidadesProdutoAtual})
+                                </span>
+                              )}
+                            </span>
+                            <span className="font-mono font-bold text-slate-800">
+                              {formatCurrency(
+                                calcularPrecoUnitarioCliente(
+                                  dem.preco_pago_cliente,
+                                  totalUnidadesProdutoAtual,
+                                ),
+                              )}
                             </span>
                           </div>
                           <div className="flex items-center justify-between font-semibold text-[11px] text-blue-900">
@@ -3040,6 +3084,12 @@ export default function PrecificacaoComparar() {
                 <th className="py-2.5 px-4 font-bold">Canal / Modalidade</th>
                 <th className="py-2.5 px-3 font-bold text-right">Preço Anunc.</th>
                 <th className="py-2.5 px-3 font-bold text-right">Preço Cliente</th>
+                <th
+                  className="py-2.5 px-3 font-bold text-right"
+                  title="Preço pago pelo cliente dividido pelo total de unidades"
+                >
+                  Preço Unit. Cliente
+                </th>
                 <th className="py-2.5 px-3 font-bold text-right">Taxas Retidas</th>
                 <th className="py-2.5 px-3 font-bold text-right">A Receber</th>
                 <th className="py-2.5 px-3 font-bold text-right">Custo Total</th>
@@ -3096,6 +3146,19 @@ export default function PrecificacaoComparar() {
                       </td>
                       <td className="py-3 px-3 text-right font-mono text-muted-foreground">
                         {formatCurrency(dem.preco_pago_cliente)}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-medium text-slate-800 bg-slate-50/50">
+                        {formatCurrency(
+                          calcularPrecoUnitarioCliente(
+                            dem.preco_pago_cliente,
+                            totalUnidadesProdutoAtual,
+                          ),
+                        )}
+                        {totalUnidadesProdutoAtual > 1 && (
+                          <span className="text-[9px] text-muted-foreground block font-sans">
+                            (÷{totalUnidadesProdutoAtual} un)
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-3 text-right font-mono text-red-600">
                         -{formatCurrency(dem.total_taxas_retidas_canal)}
