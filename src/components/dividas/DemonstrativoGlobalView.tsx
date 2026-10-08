@@ -1,3 +1,4 @@
+import { useState, useMemo } from 'react'
 import {
   Table,
   TableBody,
@@ -7,10 +8,26 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Globe, AlertTriangle, CheckCircle2, Layers, ArrowRight, ShieldAlert } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  Globe,
+  AlertTriangle,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  ShieldAlert,
+  CalendarDays,
+  CircleDollarSign,
+  TrendingUp,
+  Inbox,
+  AlertCircle,
+} from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/format'
 import {
   consolidarDemonstrativoGlobal,
+  calcularTotalMensalPrevisto,
+  formatarRotuloMesAno,
+  navegarMesCompetencia,
   type DividaRecord,
   type ParcelaRecord,
   type ReceitaRecord,
@@ -27,7 +44,41 @@ export function DemonstrativoGlobalView({
   parcelasPorDivida,
   receitasPorDivida,
 }: DemonstrativoGlobalViewProps) {
-  const global = consolidarDemonstrativoGlobal(dividas, parcelasPorDivida, receitasPorDivida)
+  const mesAtualIso = useMemo(() => new Date().toISOString().slice(0, 7), [])
+  const [mesNavegacao, setMesNavegacao] = useState<string>(mesAtualIso)
+
+  const global = useMemo(
+    () => consolidarDemonstrativoGlobal(dividas, parcelasPorDivida, receitasPorDivida),
+    [dividas, parcelasPorDivida, receitasPorDivida],
+  )
+
+  const dadosMensalPrevisto = useMemo(
+    () =>
+      calcularTotalMensalPrevisto({
+        mesAno: mesNavegacao,
+        dividas,
+        parcelasPorDivida,
+        receitasPorDivida,
+      }),
+    [mesNavegacao, dividas, parcelasPorDivida, receitasPorDivida],
+  )
+
+  const handleMesAnterior = () => {
+    setMesNavegacao((prev) => navegarMesCompetencia(prev, -1))
+  }
+
+  const handleMesSeguinte = () => {
+    setMesNavegacao((prev) => navegarMesCompetencia(prev, 1))
+  }
+
+  const handleMesHoje = () => {
+    setMesNavegacao(mesAtualIso)
+  }
+
+  const rotuloMesAtual = formatarRotuloMesAno(mesNavegacao)
+  const isMesHoje = mesNavegacao === mesAtualIso
+  const semMovimentoNoMes =
+    dadosMensalPrevisto.quantidade_parcelas === 0 && dadosMensalPrevisto.quantidade_receitas === 0
 
   return (
     <div className="space-y-5">
@@ -129,6 +180,253 @@ export function DemonstrativoGlobalView({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* BLOCO: TOTAL MENSAL PREVISTO COM NAVEGAÇÃO ENTRE MESES */}
+      <div className="rounded-xl border border-primary/20 bg-linear-to-b from-primary/5 via-white to-white p-4 sm:p-5 shadow-xs space-y-4">
+        {/* BARRA DE NAVEGAÇÃO DE MÊS */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/70 pb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <CalendarDays className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm sm:text-base font-bold text-foreground">
+                  Total Mensal Previsto
+                </h4>
+                {isMesHoje && (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] font-semibold py-0 px-2 text-primary border-primary/30"
+                  >
+                    Mês Atual
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Navegue entre os meses para saber o quanto arrecadar das máquinas para honrar os
+                compromissos.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 self-start sm:self-center bg-white border border-border rounded-lg p-1 shadow-2xs">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleMesAnterior}
+              className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+              title="Mês Anterior"
+              aria-label="Mês Anterior"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <div className="px-3 min-w-[150px] text-center font-bold text-sm text-foreground select-none">
+              {rotuloMesAtual}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleMesSeguinte}
+              className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+              title="Mês Seguinte"
+              aria-label="Mês Seguinte"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            {!isMesHoje && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleMesHoje}
+                className="h-7 px-2 text-xs text-muted-foreground ml-1"
+              >
+                Hoje
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* ESTADO VAZIO: NENHUMA PARCELA NEM RECEITA NO MÊS */}
+        {semMovimentoNoMes ? (
+          <div className="rounded-xl border border-dashed border-border/80 bg-slate-50/50 p-6 text-center space-y-2">
+            <Inbox className="w-8 h-8 text-slate-300 mx-auto" />
+            <h5 className="text-sm font-semibold text-foreground">
+              Sem parcelas previstas neste mês
+            </h5>
+            <p className="text-xs text-muted-foreground max-w-md mx-auto">
+              Nenhuma dívida de máquina possui vencimento ou receita registrada em {rotuloMesAtual}.
+              Use as setas para navegar para outros meses.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* CARDS DE DESTAQUE DO MÊS */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* CARD 1: PARCELAS DO MÊS (TOTAL E ABERTO) */}
+              <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Parcelas a Vencer
+                  </span>
+                  <CircleDollarSign className="w-4 h-4 text-slate-500" />
+                </div>
+                <div className="text-xl font-black text-slate-900">
+                  {formatCurrency(dadosMensalPrevisto.total_parcelas_aberto)}
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t border-slate-100">
+                  <span>{dadosMensalPrevisto.quantidade_parcelas_aberto} parcela(s) em aberto</span>
+                  {dadosMensalPrevisto.total_parcelas_pagas > 0 && (
+                    <span className="text-emerald-600 font-medium">
+                      +{formatCurrency(dadosMensalPrevisto.total_parcelas_pagas)} já pagas
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* CARD 2: RECEITAS PREVISTAS/REGISTRADAS DAS MÁQUINAS NO MÊS */}
+              <div className="rounded-xl border border-emerald-200 bg-white p-3.5 shadow-2xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+                    Receitas das Máquinas
+                  </span>
+                  <TrendingUp className="w-4 h-4 text-emerald-600" />
+                </div>
+                <div className="text-xl font-black text-emerald-700">
+                  {formatCurrency(dadosMensalPrevisto.total_receitas_mes)}
+                </div>
+                <div className="text-[11px] text-muted-foreground pt-1 border-t border-slate-100">
+                  {dadosMensalPrevisto.quantidade_receitas > 0 ? (
+                    <span>
+                      {dadosMensalPrevisto.quantidade_receitas} lançamento(s) de receita no mês
+                    </span>
+                  ) : (
+                    <span className="text-amber-700">Nenhuma receita registrada no mês</span>
+                  )}
+                </div>
+              </div>
+
+              {/* CARD 3: RESULTADO - QUANTO FALTA ARRECADAR */}
+              <div
+                className={`rounded-xl border p-3.5 shadow-2xs space-y-1 ${
+                  dadosMensalPrevisto.falta_arrecadar > 0
+                    ? 'border-amber-200 bg-amber-50/50'
+                    : 'border-emerald-200 bg-emerald-50/50'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span
+                    className={`text-[11px] font-bold uppercase tracking-wider ${
+                      dadosMensalPrevisto.falta_arrecadar > 0
+                        ? 'text-amber-900'
+                        : 'text-emerald-900'
+                    }`}
+                  >
+                    Quanto Falta Arrecadar
+                  </span>
+                  {dadosMensalPrevisto.falta_arrecadar > 0 ? (
+                    <AlertCircle className="w-4 h-4 text-amber-600" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  )}
+                </div>
+                <div
+                  className={`text-xl font-black ${
+                    dadosMensalPrevisto.falta_arrecadar > 0 ? 'text-amber-900' : 'text-emerald-700'
+                  }`}
+                >
+                  {formatCurrency(dadosMensalPrevisto.falta_arrecadar)}
+                </div>
+                <div
+                  className={`text-[11px] font-medium pt-1 border-t ${
+                    dadosMensalPrevisto.falta_arrecadar > 0
+                      ? 'border-amber-200/70 text-amber-800'
+                      : 'border-emerald-200/70 text-emerald-800'
+                  }`}
+                >
+                  {dadosMensalPrevisto.falta_arrecadar > 0
+                    ? 'Meta de faturamento das máquinas para cobrir o mês'
+                    : dadosMensalPrevisto.superavit > 0
+                      ? `Superávit de ${formatCurrency(dadosMensalPrevisto.superavit)} nas receitas`
+                      : 'Parcelas do mês integralmente cobertas'}
+                </div>
+              </div>
+            </div>
+
+            {/* TABELA DE COMPOSIÇÃO DETALHADA DO MÊS */}
+            <div className="bg-white rounded-lg border border-border/80 overflow-hidden">
+              <div className="px-3.5 py-2.5 bg-slate-50 border-b border-border/70 flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">
+                  Composição das Parcelas de {rotuloMesAtual}
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  Total Previsto: {formatCurrency(dadosMensalPrevisto.total_parcelas_mes)}
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader className="bg-slate-50/50">
+                    <TableRow>
+                      <TableHead className="text-xs">Vencimento</TableHead>
+                      <TableHead className="text-xs">Máquina</TableHead>
+                      <TableHead className="text-xs text-center">Parcela</TableHead>
+                      <TableHead className="text-xs text-right">Valor</TableHead>
+                      <TableHead className="text-xs text-center w-32">Situação</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {dadosMensalPrevisto.parcelas.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={5}
+                          className="text-center py-4 text-xs text-muted-foreground"
+                        >
+                          Nenhuma parcela de dívida com vencimento neste mês.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      dadosMensalPrevisto.parcelas.map((p) => (
+                        <TableRow key={`${p.divida_id}_${p.parcela_id}`}>
+                          <TableCell className="text-xs font-semibold text-foreground">
+                            {formatDate(p.data_vencimento)}
+                          </TableCell>
+                          <TableCell className="text-xs font-medium text-slate-800">
+                            {p.divida_nome}
+                          </TableCell>
+                          <TableCell className="text-center text-xs font-medium text-muted-foreground">
+                            #{p.numero}
+                          </TableCell>
+                          <TableCell className="text-right text-xs font-bold text-foreground">
+                            {formatCurrency(p.valor)}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {p.paga ? (
+                              <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border-0 text-[10px] py-0">
+                                Paga
+                              </Badge>
+                            ) : p.status === 'atrasada' ? (
+                              <Badge className="bg-rose-100 text-rose-800 hover:bg-rose-100 border-0 text-[10px] py-0">
+                                Atrasada
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 text-slate-700 border-slate-300"
+                              >
+                                A Vencer
+                              </Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* CRONOGRAMA UNIFICADO ORDENADO POR DATA DE VENCIMENTO */}

@@ -5,7 +5,10 @@ import {
   calcularCronogramaComSaldo,
   calcularPaybackMaquina,
   calcularResumoDivida,
+  calcularTotalMensalPrevisto,
   consolidarDemonstrativoGlobal,
+  formatarRotuloMesAno,
+  navegarMesCompetencia,
   projetarCaixaPorMaquina,
   renegociarCronograma,
   simularParcelasRestantes,
@@ -560,6 +563,250 @@ describe('Módulo de Dívidas Isolado - Regras e Cálculos Puros', () => {
       // A parcela da m1 em 2025-02-10 deve constar como coberta
       const itemM1 = global.cronograma_unificado.find((i) => i.parcela_id === 'p_m1_1')
       expect(itemM1?.coberta_pela_maquina).toBe(true)
+    })
+  })
+
+  describe('7. Navegação e Total Mensal Previsto no Demonstrativo Global', () => {
+    it('navegarMesCompetencia avança e retrocede meses corretamente', () => {
+      expect(navegarMesCompetencia('2026-10', 1)).toBe('2026-11')
+      expect(navegarMesCompetencia('2026-10', -1)).toBe('2026-09')
+      expect(navegarMesCompetencia('2026-12', 1)).toBe('2027-01')
+      expect(navegarMesCompetencia('2026-01', -1)).toBe('2025-12')
+    })
+
+    it('formatarRotuloMesAno formata para português', () => {
+      expect(formatarRotuloMesAno('2026-10')).toBe('Outubro de 2026')
+      expect(formatarRotuloMesAno('2025-01')).toBe('Janeiro de 2025')
+      expect(formatarRotuloMesAno('2027-12')).toBe('Dezembro de 2027')
+    })
+
+    it('calcula Total Mensal Previsto somando parcelas ativas, receitas e saldo a arrecadar', () => {
+      const d1: DividaRecord = {
+        id: 'div_d1',
+        nome: 'Plotter Impressão',
+        credor: 'Credor 1',
+        valor_total: 100000,
+        data_contratacao: '2026-01-01',
+        status: 'ativa',
+      }
+      const d2: DividaRecord = {
+        id: 'div_d2',
+        nome: 'Laser Fibra',
+        credor: 'Credor 2',
+        valor_total: 200000,
+        data_contratacao: '2026-01-01',
+        status: 'ativa',
+      }
+
+      // Outubro 2026:
+      // d1 tem: Parcela 1 paga (10.000) e Parcela 2 pendente (15.000)
+      // d2 tem: Parcela 1 pendente (25.000)
+      // Total parcelas do mês = 50.000
+      // Total parcelas pagas = 10.000
+      // Total parcelas em aberto = 40.000
+      // Receitas em outubro: d1 gerou 12.000 e d2 gerou 8.000 = 20.000
+      // Falta arrecadar = 40.000 - 20.000 = 20.000
+      const parcelasMap = new Map<string, ParcelaRecord[]>([
+        [
+          'div_d1',
+          [
+            {
+              id: 'p1_d1',
+              divida: 'div_d1',
+              numero: 1,
+              data_vencimento: '2026-10-05',
+              valor: 10000,
+              status: 'paga',
+              valor_pago: 10000,
+            },
+            {
+              id: 'p2_d1',
+              divida: 'div_d1',
+              numero: 2,
+              data_vencimento: '2026-10-20',
+              valor: 15000,
+              status: 'pendente',
+            },
+            {
+              id: 'p3_d1',
+              divida: 'div_d1',
+              numero: 3,
+              data_vencimento: '2026-11-20',
+              valor: 15000,
+              status: 'pendente',
+            },
+          ],
+        ],
+        [
+          'div_d2',
+          [
+            {
+              id: 'p1_d2',
+              divida: 'div_d2',
+              numero: 1,
+              data_vencimento: '2026-10-15',
+              valor: 25000,
+              status: 'pendente',
+            },
+          ],
+        ],
+      ])
+
+      const receitasMap = new Map<string, ReceitaRecord[]>([
+        [
+          'div_d1',
+          [
+            {
+              id: 'r1_d1',
+              divida: 'div_d1',
+              data: '2026-10-08',
+              valor: 12000,
+              descricao: 'Receita plotter serviço A',
+            },
+            {
+              id: 'r2_d1',
+              divida: 'div_d1',
+              data: '2026-11-05',
+              valor: 5000,
+              descricao: 'Receita de nov',
+            },
+          ],
+        ],
+        [
+          'div_d2',
+          [
+            {
+              id: 'r1_d2',
+              divida: 'div_d2',
+              data: '2026-10-12',
+              valor: 8000,
+              descricao: 'Receita laser serviço B',
+            },
+          ],
+        ],
+      ])
+
+      const resultadoOutubro = calcularTotalMensalPrevisto({
+        mesAno: '2026-10',
+        dividas: [d1, d2],
+        parcelasPorDivida: parcelasMap,
+        receitasPorDivida: receitasMap,
+      })
+
+      expect(resultadoOutubro.mes_ano).toBe('2026-10')
+      expect(resultadoOutubro.total_parcelas_mes).toBe(50000)
+      expect(resultadoOutubro.total_parcelas_pagas).toBe(10000)
+      expect(resultadoOutubro.total_parcelas_aberto).toBe(40000)
+      expect(resultadoOutubro.total_receitas_mes).toBe(20000)
+      expect(resultadoOutubro.falta_arrecadar).toBe(20000)
+      expect(resultadoOutubro.superavit).toBe(0)
+      expect(resultadoOutubro.quantidade_parcelas).toBe(3)
+      expect(resultadoOutubro.quantidade_parcelas_aberto).toBe(2)
+      expect(resultadoOutubro.quantidade_parcelas_pagas).toBe(1)
+      expect(resultadoOutubro.quantidade_receitas).toBe(2)
+      expect(resultadoOutubro.parcelas).toHaveLength(3)
+      expect(resultadoOutubro.receitas).toHaveLength(2)
+
+      // Testa mês seguinte (Novembro 2026)
+      const resultadoNovembro = calcularTotalMensalPrevisto({
+        mesAno: '2026-11',
+        dividas: [d1, d2],
+        parcelasPorDivida: parcelasMap,
+        receitasPorDivida: receitasMap,
+      })
+
+      expect(resultadoNovembro.mes_ano).toBe('2026-11')
+      expect(resultadoNovembro.total_parcelas_mes).toBe(15000)
+      expect(resultadoNovembro.total_parcelas_aberto).toBe(15000)
+      expect(resultadoNovembro.total_receitas_mes).toBe(5000)
+      expect(resultadoNovembro.falta_arrecadar).toBe(10000)
+
+      // Testa mês com superávit (receitas > parcelas em aberto)
+      const resultadoSuperavit = calcularTotalMensalPrevisto({
+        mesAno: '2026-10',
+        dividas: [d1], // Apenas d1: em aberto tem 15.000, receitas tem 12.000. Se receita fosse 25.000:
+        parcelasPorDivida: parcelasMap,
+        receitasPorDivida: new Map([
+          [
+            'div_d1',
+            [
+              {
+                id: 'rx',
+                divida: 'div_d1',
+                data: '2026-10-10',
+                valor: 25000,
+                descricao: 'Receita grande',
+              },
+            ],
+          ],
+        ]),
+      })
+      // Aberto: 15.000 (parcela 2), Receita: 25.000
+      expect(resultadoSuperavit.falta_arrecadar).toBe(0)
+      expect(resultadoSuperavit.superavit).toBe(10000)
+    })
+
+    it('retorna estado vazio zerado para mês sem parcelas nem receitas', () => {
+      const d1: DividaRecord = {
+        id: 'div_1',
+        nome: 'Dívida 1',
+        credor: 'Credor',
+        valor_total: 50000,
+        data_contratacao: '2026-01-01',
+        status: 'ativa',
+      }
+      const resultadoVazio = calcularTotalMensalPrevisto({
+        mesAno: '2030-05',
+        dividas: [d1],
+        parcelasPorDivida: new Map(),
+        receitasPorDivida: new Map(),
+      })
+
+      expect(resultadoVazio.mes_ano).toBe('2030-05')
+      expect(resultadoVazio.total_parcelas_mes).toBe(0)
+      expect(resultadoVazio.total_parcelas_aberto).toBe(0)
+      expect(resultadoVazio.total_parcelas_pagas).toBe(0)
+      expect(resultadoVazio.total_receitas_mes).toBe(0)
+      expect(resultadoVazio.falta_arrecadar).toBe(0)
+      expect(resultadoVazio.superavit).toBe(0)
+      expect(resultadoVazio.quantidade_parcelas).toBe(0)
+      expect(resultadoVazio.quantidade_receitas).toBe(0)
+    })
+
+    it('ignora dívidas inativas ou quitadas se apenasAtivas for true (padrão)', () => {
+      const dQuitada: DividaRecord = {
+        id: 'div_quitada',
+        nome: 'Dívida Quitada',
+        credor: 'Credor',
+        valor_total: 50000,
+        data_contratacao: '2026-01-01',
+        status: 'quitada',
+      }
+      const parcelasMap = new Map<string, ParcelaRecord[]>([
+        [
+          'div_quitada',
+          [
+            {
+              id: 'p_q',
+              divida: 'div_quitada',
+              numero: 1,
+              data_vencimento: '2026-10-10',
+              valor: 5000,
+              status: 'pendente',
+            },
+          ],
+        ],
+      ])
+
+      const res = calcularTotalMensalPrevisto({
+        mesAno: '2026-10',
+        dividas: [dQuitada],
+        parcelasPorDivida: parcelasMap,
+        receitasPorDivida: new Map(),
+      })
+
+      expect(res.quantidade_parcelas).toBe(0)
+      expect(res.total_parcelas_mes).toBe(0)
     })
   })
 })

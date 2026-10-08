@@ -152,6 +152,44 @@ export interface DemonstrativoGlobalItem {
   valor_descoberto: number
 }
 
+export interface ItemParcelaMensalPrevisto {
+  divida_id: string
+  divida_nome: string
+  parcela_id: string
+  numero: number
+  data_vencimento: string
+  valor: number
+  status: ParcelaStatus
+  paga: boolean
+  valor_pago?: number
+  data_pagamento?: string
+}
+
+export interface ItemReceitaMensalPrevisto {
+  divida_id: string
+  divida_nome: string
+  receita_id: string
+  data: string
+  valor: number
+  descricao: string
+}
+
+export interface TotalMensalPrevistoDemonstrativo {
+  mes_ano: string // 'YYYY-MM'
+  total_parcelas_mes: number // soma de todas as parcelas com vencimento no mês
+  total_parcelas_aberto: number // parcelas pendentes ou atrasadas (não pagas)
+  total_parcelas_pagas: number // parcelas pagas no mês
+  total_receitas_mes: number // receitas registradas no mês
+  falta_arrecadar: number // max(0, parcelas em aberto - receitas do mês)
+  superavit: number // max(0, receitas do mês - parcelas em aberto)
+  quantidade_parcelas: number
+  quantidade_parcelas_aberto: number
+  quantidade_parcelas_pagas: number
+  quantidade_receitas: number
+  parcelas: ItemParcelaMensalPrevisto[]
+  receitas: ItemReceitaMensalPrevisto[]
+}
+
 export interface DemonstrativoGlobal {
   total_dividas: number
   valor_total_consolidado: number
@@ -747,5 +785,181 @@ export function consolidarDemonstrativoGlobal(
     total_receitas_consolidado: arredondarMoeda(totalReceitasConsolidado),
     cronograma_unificado: cronogramaUnificado,
     primeira_descoberta_global: primeiraDescoberta,
+  }
+}
+
+/**
+ * Retorna uma competência 'YYYY-MM' deslocada em N meses a partir de uma competência base.
+ * Exemplo: navegarMesCompetencia('2026-10', 1) => '2026-11'
+ *          navegarMesCompetencia('2026-01', -1) => '2025-12'
+ */
+export function navegarMesCompetencia(mesAno: string, offsetMeses: number): string {
+  const [anoStr, mesStr] = (mesAno || '').slice(0, 7).split('-')
+  const ano = parseInt(anoStr, 10) || new Date().getFullYear()
+  const mesZero = (parseInt(mesStr, 10) || 1) - 1
+  const novaData = new Date(Date.UTC(ano, mesZero + offsetMeses, 1))
+  const anoResult = novaData.getUTCFullYear()
+  const mesResult = novaData.getUTCMonth() + 1
+  return `${anoResult}-${String(mesResult).padStart(2, '0')}`
+}
+
+/**
+ * Formata 'YYYY-MM' para rótulo legível em Português.
+ * Exemplo: '2026-10' => 'Outubro de 2026'
+ */
+export function formatarRotuloMesAno(mesAno: string): string {
+  const [anoStr, mesStr] = (mesAno || '').slice(0, 7).split('-')
+  const ano = parseInt(anoStr, 10)
+  const mesNum = parseInt(mesStr, 10)
+  if (isNaN(ano) || isNaN(mesNum) || mesNum < 1 || mesNum > 12) {
+    return mesAno
+  }
+  const meses = [
+    'Janeiro',
+    'Fevereiro',
+    'Março',
+    'Abril',
+    'Maio',
+    'Junho',
+    'Julho',
+    'Agosto',
+    'Setembro',
+    'Outubro',
+    'Novembro',
+    'Dezembro',
+  ]
+  return `${meses[mesNum - 1]} de ${ano}`
+}
+
+/**
+ * TOTAL MENSAL PREVISTO (Demonstrativo Global):
+ *
+ * Agregação pura para um determinado mês 'YYYY-MM' em todas as dívidas ativas:
+ * 1. Soma parcelas com vencimento naquele mês:
+ *    - total_parcelas_mes: total geral previsto no mês (pagas + pendentes/atrasadas).
+ *    - total_parcelas_aberto: apenas parcelas não pagas (o que de fato precisa ser arrecadado).
+ *    - total_parcelas_pagas: o que já foi liquidado no mês.
+ * 2. Total de receitas previstas/registradas das máquinas com data naquele mês.
+ * 3. Resultado líquido:
+ *    - falta_arrecadar = max(0, total_parcelas_aberto - total_receitas_mes).
+ *    - superavit = max(0, total_receitas_mes - total_parcelas_aberto).
+ *
+ * Considera apenas dívidas ativas (ou todas se apenasAtivas = false).
+ */
+export function calcularTotalMensalPrevisto(params: {
+  mesAno: string // 'YYYY-MM'
+  dividas: DividaRecord[]
+  parcelasPorDivida: Map<string, ParcelaRecord[]>
+  receitasPorDivida: Map<string, ReceitaRecord[]>
+  apenasAtivas?: boolean // default true
+}): TotalMensalPrevistoDemonstrativo {
+  const { mesAno, dividas, parcelasPorDivida, receitasPorDivida, apenasAtivas = true } = params
+  const mesAlvo = (mesAno || '').slice(0, 7)
+
+  const dividasFiltradas = dividas.filter((d) => {
+    if (!apenasAtivas) return true
+    return d.status === 'ativa' && d.ativo !== false
+  })
+
+  let totalParcelasMes = 0
+  let totalParcelasAberto = 0
+  let totalParcelasPagas = 0
+  let totalReceitasMes = 0
+
+  let countParcelasAberto = 0
+  let countParcelasPagas = 0
+
+  const parcelasDoMes: ItemParcelaMensalPrevisto[] = []
+  const receitasDoMes: ItemReceitaMensalPrevisto[] = []
+
+  for (const div of dividasFiltradas) {
+    const parcelas = parcelasPorDivida.get(div.id) || []
+    const receitas = receitasPorDivida.get(div.id) || []
+
+    for (const p of parcelas) {
+      const pMes = (p.data_vencimento || '').slice(0, 7)
+      if (pMes === mesAlvo) {
+        const isPaga = p.status === 'paga'
+        const val = arredondarMoeda(p.valor || 0)
+        totalParcelasMes += val
+
+        if (isPaga) {
+          totalParcelasPagas += val
+          countParcelasPagas += 1
+        } else {
+          totalParcelasAberto += val
+          countParcelasAberto += 1
+        }
+
+        parcelasDoMes.push({
+          divida_id: div.id,
+          divida_nome: div.nome,
+          parcela_id: p.id,
+          numero: p.numero,
+          data_vencimento: p.data_vencimento,
+          valor: val,
+          status: p.status,
+          paga: isPaga,
+          valor_pago: p.valor_pago,
+          data_pagamento: p.data_pagamento,
+        })
+      }
+    }
+
+    for (const r of receitas) {
+      const rMes = (r.data || '').slice(0, 7)
+      if (rMes === mesAlvo) {
+        const val = arredondarMoeda(r.valor || 0)
+        totalReceitasMes += val
+
+        receitasDoMes.push({
+          divida_id: div.id,
+          divida_nome: div.nome,
+          receita_id: r.id,
+          data: r.data,
+          valor: val,
+          descricao: r.descricao,
+        })
+      }
+    }
+  }
+
+  // Ordenações
+  parcelasDoMes.sort((a, b) => {
+    if (a.data_vencimento !== b.data_vencimento) {
+      return a.data_vencimento.localeCompare(b.data_vencimento)
+    }
+    return a.divida_nome.localeCompare(b.divida_nome)
+  })
+
+  receitasDoMes.sort((a, b) => {
+    if (a.data !== b.data) {
+      return a.data.localeCompare(b.data)
+    }
+    return a.divida_nome.localeCompare(b.divida_nome)
+  })
+
+  totalParcelasMes = arredondarMoeda(totalParcelasMes)
+  totalParcelasAberto = arredondarMoeda(totalParcelasAberto)
+  totalParcelasPagas = arredondarMoeda(totalParcelasPagas)
+  totalReceitasMes = arredondarMoeda(totalReceitasMes)
+
+  const faltaArrecadar = arredondarMoeda(Math.max(0, totalParcelasAberto - totalReceitasMes))
+  const superavit = arredondarMoeda(Math.max(0, totalReceitasMes - totalParcelasAberto))
+
+  return {
+    mes_ano: mesAlvo,
+    total_parcelas_mes: totalParcelasMes,
+    total_parcelas_aberto: totalParcelasAberto,
+    total_parcelas_pagas: totalParcelasPagas,
+    total_receitas_mes: totalReceitasMes,
+    falta_arrecadar: faltaArrecadar,
+    superavit: superavit,
+    quantidade_parcelas: parcelasDoMes.length,
+    quantidade_parcelas_aberto: countParcelasAberto,
+    quantidade_parcelas_pagas: countParcelasPagas,
+    quantidade_receitas: receitasDoMes.length,
+    parcelas: parcelasDoMes,
+    receitas: receitasDoMes,
   }
 }
