@@ -1,39 +1,61 @@
 import { describe, expect, it } from 'vitest'
 import {
-  PRODUTOS_PADRAO_PRODUCAO,
   arredondarMoeda,
   calcularCustoLinha,
   calcularFaixaSemanaProducao,
+  calcularFechamentoRegistro,
   calcularFechamentoSemana,
+  calcularGradeProdutosRegistro,
   calcularGradeSemanalFornecedor,
   calcularResumoSaques,
   calcularTotalDia,
   calcularTotalGrupoSaque,
   formatarCabecalhoDia,
   formatarDiaMes,
+  formatarRangeDatas,
   gerarCincoDiasUteis,
+  gerarDatasRange,
+  getDiaSemanaAbrev,
+  getDiaSemanaCompleto,
   getSegundaFeiraSemana,
+  ordenarDatasIso,
 } from './producao'
 
-describe('Módulo de Produção - Regras e Cálculos', () => {
-  describe('Lista de produtos padrão', () => {
-    it('deve conter os 18 produtos do print com seus custos unitários', () => {
-      expect(PRODUTOS_PADRAO_PRODUCAO).toHaveLength(18)
-      expect(PRODUTOS_PADRAO_PRODUCAO[0]).toEqual({
-        nome: 'Toalha Banhão Quadriculada',
-        custo_padrao: 14.2,
-        ordem: 1,
-      })
-      expect(PRODUTOS_PADRAO_PRODUCAO[7]).toEqual({
-        nome: 'Toalha Leve',
-        custo_padrao: 10.0,
-        ordem: 8,
-      })
-      expect(PRODUTOS_PADRAO_PRODUCAO[17]).toEqual({
-        nome: 'Pano Baiana',
-        custo_padrao: 1.95,
-        ordem: 18,
-      })
+describe('Módulo de Produção - Registros de Pagamento de Fornecedor', () => {
+  describe('Formatação de Ranges e Datas Dinâmicas', () => {
+    it('deve formatar range de compra no formato amigável do print (ex.: seg 05/10 a sex 09/10)', () => {
+      const formatado = formatarRangeDatas('2026-10-05', '2026-10-09')
+      expect(formatado).toBe('seg 05/10 a sex 09/10')
+    })
+
+    it('deve formatar range de saques no formato amigável do print (ex.: dom 11/10 a sáb 17/10)', () => {
+      const formatado = formatarRangeDatas('2026-10-11', '2026-10-17')
+      expect(formatado).toBe('dom 11/10 a sáb 17/10')
+    })
+
+    it('deve obter abreviações e nomes completos de dias da semana corretamente', () => {
+      // 2026-10-05 é segunda-feira
+      expect(getDiaSemanaAbrev('2026-10-05')).toBe('seg')
+      expect(getDiaSemanaCompleto('2026-10-05')).toBe('segunda-feira')
+
+      // 2026-10-10 é sábado
+      expect(getDiaSemanaAbrev('2026-10-10')).toBe('sáb')
+      expect(getDiaSemanaCompleto('2026-10-10')).toBe('sábado')
+
+      // 2026-10-11 é domingo
+      expect(getDiaSemanaAbrev('2026-10-11')).toBe('dom')
+      expect(getDiaSemanaCompleto('2026-10-11')).toBe('domingo')
+    })
+
+    it('deve ordenar e deduplicar datas ISO dinâmicas em ordem cronológica', () => {
+      const datas = ['2026-10-08', '2026-10-05', '2026-10-10', '2026-10-05', '2026-10-07']
+      const ordenadas = ordenarDatasIso(datas)
+      expect(ordenadas).toEqual(['2026-10-05', '2026-10-07', '2026-10-08', '2026-10-10'])
+    })
+
+    it('deve gerar datas contínuas dentro de um range quando solicitado', () => {
+      const datas = gerarDatasRange('2026-10-05', '2026-10-08')
+      expect(datas).toEqual(['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08'])
     })
   })
 
@@ -52,8 +74,8 @@ describe('Módulo de Produção - Regras e Cálculos', () => {
     })
   })
 
-  describe('calcularTotalDia', () => {
-    it('deve calcular o total diário somando as linhas', () => {
+  describe('calcularTotalDia (Bloco Diário Dinâmico)', () => {
+    it('deve calcular o total diário somando as linhas de produtos', () => {
       const itens = [
         { produto_id: 'p1', quantidade: 20 },
         { produto_id: 'p2', quantidade: 149 },
@@ -68,74 +90,50 @@ describe('Módulo de Produção - Regras e Cálculos', () => {
         p4: 2.35, // 30 * 2.35 = 70.50
         p5: 2.0, // 480 * 2.0 = 960.00
       }
-      // Soma: 284 + 1490 + 722.40 + 70.50 + 960 = 3526.90 (exatamente o do print!)
       expect(calcularTotalDia(itens, custos)).toBe(3526.9)
     })
   })
 
-  describe('calcularGradeSemanalFornecedor', () => {
-    it('deve reproduzir exatamente o resumo do print semanal de exemplo (R$ 12.474,10)', () => {
+  describe('calcularGradeProdutosRegistro (Grade Dinâmica)', () => {
+    it('deve somar quantidades de datas variadas (incluindo sábado ou 4 dias)', () => {
       const produtos = [
-        { id: 'p1', nome: 'Toalha Banhão Quadriculada', custo_unitario: 14.2, ordem: 1 },
-        { id: 'p2', nome: 'Toalha Banhão Bola', custo_unitario: 14.2, ordem: 2 },
-        { id: 'p3', nome: 'Toalha Leve', custo_unitario: 10.0, ordem: 8 },
-        { id: 'p4', nome: 'Rosto Folha', custo_unitario: 4.3, ordem: 14 },
-        { id: 'p5', nome: 'Pano Atoalhado', custo_unitario: 2.35, ordem: 16 },
-        { id: 'p6', nome: 'Toalha Pequena', custo_unitario: 2.0, ordem: 17 },
+        { id: 'p1', nome: 'Toalha Banhão', custo_unitario: 14.2, ordem: 1 },
+        { id: 'p2', nome: 'Toalha Leve', custo_unitario: 10.0, ordem: 2 },
+        { id: 'p3', nome: 'Pano Baiana', custo_unitario: 1.95, ordem: 3 },
       ]
 
-      // Itens simulando as somas da semana:
-      // p1: 20 + 10 + 10 + 10 = 50 un -> R$ 710,00
-      // p3: 149 + 207 + 114 + 161 + 76 = 707 un -> R$ 7.070,00
-      // p4: 168 + 24 + 24 + 48 + 48 = 312 un -> R$ 1.341,60
-      // p5: 30 + 0 + 30 + 30 + 60 = 150 un -> R$ 352,50
-      // p6: 480 + 720 + 0 + 300 + 0 = 1500 un -> R$ 3.000,00
-      // Total: 710 + 7070 + 1341.60 + 352.50 + 3000 = 12.474,10
+      // Lançamentos em 3 datas reais: segunda, quarta e sábado
       const itens = [
-        { data: '2026-08-24', produto_id: 'p1', quantidade: 20 },
-        { data: '2026-08-25', produto_id: 'p1', quantidade: 10 },
-        { data: '2026-08-26', produto_id: 'p1', quantidade: 10 },
-        { data: '2026-08-27', produto_id: 'p1', quantidade: 10 },
-
-        { data: '2026-08-24', produto_id: 'p3', quantidade: 149 },
-        { data: '2026-08-25', produto_id: 'p3', quantidade: 207 },
-        { data: '2026-08-26', produto_id: 'p3', quantidade: 114 },
-        { data: '2026-08-27', produto_id: 'p3', quantidade: 161 },
-        { data: '2026-08-28', produto_id: 'p3', quantidade: 76 },
-
-        { data: '2026-08-24', produto_id: 'p4', quantidade: 168 },
-        { data: '2026-08-25', produto_id: 'p4', quantidade: 24 },
-        { data: '2026-08-26', produto_id: 'p4', quantidade: 24 },
-        { data: '2026-08-27', produto_id: 'p4', quantidade: 48 },
-        { data: '2026-08-28', produto_id: 'p4', quantidade: 48 },
-
-        { data: '2026-08-24', produto_id: 'p5', quantidade: 30 },
-        { data: '2026-08-26', produto_id: 'p5', quantidade: 30 },
-        { data: '2026-08-27', produto_id: 'p5', quantidade: 30 },
-        { data: '2026-08-28', produto_id: 'p5', quantidade: 60 },
-
-        { data: '2026-08-24', produto_id: 'p6', quantidade: 480 },
-        { data: '2026-08-25', produto_id: 'p6', quantidade: 720 },
-        { data: '2026-08-27', produto_id: 'p6', quantidade: 300 },
+        { data: '2026-10-05', produto_id: 'p1', quantidade: 15 },
+        { data: '2026-10-07', produto_id: 'p1', quantidade: 25 },
+        { data: '2026-10-10', produto_id: 'p1', quantidade: 10 }, // sábado
+        { data: '2026-10-05', produto_id: 'p2', quantidade: 100 },
+        { data: '2026-10-10', produto_id: 'p2', quantidade: 50 },
+        { data: '2026-10-07', produto_id: 'p3', quantidade: 200 },
       ]
 
-      const resultado = calcularGradeSemanalFornecedor(produtos, itens)
+      const resultado = calcularGradeProdutosRegistro(produtos, itens)
 
-      expect(resultado.custo_total_fornecedor).toBe(12474.1)
-      expect(resultado.quantidade_total_geral).toBe(50 + 707 + 312 + 150 + 1500)
+      // p1: 15 + 25 + 10 = 50 un -> R$ 710,00
+      // p2: 100 + 50 = 150 un -> R$ 1.500,00
+      // p3: 200 un -> R$ 390,00
+      // Total un: 50 + 150 + 200 = 400 un
+      // Total custo: 710 + 1500 + 390 = 2600.00
+      expect(resultado.quantidade_total_geral).toBe(400)
+      expect(resultado.custo_total_fornecedor).toBe(2600.0)
 
       const linhaP1 = resultado.linhas.find((l) => l.produto_id === 'p1')
       expect(linhaP1?.quantidade_total).toBe(50)
       expect(linhaP1?.custo_total).toBe(710.0)
 
       const linhaP2 = resultado.linhas.find((l) => l.produto_id === 'p2')
-      expect(linhaP2?.quantidade_total).toBe(0)
-      expect(linhaP2?.custo_total).toBe(0)
+      expect(linhaP2?.quantidade_total).toBe(150)
+      expect(linhaP2?.custo_total).toBe(1500.0)
     })
   })
 
   describe('calcularTotalGrupoSaque e calcularResumoSaques', () => {
-    it('deve calcular soma por grupo e total geral de saques', () => {
+    it('deve calcular soma por grupo e total geral de saques do registro', () => {
       const grupos = [
         {
           id: 'g1',
@@ -165,51 +163,31 @@ describe('Módulo de Produção - Regras e Cálculos', () => {
     })
   })
 
-  describe('calcularFechamentoSemana', () => {
-    it('deve calcular saldo correto: totalSaques - impostos - totalFornecedor', () => {
-      // Caso 1: Saques = 0, Imposto = 0, Fornecedor = 12474.10 -> Saldo = -12474.10 (como no print)
-      const f1 = calcularFechamentoSemana(12474.1, 0, 0)
-      expect(f1.saldo_semana).toBe(-12474.1)
+  describe('calcularFechamentoRegistro', () => {
+    it('deve calcular saldo do registro: saques − impostos − custo fornecedor', () => {
+      // Caso 1: Déficit (vermelho)
+      const f1 = calcularFechamentoRegistro(12474.1, 0, 0)
+      expect(f1.saldo).toBe(-12474.1)
       expect(f1.is_negativo).toBe(true)
 
-      // Caso 2: Saques = 20.000, Imposto = 2.000, Fornecedor = 15.000 -> Saldo = +3.000
-      const f2 = calcularFechamentoSemana(15000, 20000, 2000)
-      expect(f2.saldo_semana).toBe(3000)
+      // Caso 2: Superávit (verde)
+      const f2 = calcularFechamentoRegistro(15000, 20000, 2000)
+      expect(f2.saldo).toBe(3000)
       expect(f2.is_negativo).toBe(false)
     })
   })
 
-  describe('Faixa de datas e defasagem da semana', () => {
-    it('deve calcular a segunda-feira da semana de uma data', () => {
-      // 2026-08-24 é uma segunda-feira
-      expect(getSegundaFeiraSemana('2026-08-24')).toBe('2026-08-24')
-      // 2026-08-26 (quarta-feira) deve recuar para 2026-08-24
-      expect(getSegundaFeiraSemana('2026-08-26')).toBe('2026-08-24')
-      // 2026-08-30 (domingo) pertence à semana que começou em 2026-08-24
-      expect(getSegundaFeiraSemana('2026-08-30')).toBe('2026-08-24')
-    })
-
-    it('deve calcular a faixa de datas exata do modelo do usuário (seg 24/08 a sex 28/08 »»» dom 30/08 a sáb 05/09)', () => {
-      const faixa = calcularFaixaSemanaProducao('2026-08-24', 6)
-      expect(faixa.data_inicio_fornecedor).toBe('2026-08-24')
-      expect(faixa.data_fim_fornecedor).toBe('2026-08-28')
-      expect(faixa.data_inicio_saques).toBe('2026-08-30')
-      expect(faixa.data_fim_saques).toBe('2026-09-05')
-      expect(faixa.label_fornecedor).toBe('seg 24/08 a sex 28/08')
-      expect(faixa.label_saques).toBe('dom 30/08 a sáb 05/09')
-      expect(faixa.rotulo_completo).toBe('seg 24/08 a sex 28/08 »»» dom 30/08 a sáb 05/09')
-    })
-
-    it('deve gerar os 5 dias úteis seg a sex com formatação', () => {
-      const dias = gerarCincoDiasUteis('2026-08-24')
-      expect(dias).toHaveLength(5)
-      expect(dias[0].data).toBe('2026-08-24')
-      expect(dias[0].nome_dia).toBe('segunda-feira')
-      expect(dias[4].data).toBe('2026-08-28')
-      expect(dias[4].nome_dia).toBe('sexta-feira')
-
+  describe('Formatadores e compatibilidade', () => {
+    it('formatarCabecalhoDia deve formatar a data por extenso', () => {
       const cabecalho = formatarCabecalhoDia('2026-08-24', 'segunda-feira')
       expect(cabecalho).toBe('segunda-feira, 24 de agosto/26')
+    })
+
+    it('calcularFaixaSemanaProducao deve gerar as faixas de compras e saques corretas', () => {
+      const faixa = calcularFaixaSemanaProducao('2026-10-05', 6)
+      expect(faixa.label_fornecedor).toBe('seg 05/10 a sex 09/10')
+      expect(faixa.label_saques).toBe('dom 11/10 a sáb 17/10')
+      expect(faixa.rotulo_completo).toBe('seg 05/10 a sex 09/10 »»» dom 11/10 a sáb 17/10')
     })
   })
 })

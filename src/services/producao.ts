@@ -1,31 +1,32 @@
 import pb from '@/lib/pocketbase/client'
 import {
-  PRODUTOS_PADRAO_PRODUCAO,
   calcularFaixaSemanaProducao,
-  gerarCincoDiasUteis,
+  formatarRangeDatas,
   getSegundaFeiraSemana,
-  getSemanaAnoIdentificador,
+  ordenarDatasIso,
 } from '@/lib/producao'
 
-export interface ProducaoSemanaRecord {
+export interface ProducaoRegistroRecord {
   id: string
-  semana_ano: string
-  segunda_feira: string
-  data_inicio_fornecedor: string
-  data_fim_fornecedor: string
+  fornecedor?: string
+  fornecedor_nome?: string
+  data_inicio_compra: string
+  data_fim_compra: string
   data_inicio_saques: string
   data_fim_saques: string
-  dias_offset_saques: number
+  label_compra?: string
+  label_saques?: string
   imposto: number
-  observacoes: string
-  despesa_vinculo_id?: string
+  observacoes?: string
+  datas_grade?: string[]
   created: string
   updated: string
 }
 
 export interface ProducaoProdutoRecord {
   id: string
-  semana: string
+  registro?: string
+  semana?: string
   nome: string
   custo_unitario: number
   ordem: number
@@ -36,7 +37,8 @@ export interface ProducaoProdutoRecord {
 
 export interface ProducaoDiaItemRecord {
   id: string
-  semana: string
+  registro?: string
+  semana?: string
   data: string
   produto: string
   quantidade: number
@@ -56,7 +58,8 @@ export interface ProducaoSaqueItemRecord {
 
 export interface ProducaoSaqueGrupoRecord {
   id: string
-  semana: string
+  registro?: string
+  semana?: string
   titulo: string
   marketplace_referencia?: string
   ordem: number
@@ -65,15 +68,33 @@ export interface ProducaoSaqueGrupoRecord {
   updated: string
 }
 
-export interface SemanaProducaoCompleta {
-  semana: ProducaoSemanaRecord
+export interface RegistroProducaoCompleto {
+  registro: ProducaoRegistroRecord
   produtos: ProducaoProdutoRecord[]
   diasItens: ProducaoDiaItemRecord[]
   gruposSaques: (ProducaoSaqueGrupoRecord & { itens: ProducaoSaqueItemRecord[] })[]
 }
 
+// Mantido para compatibilidade com importações legadas
+export type ProducaoSemanaRecord = ProducaoRegistroRecord
+export type SemanaProducaoCompleta = RegistroProducaoCompleto
+
+export interface FornecedorReferencia {
+  id: string
+  nome: string
+  razao_social?: string
+}
+
+export interface FornecedorProdutoReferencia {
+  id: string
+  fornecedor_id: string
+  descricao: string
+  sku_fornecedor?: string
+  preco_custo_unitario: number
+}
+
 /**
- * Grupos padrão de marketplaces sugeridos do modelo da planilha
+ * Grupos padrão de marketplaces sugeridos
  */
 export const GRUPOS_PADRAO_SAQUES = [
   { titulo: 'Saque Shopee-SHPP(Sicred)', marketplace_referencia: 'Shopee' },
@@ -84,127 +105,38 @@ export const GRUPOS_PADRAO_SAQUES = [
 
 export const producaoService = {
   /**
-   * Obtém ou cria uma semana de produção sob demanda
+   * Lista todos os registros de pagamento de fornecedor ordenados pelos mais recentes
    */
-  async getOrCreateSemana(
-    segundaFeiraIso: string,
-    offsetDias: number = 6,
-  ): Promise<SemanaProducaoCompleta> {
-    const segundaFeira = getSegundaFeiraSemana(segundaFeiraIso)
-    const semanaAno = getSemanaAnoIdentificador(segundaFeira)
-
-    let semanaRecord: ProducaoSemanaRecord
-
-    try {
-      semanaRecord = await pb
-        .collection('producao_semanas')
-        .getFirstListItem<ProducaoSemanaRecord>(`semana_ano = "${semanaAno}"`)
-    } catch {
-      // Criar nova semana sob demanda
-      const faixa = calcularFaixaSemanaProducao(segundaFeira, offsetDias)
-      semanaRecord = await pb.collection('producao_semanas').create<ProducaoSemanaRecord>({
-        semana_ano: semanaAno,
-        segunda_feira: segundaFeira,
-        data_inicio_fornecedor: faixa.data_inicio_fornecedor,
-        data_fim_fornecedor: faixa.data_fim_fornecedor,
-        data_inicio_saques: faixa.data_inicio_saques,
-        data_fim_saques: faixa.data_fim_saques,
-        dias_offset_saques: offsetDias,
-        imposto: 0,
-        observacoes: '',
-      })
-
-      // Tenta copiar produtos da semana anterior mais recente; se não houver, semeia os 18 produtos padrão
-      let produtosBase = PRODUTOS_PADRAO_PRODUCAO.map((p) => ({
-        nome: p.nome,
-        custo_unitario: p.custo_padrao,
-        ordem: p.ordem,
-      }))
-
-      try {
-        const semanasAnteriores = await pb
-          .collection('producao_semanas')
-          .getList<ProducaoSemanaRecord>(1, 1, {
-            filter: `segunda_feira < "${segundaFeira}"`,
-            sort: '-segunda_feira',
-          })
-
-        if (semanasAnteriores.items.length > 0) {
-          const ultimaSemanaId = semanasAnteriores.items[0].id
-          const produtosAnteriores = await pb
-            .collection('producao_produtos')
-            .getFullList<ProducaoProdutoRecord>({
-              filter: `semana = "${ultimaSemanaId}"`,
-              sort: 'ordem',
-            })
-
-          if (produtosAnteriores.length > 0) {
-            produtosBase = produtosAnteriores.map((p) => ({
-              nome: p.nome,
-              custo_unitario: p.custo_unitario,
-              ordem: p.ordem,
-            }))
-          }
-        }
-      } catch {
-        // Usa produtos padrão
-      }
-
-      // Cria os produtos para a nova semana
-      for (const p of produtosBase) {
-        await pb.collection('producao_produtos').create({
-          semana: semanaRecord.id,
-          nome: p.nome,
-          custo_unitario: p.custo_unitario,
-          ordem: p.ordem,
-        })
-      }
-
-      // Cria os grupos de saques padrão com 2 itens vazios cada
-      for (let i = 0; i < GRUPOS_PADRAO_SAQUES.length; i++) {
-        const gDef = GRUPOS_PADRAO_SAQUES[i]
-        const grupo = await pb.collection('producao_saques_grupos').create({
-          semana: semanaRecord.id,
-          titulo: gDef.titulo,
-          marketplace_referencia: gDef.marketplace_referencia,
-          ordem: i + 1,
-        })
-
-        // Linhas iniciais de saque
-        await pb.collection('producao_saques_itens').create({
-          grupo: grupo.id,
-          descricao: 'Auto Saque',
-          valor: 0,
-          ordem: 1,
-        })
-      }
-    }
-
-    return this.carregarSemanaCompleta(semanaRecord.id)
+  async listarRegistros(): Promise<ProducaoRegistroRecord[]> {
+    return pb.collection('producao_registros').getFullList<ProducaoRegistroRecord>({
+      sort: '-data_inicio_compra,-created',
+    })
   },
 
   /**
-   * Carrega todos os dados de uma semana
+   * Carrega um registro completo por ID
    */
-  async carregarSemanaCompleta(semanaId: string): Promise<SemanaProducaoCompleta> {
-    const semana = await pb.collection('producao_semanas').getOne<ProducaoSemanaRecord>(semanaId)
+  async carregarRegistroCompleto(registroId: string): Promise<RegistroProducaoCompleto> {
+    const registro = await pb
+      .collection('producao_registros')
+      .getOne<ProducaoRegistroRecord>(registroId)
 
     const produtos = await pb.collection('producao_produtos').getFullList<ProducaoProdutoRecord>({
-      filter: `semana = "${semanaId}"`,
-      sort: 'ordem',
+      filter: `registro = "${registroId}"`,
+      sort: 'ordem,created',
     })
 
     const diasItens = await pb
       .collection('producao_dias_itens')
       .getFullList<ProducaoDiaItemRecord>({
-        filter: `semana = "${semanaId}"`,
+        filter: `registro = "${registroId}"`,
       })
 
     const grupos = await pb
       .collection('producao_saques_grupos')
       .getFullList<ProducaoSaqueGrupoRecord>({
-        filter: `semana = "${semanaId}"`,
-        sort: 'ordem',
+        filter: `registro = "${registroId}"`,
+        sort: 'ordem,created',
       })
 
     const gruposComItens: (ProducaoSaqueGrupoRecord & { itens: ProducaoSaqueItemRecord[] })[] = []
@@ -223,7 +155,7 @@ export const producaoService = {
     }
 
     return {
-      semana,
+      registro,
       produtos,
       diasItens,
       gruposSaques: gruposComItens,
@@ -231,29 +163,161 @@ export const producaoService = {
   },
 
   /**
-   * Atualiza dados básicos da semana (imposto, offset de dias, observações)
+   * Cria um novo Registro de Pagamento de Fornecedor
    */
-  async atualizarSemana(
-    semanaId: string,
-    data: Partial<Pick<ProducaoSemanaRecord, 'imposto' | 'dias_offset_saques' | 'observacoes'>>,
-  ): Promise<ProducaoSemanaRecord> {
-    if (data.dias_offset_saques !== undefined) {
-      const semana = await pb.collection('producao_semanas').getOne<ProducaoSemanaRecord>(semanaId)
-      const faixa = calcularFaixaSemanaProducao(semana.segunda_feira, data.dias_offset_saques)
-      return pb.collection('producao_semanas').update<ProducaoSemanaRecord>(semanaId, {
-        ...data,
-        data_inicio_saques: faixa.data_inicio_saques,
-        data_fim_saques: faixa.data_fim_saques,
+  async criarRegistro(dados: {
+    fornecedorId?: string
+    fornecedorNome?: string
+    dataInicioCompra: string
+    dataFimCompra: string
+    dataInicioSaques: string
+    dataFimSaques: string
+    imposto?: number
+    observacoes?: string
+    datasIniciaisGrade?: string[]
+  }): Promise<RegistroProducaoCompleto> {
+    const labelCompra = formatarRangeDatas(dados.dataInicioCompra, dados.dataFimCompra)
+    const labelSaques = formatarRangeDatas(dados.dataInicioSaques, dados.dataFimSaques)
+
+    const registroCriado = await pb
+      .collection('producao_registros')
+      .create<ProducaoRegistroRecord>({
+        fornecedor: dados.fornecedorId || undefined,
+        fornecedor_nome: dados.fornecedorNome || '',
+        data_inicio_compra: dados.dataInicioCompra,
+        data_fim_compra: dados.dataFimCompra,
+        data_inicio_saques: dados.dataInicioSaques,
+        data_fim_saques: dados.dataFimSaques,
+        label_compra: labelCompra,
+        label_saques: labelSaques,
+        imposto: dados.imposto || 0,
+        observacoes: dados.observacoes || '',
+        datas_grade: dados.datasIniciaisGrade || [],
+      })
+
+    // Semeia grupos padrão de saques para o registro
+    for (let i = 0; i < GRUPOS_PADRAO_SAQUES.length; i++) {
+      const gDef = GRUPOS_PADRAO_SAQUES[i]
+      const grupo = await pb.collection('producao_saques_grupos').create({
+        registro: registroCriado.id,
+        titulo: gDef.titulo,
+        marketplace_referencia: gDef.marketplace_referencia,
+        ordem: i + 1,
+      })
+
+      // Linha inicial vazia
+      await pb.collection('producao_saques_itens').create({
+        grupo: grupo.id,
+        descricao: 'Auto Saque',
+        valor: 0,
+        ordem: 1,
       })
     }
-    return pb.collection('producao_semanas').update<ProducaoSemanaRecord>(semanaId, data)
+
+    return this.carregarRegistroCompleto(registroCriado.id)
   },
 
   /**
-   * Atualiza ou cadastra produto da semana
+   * Atualiza dados de cabeçalho do registro (fornecedor, datas, imposto, datas_grade)
+   */
+  async atualizarRegistro(
+    registroId: string,
+    dados: Partial<ProducaoRegistroRecord>,
+  ): Promise<ProducaoRegistroRecord> {
+    const payload: Record<string, unknown> = { ...dados }
+
+    // Atualiza labels se datas mudaram
+    if (dados.data_inicio_compra && dados.data_fim_compra) {
+      payload.label_compra = formatarRangeDatas(dados.data_inicio_compra, dados.data_fim_compra)
+    }
+    if (dados.data_inicio_saques && dados.data_fim_saques) {
+      payload.label_saques = formatarRangeDatas(dados.data_inicio_saques, dados.data_fim_saques)
+    }
+
+    return pb.collection('producao_registros').update<ProducaoRegistroRecord>(registroId, payload)
+  },
+
+  /**
+   * Exclui um registro de pagamento e todos os seus itens vinculados
+   */
+  async excluirRegistro(registroId: string): Promise<void> {
+    await pb.collection('producao_registros').delete(registroId)
+  },
+
+  /**
+   * Adiciona ou remove uma data real na grade dinâmica do registro
+   */
+  async adicionarDataNaGrade(registroId: string, novaDataIso: string): Promise<string[]> {
+    const reg = await pb.collection('producao_registros').getOne<ProducaoRegistroRecord>(registroId)
+    const datasAtuais = Array.isArray(reg.datas_grade) ? reg.datas_grade : []
+    const novasDatas = ordenarDatasIso([...datasAtuais, novaDataIso])
+    await pb.collection('producao_registros').update(registroId, { datas_grade: novasDatas })
+    return novasDatas
+  },
+
+  async removerDataDaGrade(registroId: string, dataIsoParaRemover: string): Promise<string[]> {
+    const reg = await pb.collection('producao_registros').getOne<ProducaoRegistroRecord>(registroId)
+    const datasAtuais = Array.isArray(reg.datas_grade) ? reg.datas_grade : []
+    const novasDatas = datasAtuais.filter((d) => d.slice(0, 10) !== dataIsoParaRemover.slice(0, 10))
+    await pb.collection('producao_registros').update(registroId, { datas_grade: novasDatas })
+
+    // Limpa também os itens daquela data neste registro
+    try {
+      const itensParaExcluir = await pb
+        .collection('producao_dias_itens')
+        .getFullList<ProducaoDiaItemRecord>({
+          filter: `registro = "${registroId}" && data ~ "${dataIsoParaRemover.slice(0, 10)}"`,
+        })
+      for (const item of itensParaExcluir) {
+        await pb.collection('producao_dias_itens').delete(item.id)
+      }
+    } catch {
+      /* intentionally ignored */
+    }
+
+    return novasDatas
+  },
+
+  /**
+   * Adiciona produtos do catálogo do fornecedor selecionado para a grade do registro
+   */
+  async adicionarProdutosDoCatalogo(
+    registroId: string,
+    produtosCatalogo: { nome: string; custo_unitario: number; codigo_referencia?: string }[],
+  ): Promise<ProducaoProdutoRecord[]> {
+    const produtosExistentes = await pb
+      .collection('producao_produtos')
+      .getFullList<ProducaoProdutoRecord>({
+        filter: `registro = "${registroId}"`,
+      })
+
+    const nomesExistentes = new Set(produtosExistentes.map((p) => p.nome.toLowerCase().trim()))
+    let ordemAtual = produtosExistentes.length
+
+    for (const item of produtosCatalogo) {
+      if (!nomesExistentes.has(item.nome.toLowerCase().trim())) {
+        ordemAtual++
+        await pb.collection('producao_produtos').create({
+          registro: registroId,
+          nome: item.nome,
+          custo_unitario: Math.max(0, Number(item.custo_unitario) || 0),
+          ordem: ordemAtual,
+          codigo_referencia: item.codigo_referencia || '',
+        })
+      }
+    }
+
+    return pb.collection('producao_produtos').getFullList<ProducaoProdutoRecord>({
+      filter: `registro = "${registroId}"`,
+      sort: 'ordem,created',
+    })
+  },
+
+  /**
+   * Cadastra ou atualiza um produto avulso no registro
    */
   async salvarProduto(
-    semanaId: string,
+    registroId: string,
     produto: { id?: string; nome: string; custo_unitario: number; ordem?: number },
   ): Promise<ProducaoProdutoRecord> {
     if (produto.id) {
@@ -264,7 +328,7 @@ export const producaoService = {
       })
     }
     return pb.collection('producao_produtos').create<ProducaoProdutoRecord>({
-      semana: semanaId,
+      registro: registroId,
       nome: produto.nome,
       custo_unitario: produto.custo_unitario,
       ordem: produto.ordem ?? 999,
@@ -272,57 +336,29 @@ export const producaoService = {
   },
 
   /**
-   * Exclui produto da semana
+   * Exclui produto da grade do registro
    */
   async excluirProduto(produtoId: string): Promise<void> {
     await pb.collection('producao_produtos').delete(produtoId)
   },
 
   /**
-   * Recarrega os 18 produtos padrão na semana atual
-   */
-  async carregarProdutosPadraoNaSemana(semanaId: string): Promise<ProducaoProdutoRecord[]> {
-    const produtosExistentes = await pb
-      .collection('producao_produtos')
-      .getFullList<ProducaoProdutoRecord>({
-        filter: `semana = "${semanaId}"`,
-      })
-
-    const nomesExistentes = new Set(produtosExistentes.map((p) => p.nome.toLowerCase().trim()))
-
-    for (const p of PRODUTOS_PADRAO_PRODUCAO) {
-      if (!nomesExistentes.has(p.nome.toLowerCase().trim())) {
-        await pb.collection('producao_produtos').create({
-          semana: semanaId,
-          nome: p.nome,
-          custo_unitario: p.custo_padrao,
-          ordem: p.ordem,
-        })
-      }
-    }
-
-    return pb.collection('producao_produtos').getFullList<ProducaoProdutoRecord>({
-      filter: `semana = "${semanaId}"`,
-      sort: 'ordem',
-    })
-  },
-
-  /**
-   * Atualiza ou grava a quantidade de um produto em um determinado dia
+   * Atualiza ou grava a quantidade de um produto em um determinado dia dentro do registro
    */
   async salvarQuantidadeDia(
-    semanaId: string,
+    registroId: string,
     dataIso: string,
     produtoId: string,
     quantidade: number,
   ): Promise<ProducaoDiaItemRecord> {
     const qtd = Math.max(0, Number(quantidade) || 0)
+    const dataLimpa = dataIso.slice(0, 10)
 
     try {
       const existente = await pb
         .collection('producao_dias_itens')
         .getFirstListItem<ProducaoDiaItemRecord>(
-          `semana = "${semanaId}" && data = "${dataIso}" && produto = "${produtoId}"`,
+          `registro = "${registroId}" && data ~ "${dataLimpa}" && produto = "${produtoId}"`,
         )
 
       return pb.collection('producao_dias_itens').update<ProducaoDiaItemRecord>(existente.id, {
@@ -330,8 +366,8 @@ export const producaoService = {
       })
     } catch {
       return pb.collection('producao_dias_itens').create<ProducaoDiaItemRecord>({
-        semana: semanaId,
-        data: dataIso,
+        registro: registroId,
+        data: dataLimpa,
         produto: produtoId,
         quantidade: qtd,
       })
@@ -339,20 +375,20 @@ export const producaoService = {
   },
 
   /**
-   * Cria novo grupo de saques
+   * Cria novo grupo de saques no registro
    */
   async criarGrupoSaque(
-    semanaId: string,
+    registroId: string,
     titulo: string,
     marketplaceReferencia?: string,
   ): Promise<ProducaoSaqueGrupoRecord> {
     const grupos = await pb.collection('producao_saques_grupos').getFullList({
-      filter: `semana = "${semanaId}"`,
+      filter: `registro = "${registroId}"`,
     })
     const ordem = grupos.length + 1
 
     const grupo = await pb.collection('producao_saques_grupos').create<ProducaoSaqueGrupoRecord>({
-      semana: semanaId,
+      registro: registroId,
       titulo,
       marketplace_referencia: marketplaceReferencia || '',
       ordem,
@@ -379,7 +415,7 @@ export const producaoService = {
   },
 
   /**
-   * Exclui grupo de saques e seus itens (cascade delete)
+   * Exclui grupo de saques e seus itens
    */
   async excluirGrupoSaque(grupoId: string): Promise<void> {
     await pb.collection('producao_saques_grupos').delete(grupoId)
@@ -424,7 +460,60 @@ export const producaoService = {
   },
 
   /**
-   * Lista marketplaces do sistema como REFERÊNCIA apenas (leitura), sem vincular a contas
+   * Lista fornecedores cadastrados no ERP (/fornecedores) apenas como REFERÊNCIA (somente leitura)
+   */
+  async listarFornecedoresReferencia(): Promise<FornecedorReferencia[]> {
+    try {
+      const records = await pb.collection('fornecedores').getFullList<{
+        id: string
+        nome_fantasia?: string
+        razao_social?: string
+      }>({
+        sort: 'nome_fantasia,razao_social',
+      })
+
+      return records.map((r) => ({
+        id: r.id,
+        nome: r.nome_fantasia || r.razao_social || 'Fornecedor sem nome',
+        razao_social: r.razao_social,
+      }))
+    } catch {
+      return []
+    }
+  },
+
+  /**
+   * Lista os produtos do catálogo de um determinado fornecedor (somente leitura)
+   */
+  async listarProdutosDoFornecedor(fornecedorId: string): Promise<FornecedorProdutoReferencia[]> {
+    if (!fornecedorId) return []
+    try {
+      const records = await pb.collection('fornecedores_produtos').getFullList<{
+        id: string
+        fornecedor: string
+        descricao: string
+        sku_fornecedor?: string
+        preco_custo_unitario?: number
+        ativo?: boolean
+      }>({
+        filter: `fornecedor = "${fornecedorId}" && ativo = true`,
+        sort: 'descricao',
+      })
+
+      return records.map((p) => ({
+        id: p.id,
+        fornecedor_id: p.fornecedor,
+        descricao: p.descricao,
+        sku_fornecedor: p.sku_fornecedor,
+        preco_custo_unitario: Number(p.preco_custo_unitario) || 0,
+      }))
+    } catch {
+      return []
+    }
+  },
+
+  /**
+   * Lista marketplaces do sistema como REFERÊNCIA apenas (leitura)
    */
   async listarMarketplacesReferencia(): Promise<string[]> {
     try {
@@ -445,5 +534,32 @@ export const producaoService = {
     } catch {
       return ['Shopee', 'Shein', 'Kwai', 'TikTok', 'Mercado Livre', 'Amazon']
     }
+  },
+
+  /**
+   * Compatibilidade: Obtém ou cria registro padrão para a semana caso seja chamado por rotas legadas
+   */
+  async getOrCreateSemana(segundaFeiraIso?: string): Promise<RegistroProducaoCompleto> {
+    const registros = await this.listarRegistros()
+    if (registros.length > 0) {
+      return this.carregarRegistroCompleto(registros[0].id)
+    }
+
+    const seg = getSegundaFeiraSemana(segundaFeiraIso)
+    const faixa = calcularFaixaSemanaProducao(seg, 6)
+
+    // Fornecedor padrão se existir
+    const forns = await this.listarFornecedoresReferencia()
+    const forn = forns[0]
+
+    return this.criarRegistro({
+      fornecedorId: forn?.id,
+      fornecedorNome: forn?.nome,
+      dataInicioCompra: faixa.data_inicio_fornecedor,
+      dataFimCompra: faixa.data_fim_fornecedor,
+      dataInicioSaques: faixa.data_inicio_saques,
+      dataFimSaques: faixa.data_fim_saques,
+      datasIniciaisGrade: [faixa.data_inicio_fornecedor, faixa.data_fim_fornecedor],
+    })
   },
 }

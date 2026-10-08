@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-08T18:37:56.122Z",
+  "generatedAt": "2026-10-08T19:33:26.002Z",
   "collections": [
     {
       "name": "users",
@@ -4822,7 +4822,7 @@
         {
           "name": "semana",
           "type": "relation",
-          "required": true,
+          "required": false,
           "system": false,
           "collectionRef": "producao_semanas"
         },
@@ -4863,11 +4863,19 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "registro",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "producao_registros"
         }
       ],
       "indexes": [
         "CREATE INDEX idx_prod_prod_sem ON producao_produtos (semana)",
-        "CREATE INDEX idx_prod_prod_ordem ON producao_produtos (ordem)"
+        "CREATE INDEX idx_prod_prod_ordem ON producao_produtos (ordem)",
+        "CREATE INDEX `idx_prod_prod_reg` ON `producao_produtos` (registro)"
       ]
     },
     {
@@ -4884,7 +4892,7 @@
         {
           "name": "semana",
           "type": "relation",
-          "required": true,
+          "required": false,
           "system": false,
           "collectionRef": "producao_semanas"
         },
@@ -4920,12 +4928,20 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "registro",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "producao_registros"
         }
       ],
       "indexes": [
         "CREATE INDEX idx_prod_dias_sem ON producao_dias_itens (semana)",
         "CREATE INDEX idx_prod_dias_data ON producao_dias_itens (data)",
-        "CREATE INDEX idx_prod_dias_prod ON producao_dias_itens (produto)"
+        "CREATE INDEX idx_prod_dias_prod ON producao_dias_itens (produto)",
+        "CREATE INDEX `idx_prod_dias_reg` ON `producao_dias_itens` (registro)"
       ]
     },
     {
@@ -4942,7 +4958,7 @@
         {
           "name": "semana",
           "type": "relation",
-          "required": true,
+          "required": false,
           "system": false,
           "collectionRef": "producao_semanas"
         },
@@ -4977,11 +4993,19 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "registro",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "producao_registros"
         }
       ],
       "indexes": [
         "CREATE INDEX idx_prod_saq_grp_sem ON producao_saques_grupos (semana)",
-        "CREATE INDEX idx_prod_saq_grp_ordem ON producao_saques_grupos (ordem)"
+        "CREATE INDEX idx_prod_saq_grp_ordem ON producao_saques_grupos (ordem)",
+        "CREATE INDEX `idx_prod_saq_grp_reg` ON `producao_saques_grupos` (registro)"
       ]
     },
     {
@@ -5039,6 +5063,101 @@
         "CREATE INDEX idx_prod_saq_item_grp ON producao_saques_itens (grupo)",
         "CREATE INDEX idx_prod_saq_item_ordem ON producao_saques_itens (ordem)"
       ]
+    },
+    {
+      "name": "producao_registros",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+      },
+      "fields": [
+        {
+          "name": "fornecedor",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "fornecedores"
+        },
+        {
+          "name": "fornecedor_nome",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "data_inicio_compra",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "data_fim_compra",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "data_inicio_saques",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "data_fim_saques",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "label_compra",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "label_saques",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "imposto",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "datas_grade",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": []
     }
   ]
 }
