@@ -199,7 +199,7 @@ export function AppLayout() {
     { to: '/precificacao/comparar', label: 'Comparador Lado a Lado', icon: Calculator },
     { to: '/precificacao/aprovados', label: 'Cenários & Repositório', icon: BookmarkCheck },
     { to: '/precificacao/dashboard', label: 'Dashboard de Margens', icon: LayoutDashboard },
-    { to: '/precificacao/produtos', label: 'Produtos & Custos', icon: PackageCheck },
+    { to: '/precificacao/produtos', label: 'Produtos & Kits', icon: PackageCheck },
     { to: '/precificacao/canais', label: 'Canais & Taxas', icon: Store },
   ]
 
@@ -776,7 +776,7 @@ export function AppLayout() {
                     'Precificação: Dashboard de Margens',
                     LayoutDashboard,
                   ],
-                  ['/precificacao/produtos', 'Precificação: Produtos & Custos', PackageCheck],
+                  ['/precificacao/produtos', 'Precificação: Produtos & Kits', PackageCheck],
                   ['/precificacao/canais', 'Precificação: Canais & Taxas', Store],
                   ['/producao', 'Produção Semanal & Saques', Factory],
                   ['/metas-agenda', 'Painel Metas & Agenda', Target],

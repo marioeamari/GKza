@@ -26,7 +26,7 @@ export function PrecHeader({ titulo, subtitulo, acoes }: PrecHeaderProps) {
     { to: '/precificacao/comparar', label: 'Comparador Lado a Lado', icon: Calculator },
     { to: '/precificacao/aprovados', label: 'Cenários & Repositório', icon: BookmarkCheck },
     { to: '/precificacao/dashboard', label: 'Dashboard de Margens', icon: LayoutDashboard },
-    { to: '/precificacao/produtos', label: 'Produtos & Custos', icon: PackageCheck },
+    { to: '/precificacao/produtos', label: 'Produtos & Kits', icon: PackageCheck },
     { to: '/precificacao/canais', label: 'Canais & Taxas', icon: Store },
     { to: '/fornecedores', label: 'Fornecedores & Insumos', icon: Truck },
   ]

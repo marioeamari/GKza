@@ -128,6 +128,36 @@ export default function Fornecedores() {
 
   return (
     <>
+      {/* Callout explicativo da função da página de Fornecedores */}
+      <div className="mb-4 rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs sm:text-sm text-foreground flex items-start gap-3">
+        <div className="rounded-lg bg-primary/10 p-2 text-primary shrink-0 mt-0.5">
+          <Truck className="h-5 w-5" />
+        </div>
+        <div className="space-y-1">
+          <p className="font-bold text-foreground">
+            Cadastro de Fornecedores & Produtos de Revenda
+          </p>
+          <p className="text-muted-foreground leading-relaxed">
+            Aqui você cadastra fornecedores e seus produtos fornecidos (itens de revenda com custo
+            de aquisição). Para produtos de fabricação própria, o cadastro acontece em{' '}
+            <Link
+              to="/empresas"
+              className="font-semibold text-primary underline underline-offset-2 hover:text-primary/80"
+            >
+              Empresas
+            </Link>
+            . Para simular preços, margens e kits, acesse{' '}
+            <Link
+              to="/precificacao/produtos"
+              className="font-semibold text-primary underline underline-offset-2 hover:text-primary/80"
+            >
+              Precificação: Produtos & Kits
+            </Link>
+            .
+          </p>
+        </div>
+      </div>
+
       <PageHeader
         title="Fornecedores"
         description="Cadastro de fornecedores (PJ/PF), prazos, condições comerciais e catálogo de produtos para precificação."

@@ -45,6 +45,7 @@ interface FornecedorDialogProps {
   onSaved: () => void
   canWrite: boolean
   canDelete: boolean
+  defaultTab?: 'dados' | 'produtos'
 }
 
 const initialFornecedor = {
@@ -93,6 +94,7 @@ export function FornecedorDialog({
   onSaved,
   canWrite,
   canDelete,
+  defaultTab = 'dados',
 }: FornecedorDialogProps) {
   const { toast } = useToast()
   const [form, setForm] = useState(initialFornecedor)
@@ -118,7 +120,7 @@ export function FornecedorDialog({
 
   useEffect(() => {
     if (open) {
-      setTab('dados')
+      setTab(defaultTab || 'dados')
       if (record) {
         setForm({
           razao_social: record.razao_social || '',
@@ -150,7 +152,7 @@ export function FornecedorDialog({
       }
       setErrors({})
     }
-  }, [open, record])
+  }, [open, record, defaultTab])
 
   async function carregarProdutos(fornecedorId: string) {
     try {

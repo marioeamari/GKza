@@ -130,6 +130,34 @@ export default function Empresas() {
 
   return (
     <>
+      {/* Callout explicativo da função da página de Empresas */}
+      <div className="mb-4 rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs sm:text-sm text-foreground flex items-start gap-3">
+        <div className="rounded-lg bg-primary/10 p-2 text-primary shrink-0 mt-0.5">
+          <Building2 className="h-5 w-5" />
+        </div>
+        <div className="space-y-1">
+          <p className="font-bold text-foreground">Cadastro de Empresas & Fabricação Própria</p>
+          <p className="text-muted-foreground leading-relaxed">
+            Aqui você gerencia as empresas e cadastra os produtos de fabricação própria na ficha da
+            empresa (aba Produtos). Para produtos de revenda, use a ficha do fornecedor em{' '}
+            <Link
+              to="/fornecedores"
+              className="font-semibold text-primary underline underline-offset-2 hover:text-primary/80"
+            >
+              Fornecedores
+            </Link>
+            . Para simular preços, margens e kits, acesse{' '}
+            <Link
+              to="/precificacao/produtos"
+              className="font-semibold text-primary underline underline-offset-2 hover:text-primary/80"
+            >
+              Precificação: Produtos & Kits
+            </Link>
+            .
+          </p>
+        </div>
+      </div>
+
       <PageHeader
         title="Empresas"
         description="Cadastro e ficha detalhada das empresas do sistema. Cada empresa atua como fornecedor de fabricação própria, com dados cadastrais e produtos fabricados para precificação."

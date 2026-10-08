@@ -283,7 +283,7 @@ export default function PrecificacaoHub() {
                 Cadastre seus produtos ou kits para iniciar simulações analíticas de venda.
               </p>
               <Button asChild className="mt-4 bg-primary text-white" size="sm">
-                <Link to="/precificacao/produtos">Cadastrar Primeiro Produto</Link>
+                <Link to="/precificacao/produtos">Ver Produtos & Kits</Link>
               </Button>
             </div>
           ) : (
