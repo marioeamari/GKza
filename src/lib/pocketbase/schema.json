@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-08T17:11:14.502Z",
+  "generatedAt": "2026-10-08T18:09:19.246Z",
   "collections": [
     {
       "name": "users",
@@ -4715,6 +4715,329 @@
       "indexes": [
         "CREATE INDEX idx_dividas_receitas_divida ON dividas_receitas (divida)",
         "CREATE INDEX idx_dividas_receitas_data ON dividas_receitas (data)"
+      ]
+    },
+    {
+      "name": "producao_semanas",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+      },
+      "fields": [
+        {
+          "name": "semana_ano",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "segunda_feira",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "data_inicio_fornecedor",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "data_fim_fornecedor",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "data_inicio_saques",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "data_fim_saques",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "dias_offset_saques",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "imposto",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "despesa_vinculo_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_prod_sem_ano ON producao_semanas (semana_ano)",
+        "CREATE INDEX idx_prod_sem_seg ON producao_semanas (segunda_feira)"
+      ]
+    },
+    {
+      "name": "producao_produtos",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+      },
+      "fields": [
+        {
+          "name": "semana",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "producao_semanas"
+        },
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "custo_unitario",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "ordem",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "codigo_referencia",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_prod_prod_sem ON producao_produtos (semana)",
+        "CREATE INDEX idx_prod_prod_ordem ON producao_produtos (ordem)"
+      ]
+    },
+    {
+      "name": "producao_dias_itens",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+      },
+      "fields": [
+        {
+          "name": "semana",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "producao_semanas"
+        },
+        {
+          "name": "data",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "produto",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "producao_produtos"
+        },
+        {
+          "name": "quantidade",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_prod_dias_sem ON producao_dias_itens (semana)",
+        "CREATE INDEX idx_prod_dias_data ON producao_dias_itens (data)",
+        "CREATE INDEX idx_prod_dias_prod ON producao_dias_itens (produto)"
+      ]
+    },
+    {
+      "name": "producao_saques_grupos",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+      },
+      "fields": [
+        {
+          "name": "semana",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "producao_semanas"
+        },
+        {
+          "name": "titulo",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "marketplace_referencia",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ordem",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_prod_saq_grp_sem ON producao_saques_grupos (semana)",
+        "CREATE INDEX idx_prod_saq_grp_ordem ON producao_saques_grupos (ordem)"
+      ]
+    },
+    {
+      "name": "producao_saques_itens",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+      },
+      "fields": [
+        {
+          "name": "grupo",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "producao_saques_grupos"
+        },
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "valor",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "ordem",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_prod_saq_item_grp ON producao_saques_itens (grupo)",
+        "CREATE INDEX idx_prod_saq_item_ordem ON producao_saques_itens (ordem)"
       ]
     }
   ]

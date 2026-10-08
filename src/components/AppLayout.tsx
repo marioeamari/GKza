@@ -36,6 +36,7 @@ import {
   Boxes,
   FileSpreadsheet,
   History,
+  Factory,
 } from 'lucide-react'
 import { ContextSelector } from '@/components/ContextSelector'
 
@@ -227,6 +228,7 @@ export function AppLayout() {
       highlight: pendentesCount > 0,
     },
     { to: '/despesas', label: 'Despesas', icon: Receipt },
+    { to: '/producao', label: 'Produção Semanal', icon: Factory },
     { to: '/dividas', label: 'Dívidas & Máquinas', icon: Coins },
     { to: '/lancamentos', label: 'Lançamentos', icon: BadgeDollarSign },
     {
@@ -776,6 +778,7 @@ export function AppLayout() {
                   ],
                   ['/precificacao/produtos', 'Precificação: Produtos & Custos', PackageCheck],
                   ['/precificacao/canais', 'Precificação: Canais & Taxas', Store],
+                  ['/producao', 'Produção Semanal & Saques', Factory],
                   ['/metas-agenda', 'Painel Metas & Agenda', Target],
                   ['/dividas', 'Dívidas de Máquinas & Ativos', Coins],
                   ['/habitos', 'Hábitos & Rotinas', CalendarCheck2],
