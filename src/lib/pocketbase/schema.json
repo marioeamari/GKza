@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-08T18:09:19.246Z",
+  "generatedAt": "2026-10-08T18:18:52.604Z",
   "collections": [
     {
       "name": "users",
@@ -5011,7 +5011,7 @@
         {
           "name": "valor",
           "type": "number",
-          "required": true,
+          "required": false,
           "system": false
         },
         {
