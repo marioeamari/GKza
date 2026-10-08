@@ -358,3 +358,110 @@ export function alocarPagamentoFaturaFifo(
     cicloFechado: false,
   }
 }
+
+/**
+ * Interface mínima esperada para ordenação de ocorrências de despesas
+ */
+export interface DespesaOcorrenciaOrdenavel {
+  id: string
+  status?: string
+  data_vencimento?: string | null
+  data_pagamento?: string | null
+  valor_previsto?: number | null
+  valor_pago?: number | null
+  observacoes?: string | null
+  expand?: {
+    compromisso?: {
+      descricao?: string | null
+    } | null
+  } | null
+}
+
+export type ModoOrdenacaoDespesa = 'urgente' | 'recente'
+
+/**
+ * Ordena ocorrências de despesas de forma pura, cronológica e determinística.
+ *
+ * Regras:
+ * 1. Separa não pagas (previstas) das já pagas (pagas sempre após as pendentes).
+ * 2. Critério prioritário: DATA (vencimento para pendentes, data_pagamento || data_vencimento para pagas).
+ *    - 'urgente':
+ *        * Pendentes vencidas e que vencem hoje (<= today) no topo em ordem cronológica (mais antiga primeiro).
+ *        * Pendentes futuras (> today) a seguir em ordem cronológica crescente (mais próxima primeiro).
+ *    - 'recente':
+ *        * Pendentes futuras no topo em ordem decrescente (mais distante primeiro).
+ *        * Vencidas/hoje a seguir em ordem decrescente.
+ *    - Pagas:
+ *        * Em 'urgente': cronológica crescente (mais antiga paga primeiro).
+ *        * Em 'recente': cronológica decrescente (mais recente primeiro).
+ * 3. Desempate estável e determinístico (SEM ordenação alfabética prévia):
+ *    - Se as datas forem iguais: valor decrescente (maior valor primeiro).
+ *    - Se valores forem iguais: ID estável (localeCompare).
+ */
+export function ordenarDespesasPorData<T extends DespesaOcorrenciaOrdenavel>(
+  ocorrencias: T[],
+  modo: ModoOrdenacaoDespesa = 'urgente',
+  hojeStr?: string,
+): T[] {
+  const copy = [...ocorrencias]
+  const today = hojeStr || new Date().toISOString().slice(0, 10)
+
+  return copy.sort((a, b) => {
+    const isPagaA = a.status === 'paga'
+    const isPagaB = b.status === 'paga'
+
+    // 1. Pagas sempre após pendentes
+    if (isPagaA !== isPagaB) {
+      return isPagaA ? 1 : -1
+    }
+
+    // Se ambas são pagas:
+    if (isPagaA && isPagaB) {
+      const dtA = (a.data_pagamento || a.data_vencimento || '').slice(0, 10)
+      const dtB = (b.data_pagamento || b.data_vencimento || '').slice(0, 10)
+      const cmpData = modo === 'recente' ? dtB.localeCompare(dtA) : dtA.localeCompare(dtB)
+      if (cmpData !== 0) return cmpData
+
+      // Desempate: valor decrescente -> ID
+      const valA = Number(a.valor_pago ?? a.valor_previsto ?? 0)
+      const valB = Number(b.valor_pago ?? b.valor_previsto ?? 0)
+      const valDiff = valB - valA
+      if (valDiff !== 0) return valDiff
+
+      return (a.id || '').localeCompare(b.id || '')
+    }
+
+    // Se ambas são pendentes:
+    const dueA = a.data_vencimento ? a.data_vencimento.slice(0, 10) : '9999-99-99'
+    const dueB = b.data_vencimento ? b.data_vencimento.slice(0, 10) : '9999-99-99'
+
+    const isUrgenteA = dueA <= today
+    const isUrgenteB = dueB <= today
+
+    if (modo === 'urgente') {
+      // Vencidas / hoje no topo
+      if (isUrgenteA && !isUrgenteB) return -1
+      if (!isUrgenteA && isUrgenteB) return 1
+
+      // Ambas vencidas/hoje OU ambas futuras: ordem crescente de vencimento (mais antiga/mais próxima primeiro)
+      const cmp = dueA.localeCompare(dueB)
+      if (cmp !== 0) return cmp
+    } else {
+      // 'recente': Mais tarde primeiro — datas mais distantes (futuras) no topo; vencidas/hoje ao final das pendentes
+      if (!isUrgenteA && isUrgenteB) return -1
+      if (isUrgenteA && !isUrgenteB) return 1
+
+      // Ambas futuras OU ambas vencidas/hoje: ordem decrescente de vencimento (data mais distante primeiro)
+      const cmp = dueB.localeCompare(dueA)
+      if (cmp !== 0) return cmp
+    }
+
+    // Desempate estável: valor decrescente -> ID (sem alfabético)
+    const valA = Number(a.valor_previsto ?? 0)
+    const valB = Number(b.valor_previsto ?? 0)
+    const valDiff = valB - valA
+    if (valDiff !== 0) return valDiff
+
+    return (a.id || '').localeCompare(b.id || '')
+  })
+}

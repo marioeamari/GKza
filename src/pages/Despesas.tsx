@@ -93,7 +93,7 @@ import {
   type EstadoCicloFatura,
 } from '@/lib/cartao-fatura'
 import { can } from '@/lib/permissions'
-import { prepararDuplicacaoCompromisso } from '@/lib/despesas-pipeline'
+import { prepararDuplicacaoCompromisso, ordenarDespesasPorData } from '@/lib/despesas-pipeline'
 import { cadastrosService } from '@/services/cadastros'
 import { useRealtime } from '@/hooks/use-realtime'
 import { despesasService } from '@/services/despesas'
@@ -605,6 +605,8 @@ export default function Despesas() {
     } catch (e) {
       console.warn('Erro ao salvar filtro de data de competência no localStorage:', e)
     }
+    // Feedback imediato e recarga forçada da visualização
+    setRefreshing(true)
   }
 
   // Ordenação: 'urgente' (mais urgente primeiro: pendentes vencidas/hoje/futuras no topo) | 'recente' (mais tarde primeiro)
@@ -692,15 +694,34 @@ export default function Despesas() {
         ? `(status = 'paga' && ((data_pagamento >= '${dataInicioMes}' && data_pagamento <= '${dataFimMes}') || (secao = 'cartoes_credito' && competencia = '${currentCompetencia}'))) || (status = 'prevista' && competencia = '${currentCompetencia}')`
         : `competencia = '${currentCompetencia}'`
 
-      const [allComps, allOcs, allPagamentosFatura] = await Promise.all([
-        despesasService.listCompromissos(),
-        despesasService.listOcorrencias({
-          filter: filterOcorrencias,
-        }),
-        financeService.listLancamentos({
-          filter: `is_pagamento_fatura = true && competencia = '${currentCompetencia}'`,
-        }),
-      ])
+      let allComps = await despesasService.listCompromissos()
+      let allOcs = await despesasService.listOcorrencias({
+        filter: filterOcorrencias,
+      })
+
+      // Se navegou para uma competência atual ou futura (>= realCurrentComp) e não encontrou ocorrências,
+      // mas existem compromissos ativos que deveriam gerar ocorrência nesse mês:
+      // aciona a geração sob demanda para a tela não parecer estática.
+      if (currentCompetencia >= realCurrentComp && allOcs.length === 0 && allComps.length > 0) {
+        try {
+          await despesasService.gerarOcorrenciasParaCompromissosLote({
+            compromissos: allComps,
+            competencias: [currentCompetencia],
+            batchSize: 4,
+            batchDelayMs: 150,
+          })
+          // Recarrega as ocorrências recém-geradas
+          allOcs = await despesasService.listOcorrencias({
+            filter: filterOcorrencias,
+          })
+        } catch (genErr) {
+          console.warn('Tentativa de autogeração sob demanda falhou ou foi parcial:', genErr)
+        }
+      }
+
+      const allPagamentosFatura = await financeService.listLancamentos({
+        filter: `is_pagamento_fatura = true && competencia = '${currentCompetencia}'`,
+      })
 
       // Pequeno atraso para escalonar antes das consultas secundárias
       await new Promise((r) => setTimeout(r, 80))
@@ -809,7 +830,8 @@ export default function Despesas() {
   /**
    * Mutex e Fila de Coalescência:
    * Se uma loadData() já estiver em execução, não inicia outra concorrentemente.
-   * Marca pendingReloadRef = true para executar UMA única recarga imediatamente após o término da atual.
+   * Marca pendingReloadRef = true para executar UMA única recarga imediatamente após o término da atual,
+   * garantindo que nenhuma mudança de filtro ou competência seja engolida.
    */
   const loadData = useCallback(async (): Promise<void> => {
     if (isExecutingRef.current) {
@@ -824,7 +846,7 @@ export default function Despesas() {
       isExecutingRef.current = false
       if (pendingReloadRef.current) {
         pendingReloadRef.current = false
-        // Dispara a próxima execução pendente coalescida
+        // Dispara a próxima execução pendente coalescida sem perder os parâmetros atualizados
         loadData()
       }
     }
@@ -907,6 +929,7 @@ export default function Despesas() {
     const nextComp = `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}`
     const next = new URLSearchParams(params)
     next.set('competencia', nextComp)
+    setRefreshing(true)
     setParams(next, { replace: true })
   }
 
@@ -1120,78 +1143,12 @@ export default function Despesas() {
 
   // Função utilitária para ordenação inteligente de ocorrências:
   // Separa não pagas (previstas) das já pagas (pagas sempre após as pendentes).
-  // - Em 'urgente' (default):
-  //     * Pendentes vencidas e que vencem hoje no topo em ordem cronológica (mais antiga primeiro),
-  //       seguidas pelas pendentes futuras em ordem cronológica crescente (mais próxima primeiro).
-  //     * Desempate estável: descrição -> ID -> valor decrescente.
-  // - Em 'recente' (mais tarde primeiro):
-  //     * Inversão completa da urgência: pendentes futuras com vencimento mais distante no topo
-  //       (ordem cronológica decrescente), seguidas pelas vencidas/hoje (com vencimento menos atrasado antes do mais antigo).
-  //     * Desempate estável: descrição -> ID -> valor decrescente.
-  // - Pagas: agrupadas ao final em ambas as opções, ordenadas cronologicamente de forma consistente.
+  // Função utilitária para ordenação inteligente de ocorrências:
+  // Usa a função pura de pipeline `ordenarDespesasPorData` garantindo ordenação cronológica primária
+  // e desempate estável por data -> valor decrescente -> ID (eliminando desempate alfabético).
   const sortOcorrenciasList = useCallback(
     (list: DespesaOcorrencia[]) => {
-      const copy = [...list]
-      const today = realTodayStr // 'YYYY-MM-DD'
-
-      return copy.sort((a, b) => {
-        const isPagaA = a.status === 'paga'
-        const isPagaB = b.status === 'paga'
-
-        // 1. As pagas ficam sempre abaixo das não pagas para garantir que as que precisam ser pagas fiquem no topo
-        if (isPagaA !== isPagaB) {
-          return isPagaA ? 1 : -1
-        }
-
-        // Se ambas são pagas: ordena de acordo com sortBy (recente: mais recente primeiro; urgente: mais antiga primeiro)
-        if (isPagaA && isPagaB) {
-          const dtA = (a.data_pagamento || a.data_vencimento || '').slice(0, 10)
-          const dtB = (b.data_pagamento || b.data_vencimento || '').slice(0, 10)
-          const cmpPago = sortBy === 'recente' ? dtB.localeCompare(dtA) : dtA.localeCompare(dtB)
-          if (cmpPago !== 0) return cmpPago
-          const descA = a.expand?.compromisso?.descricao || a.observacoes || ''
-          const descB = b.expand?.compromisso?.descricao || b.observacoes || ''
-          const cmpDesc = descA.localeCompare(descB)
-          if (cmpDesc !== 0) return cmpDesc
-          return a.id.localeCompare(b.id)
-        }
-
-        // Se ambas são pendentes (previstas):
-        const dueA = a.data_vencimento ? a.data_vencimento.slice(0, 10) : '9999-99-99'
-        const dueB = b.data_vencimento ? b.data_vencimento.slice(0, 10) : '9999-99-99'
-
-        const isUrgenteA = dueA <= today
-        const isUrgenteB = dueB <= today
-
-        if (sortBy === 'urgente') {
-          // Mais urgente primeiro: vencidas e hoje no topo
-          if (isUrgenteA && !isUrgenteB) return -1
-          if (!isUrgenteA && isUrgenteB) return 1
-
-          // Ambas vencidas/hoje OU ambas futuras: ordem crescente de vencimento (mais próxima/urgente primeiro)
-          const cmp = dueA.localeCompare(dueB)
-          if (cmp !== 0) return cmp
-        } else {
-          // 'recente': Mais tarde primeiro — datas mais distantes (futuras) no topo; vencidas/hoje ao final das pendentes
-          if (!isUrgenteA && isUrgenteB) return -1
-          if (isUrgenteA && !isUrgenteB) return 1
-
-          // Ambas futuras OU ambas vencidas/hoje: ordem decrescente de vencimento (data mais distante primeiro)
-          const cmp = dueB.localeCompare(dueA)
-          if (cmp !== 0) return cmp
-        }
-
-        // Desempate consistente e determinístico
-        const descA = a.expand?.compromisso?.descricao || a.observacoes || ''
-        const descB = b.expand?.compromisso?.descricao || b.observacoes || ''
-        const cmpDesc = descA.localeCompare(descB)
-        if (cmpDesc !== 0) return cmpDesc
-
-        const valDiff = (b.valor_previsto || 0) - (a.valor_previsto || 0)
-        if (valDiff !== 0) return valDiff
-
-        return a.id.localeCompare(b.id)
-      })
+      return ordenarDespesasPorData(list, sortBy, realTodayStr)
     },
     [realTodayStr, sortBy],
   )

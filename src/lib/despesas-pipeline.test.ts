@@ -5,6 +5,7 @@ import {
   prepararDuplicacaoCompromisso,
   prepararDuplicacaoLancamento,
   alocarPagamentoFaturaFifo,
+  ordenarDespesasPorData,
 } from './despesas-pipeline'
 import { calcularCompetenciaEVencimento, calcularFaturaCartao } from './cartao-fatura'
 
@@ -589,6 +590,87 @@ describe('despesas-pipeline - Cobertura dos 8 Fluxos do Usuário', () => {
       expect(res.itensQuitadosIds).toEqual([])
       expect(res.isTotal).toBe(true)
       expect(res.cicloFechado).toBe(true)
+    })
+  })
+
+  describe('ordenarDespesasPorData (Regra Pura de Ordenação)', () => {
+    const hoje = '2026-10-15'
+
+    it('ordena pendentes prioritariamente por data cronológica e desempata por valor decrescente, NÃO alfabético', () => {
+      const lista = [
+        {
+          id: 'item_z',
+          status: 'prevista',
+          data_vencimento: '2026-10-20',
+          valor_previsto: 50,
+          expand: { compromisso: { descricao: 'Zebra' } },
+        },
+        {
+          id: 'item_a',
+          status: 'prevista',
+          data_vencimento: '2026-10-18',
+          valor_previsto: 10,
+          expand: { compromisso: { descricao: 'Abacaxi' } },
+        },
+        {
+          id: 'item_b_alto',
+          status: 'prevista',
+          data_vencimento: '2026-10-20',
+          valor_previsto: 500,
+          expand: { compromisso: { descricao: 'Banana Cara' } },
+        },
+        {
+          id: 'item_c_baixo',
+          status: 'prevista',
+          data_vencimento: '2026-10-20',
+          valor_previsto: 200,
+          expand: { compromisso: { descricao: 'Amora' } },
+        },
+      ]
+
+      const ordenado = ordenarDespesasPorData(lista, 'urgente', hoje)
+
+      // 1º: item_a vence dia 18 (mais próxima)
+      expect(ordenado[0].id).toBe('item_a')
+
+      // 2º, 3º e 4º vencem no mesmo dia (2026-10-20):
+      // Deve desempatar por valor decrescente (500 > 200 > 50)
+      // Note que 'Banana Cara' (500) vem antes de 'Amora' (200), provando que não é alfabético!
+      expect(ordenado[1].id).toBe('item_b_alto') // R$ 500
+      expect(ordenado[2].id).toBe('item_c_baixo') // R$ 200
+      expect(ordenado[3].id).toBe('item_z') // R$ 50
+    })
+
+    it('coloca pendentes vencidas e de hoje no topo em modo urgente', () => {
+      const lista = [
+        { id: 'futura', status: 'prevista', data_vencimento: '2026-10-25', valor_previsto: 100 },
+        { id: 'vencida', status: 'prevista', data_vencimento: '2026-10-10', valor_previsto: 100 },
+        { id: 'hoje', status: 'prevista', data_vencimento: '2026-10-15', valor_previsto: 100 },
+      ]
+
+      const ordenado = ordenarDespesasPorData(lista, 'urgente', hoje)
+      expect(ordenado.map((o) => o.id)).toEqual(['vencida', 'hoje', 'futura'])
+    })
+
+    it('coloca pagas sempre após pendentes', () => {
+      const lista = [
+        { id: 'paga_1', status: 'paga', data_vencimento: '2026-10-01', valor_previsto: 100 },
+        { id: 'pend_1', status: 'prevista', data_vencimento: '2026-10-28', valor_previsto: 100 },
+      ]
+
+      const ordenado = ordenarDespesasPorData(lista, 'urgente', hoje)
+      expect(ordenado[0].id).toBe('pend_1')
+      expect(ordenado[1].id).toBe('paga_1')
+    })
+
+    it('desempata por ID de forma estável quando data e valor forem idênticos', () => {
+      const lista = [
+        { id: 'b_id', status: 'prevista', data_vencimento: '2026-10-20', valor_previsto: 100 },
+        { id: 'a_id', status: 'prevista', data_vencimento: '2026-10-20', valor_previsto: 100 },
+      ]
+
+      const ordenado = ordenarDespesasPorData(lista, 'urgente', hoje)
+      expect(ordenado.map((o) => o.id)).toEqual(['a_id', 'b_id'])
     })
   })
 })
