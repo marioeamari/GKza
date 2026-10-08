@@ -1734,11 +1734,19 @@ export function DespesaCompromissoDialog({
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-medium text-foreground">
                               Comprovante de pagamento vinculado{' '}
-                              {ocorrenciaPagaMaisRecente.data_pagamento && (
-                                <span className="text-muted-foreground font-normal">
-                                  (Pago em {formatDate(ocorrenciaPagaMaisRecente.data_pagamento)})
-                                </span>
-                              )}
+                              {ocorrenciaPagaMaisRecente.data_pagamento &&
+                                (isMetodoCredito(compromisso?.metodo_pagamento, metodosPagamento) ||
+                                (selectedConta?.tipo === 'cartao' &&
+                                  isMetodoCredito(form.metodo_pagamento, metodosPagamento)) ? (
+                                  <span className="text-muted-foreground font-normal">
+                                    (Fatura quitada:{' '}
+                                    {formatDate(ocorrenciaPagaMaisRecente.data_pagamento)})
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground font-normal">
+                                    (Pago em {formatDate(ocorrenciaPagaMaisRecente.data_pagamento)})
+                                  </span>
+                                ))}
                             </span>
                             {ocorrenciasPagas.length > 1 && (
                               <span className="text-[10px] rounded bg-secondary px-1.5 py-0.5 text-muted-foreground">

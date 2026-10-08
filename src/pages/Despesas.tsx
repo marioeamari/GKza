@@ -159,6 +159,11 @@ function CompromissoAnualRow({
   const tag = compromisso.expand?.tag
   const categoria = compromisso.expand?.categoria
   const contaPadrao = ocorrenciaMes?.expand?.conta || compromisso.expand?.conta_padrao
+  const metodoPagCompromisso = compromisso.expand?.metodo_pagamento
+  const metodoEhCreditoCompromisso = isMetodoCredito(metodoPagCompromisso)
+  const isCartaoCompromisso =
+    (contaPadrao?.tipo === 'cartao' || compromisso.secao === 'cartoes_credito') &&
+    metodoEhCreditoCompromisso
 
   const titularTipo = compromisso.titular_tipo || (compromisso.empresa ? 'cnpj' : 'cpf')
   const titularNome =
@@ -285,6 +290,15 @@ function CompromissoAnualRow({
               </span>
             )}
 
+            {compromisso.data_inicio && (
+              <span className={isCartaoCompromisso ? 'text-success font-semibold' : ''}>
+                Compra:{' '}
+                <strong className={isCartaoCompromisso ? 'text-success font-bold' : ''}>
+                  {formatDate(compromisso.data_inicio)}
+                </strong>
+              </span>
+            )}
+
             <span>
               Cobrança anual:{' '}
               <strong>
@@ -292,7 +306,25 @@ function CompromissoAnualRow({
               </strong>
             </span>
 
-            {isPagaNoMes && ocorrenciaMes?.data_pagamento ? (
+            {isCartaoCompromisso ? (
+              // Compras no Crédito:
+              // - O vencimento/quitação da fatura aparece como texto secundário discreto (ex.: "Fatura: vence 23/10" ou quitada)
+              isPagaNoMes && ocorrenciaMes?.data_pagamento ? (
+                <span className="text-muted-foreground">
+                  Fatura: quitada ({formatDate(ocorrenciaMes.data_pagamento).slice(0, 5)})
+                </span>
+              ) : ocorrenciaMes?.data_vencimento ? (
+                <span className="text-muted-foreground">
+                  Fatura: vence {formatDate(ocorrenciaMes.data_vencimento).slice(0, 5)}
+                </span>
+              ) : !isMesDeRenovacao && ultimaOcorrenciaPaga?.data_pagamento ? (
+                <span className="text-muted-foreground flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3 inline text-muted-foreground" />
+                  Fatura quitada em {formatDate(ultimaOcorrenciaPaga.data_pagamento).slice(0, 5)}
+                </span>
+              ) : null
+            ) : // Demais métodos (débito, Pix, dinheiro, boleto etc.): mantém destaque padrão
+            isPagaNoMes && ocorrenciaMes?.data_pagamento ? (
               <span className="text-success font-medium">
                 Pago em: {formatDate(ocorrenciaMes.data_pagamento)}
               </span>
@@ -3225,8 +3257,11 @@ function OcorrenciaRow({
             )}
 
             {dataCompraFormatada && (
-              <span>
-                Compra: <strong>{dataCompraFormatada}</strong>
+              <span className={isCartao ? 'text-success font-semibold' : ''}>
+                Compra:{' '}
+                <strong className={isCartao ? 'text-success font-bold' : ''}>
+                  {dataCompraFormatada}
+                </strong>
               </span>
             )}
 
@@ -3241,11 +3276,24 @@ function OcorrenciaRow({
                 Comp: {ocorrencia.competencia}
               </span>
             )}
-            {isPaga && ocorrencia.data_pagamento && (
+            {isCartao ? (
+              // Compras no Crédito:
+              // - O vencimento da fatura aparece como texto secundário discreto (ex.: "Fatura: vence 23/10") ou quitada se paga
+              isPaga && ocorrencia.data_pagamento ? (
+                <span className="text-muted-foreground">
+                  Fatura: quitada ({formatDate(ocorrencia.data_pagamento).slice(0, 5)})
+                </span>
+              ) : ocorrencia.data_vencimento ? (
+                <span className="text-muted-foreground">
+                  Fatura: vence {formatDate(ocorrencia.data_vencimento).slice(0, 5)}
+                </span>
+              ) : null
+            ) : // Demais métodos (débito, Pix, dinheiro, boleto etc.): mantém o padrão com destaque
+            isPaga && ocorrencia.data_pagamento ? (
               <span className="text-success font-medium">
                 Pago em: {formatDate(ocorrencia.data_pagamento)}
               </span>
-            )}
+            ) : null}
             {linkPag && (
               <a
                 href={linkPag}
