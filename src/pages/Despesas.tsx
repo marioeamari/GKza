@@ -711,20 +711,10 @@ export default function Despesas() {
       const realTodayStr = getLocalDateStr() // 'YYYY-MM-DD'
       const realCurrentComp = realTodayStr.slice(0, 7) // 'YYYY-MM'
 
-      // 2. Carrega compromissos e ocorrências da competência atual (respeitando o modo vencimento vs pagamento)
-      const isModoPagamento = filtroDataCompetencia === 'pagamento'
-      const [anoC, mesC] = currentCompetencia.split('-').map((v) => parseInt(v, 10))
-      const ultimoDiaMes = new Date(Date.UTC(anoC, mesC, 0)).getUTCDate()
-      const dataInicioMes = `${currentCompetencia}-01`
-      const dataFimMes = `${currentCompetencia}-${String(ultimoDiaMes).padStart(2, '0')} 23:59:59`
-
-      // Se filtroDataCompetencia === 'pagamento':
-      // Para cartão de crédito: a data_pagamento reflete o vencimento da fatura da competência do ciclo.
-      // Busca ocorrências pagas no mês pela data_pagamento OU de cartão cuja competência seja a atual,
-      // e previstas cuja competência = currentCompetencia.
-      const filterOcorrencias = isModoPagamento
-        ? `(status = 'paga' && ((data_pagamento >= '${dataInicioMes}' && data_pagamento <= '${dataFimMes}') || (secao = 'cartoes_credito' && competencia = '${currentCompetencia}'))) || (status = 'prevista' && competencia = '${currentCompetencia}')`
-        : `competencia = '${currentCompetencia}'`
+      // 2. Carrega compromissos e ocorrências da competência atual (regra canônica: competência sempre fixa)
+      // O filtro "filtroDataCompetencia" (vencimento vs pagamento) atua exclusivamente como filtro visual de exibição/destaque,
+      // sem alterar a cláusula de busca nem recalcular a base contábil ou totalizadores gerais.
+      const filterOcorrencias = `competencia = '${currentCompetencia}'`
 
       let allComps = await despesasService.listCompromissos()
       let allOcs = await despesasService.listOcorrencias({
