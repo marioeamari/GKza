@@ -45,6 +45,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from '@/components/ui/command'
+import { ChevronsUpDown } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -184,6 +195,7 @@ export default function PrecificacaoComparar() {
 
   // Produto selecionado para o estudo
   const [selectedProdutoId, setSelectedProdutoId] = useState<string>('')
+  const [comboboxProdutoOpen, setComboboxProdutoOpen] = useState(false)
 
   // Modo de precificação
   const [modoCalculo, setModoCalculo] = useState<
@@ -1489,31 +1501,252 @@ export default function PrecificacaoComparar() {
               </Label>
               <div className="flex items-center gap-3 w-full">
                 <div className="flex-1 min-w-0">
-                  <Select
-                    value={selectedProdutoId}
-                    onValueChange={(val) => {
-                      setSelectedProdutoId(val)
-                      setKitInfoAtual(null)
-                      setPrecosPorColuna({})
-                      setDescontosPorColuna({})
-                      setCenariosSalvosAdicionados([])
-                      setModoCalculo('mesmo_preco')
-                      const p = produtos.find((x) => x.id === val)
-                      if (p) setSearchParams({ sku: p.sku })
-                    }}
-                  >
-                    <SelectTrigger className="font-bold text-sm h-11 w-full bg-secondary/30 border-border">
-                      <SelectValue placeholder="Selecione um produto..." />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-80 w-[var(--radix-select-trigger-width)]">
-                      {produtos.map((p) => (
-                        <SelectItem key={p.id} value={p.id} className="cursor-pointer py-2">
-                          <span className="font-mono font-bold text-primary mr-2">[{p.sku}]</span>
-                          <span className="font-medium text-foreground">{p.nome}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Popover open={comboboxProdutoOpen} onOpenChange={setComboboxProdutoOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={comboboxProdutoOpen}
+                        className="font-bold text-sm h-11 w-full justify-between bg-secondary/30 border-border px-3.5"
+                      >
+                        <span className="truncate text-left">
+                          {produtoAtual ? (
+                            <>
+                              <span className="font-mono font-bold text-primary mr-2">
+                                [{produtoAtual.sku}]
+                              </span>
+                              <span className="font-medium text-foreground">
+                                {produtoAtual.nome}
+                              </span>
+                              {(produtoAtual.expand?.fornecedor?.nome_fantasia ||
+                                produtoAtual.expand?.fornecedor?.razao_social ||
+                                produtoAtual.expand?.empresa?.nome_fantasia ||
+                                produtoAtual.expand?.empresa?.razao_social) && (
+                                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                                  ·{' '}
+                                  {produtoAtual.expand?.fornecedor?.nome_fantasia ||
+                                    produtoAtual.expand?.fornecedor?.razao_social ||
+                                    produtoAtual.expand?.empresa?.nome_fantasia ||
+                                    produtoAtual.expand?.empresa?.razao_social}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground font-normal">
+                              Selecione um produto para estudo...
+                            </span>
+                          )}
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[min(650px,95vw)] p-0" align="start">
+                      <Command>
+                        <CommandInput
+                          placeholder="Buscar por nome, SKU, fornecedor ou empresa..."
+                          className="h-10 text-xs"
+                        />
+                        <CommandList className="max-h-80 overflow-y-auto">
+                          <CommandEmpty className="py-6 text-center text-xs text-muted-foreground">
+                            Nenhum produto encontrado.
+                          </CommandEmpty>
+
+                          {/* 1. Grupo Revenda */}
+                          {produtos.some((p) => p.tipo === 'revenda') && (
+                            <CommandGroup
+                              heading={
+                                <span className="font-bold text-xs uppercase tracking-wider text-blue-700 flex items-center gap-1.5">
+                                  <Badge className="bg-blue-600 text-white text-[9px] h-4 px-1 py-0 border-none">
+                                    Revenda
+                                  </Badge>
+                                  <span>Produtos de Revenda</span>
+                                </span>
+                              }
+                            >
+                              {produtos
+                                .filter((p) => p.tipo === 'revenda')
+                                .map((p) => {
+                                  const fornNome =
+                                    p.expand?.fornecedor?.nome_fantasia ||
+                                    p.expand?.fornecedor?.razao_social ||
+                                    ''
+                                  const empNome =
+                                    p.expand?.empresa?.nome_fantasia ||
+                                    p.expand?.empresa?.razao_social ||
+                                    ''
+                                  const origemLabel = fornNome
+                                    ? `Fornecedor: ${fornNome}`
+                                    : empNome
+                                      ? `Empresa: ${empNome}`
+                                      : ''
+
+                                  return (
+                                    <CommandItem
+                                      key={p.id}
+                                      value={`${p.sku} ${p.nome} ${fornNome} ${empNome} revenda`}
+                                      onSelect={() => {
+                                        setSelectedProdutoId(p.id)
+                                        setKitInfoAtual(null)
+                                        setPrecosPorColuna({})
+                                        setDescontosPorColuna({})
+                                        setCenariosSalvosAdicionados([])
+                                        setModoCalculo('mesmo_preco')
+                                        setSearchParams({ sku: p.sku })
+                                        setComboboxProdutoOpen(false)
+                                      }}
+                                      className="cursor-pointer py-2 px-3 text-xs flex items-center justify-between"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="font-mono font-bold text-primary shrink-0">
+                                          [{p.sku}]
+                                        </span>
+                                        <span className="font-medium text-foreground truncate">
+                                          {p.nome}
+                                        </span>
+                                        {origemLabel && (
+                                          <span className="text-[11px] text-muted-foreground shrink-0 bg-secondary/60 px-1.5 py-0.5 rounded">
+                                            {origemLabel}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {selectedProdutoId === p.id && (
+                                        <Check className="h-4 w-4 text-primary shrink-0 ml-2" />
+                                      )}
+                                    </CommandItem>
+                                  )
+                                })}
+                            </CommandGroup>
+                          )}
+
+                          <CommandSeparator />
+
+                          {/* 2. Grupo Fabricação Própria */}
+                          {produtos.some((p) => p.tipo === 'fabricacao_propria') && (
+                            <CommandGroup
+                              heading={
+                                <span className="font-bold text-xs uppercase tracking-wider text-amber-700 flex items-center gap-1.5">
+                                  <Badge className="bg-amber-600 text-white text-[9px] h-4 px-1 py-0 border-none">
+                                    Fabricação
+                                  </Badge>
+                                  <span>Fabricação Própria</span>
+                                </span>
+                              }
+                            >
+                              {produtos
+                                .filter((p) => p.tipo === 'fabricacao_propria')
+                                .map((p) => {
+                                  const empNome =
+                                    p.expand?.empresa?.nome_fantasia ||
+                                    p.expand?.empresa?.razao_social ||
+                                    ''
+
+                                  return (
+                                    <CommandItem
+                                      key={p.id}
+                                      value={`${p.sku} ${p.nome} ${empNome} fabricacao propria`}
+                                      onSelect={() => {
+                                        setSelectedProdutoId(p.id)
+                                        setKitInfoAtual(null)
+                                        setPrecosPorColuna({})
+                                        setDescontosPorColuna({})
+                                        setCenariosSalvosAdicionados([])
+                                        setModoCalculo('mesmo_preco')
+                                        setSearchParams({ sku: p.sku })
+                                        setComboboxProdutoOpen(false)
+                                      }}
+                                      className="cursor-pointer py-2 px-3 text-xs flex items-center justify-between"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="font-mono font-bold text-primary shrink-0">
+                                          [{p.sku}]
+                                        </span>
+                                        <span className="font-medium text-foreground truncate">
+                                          {p.nome}
+                                        </span>
+                                        {empNome && (
+                                          <span className="text-[11px] text-muted-foreground shrink-0 bg-secondary/60 px-1.5 py-0.5 rounded">
+                                            Empresa: {empNome}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {selectedProdutoId === p.id && (
+                                        <Check className="h-4 w-4 text-primary shrink-0 ml-2" />
+                                      )}
+                                    </CommandItem>
+                                  )
+                                })}
+                            </CommandGroup>
+                          )}
+
+                          <CommandSeparator />
+
+                          {/* 3. Grupo Kits e Combos */}
+                          {produtos.some((p) => p.tipo === 'kit' || p.tipo === 'combo') && (
+                            <CommandGroup
+                              heading={
+                                <span className="font-bold text-xs uppercase tracking-wider text-purple-700 flex items-center gap-1.5">
+                                  <Badge className="bg-purple-600 text-white text-[9px] h-4 px-1 py-0 border-none">
+                                    Kits/Combos
+                                  </Badge>
+                                  <span>Kits e Combos</span>
+                                </span>
+                              }
+                            >
+                              {produtos
+                                .filter((p) => p.tipo === 'kit' || p.tipo === 'combo')
+                                .map((p) => {
+                                  const empNome =
+                                    p.expand?.empresa?.nome_fantasia ||
+                                    p.expand?.empresa?.razao_social ||
+                                    ''
+
+                                  return (
+                                    <CommandItem
+                                      key={p.id}
+                                      value={`${p.sku} ${p.nome} ${empNome} kit combo`}
+                                      onSelect={() => {
+                                        setSelectedProdutoId(p.id)
+                                        setKitInfoAtual(null)
+                                        setPrecosPorColuna({})
+                                        setDescontosPorColuna({})
+                                        setCenariosSalvosAdicionados([])
+                                        setModoCalculo('mesmo_preco')
+                                        setSearchParams({ sku: p.sku })
+                                        setComboboxProdutoOpen(false)
+                                      }}
+                                      className="cursor-pointer py-2 px-3 text-xs flex items-center justify-between"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="font-mono font-bold text-primary shrink-0">
+                                          [{p.sku}]
+                                        </span>
+                                        <span className="font-medium text-foreground truncate">
+                                          {p.nome}
+                                        </span>
+                                        <Badge
+                                          variant="secondary"
+                                          className="text-[9px] h-4 px-1 py-0 font-semibold shrink-0"
+                                        >
+                                          {p.tipo === 'kit' ? 'Kit' : 'Combo'}
+                                        </Badge>
+                                        {empNome && (
+                                          <span className="text-[11px] text-muted-foreground shrink-0 bg-secondary/60 px-1.5 py-0.5 rounded">
+                                            Empresa: {empNome}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {selectedProdutoId === p.id && (
+                                        <Check className="h-4 w-4 text-primary shrink-0 ml-2" />
+                                      )}
+                                    </CommandItem>
+                                  )
+                                })}
+                            </CommandGroup>
+                          )}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
 
                 {produtoAtual && (

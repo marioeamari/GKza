@@ -33,6 +33,7 @@ import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/hooks/use-toast'
 import { apiFieldErrors, apiMessage } from '@/lib/api-error'
 import { dateOnly, formatCurrency, toPocketBaseDate } from '@/lib/format'
+import pb from '@/lib/pocketbase/client'
 import { marketplacesService } from '@/services/marketplaces'
 import { precificacaoService } from '@/services/precificacao'
 import type { MarketplaceConta, SaleStatus, Venda, VendaItem } from '@/types/domain'
@@ -175,15 +176,54 @@ export function SaleDialog({
     Math.round((form.valor_bruto - form.comissao - form.taxas) * 100) / 100,
   )
 
-  // Recalcular comissão ao mudar a conta
-  const setAccount = (marketplace_conta: string) => {
+  // Recalcular comissão e atualizar preços sugeridos ao mudar a conta
+  const setAccount = async (marketplace_conta: string) => {
     const c = contas.find((a) => a.id === marketplace_conta)
     const pct = c?.comissao_percentual || 0
+
+    // Buscar canal correspondente a esta conta
+    const marketplaceId = c?.marketplace
+    const canalCorrespondente = canais.find(
+      (ch) =>
+        (marketplaceId && ch.marketplace === marketplaceId) ||
+        (c?.apelido && ch.nome.toLowerCase().includes(c.apelido.toLowerCase())),
+    )
+
     setForm((prev) => ({
       ...prev,
       marketplace_conta,
       comissao: Math.round(prev.valor_bruto * pct) / 100,
     }))
+
+    // Se já existem itens com produto_id selecionado e trocou de conta, consultar se há precificação aprovada neste novo canal
+    if (canalCorrespondente) {
+      for (let i = 0; i < form.itens.length; i++) {
+        const item = form.itens[i]
+        if (item.produto_id) {
+          try {
+            const precs = await pb
+              .collection('prec_precificacoes')
+              .getList<PrecPrecificacaoRecord>(1, 1, {
+                filter: `produto = "${item.produto_id}" && canal = "${canalCorrespondente.id}" && status = "aprovada"`,
+                sort: '-updated,-created',
+              })
+            if (precs.items.length > 0) {
+              const rec = precs.items[0]
+              const preco = rec.preco_aprovado || rec.premissas?.preco_venda || 0
+              if (preco > 0 && preco !== item.preco_unitario) {
+                handleItemChange(i, 'preco_unitario', preco)
+                toast({
+                  title: 'Preço sugerido atualizado para o canal',
+                  description: `Preço sugerido: ${formatCurrency(preco)} (Aprovado na Precificação)`,
+                })
+              }
+            }
+          } catch {
+            /* intentionally ignored */
+          }
+        }
+      }
+    }
   }
 
   // Mapa de canais e modalidades para rótulos nos itens
@@ -295,14 +335,56 @@ export function SaleDialog({
     })
   }
 
-  // Ao selecionar uma opção específica de modalidade/preço aprovado do produto
-  const handleSelectOpcaoProduto = (index: number, opcao: OpcaoProdutoModalidade) => {
+  // Ao selecionar um produto do catálogo ou opção avulsa
+  // Regra da Tarefa 4:
+  // Ao selecionar produto+canal, consultar prec_precificacoes com filtro produto/canal/status="aprovada"
+  // (sort -updated, -created, limite 1); se preco_aprovado>0, sugerir no valor unitário com selo
+  // "Preço sugerido: R$ XX,XX (Aprovado na Precificação)".
+  const handleSelectOpcaoProduto = async (index: number, opcao: OpcaoProdutoModalidade) => {
+    // 1. Identificar o canal da conta selecionada
+    const marketplaceId = selectedConta?.marketplace
+    const canalCorrespondente = canais.find(
+      (c) =>
+        (marketplaceId && c.marketplace === marketplaceId) ||
+        (selectedConta?.apelido &&
+          c.nome.toLowerCase().includes(selectedConta.apelido.toLowerCase())),
+    )
+
+    let precoSugeridoAprovado = 0
+    let cenarioAprovadoId = ''
+
+    if (opcao.produtoId && canalCorrespondente) {
+      try {
+        const precs = await pb
+          .collection('prec_precificacoes')
+          .getList<PrecPrecificacaoRecord>(1, 1, {
+            filter: `produto = "${opcao.produtoId}" && canal = "${canalCorrespondente.id}" && status = "aprovada"`,
+            sort: '-updated,-created',
+          })
+        if (precs.items.length > 0) {
+          const rec = precs.items[0]
+          const preco = rec.preco_aprovado || rec.premissas?.preco_venda || 0
+          if (preco > 0) {
+            precoSugeridoAprovado = preco
+            cenarioAprovadoId = rec.id
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao consultar preço aprovado do canal:', err)
+      }
+    }
+
+    // Se não encontrou aprovado para o canal específico, mas a opção já trazia preço aprovado (fallback)
+    const precoFinal =
+      precoSugeridoAprovado > 0 ? precoSugeridoAprovado : opcao.preco > 0 ? opcao.preco : 0
+
+    const ehAprovado = precoSugeridoAprovado > 0 || (opcao.temPrecoAprovado && opcao.preco > 0)
+
     setForm((prev) => {
       const novosItens = [...prev.itens]
       const qtdAtual = novosItens[index]?.quantidade || 1
-      const subtotal = Math.round(qtdAtual * opcao.preco * 100) / 100
+      const subtotal = Math.round(qtdAtual * precoFinal * 100) / 100
 
-      // Formatar descrição descritiva com canal e modalidade se houver
       const sufixoModalidade = opcao.canalNome
         ? ` (${opcao.canalNome}${opcao.modalidadeNome ? ` - ${opcao.modalidadeNome}` : ''})`
         : ''
@@ -313,7 +395,7 @@ export function SaleDialog({
         produto_id: opcao.produtoId,
         sku: opcao.sku,
         descricao: descricaoFinal,
-        preco_unitario: opcao.preco,
+        preco_unitario: precoFinal,
         subtotal,
       }
 
@@ -330,6 +412,13 @@ export function SaleDialog({
         comissao: novaComissao,
       }
     })
+
+    if (ehAprovado && precoFinal > 0) {
+      toast({
+        title: 'Preço sugerido aplicado',
+        description: `Preço sugerido: ${formatCurrency(precoFinal)} (Aprovado na Precificação)`,
+      })
+    }
   }
 
   const handleAddItem = () => {
@@ -694,9 +783,20 @@ export function SaleDialog({
 
                     {/* Preço Unitário */}
                     <div className="sm:col-span-2 space-y-1">
-                      <span className="text-[10px] font-semibold text-muted-foreground uppercase block">
-                        Unitário (R$)
-                      </span>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-semibold text-muted-foreground uppercase block">
+                          Unitário (R$)
+                        </span>
+                        {item.produto_id && item.preco_unitario > 0 && (
+                          <Badge
+                            variant="secondary"
+                            className="text-[9px] h-3.5 px-1 py-0 bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            title="Preço sugerido baseado na precificação aprovada"
+                          >
+                            Aprovado
+                          </Badge>
+                        )}
+                      </div>
                       <Input
                         type="number"
                         step="0.01"
@@ -725,11 +825,19 @@ export function SaleDialog({
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t border-border/40">
-                    <span>
-                      {item.quantidade} un × {formatCurrency(item.preco_unitario)}
-                    </span>
-                    <span className="font-semibold text-foreground font-mono">
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t border-border/40 flex-wrap gap-1">
+                    <div className="flex items-center gap-2">
+                      <span>
+                        {item.quantidade} un × {formatCurrency(item.preco_unitario)}
+                      </span>
+                      {item.produto_id && item.preco_unitario > 0 && (
+                        <span className="text-[10.5px] text-emerald-700 font-medium">
+                          Preço sugerido: {formatCurrency(item.preco_unitario)} (Aprovado na
+                          Precificação)
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-semibold text-foreground font-mono ml-auto">
                       Subtotal: {formatCurrency(item.subtotal)}
                     </span>
                   </div>

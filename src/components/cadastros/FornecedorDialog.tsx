@@ -439,9 +439,18 @@ export function FornecedorDialog({
         formData.append('imagem', '')
       }
 
-      await fornecedoresService.saveProduto(formData, editingProduto?.id)
+      const savedProduto = await fornecedoresService.saveProduto(formData, editingProduto?.id)
+
+      // Ponte automática no salvamento: espelhar em prec_produtos com cópia de imagem
+      try {
+        await fornecedoresService.syncProdutoComPrecificacao(savedProduto.id)
+      } catch (bridgeErr) {
+        console.warn('Aviso: falha no espelhamento para prec_produtos:', bridgeErr)
+      }
+
       toast({
         title: editingProduto ? 'Produto atualizado' : 'Produto adicionado com sucesso',
+        description: 'Dados sincronizados com o catálogo de precificação.',
       })
       setProdutoDialog(false)
       carregarProdutos(record.id)
