@@ -738,36 +738,14 @@ export default function Despesas() {
 
       // 2. Carrega compromissos e ocorrências da competência atual (regra canônica: competência gravada na entrada)
       // A busca traz as ocorrências da competência atual para garantir os totais/valores contábeis estáveis.
-      // Se filtroDataCompetencia for 'pagamento', também trazemos despesas pagas nessa competência cuja data_pagamento
-      // seja no mês visualizado para compor a exibição das grades, garantindo que os totais gerais fiquem sempre baseados
-      // na competência gravada na entrada.
+      // O filtro visual filtroDataCompetencia atua puramente em memória via useMemo (filteredOcorrencias)
+      // sem acoplar a requisições secundárias de rede ou congelar a tela.
       const filterOcorrencias = `competencia = '${currentCompetencia}'`
 
       let allComps = await despesasService.listCompromissos()
       let allOcs = await despesasService.listOcorrencias({
         filter: filterOcorrencias,
       })
-
-      // Se houver despesas pagas no mês cuja competência seja diferente (ex: compra anterior paga neste mês),
-      // ou se o usuário estiver no modo 'pagamento', trazemos ocorrências adicionais pagas neste mês para exibir na grade
-      if (filtroDataCompetencia === 'pagamento') {
-        try {
-          const ocsPagasNoMes = await despesasService.listOcorrencias({
-            filter: `data_pagamento >= '${currentCompetencia}-01 00:00:00' && data_pagamento <= '${currentCompetencia}-31 23:59:59' && competencia != '${currentCompetencia}'`,
-          })
-          if (ocsPagasNoMes.length > 0) {
-            const idsExistentes = new Set(allOcs.map((o) => o.id))
-            for (const ocExtra of ocsPagasNoMes) {
-              if (!idsExistentes.has(ocExtra.id)) {
-                allOcs.push(ocExtra)
-                idsExistentes.add(ocExtra.id)
-              }
-            }
-          }
-        } catch (extraErr) {
-          console.warn('Busca de ocorrências adicionais pagas no mês:', extraErr)
-        }
-      }
 
       // Se navegou para uma competência atual ou futura (>= realCurrentComp) e não encontrou ocorrências,
       // mas existem compromissos ativos que deveriam gerar ocorrência nesse mês:
@@ -895,7 +873,7 @@ export default function Despesas() {
       setRefreshing(false)
       setIsRetrying(false)
     }
-  }, [activeContext, currentCompetencia, filtroDataCompetencia, hasLoadedOnce])
+  }, [activeContext, currentCompetencia, hasLoadedOnce])
 
   /**
    * Mutex e Fila de Coalescência:
