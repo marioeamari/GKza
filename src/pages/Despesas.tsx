@@ -2285,6 +2285,27 @@ export default function Despesas() {
                                 )
                               })()}
 
+                            {/* Botão de ordenação Compra: mais recentes / mais antigas no CABEÇALHO do card da conta */}
+                            {aceitaCredito && ocorrenciasCredito.length > 0 && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 text-xs font-semibold px-2.5 gap-1.5 border-primary/30 bg-white hover:bg-primary/5 text-foreground shadow-2xs cursor-pointer shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleToggleOrdemCompraCredito()
+                                }}
+                                title="Alternar ordenação das compras do ciclo de crédito (mais recentes ou mais antigas)"
+                              >
+                                <ArrowUpDown className="h-3 w-3 text-primary shrink-0" />
+                                <span>
+                                  {ordemCompraCredito === 'recente'
+                                    ? 'Compra: mais recentes'
+                                    : 'Compra: mais antigas'}
+                                </span>
+                              </Button>
+                            )}
+
                             {/* Botão + Adicionar nesta conta (em TODAS as contas ativas) */}
                             <PermissionButton
                               size="sm"
