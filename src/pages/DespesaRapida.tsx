@@ -32,7 +32,7 @@ import { Link } from 'react-router-dom'
 import pb from '@/lib/pocketbase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useAppContext } from '@/contexts/AppContext'
-import { fornecedoresService } from '@/services/fornecedores'
+import { estabelecimentosService } from '@/services/estabelecimentos'
 import { despesasService } from '@/services/despesas'
 import { financeService } from '@/services/finance'
 import { formatCurrency, formatDate } from '@/lib/format'
@@ -57,13 +57,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import type { Conta, Fornecedor, MetodoPagamento, TelegramRegistroPendente } from '@/types/domain'
+import type {
+  Conta,
+  Estabelecimento,
+  MetodoPagamento,
+  TelegramRegistroPendente,
+} from '@/types/domain'
 
 const LAST_CONTEXT_KEY = 'gkza_despesa_rapida_last_context_id'
 const RECENT_SUPPLIERS_KEY = 'gkza_despesa_rapida_recent_suppliers'
 const FAVORITE_SUPPLIERS_KEY = 'gkza_despesa_rapida_favorite_suppliers'
 
-interface FornecedorHistoricoSugerido {
+interface EstabelecimentoHistoricoSugerido {
   contaId?: string
   metodoId?: string
   totalUsos: number
@@ -80,7 +85,7 @@ export default function DespesaRapida() {
 
   // Dados auxiliares carregados do sistema
   const [loadingInitial, setLoadingInitial] = useState(true)
-  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([])
+  const [fornecedores, setFornecedores] = useState<Estabelecimento[]>([])
   const [contas, setContas] = useState<Conta[]>([])
   const [metodosPagamento, setMetodosPagamento] = useState<MetodoPagamento[]>([])
   const [descricoesSugeridas, setDescricoesSugeridas] = useState<string[]>([])
@@ -106,11 +111,11 @@ export default function DespesaRapida() {
 
   // Histórico e sugestões derivadas
   const [historicoFornecedores, setHistoricoFornecedores] = useState<
-    Record<string, FornecedorHistoricoSugerido>
+    Record<string, EstabelecimentoHistoricoSugerido>
   >({})
-  const [sugestaoAtiva, setSugestaoAtiva] = useState<FornecedorHistoricoSugerido | null>(null)
+  const [sugestaoAtiva, setSugestaoAtiva] = useState<EstabelecimentoHistoricoSugerido | null>(null)
 
-  // Busca e modal de fornecedores
+  // Busca e modal de estabelecimentos
   const [fornecedorSearchOpen, setFornecedorSearchOpen] = useState(false)
   const [fornecedorQuery, setFornecedorQuery] = useState('')
   const [novoFornecedorDialogOpen, setNovoFornecedorDialogOpen] = useState(false)
@@ -154,7 +159,7 @@ export default function DespesaRapida() {
         await Promise.all([
           financeService.listContas().catch(() => [] as Conta[]),
           despesasService.listMetodosPagamento().catch(() => [] as MetodoPagamento[]),
-          fornecedoresService.listFornecedores().catch(() => [] as Fornecedor[]),
+          estabelecimentosService.listEstabelecimentos().catch(() => [] as Estabelecimento[]),
           pb
             .collection('despesas_compromisso')
             .getList(1, 100, {
@@ -219,7 +224,7 @@ export default function DespesaRapida() {
         }
       }
 
-      const historicoFinal: Record<string, FornecedorHistoricoSugerido> = {}
+      const historicoFinal: Record<string, EstabelecimentoHistoricoSugerido> = {}
       for (const [forn, data] of Object.entries(mapHist)) {
         const topConta = Object.entries(data.contas).sort((a, b) => b[1] - a[1])[0]?.[0]
         const topMetodo = Object.entries(data.metodos).sort((a, b) => b[1] - a[1])[0]?.[0]
@@ -538,22 +543,22 @@ export default function DespesaRapida() {
     }
   }
 
-  // Criar fornecedor rapidamente
+  // Criar estabelecimento rapidamente
   const handleCriarNovoFornecedorRapido = async () => {
     const nome = novoFornecedorNome.trim()
     if (!nome) return
     setSalvandoNovoFornecedor(true)
     try {
-      const criado = await fornecedoresService.saveFornecedor({
-        nome_fantasia: nome,
-        razao_social: nome,
+      const criado = await estabelecimentosService.saveEstabelecimento({
+        nome,
+        ativa: true,
       })
       setFornecedores((prev) => [criado, ...prev])
-      handleSelectFornecedor(criado.nome_fantasia, criado.id)
+      handleSelectFornecedor(criado.nome, criado.id)
       setNovoFornecedorNome('')
       setNovoFornecedorDialogOpen(false)
     } catch (err) {
-      setErrorMessage(apiMessage(err, 'Erro ao criar fornecedor.'))
+      setErrorMessage(apiMessage(err, 'Erro ao criar estabelecimento.'))
     } finally {
       setSalvandoNovoFornecedor(false)
     }
@@ -877,18 +882,16 @@ export default function DespesaRapida() {
       }),
     )
 
-    // Tenta obter fornecedor estruturado ou extrair das observações
+    // Tenta obter fornecedor/estabelecimento estruturado ou extrair das observações
     if (item.fornecedor && fornecedores.some((f) => f.id === item.fornecedor)) {
       const fornObj = fornecedores.find((f) => f.id === item.fornecedor)
       setSelectedFornecedorId(item.fornecedor)
-      setFornecedorNome(
-        fornObj?.nome_fantasia || fornObj?.razao_social || item.fornecedor_nome || '',
-      )
+      setFornecedorNome(fornObj?.nome || item.fornecedor_nome || '')
     } else if (item.fornecedor_nome) {
       setSelectedFornecedorId(null)
       setFornecedorNome(item.fornecedor_nome)
     } else {
-      const fornecedorMatch = item.observacoes?.match(/Fornecedor:\s*([^|]+)/)
+      const fornecedorMatch = item.observacoes?.match(/(?:Estabelecimento|Fornecedor):\s*([^|]+)/i)
       if (fornecedorMatch && fornecedorMatch[1]) {
         const fNome = fornecedorMatch[1].trim()
         setFornecedorNome(fNome)
@@ -921,10 +924,9 @@ export default function DespesaRapida() {
     if (!fornecedorQuery.trim()) return true
     const q = fornecedorQuery.toLowerCase()
     return (
-      f.nome_fantasia?.toLowerCase().includes(q) ||
-      f.razao_social?.toLowerCase().includes(q) ||
-      f.cnpj?.includes(q) ||
-      f.cpf?.includes(q)
+      f.nome?.toLowerCase().includes(q) ||
+      f.apelido?.toLowerCase().includes(q) ||
+      f.categoria?.toLowerCase().includes(q)
     )
   })
 
@@ -1175,11 +1177,11 @@ export default function DespesaRapida() {
               </div>
             </div>
 
-            {/* 4. FORNECEDOR / FAVORECIDO (PESQUISÁVEL) */}
+            {/* 4. ESTABELECIMENTO / LOCAL DE COMPRA (PESQUISÁVEL) */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-black uppercase tracking-wider text-stone-600">
-                  4. Fornecedor / Favorecido
+                  4. Estabelecimento / Local de compra
                 </Label>
                 {fornecedorNome && (
                   <button
@@ -1209,13 +1211,13 @@ export default function DespesaRapida() {
                         : 'text-stone-400 font-normal truncate'
                     }
                   >
-                    {fornecedorNome || 'Selecionar ou buscar fornecedor...'}
+                    {fornecedorNome || 'Selecionar ou buscar estabelecimento...'}
                   </span>
                 </div>
                 <Search className="h-4 w-4 text-stone-400 shrink-0" />
               </div>
 
-              {/* Sugestão de Fornecedor: BANNER DE INTELIGÊNCIA POR HISTÓRICO */}
+              {/* Sugestão de Estabelecimento: BANNER DE INTELIGÊNCIA POR HISTÓRICO */}
               {sugestaoAtiva && (
                 <div className="rounded-xl border border-orange-200 bg-gradient-to-r from-orange-50 via-amber-50/70 to-orange-50 p-2.5 text-xs text-orange-950 animate-in fade-in-50">
                   <div className="flex items-center justify-between gap-2">
@@ -1545,13 +1547,13 @@ export default function DespesaRapida() {
         </footer>
       </div>
 
-      {/* MODAL DE BUSCA / SELEÇÃO DE FORNECEDORES */}
+      {/* MODAL DE BUSCA / SELEÇÃO DE ESTABELECIMENTOS */}
       <Dialog open={fornecedorSearchOpen} onOpenChange={setFornecedorSearchOpen}>
         <DialogContent className="sm:max-w-md p-5 max-h-[90vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle className="text-base font-black">Selecionar Fornecedor</DialogTitle>
+            <DialogTitle className="text-base font-black">Selecionar Estabelecimento</DialogTitle>
             <DialogDescription className="text-xs text-stone-500">
-              Escolha um fornecedor recente, favorito ou pesquise na base de cadastros.
+              Escolha um estabelecimento recente, favorito ou pesquise na base de cadastros.
             </DialogDescription>
           </DialogHeader>
 
@@ -1559,7 +1561,7 @@ export default function DespesaRapida() {
           <div className="relative my-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" />
             <Input
-              placeholder="Pesquisar fornecedor..."
+              placeholder="Pesquisar estabelecimento..."
               value={fornecedorQuery}
               onChange={(e) => setFornecedorQuery(e.target.value)}
               className="pl-9 h-11 text-sm bg-stone-50"
@@ -1568,7 +1570,7 @@ export default function DespesaRapida() {
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-thin">
-            {/* Botão para cadastrar novo fornecedor rápido */}
+            {/* Botão para cadastrar novo estabelecimento rápido */}
             <button
               type="button"
               onClick={() => {
@@ -1579,7 +1581,7 @@ export default function DespesaRapida() {
             >
               <span className="flex items-center gap-2">
                 <Plus className="h-4 w-4" />
-                Criar novo fornecedor {fornecedorQuery ? `"${fornecedorQuery}"` : ''}
+                Criar novo estabelecimento {fornecedorQuery ? `"${fornecedorQuery}"` : ''}
               </span>
             </button>
 
@@ -1637,36 +1639,36 @@ export default function DespesaRapida() {
               </div>
             )}
 
-            {/* SEÇÃO TODOS OS FORNECEDORES CADASTRADOS */}
+            {/* SEÇÃO TODOS OS ESTABELECIMENTOS CADASTRADOS */}
             <div>
               <p className="text-[10px] font-extrabold uppercase tracking-wider text-stone-400 mb-1">
-                {fornecedorQuery ? 'Resultados' : 'Todos os Fornecedores'}
+                {fornecedorQuery ? 'Resultados' : 'Todos os Estabelecimentos'}
               </p>
               <div className="space-y-1">
                 {fornecedoresFiltrados.length === 0 ? (
                   <p className="text-xs text-stone-400 py-3 text-center">
-                    Nenhum fornecedor encontrado.
+                    Nenhum estabelecimento encontrado.
                   </p>
                 ) : (
                   fornecedoresFiltrados.map((f) => {
                     const isFav = favoriteSupplierNames.some(
-                      (fav) => fav.toLowerCase() === f.nome_fantasia.toLowerCase(),
+                      (fav) => fav.toLowerCase() === f.nome.toLowerCase(),
                     )
                     return (
                       <div
                         key={f.id}
-                        onClick={() => handleSelectFornecedor(f.nome_fantasia, f.id)}
+                        onClick={() => handleSelectFornecedor(f.nome, f.id)}
                         className="flex items-center justify-between rounded-lg p-2 text-xs font-semibold hover:bg-stone-100 cursor-pointer transition"
                       >
                         <div className="min-w-0 truncate">
-                          <p className="truncate font-bold text-stone-800">{f.nome_fantasia}</p>
-                          {f.razao_social && f.razao_social !== f.nome_fantasia && (
-                            <p className="text-[10px] text-stone-400 truncate">{f.razao_social}</p>
+                          <p className="truncate font-bold text-stone-800">{f.nome}</p>
+                          {f.apelido && f.apelido !== f.nome && (
+                            <p className="text-[10px] text-stone-400 truncate">{f.apelido}</p>
                           )}
                         </div>
                         <button
                           type="button"
-                          onClick={(e) => toggleFavoriteSupplier(f.nome_fantasia, e)}
+                          onClick={(e) => toggleFavoriteSupplier(f.nome, e)}
                           className={`p-1 text-sm ${isFav ? 'text-amber-500' : 'text-stone-300 hover:text-amber-500'}`}
                         >
                           {isFav ? '★' : '☆'}
@@ -1681,19 +1683,19 @@ export default function DespesaRapida() {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL RÁPIDO: NOVO FORNECEDOR (APENAS NOME) */}
+      {/* MODAL RÁPIDO: NOVO ESTABELECIMENTO (APENAS NOME) */}
       <Dialog open={novoFornecedorDialogOpen} onOpenChange={setNovoFornecedorDialogOpen}>
         <DialogContent className="sm:max-w-xs p-5">
           <DialogHeader>
-            <DialogTitle className="text-base font-black">Novo Fornecedor</DialogTitle>
+            <DialogTitle className="text-base font-black">Novo Estabelecimento</DialogTitle>
             <DialogDescription className="text-xs text-stone-500">
-              Cadastre rapidamente informando apenas o nome fantasia.
+              Cadastre rapidamente informando apenas o nome do local de compra.
             </DialogDescription>
           </DialogHeader>
 
           <div className="my-2 space-y-1.5">
             <Label htmlFor="novoNome" className="text-xs font-bold text-stone-700">
-              Nome do Fornecedor *
+              Nome do Estabelecimento *
             </Label>
             <Input
               id="novoNome"

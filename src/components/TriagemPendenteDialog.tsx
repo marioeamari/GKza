@@ -1285,15 +1285,17 @@ export function TriagemPendenteDialog({
                   </div>
 
                   <div className="space-y-1">
-                    <Label className="text-xs font-semibold">Fornecedor / favorecido</Label>
+                    <Label className="text-xs font-semibold">Estabelecimento / Favorecido</Label>
                     <Input
                       value={despForm.fornecedor}
                       onChange={(e) =>
                         setDespForm((prev) => ({ ...prev, fornecedor: e.target.value }))
                       }
-                      placeholder="Ex.: ConectPlus, CPFL, Vivo..."
+                      placeholder="Ex.: ConectPlus, CPFL, Muffat..."
                     />
-                    <p className="text-[10px] text-muted-foreground">Quem recebe o pagamento.</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Local de compra ou quem recebe o pagamento.
+                    </p>
                   </div>
 
                   <div className="space-y-1">

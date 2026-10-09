@@ -266,7 +266,7 @@ export function BaixaOcorrenciaDialog({
               </span>
             </div>
             {comp?.fornecedor && (
-              <p className="text-muted-foreground">Fornecedor: {comp.fornecedor}</p>
+              <p className="text-muted-foreground">Estabelecimento: {comp.fornecedor}</p>
             )}
             {ocorrencia && (
               <p className="text-muted-foreground">

@@ -25,6 +25,13 @@ export interface Empresa extends RecordModel {
   observacoes: string
 }
 
+export interface Estabelecimento extends RecordModel {
+  nome: string
+  apelido?: string
+  categoria?: string
+  ativa?: boolean
+}
+
 export interface Fornecedor extends RecordModel {
   razao_social: string
   nome_fantasia: string

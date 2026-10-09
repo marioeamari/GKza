@@ -1053,13 +1053,15 @@ export function DespesaCompromissoDialog({
               </div>
 
               <div className="space-y-1.5">
-                <Label className="font-semibold">Fornecedor / favorecido</Label>
+                <Label className="font-semibold">Estabelecimento / Favorecido</Label>
                 <Input
                   value={form.fornecedor}
                   onChange={(e) => setForm({ ...form, fornecedor: e.target.value })}
-                  placeholder="Ex.: CPFL, Sesi, ConnectPlus, Posto Ipiranga..."
+                  placeholder="Ex.: CPFL, Sesi, ConnectPlus, Muffat, Posto..."
                 />
-                <p className="text-[11px] text-muted-foreground">Quem recebe o pagamento.</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Local de compra ou quem recebe o pagamento.
+                </p>
               </div>
 
               <div className="space-y-1.5">
