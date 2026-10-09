@@ -1652,4 +1652,104 @@ describe('despesasService - anti-retroatividade e deduplicação no gerador e si
     expect(ocUpdates.data_vencimento).toBe('2026-10-23T12:00:00.000Z')
     expect(ocUpdates.valor_pago).toBe(72.09)
   })
+
+  it('trava da nova regra em baixarOcorrencia: método Pix em conta tipo cartao gera lançamento pago na data real e competência do pagamento', async () => {
+    const mockContaCartaoPix: Conta = {
+      id: 'qgdga7rawa3p00a',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: 'Sicred',
+      tipo: 'cartao',
+      saldo_inicial: 0,
+      cor: '#1E6F5C',
+      ativa: true,
+      dia_fechamento: 31,
+      dia_vencimento: 10,
+      tipos_pagamento: ['pix', 'debito', 'transferencia', 'boletos', 'credito'],
+    }
+
+    const mockCompromissoPix = {
+      id: 'gxnik4z2e2tv7lr',
+      descricao: 'Frete Maquina Corte Laser',
+      data_inicio: '2026-10-09 00:00:00.000Z',
+      dia_vencimento: 9,
+      conta_padrao: 'qgdga7rawa3p00a',
+      metodo_pagamento: 'cgic0ozb853vvmj', // Pix (tipo pix, nome Pix)
+      modalidade_parcelamento: 'a_vista',
+      regra_repeticao: 'avulso',
+      total_parcelas: 1,
+      parcela_inicial: 1,
+      valor_estimado: 9500,
+      secao: 'contas_mensais_pix_boleto',
+    }
+
+    const mockOcorrPix = {
+      id: 'g58ws79tjwhaj1s',
+      compromisso: 'gxnik4z2e2tv7lr',
+      numero_parcela: 0,
+      total_parcelas: 0,
+      competencia: '2026-10',
+      data_vencimento: '2026-10-09T12:00:00.000Z',
+      valor_previsto: 9500,
+      status: 'prevista',
+    }
+
+    const mockCreateLanc = vi.fn().mockResolvedValue({ id: 'ybr5ks5atvf8r51' })
+    const mockUpdateOcorr = vi.fn().mockResolvedValue({ id: 'g58ws79tjwhaj1s', status: 'paga' })
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: vi.fn().mockResolvedValue(mockContaCartaoPix) } as any
+      }
+      if (name === 'despesas_compromisso') {
+        return { getOne: vi.fn().mockResolvedValue(mockCompromissoPix) } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getOne: vi.fn().mockResolvedValue(mockOcorrPix),
+          update: mockUpdateOcorr,
+          getList: vi.fn().mockResolvedValue({ items: [], totalItems: 0 }),
+        } as any
+      }
+      if (name === 'lancamentos') {
+        return { create: mockCreateLanc } as any
+      }
+      if (name === 'metodos_pagamento') {
+        return {
+          getOne: vi.fn().mockResolvedValue({
+            id: 'cgic0ozb853vvmj',
+            nome: 'Pix',
+            codigo: 'pix',
+            tipo: 'pix',
+          }),
+        } as any
+      }
+      return {} as any
+    })
+
+    await despesasService.baixarOcorrencia({
+      ocorrenciaId: 'g58ws79tjwhaj1s',
+      valorPago: 9500,
+      dataPagamento: '2026-10-09',
+      contaId: 'qgdga7rawa3p00a',
+      descricao: 'Frete Maquina Corte Laser',
+    })
+
+    // Lançamento gerado como "pago" (saída real de caixa), data real 2026-10-09 e competência 2026-10
+    expect(mockCreateLanc).toHaveBeenCalledTimes(1)
+    const lancData = mockCreateLanc.mock.calls[0][0]
+    expect(lancData.competencia).toBe('2026-10')
+    expect(lancData.status).toBe('pago')
+    expect(lancData.data).toBe('2026-10-09 12:00:00')
+
+    // Ocorrência atualizada com competência 2026-10, data_pagamento 2026-10-09 e status paga
+    expect(mockUpdateOcorr).toHaveBeenCalledTimes(1)
+    const ocUpdates = mockUpdateOcorr.mock.calls[0][1]
+    expect(ocUpdates.status).toBe('paga')
+    expect(ocUpdates.competencia).toBe('2026-10')
+    expect(ocUpdates.data_pagamento).toBe('2026-10-09 12:00:00')
+    expect(ocUpdates.valor_pago).toBe(9500)
+  })
 })

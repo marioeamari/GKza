@@ -450,12 +450,14 @@ export const despesasService = {
         ? (ocorrAtual.compromisso as any).metodo_pagamento
         : null)
 
-    // Se a conta for tipo 'cartao', ou aceitar crédito com método crédito (ou método ausente)
-    const contaAceitaCred = contaObj ? contaAceitaCredito(contaObj) : false
-    const metodoEfetivoEhCredito =
-      Boolean(contaObj) &&
-      (contaObj?.tipo === 'cartao' ||
-        (contaAceitaCred && (metodoCompId ? isMetodoCredito(metodoCompId) : true)))
+    // Se a conta suportar crédito com dia_fechamento > 0 e o método for crédito
+    // Regra: método crédito SOMENTE quando o método do compromisso for crédito E a conta suportar crédito.
+    // Se método não-crédito (Pix, Débito, Boleto, etc.), nunca entra no ciclo da fatura mesmo se conta for tipo 'cartao'.
+    const rawFechConta = Number((contaObj as any)?.dia_fechamento)
+    const temFechamento = !isNaN(rawFechConta) && rawFechConta > 0
+    const contaAceitaCred = contaObj ? contaAceitaCredito(contaObj) && temFechamento : false
+    const ehMetodoCredito = metodoCompId ? isMetodoCredito(metodoCompId) : true
+    const metodoEfetivoEhCredito = Boolean(contaObj) && contaAceitaCred && ehMetodoCredito
 
     // Determina a data da compra original (prioriza compromisso.data_inicio, cai para params.dataPagamento)
     const dataCompraBase = compRecord?.data_inicio
@@ -675,12 +677,12 @@ export const despesasService = {
       /* ignore */
     }
 
-    const contaAceitaCred = contaObj ? contaAceitaCredito(contaObj) : false
+    const rawFechConta = Number((contaObj as any)?.dia_fechamento)
+    const temFechamento = !isNaN(rawFechConta) && rawFechConta > 0
+    const contaAceitaCred = contaObj ? contaAceitaCredito(contaObj) && temFechamento : false
     const metodoCompId = compRecord?.metodo_pagamento
-    const metodoEfetivoEhCredito =
-      Boolean(contaObj) &&
-      (contaObj?.tipo === 'cartao' ||
-        (contaAceitaCred && (metodoCompId ? isMetodoCredito(metodoCompId) : true)))
+    const ehMetodoCredito = metodoCompId ? isMetodoCredito(metodoCompId) : true
+    const metodoEfetivoEhCredito = Boolean(contaObj) && contaAceitaCred && ehMetodoCredito
 
     // Data da compra base: se o compromisso possuir data_inicio, usamos como referência de compra
     const dataCompraBase = compRecord?.data_inicio

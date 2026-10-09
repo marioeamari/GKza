@@ -82,14 +82,22 @@ export function buildDespesaAvulsaCanonica(
   const rawFech = Number((contaObj as any)?.dia_fechamento)
   const diaFechamentoNum = !isNaN(rawFech) && rawFech > 0 ? rawFech : 0
   const isTipoCartao = contaObj?.tipo === 'cartao'
-  const aceitaCredito = Boolean(
-    isTipoCartao ||
-    (Array.isArray(contaObj?.tipos_pagamento) && contaObj?.tipos_pagamento.includes('credito')) ||
-    (typeof (contaObj as any)?.tipos_pagamento === 'string' &&
-      (contaObj as any).tipos_pagamento.includes('credito')),
+  const contaSuportaCredito = Boolean(
+    contaObj &&
+    diaFechamentoNum > 0 &&
+    (isTipoCartao ||
+      (Array.isArray(contaObj?.tipos_pagamento) && contaObj?.tipos_pagamento.includes('credito')) ||
+      (typeof (contaObj as any)?.tipos_pagamento === 'string' &&
+        (contaObj as any).tipos_pagamento.includes('credito'))),
   )
+  // Regra: a escolha entre "mês da compra" e "ciclo da fatura" lê o método do compromisso.
+  // Crédito SOMENTE quando o método for crédito E a conta suportar crédito com dia_fechamento > 0.
+  // Se metodoEhCredito for omitido/indefinido e conta tiver suporte a crédito, mantém true por retrocompatibilidade;
+  // se metodoEhCredito for explicitamente booleano (ex: false para Pix, Débito, etc.), ele prevalece.
   const ehCredito =
-    params.metodoEhCredito ?? Boolean(isTipoCartao || (aceitaCredito && diaFechamentoNum > 0))
+    params.metodoEhCredito !== undefined
+      ? Boolean(params.metodoEhCredito && contaSuportaCredito)
+      : contaSuportaCredito
 
   const rawVenc = Number((contaObj as any)?.dia_vencimento)
   const diaVencimentoNum = !isNaN(rawVenc) && rawVenc > 0 ? rawVenc : undefined

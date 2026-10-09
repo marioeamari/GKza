@@ -255,6 +255,97 @@ describe('despesas-pipeline - Cobertura dos 8 Fluxos do Usuário', () => {
       expect(canonica.lancamento.competencia).toBe('2026-10')
     })
 
+    it('trava da nova regra: método Pix em conta tipo cartao gera mês da compra / data real e status pago', () => {
+      const contaSicredCartao: any = {
+        id: 'qgdga7rawa3p00a',
+        nome: 'Sicred',
+        tipo: 'cartao',
+        dia_fechamento: 31,
+        dia_vencimento: 10,
+        tipos_pagamento: ['pix', 'debito', 'transferencia', 'boletos', 'credito'],
+      }
+
+      // Método não-crédito (Pix: metodoEhCredito = false) em conta tipo 'cartao'
+      const canonica = buildDespesaAvulsaCanonica({
+        descricao: 'Frete Maquina Corte Laser',
+        valor: 9500,
+        dataCompra: '2026-10-09',
+        contaId: contaSicredCartao.id,
+        conta: contaSicredCartao,
+        metodoEhCredito: false,
+        categoriaId: 'cat_frete',
+      })
+
+      // Competência deve ser o mês da compra real (2026-10), NÃO o ciclo da fatura
+      expect(canonica.competencia).toBe('2026-10')
+      // Data de pagamento e data do lançamento devem ser a data real da compra (2026-10-09)
+      expect(canonica.ocorrencia.data_pagamento).toBe('2026-10-09 12:00:00')
+      expect(canonica.lancamento.data).toBe('2026-10-09 12:00:00')
+      expect(canonica.lancamento.status).toBe('pago')
+      expect(canonica.ocorrencia.status).toBe('paga')
+      expect(canonica.compromisso.secao).toBe('contas_mensais_pix_boleto')
+      expect(canonica.ocorrencia.secao).toBe('contas_mensais_pix_boleto')
+    })
+
+    it('trava da nova regra: método crédito em conta tipo cartao gera ciclo da fatura e vencimento', () => {
+      const contaSicredCartao: any = {
+        id: 'qgdga7rawa3p00a',
+        nome: 'Sicred',
+        tipo: 'cartao',
+        dia_fechamento: 31,
+        dia_vencimento: 10,
+        tipos_pagamento: ['pix', 'debito', 'transferencia', 'boletos', 'credito'],
+      }
+
+      // Método crédito explícito (metodoEhCredito = true) em conta tipo 'cartao'
+      // Compra em 09/10/2026 <= fechamento 31/10 -> competência 2026-10, vencimento 10/11/2026
+      const canonica = buildDespesaAvulsaCanonica({
+        descricao: 'Material Barracão',
+        valor: 175.5,
+        dataCompra: '2026-10-09',
+        contaId: contaSicredCartao.id,
+        conta: contaSicredCartao,
+        metodoEhCredito: true,
+        categoriaId: 'cat_material',
+      })
+
+      expect(canonica.competencia).toBe('2026-10')
+      expect(canonica.dataVencimentoStr).toBe('2026-11-10')
+      expect(canonica.ocorrencia.data_pagamento).toBe('2026-11-10 12:00:00')
+      expect(canonica.lancamento.data).toBe('2026-11-10 12:00:00')
+      expect(canonica.compromisso.secao).toBe('cartoes_credito')
+      expect(canonica.ocorrencia.secao).toBe('cartoes_credito')
+    })
+
+    it('trava da nova regra: método crédito em conta não-cartao com crédito habilitado gera ciclo da fatura', () => {
+      const contaBancariaComCredito: any = {
+        id: 'conta_bb_com_credito',
+        nome: 'Banco do Brasil',
+        tipo: 'bancaria',
+        dia_fechamento: 20,
+        dia_vencimento: 5,
+        tipos_pagamento: ['pix', 'debito', 'credito'],
+      }
+
+      // Compra em 25/10/2026 > fechamento 20 -> ciclo da fatura do mês seguinte: 2026-11, vencimento 05/12/2026
+      const canonica = buildDespesaAvulsaCanonica({
+        descricao: 'Assinatura Nuvem',
+        valor: 200,
+        dataCompra: '2026-10-25',
+        contaId: contaBancariaComCredito.id,
+        conta: contaBancariaComCredito,
+        metodoEhCredito: true,
+        categoriaId: 'cat_software',
+      })
+
+      expect(canonica.competencia).toBe('2026-11')
+      expect(canonica.dataVencimentoStr).toBe('2026-12-05')
+      expect(canonica.ocorrencia.data_pagamento).toBe('2026-12-05 12:00:00')
+      expect(canonica.lancamento.data).toBe('2026-12-05 12:00:00')
+      expect(canonica.compromisso.secao).toBe('cartoes_credito')
+      expect(canonica.ocorrencia.secao).toBe('cartoes_credito')
+    })
+
     it('mantém buildTriagemCartaoPayload para compatibilidade com código legado', () => {
       const cartao = {
         id: 'cartao_xp',
