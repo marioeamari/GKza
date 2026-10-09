@@ -736,15 +736,38 @@ export default function Despesas() {
       const realTodayStr = getLocalDateStr() // 'YYYY-MM-DD'
       const realCurrentComp = realTodayStr.slice(0, 7) // 'YYYY-MM'
 
-      // 2. Carrega compromissos e ocorrências da competência atual (regra canônica: competência sempre fixa)
-      // O filtro "filtroDataCompetencia" (vencimento vs pagamento) atua exclusivamente como filtro visual de exibição/destaque,
-      // sem alterar a cláusula de busca nem recalcular a base contábil ou totalizadores gerais.
+      // 2. Carrega compromissos e ocorrências da competência atual (regra canônica: competência gravada na entrada)
+      // A busca traz as ocorrências da competência atual para garantir os totais/valores contábeis estáveis.
+      // Se filtroDataCompetencia for 'pagamento', também trazemos despesas pagas nessa competência cuja data_pagamento
+      // seja no mês visualizado para compor a exibição das grades, garantindo que os totais gerais fiquem sempre baseados
+      // na competência gravada na entrada.
       const filterOcorrencias = `competencia = '${currentCompetencia}'`
 
       let allComps = await despesasService.listCompromissos()
       let allOcs = await despesasService.listOcorrencias({
         filter: filterOcorrencias,
       })
+
+      // Se houver despesas pagas no mês cuja competência seja diferente (ex: compra anterior paga neste mês),
+      // ou se o usuário estiver no modo 'pagamento', trazemos ocorrências adicionais pagas neste mês para exibir na grade
+      if (filtroDataCompetencia === 'pagamento') {
+        try {
+          const ocsPagasNoMes = await despesasService.listOcorrencias({
+            filter: `data_pagamento >= '${currentCompetencia}-01 00:00:00' && data_pagamento <= '${currentCompetencia}-31 23:59:59' && competencia != '${currentCompetencia}'`,
+          })
+          if (ocsPagasNoMes.length > 0) {
+            const idsExistentes = new Set(allOcs.map((o) => o.id))
+            for (const ocExtra of ocsPagasNoMes) {
+              if (!idsExistentes.has(ocExtra.id)) {
+                allOcs.push(ocExtra)
+                idsExistentes.add(ocExtra.id)
+              }
+            }
+          }
+        } catch (extraErr) {
+          console.warn('Busca de ocorrências adicionais pagas no mês:', extraErr)
+        }
+      }
 
       // Se navegou para uma competência atual ou futura (>= realCurrentComp) e não encontrou ocorrências,
       // mas existem compromissos ativos que deveriam gerar ocorrência nesse mês:
@@ -872,7 +895,7 @@ export default function Despesas() {
       setRefreshing(false)
       setIsRetrying(false)
     }
-  }, [activeContext, currentCompetencia, hasLoadedOnce])
+  }, [activeContext, currentCompetencia, filtroDataCompetencia, hasLoadedOnce])
 
   /**
    * Mutex e Fila de Coalescência:
@@ -1034,6 +1057,29 @@ export default function Despesas() {
   // Filtragem das ocorrências
   const filteredOcorrencias = useMemo(() => {
     return ocorrencias.filter((oc) => {
+      // Regra (1): O filtro "Filtrar competência por" refiltra as grades de despesas:
+      // - 'vencimento': exibe as despesas cujo vencimento é no mês (comportamento padrão)
+      // - 'pagamento': exibe despesas com data_pagamento no mês visualizado (ou pagas),
+      //   além de despesas previstas em aberto que ainda não foram pagas.
+      //   Despesas que foram pagas em outro mês não pertencem ao mês de pagamento atual.
+      const matchesDataCompetencia = (() => {
+        if (filtroDataCompetencia === 'vencimento') {
+          return true
+        }
+        // filtroDataCompetencia === 'pagamento':
+        // Se a despesa foi paga: só aparece se data_pagamento coincide com o mês visualizado
+        if (oc.status === 'paga') {
+          const compPagamento = oc.data_pagamento ? oc.data_pagamento.slice(0, 7) : oc.competencia
+          return compPagamento === currentCompetencia
+        }
+        // Se está prevista (ainda não paga): permanece visível como despesa prevista a pagar
+        return true
+      })()
+
+      if (!matchesDataCompetencia) {
+        return false
+      }
+
       const comp = oc.expand?.compromisso
       const desc = comp?.descricao || ''
       const forn = comp?.fornecedor || ''
@@ -1090,13 +1136,15 @@ export default function Despesas() {
     })
   }, [
     ocorrencias,
+    filtroDataCompetencia,
+    currentCompetencia,
     search,
     filterTag,
     filterCategoria,
     filterTitular,
     filterSecao,
     filterStatus,
-    metodosPagamento,
+    metodosMap,
     contas,
   ])
 
@@ -1215,29 +1263,36 @@ export default function Despesas() {
     })
   }, [filteredOcorrencias, contas, compromissos, metodosPagamento, sortOcorrenciasList])
 
-  // Totais do Período
+  // Totais do Período — Estáveis e canônicos:
+  // Baseados exclusivamente na competência gravada na entrada (mês da compra; ciclo da fatura no crédito).
+  // NÃO recalculam ao alternar o filtro "Filtrar competência por" (que atua refiltrando as grades de exibição).
+  // Filtramos apenas as ocorrências cuja competência gravada é a competência visualizada.
+  const ocorrenciasDaCompetencia = useMemo(() => {
+    return ocorrencias.filter((o) => o.competencia === currentCompetencia)
+  }, [ocorrencias, currentCompetencia])
+
   const totalPrevistoGeral = useMemo(
-    () => ocorrencias.reduce((sum, o) => sum + (o.valor_previsto || 0), 0),
-    [ocorrencias],
+    () => ocorrenciasDaCompetencia.reduce((sum, o) => sum + (o.valor_previsto || 0), 0),
+    [ocorrenciasDaCompetencia],
   )
   const totalPagoGeral = useMemo(
     () =>
-      ocorrencias
+      ocorrenciasDaCompetencia
         .filter((o) => o.status === 'paga')
         .reduce((sum, o) => sum + (o.valor_pago || o.valor_previsto || 0), 0),
-    [ocorrencias],
+    [ocorrenciasDaCompetencia],
   )
   const totalPendenteGeral = useMemo(
     () =>
-      ocorrencias
+      ocorrenciasDaCompetencia
         .filter((o) => o.status === 'prevista')
         .reduce((sum, o) => sum + (o.valor_previsto || 0), 0),
-    [ocorrencias],
+    [ocorrenciasDaCompetencia],
   )
 
-  // Dízimo / Ofertas somados
+  // Dízimo / Ofertas somados (estável)
   const totalDizimoOfertas = useMemo(() => {
-    return ocorrencias
+    return ocorrenciasDaCompetencia
       .filter((o) => {
         const isDizimo = o.dizimo || o.expand?.compromisso?.dizimo
         return isDizimo
@@ -1246,7 +1301,7 @@ export default function Despesas() {
         const val = o.status === 'paga' ? o.valor_pago || o.valor_previsto : o.valor_previsto
         return sum + (val || 0)
       }, 0)
-  }, [ocorrencias])
+  }, [ocorrenciasDaCompetencia])
 
   // Abertura de Modais
   const handleOpenBaixa = (oc: DespesaOcorrencia) => {
@@ -2303,7 +2358,7 @@ export default function Despesas() {
                                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 pb-2.5">
                                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                                         <span className="font-extrabold uppercase tracking-wide text-foreground flex items-center gap-1.5 text-xs">
-                                          <CreditCard className="h-4 w-4 text-primary" />
+                                          <CreditCard className="h-4 w-4 text-primary shrink-0" />
                                           Fatura de Crédito (ciclo {currentCompetencia})
                                         </span>
                                         {conta.bandeira && (
@@ -2316,15 +2371,19 @@ export default function Despesas() {
                                         )}
                                       </div>
 
-                                      <div className="flex items-center gap-2">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        {/* Botão de ordenação Compra: mais recentes / mais antigas garantido e destacado */}
                                         <Button
                                           size="sm"
                                           variant="outline"
-                                          className="h-7 text-xs font-semibold px-2.5 gap-1.5 border-border/80 bg-white/90 hover:bg-white text-foreground shadow-2xs"
-                                          onClick={handleToggleOrdemCompraCredito}
-                                          title="Alternar ordenação das compras do ciclo de crédito"
+                                          className="h-7 text-xs font-semibold px-2.5 gap-1.5 border-primary/30 bg-white hover:bg-primary/5 text-foreground shadow-2xs cursor-pointer shrink-0"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            handleToggleOrdemCompraCredito()
+                                          }}
+                                          title="Alternar ordenação das compras do ciclo de crédito (mais recentes ou mais antigas)"
                                         >
-                                          <ArrowUpDown className="h-3 w-3 text-primary" />
+                                          <ArrowUpDown className="h-3 w-3 text-primary shrink-0" />
                                           <span>
                                             {ordemCompraCredito === 'recente'
                                               ? 'Compra: mais recentes'

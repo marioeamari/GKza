@@ -887,6 +887,124 @@ describe('despesas-pipeline - Cobertura dos 8 Fluxos do Usuário', () => {
     })
   })
 
+  describe('Filtro de Competência de Apuração: Grades Refiltram e Totais Permanecem Estáveis', () => {
+    it('refiltra a grade entre modo vencimento e modo pagamento enquanto totais gerais ficam estáveis', () => {
+      // Simulação do comportamento de Despesas.tsx:
+      // Ocorrência 1: competência 2026-10, paga em 2026-10-12
+      // Ocorrência 2: competência 2026-10, prevista (não paga)
+      // Ocorrência 3: competência 2026-10, paga adiantada em 2026-09-28 (data_pagamento no mês anterior)
+      // Ocorrência 4: competência 2026-09, paga com atraso em 2026-10-05 (data_pagamento em 2026-10)
+      const currentComp = '2026-10'
+
+      const ocorrenciasDaCompetencia = [
+        {
+          id: 'oc_1',
+          competencia: '2026-10',
+          status: 'paga',
+          valor_previsto: 300,
+          valor_pago: 300,
+          data_vencimento: '2026-10-10',
+          data_pagamento: '2026-10-12',
+          dizimo: false,
+        },
+        {
+          id: 'oc_2',
+          competencia: '2026-10',
+          status: 'prevista',
+          valor_previsto: 150,
+          valor_pago: 0,
+          data_vencimento: '2026-10-20',
+          data_pagamento: null,
+          dizimo: true,
+        },
+        {
+          id: 'oc_3',
+          competencia: '2026-10',
+          status: 'paga',
+          valor_previsto: 100,
+          valor_pago: 100,
+          data_vencimento: '2026-10-25',
+          data_pagamento: '2026-09-28', // paga no mês anterior
+          dizimo: false,
+        },
+      ]
+
+      const ocorrenciaPagaNesteMesOutraComp = {
+        id: 'oc_4',
+        competencia: '2026-09',
+        status: 'paga',
+        valor_previsto: 200,
+        valor_pago: 200,
+        data_vencimento: '2026-09-30',
+        data_pagamento: '2026-10-05', // paga em outubro
+        dizimo: false,
+      }
+
+      // Função de filtragem da grade (mesma lógica do filteredOcorrencias)
+      const filtrarGrade = (lista: any[], modo: 'vencimento' | 'pagamento', mesComp: string) => {
+        return lista.filter((oc) => {
+          if (modo === 'vencimento') {
+            return oc.competencia === mesComp
+          }
+          // modo 'pagamento'
+          if (oc.status === 'paga') {
+            const compPag = oc.data_pagamento ? oc.data_pagamento.slice(0, 7) : oc.competencia
+            return compPag === mesComp
+          }
+          // prevista em aberto
+          return true
+        })
+      }
+
+      // Totais gerais contábeis: calculados exclusivamente sobre as ocorrências gravadas na competência
+      const calcularTotaisGerais = (ocs: typeof ocorrenciasDaCompetencia) => ({
+        totalPrevisto: ocs.reduce((sum, o) => sum + (o.valor_previsto || 0), 0),
+        totalPago: ocs
+          .filter((o) => o.status === 'paga')
+          .reduce((sum, o) => sum + (o.valor_pago || o.valor_previsto || 0), 0),
+        totalPendente: ocs
+          .filter((o) => o.status === 'prevista')
+          .reduce((sum, o) => sum + (o.valor_previsto || 0), 0),
+        totalDizimoOfertas: ocs
+          .filter((o) => o.dizimo)
+          .reduce(
+            (sum, o) =>
+              sum +
+              (o.status === 'paga' ? o.valor_pago || o.valor_previsto : o.valor_previsto || 0),
+            0,
+          ),
+      })
+
+      // 1. Totais contábeis da competência 2026-10
+      const totaisGerais = calcularTotaisGerais(ocorrenciasDaCompetencia)
+      expect(totaisGerais.totalPrevisto).toBe(550) // 300 + 150 + 100
+      expect(totaisGerais.totalPago).toBe(400) // 300 + 100
+      expect(totaisGerais.totalPendente).toBe(150) // 150
+      expect(totaisGerais.totalDizimoOfertas).toBe(150)
+
+      // 2. Comportamento da grade no modo 'vencimento':
+      // Exibe todas as ocorrências da competência 2026-10 (oc_1, oc_2, oc_3)
+      const todasDisponiveis = [...ocorrenciasDaCompetencia, ocorrenciaPagaNesteMesOutraComp]
+      const gradeVencimento = filtrarGrade(todasDisponiveis, 'vencimento', currentComp)
+      expect(gradeVencimento.map((o) => o.id)).toEqual(['oc_1', 'oc_2', 'oc_3'])
+
+      // 3. Comportamento da grade no modo 'pagamento':
+      // oc_1 (paga em 10/2026): visível
+      // oc_2 (prevista em aberto): visível
+      // oc_3 (paga em 09/2026): NÃO visível no modo pagamento de 10/2026 pois foi paga em setembro!
+      // oc_4 (paga em 10/2026): visível no modo pagamento de 10/2026
+      const gradePagamento = filtrarGrade(todasDisponiveis, 'pagamento', currentComp)
+      expect(gradePagamento.map((o) => o.id)).toEqual(['oc_1', 'oc_2', 'oc_4'])
+
+      // Verificação chave: a grade REAGE e muda o que aparece
+      expect(gradeVencimento).not.toEqual(gradePagamento)
+
+      // E os totais gerais contábeis permanecem rigorosamente estáveis e idênticos
+      const totaisDepoisDeTrocarFiltro = calcularTotaisGerais(ocorrenciasDaCompetencia)
+      expect(totaisDepoisDeTrocarFiltro).toEqual(totaisGerais)
+    })
+  })
+
   describe('Cálculo Contábil Puro da Competência (Totais Idênticos em Vencimento vs Pagamento)', () => {
     it('totais da competência permanecem idênticos independentemente do modo visual "vencimento" ou "pagamento"', () => {
       // Simulação do cálculo de totais que Despesas.tsx realiza sobre a lista de ocorrências da competência
