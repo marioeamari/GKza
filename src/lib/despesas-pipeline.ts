@@ -515,12 +515,15 @@ export interface DespesaOcorrenciaOrdenavel {
   status?: string
   data_vencimento?: string | null
   data_pagamento?: string | null
+  data_compra?: string | null
+  created?: string | null
   valor_previsto?: number | null
   valor_pago?: number | null
   observacoes?: string | null
   expand?: {
     compromisso?: {
       descricao?: string | null
+      data_inicio?: string | null
     } | null
   } | null
 }
@@ -570,7 +573,12 @@ export function ordenarDespesasPorData<T extends DespesaOcorrenciaOrdenavel>(
       const cmpData = modo === 'recente' ? dtB.localeCompare(dtA) : dtA.localeCompare(dtB)
       if (cmpData !== 0) return cmpData
 
-      // Desempate: valor decrescente -> ID
+      // Desempate: data_compra -> valor decrescente -> ID
+      const compraA = extrairDataCompraOcorrencia(a)
+      const compraB = extrairDataCompraOcorrencia(b)
+      const cmpCompra = compraB.localeCompare(compraA)
+      if (cmpCompra !== 0) return cmpCompra
+
       const valA = Number(a.valor_pago ?? a.valor_previsto ?? 0)
       const valB = Number(b.valor_pago ?? b.valor_previsto ?? 0)
       const valDiff = valB - valA
@@ -604,12 +612,67 @@ export function ordenarDespesasPorData<T extends DespesaOcorrenciaOrdenavel>(
       if (cmp !== 0) return cmp
     }
 
+    // Quando data_vencimento empatar (comum no crédito, mesma fatura):
+    // Desempatar por data_compra -> valor (decrescente) -> id
+    const compraA = extrairDataCompraOcorrencia(a)
+    const compraB = extrairDataCompraOcorrencia(b)
+    const cmpCompra = compraB.localeCompare(compraA)
+    if (cmpCompra !== 0) return cmpCompra
+
     // Desempate estável: valor decrescente -> ID (sem alfabético)
     const valA = Number(a.valor_previsto ?? 0)
     const valB = Number(b.valor_previsto ?? 0)
     const valDiff = valB - valA
     if (valDiff !== 0) return valDiff
 
+    return (a.id || '').localeCompare(b.id || '')
+  })
+}
+
+/**
+ * Extrai a data da compra com a cadeia de fallback:
+ * data_compra -> expand?.compromisso?.data_inicio -> data_vencimento -> created -> '9999-12-31'
+ * Retorna sempre em formato 'YYYY-MM-DD' (slice(0, 10)).
+ */
+function extrairDataCompraOcorrencia(item: DespesaOcorrenciaOrdenavel): string {
+  const raw =
+    item.data_compra ||
+    item.expand?.compromisso?.data_inicio ||
+    item.data_vencimento ||
+    item.created ||
+    '9999-12-31'
+  return String(raw).slice(0, 10)
+}
+
+/**
+ * Ordena ocorrências de cartão de crédito pela data da compra:
+ * - 'recente': compras mais novas primeiro (decrescente de data_compra).
+ * - 'antiga': compras mais antigas primeiro (crescente de data_compra).
+ * Desempate: valor decrescente -> id estável (localeCompare).
+ *
+ * Fallback da data de compra:
+ * item.data_compra -> item.expand?.compromisso?.data_inicio -> item.data_vencimento -> item.created -> '9999-12-31'
+ */
+export function ordenarDespesasCreditoPorCompra<T extends DespesaOcorrenciaOrdenavel>(
+  itens: T[],
+  ordem: 'recente' | 'antiga',
+): T[] {
+  const copy = [...itens]
+
+  return copy.sort((a, b) => {
+    const dataA = extrairDataCompraOcorrencia(a)
+    const dataB = extrairDataCompraOcorrencia(b)
+
+    const cmpData = ordem === 'recente' ? dataB.localeCompare(dataA) : dataA.localeCompare(dataB)
+    if (cmpData !== 0) return cmpData
+
+    // Desempate: valor decrescente
+    const valA = Number(a.valor_pago ?? a.valor_previsto ?? 0)
+    const valB = Number(b.valor_pago ?? b.valor_previsto ?? 0)
+    const valDiff = valB - valA
+    if (valDiff !== 0) return valDiff
+
+    // Desempate: id estável
     return (a.id || '').localeCompare(b.id || '')
   })
 }

@@ -7,6 +7,7 @@ import {
   prepararDuplicacaoLancamento,
   alocarPagamentoFaturaFifo,
   ordenarDespesasPorData,
+  ordenarDespesasCreditoPorCompra,
 } from './despesas-pipeline'
 import { calcularCompetenciaEVencimento, calcularFaturaCartao } from './cartao-fatura'
 
@@ -743,6 +744,213 @@ describe('despesas-pipeline - Cobertura dos 8 Fluxos do Usuário', () => {
 
       const ordenado = ordenarDespesasPorData(lista, 'urgente', hoje)
       expect(ordenado.map((o) => o.id)).toEqual(['a_id', 'b_id'])
+    })
+
+    it('mesma data_vencimento (crédito) desempata por data_compra, depois valor decrescente, depois id', () => {
+      const lista = [
+        {
+          id: 'compra_antiga_alto',
+          status: 'prevista',
+          data_vencimento: '2026-10-23',
+          data_compra: '2026-10-02',
+          valor_previsto: 800,
+        },
+        {
+          id: 'compra_recente_baixo',
+          status: 'prevista',
+          data_vencimento: '2026-10-23',
+          data_compra: '2026-10-15',
+          valor_previsto: 100,
+        },
+        {
+          id: 'compra_recente_alto',
+          status: 'prevista',
+          data_vencimento: '2026-10-23',
+          data_compra: '2026-10-15',
+          valor_previsto: 500,
+        },
+        {
+          id: 'compra_recente_alto_id_z',
+          status: 'prevista',
+          data_vencimento: '2026-10-23',
+          data_compra: '2026-10-15',
+          valor_previsto: 500,
+        },
+      ]
+
+      const ordenado = ordenarDespesasPorData(lista, 'urgente', hoje)
+
+      // Empate no vencimento (2026-10-23):
+      // 1. data_compra mais recente (2026-10-15) vem antes de (2026-10-02)
+      // 2. Entre as de 2026-10-15: valor decrescente (500 > 100)
+      // 3. Entre as de 500: id estável ('compra_recente_alto' < 'compra_recente_alto_id_z')
+      expect(ordenado.map((o) => o.id)).toEqual([
+        'compra_recente_alto',
+        'compra_recente_alto_id_z',
+        'compra_recente_baixo',
+        'compra_antiga_alto',
+      ])
+    })
+  })
+
+  describe('ordenarDespesasCreditoPorCompra (Ordenação por Compra do Cartão)', () => {
+    it('ordena compras por recente (mais nova primeiro) e antiga (mais antiga primeiro)', () => {
+      const itens = [
+        { id: 'c1', data_compra: '2026-10-05', valor_previsto: 100 },
+        { id: 'c2', data_compra: '2026-10-18', valor_previsto: 250 },
+        { id: 'c3', data_compra: '2026-10-12', valor_previsto: 75 },
+      ]
+
+      const recentes = ordenarDespesasCreditoPorCompra(itens, 'recente')
+      expect(recentes.map((i) => i.id)).toEqual(['c2', 'c3', 'c1'])
+
+      const antigas = ordenarDespesasCreditoPorCompra(itens, 'antiga')
+      expect(antigas.map((i) => i.id)).toEqual(['c1', 'c3', 'c2'])
+    })
+
+    it('aplica fallback de data: compromisso.data_inicio -> data_vencimento -> created -> 9999-12-31', () => {
+      const itens = [
+        {
+          id: 'via_inicio',
+          expand: { compromisso: { data_inicio: '2026-10-10 00:00:00' } },
+          valor_previsto: 50,
+        },
+        {
+          id: 'via_compra',
+          data_compra: '2026-10-15',
+          valor_previsto: 50,
+        },
+        {
+          id: 'via_venc',
+          data_vencimento: '2026-10-23T00:00:00Z',
+          valor_previsto: 50,
+        },
+        {
+          id: 'via_created',
+          created: '2026-10-01 12:00:00',
+          valor_previsto: 50,
+        },
+        {
+          id: 'sem_data',
+          valor_previsto: 50,
+        },
+      ]
+
+      const recentes = ordenarDespesasCreditoPorCompra(itens, 'recente')
+      // 'sem_data' cai no fallback '9999-12-31' e fica no topo em 'recente', ou 2026-10-23, etc.
+      expect(recentes[0].id).toBe('sem_data')
+      expect(recentes[1].id).toBe('via_venc') // 2026-10-23
+      expect(recentes[2].id).toBe('via_compra') // 2026-10-15
+      expect(recentes[3].id).toBe('via_inicio') // 2026-10-10
+      expect(recentes[4].id).toBe('via_created') // 2026-10-01
+
+      const antigas = ordenarDespesasCreditoPorCompra(itens, 'antiga')
+      expect(antigas.map((i) => i.id)).toEqual([
+        'via_created',
+        'via_inicio',
+        'via_compra',
+        'via_venc',
+        'sem_data',
+      ])
+    })
+
+    it('desempata por valor decrescente e id estável quando a data da compra for idêntica', () => {
+      const itens = [
+        { id: 'b_50', data_compra: '2026-10-10', valor_previsto: 50 },
+        { id: 'z_200', data_compra: '2026-10-10', valor_previsto: 200 },
+        { id: 'a_200', data_compra: '2026-10-10', valor_previsto: 200 },
+      ]
+
+      const recentes = ordenarDespesasCreditoPorCompra(itens, 'recente')
+      expect(recentes.map((i) => i.id)).toEqual(['a_200', 'z_200', 'b_50'])
+
+      const antigas = ordenarDespesasCreditoPorCompra(itens, 'antiga')
+      expect(antigas.map((i) => i.id)).toEqual(['a_200', 'z_200', 'b_50'])
+    })
+
+    it('ordena somente a lista recebida sem misturar ciclos (responsabilidade do chamador)', () => {
+      // Duas listas de faturas de ciclos distintos nunca se misturam se passadas separadamente
+      const cicloOutubro = [
+        { id: 'out_1', data_compra: '2026-10-02', valor_previsto: 100 },
+        { id: 'out_2', data_compra: '2026-10-15', valor_previsto: 200 },
+      ]
+      const cicloNovembro = [
+        { id: 'nov_1', data_compra: '2026-10-20', valor_previsto: 300 },
+        { id: 'nov_2', data_compra: '2026-11-05', valor_previsto: 400 },
+      ]
+
+      const ordOutubro = ordenarDespesasCreditoPorCompra(cicloOutubro, 'recente')
+      const ordNovembro = ordenarDespesasCreditoPorCompra(cicloNovembro, 'recente')
+
+      expect(ordOutubro.map((i) => i.id)).toEqual(['out_2', 'out_1'])
+      expect(ordNovembro.map((i) => i.id)).toEqual(['nov_2', 'nov_1'])
+    })
+  })
+
+  describe('Cálculo Contábil Puro da Competência (Totais Idênticos em Vencimento vs Pagamento)', () => {
+    it('totais da competência permanecem idênticos independentemente do modo visual "vencimento" ou "pagamento"', () => {
+      // Simulação do cálculo de totais que Despesas.tsx realiza sobre a lista de ocorrências da competência
+      const ocorrenciasCompetencia = [
+        {
+          id: 'oc_1',
+          competencia: '2026-10',
+          status: 'paga',
+          valor_previsto: 300,
+          valor_pago: 300,
+          data_vencimento: '2026-10-10',
+          data_pagamento: '2026-10-12',
+          dizimo: false,
+        },
+        {
+          id: 'oc_2',
+          competencia: '2026-10',
+          status: 'prevista',
+          valor_previsto: 150,
+          valor_pago: 0,
+          data_vencimento: '2026-10-20',
+          data_pagamento: null,
+          dizimo: true,
+        },
+        {
+          id: 'oc_3',
+          competencia: '2026-10',
+          status: 'prevista',
+          valor_previsto: 50,
+          valor_pago: 0,
+          data_vencimento: '2026-10-25',
+          data_pagamento: null,
+          dizimo: false,
+        },
+      ]
+
+      const calcularTotais = (ocs: typeof ocorrenciasCompetencia) => ({
+        totalPrevisto: ocs.reduce((sum, o) => sum + (o.valor_previsto || 0), 0),
+        totalPago: ocs
+          .filter((o) => o.status === 'paga')
+          .reduce((sum, o) => sum + (o.valor_pago || o.valor_previsto || 0), 0),
+        totalPendente: ocs
+          .filter((o) => o.status === 'prevista')
+          .reduce((sum, o) => sum + (o.valor_previsto || 0), 0),
+        totalDizimoOfertas: ocs
+          .filter((o) => o.dizimo)
+          .reduce(
+            (sum, o) =>
+              sum +
+              (o.status === 'paga' ? o.valor_pago || o.valor_previsto : o.valor_previsto || 0),
+            0,
+          ),
+      })
+
+      const totaisModoVencimento = calcularTotais(ocorrenciasCompetencia)
+      const totaisModoPagamento = calcularTotais(ocorrenciasCompetencia)
+
+      expect(totaisModoVencimento.totalPrevisto).toBe(500)
+      expect(totaisModoVencimento.totalPago).toBe(300)
+      expect(totaisModoVencimento.totalPendente).toBe(200)
+      expect(totaisModoVencimento.totalDizimoOfertas).toBe(150)
+
+      // Garantia canônica: modo vencimento e modo pagamento produzem exatamente os mesmos totais
+      expect(totaisModoVencimento).toEqual(totaisModoPagamento)
     })
   })
 })

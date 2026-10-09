@@ -93,7 +93,11 @@ import {
   type EstadoCicloFatura,
 } from '@/lib/cartao-fatura'
 import { can } from '@/lib/permissions'
-import { prepararDuplicacaoCompromisso, ordenarDespesasPorData } from '@/lib/despesas-pipeline'
+import {
+  prepararDuplicacaoCompromisso,
+  ordenarDespesasPorData,
+  ordenarDespesasCreditoPorCompra,
+} from '@/lib/despesas-pipeline'
 import { cadastrosService } from '@/services/cadastros'
 import { useRealtime } from '@/hooks/use-realtime'
 import { despesasService } from '@/services/despesas'
@@ -637,8 +641,29 @@ export default function Despesas() {
     } catch (e) {
       console.warn('Erro ao salvar filtro de data de competência no localStorage:', e)
     }
-    // Feedback imediato e recarga forçada da visualização
-    setRefreshing(true)
+  }
+
+  // Ordem de compra do cartão de crédito: 'recente' (mais recente primeiro) | 'antiga' (mais antiga primeiro)
+  const [ordemCompraCredito, setOrdemCompraCredito] = useState<'recente' | 'antiga'>(() => {
+    try {
+      const saved = localStorage.getItem('despesas_ordem_credito_compra')
+      if (saved === 'recente' || saved === 'antiga') {
+        return saved
+      }
+    } catch (e) {
+      console.warn('Erro ao ler ordem de compra de crédito do localStorage:', e)
+    }
+    return 'recente'
+  })
+
+  const handleToggleOrdemCompraCredito = () => {
+    const next = ordemCompraCredito === 'recente' ? 'antiga' : 'recente'
+    setOrdemCompraCredito(next)
+    try {
+      localStorage.setItem('despesas_ordem_credito_compra', next)
+    } catch (e) {
+      console.warn('Erro ao salvar ordem de compra de crédito no localStorage:', e)
+    }
   }
 
   // Ordenação: 'urgente' (mais urgente primeiro: pendentes vencidas/hoje/futuras no topo) | 'recente' (mais tarde primeiro)
@@ -847,7 +872,7 @@ export default function Despesas() {
       setRefreshing(false)
       setIsRetrying(false)
     }
-  }, [activeContext, currentCompetencia, filtroDataCompetencia, hasLoadedOnce])
+  }, [activeContext, currentCompetencia, hasLoadedOnce])
 
   /**
    * Mutex e Fila de Coalescência:
@@ -2292,6 +2317,21 @@ export default function Despesas() {
                                       </div>
 
                                       <div className="flex items-center gap-2">
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-7 text-xs font-semibold px-2.5 gap-1.5 border-border/80 bg-white/90 hover:bg-white text-foreground shadow-2xs"
+                                          onClick={handleToggleOrdemCompraCredito}
+                                          title="Alternar ordenação das compras do ciclo de crédito"
+                                        >
+                                          <ArrowUpDown className="h-3 w-3 text-primary" />
+                                          <span>
+                                            {ordemCompraCredito === 'recente'
+                                              ? 'Compra: mais recentes'
+                                              : 'Compra: mais antigas'}
+                                          </span>
+                                        </Button>
+
                                         {isPago ? (
                                           <Badge
                                             variant="outline"
@@ -2438,10 +2478,15 @@ export default function Despesas() {
 
                             {/* Renderização com Abas (2+ tipos) ou Direta (1 tipo) */}
                             {!hasMultipleTabs ? (
-                              renderOcorrenciasConta(
-                                abas[0]?.ocorrencias || todasOcorrenciasConta,
-                                abas[0]?.tipo,
-                              )
+                              (() => {
+                                const tipo = abas[0]?.tipo
+                                const listaBase = abas[0]?.ocorrencias || todasOcorrenciasConta
+                                const listaFinal =
+                                  tipo === 'credito'
+                                    ? ordenarDespesasCreditoPorCompra(listaBase, ordemCompraCredito)
+                                    : listaBase
+                                return renderOcorrenciasConta(listaFinal, tipo)
+                              })()
                             ) : (
                               <Tabs defaultValue={defaultTab} className="w-full">
                                 <TabsList className="mb-4 flex h-auto flex-wrap gap-1 bg-muted/60 p-1">
@@ -2477,15 +2522,24 @@ export default function Despesas() {
                                   })}
                                 </TabsList>
 
-                                {abas.map((aba) => (
-                                  <TabsContent
-                                    key={aba.tipo}
-                                    value={aba.tipo}
-                                    className="m-0 focus-visible:outline-none"
-                                  >
-                                    {renderOcorrenciasConta(aba.ocorrencias, aba.tipo)}
-                                  </TabsContent>
-                                ))}
+                                {abas.map((aba) => {
+                                  const listaAba =
+                                    aba.tipo === 'credito'
+                                      ? ordenarDespesasCreditoPorCompra(
+                                          aba.ocorrencias,
+                                          ordemCompraCredito,
+                                        )
+                                      : aba.ocorrencias
+                                  return (
+                                    <TabsContent
+                                      key={aba.tipo}
+                                      value={aba.tipo}
+                                      className="m-0 focus-visible:outline-none"
+                                    >
+                                      {renderOcorrenciasConta(listaAba, aba.tipo)}
+                                    </TabsContent>
+                                  )
+                                })}
                               </Tabs>
                             )}
                           </div>
