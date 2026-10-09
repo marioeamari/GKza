@@ -943,7 +943,7 @@ export default function Despesas() {
     retryTimerRef.current = countdownInterval as unknown as ReturnType<typeof setTimeout>
   }, [loadData])
 
-  // Limpeza de timers no desmonte do componente
+  // Limpeza de timers no desmonte do componente (garantia de ciclo de vida seguro)
   useEffect(() => {
     return () => {
       if (realtimeDebounceTimerRef.current) {
