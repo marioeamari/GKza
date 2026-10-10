@@ -54,6 +54,12 @@ export interface KitRegra {
 
 export type TipoComposicaoPedido = 'padrao' | 'personalizada'
 export type StatusSeparacao = 'aguardando' | 'em_separacao' | 'finalizado' | 'cancelado'
+export type TriagemPedidoEspecial =
+  | 'sem_pedido_especial'
+  | 'pendente_analise'
+  | 'confirmado_chat'
+  | 'descartado'
+export type OrigemPedidoEspecial = 'manual' | 'colagem_shopee' | 'agente_ia' | 'chat_shopee'
 
 export interface KitPedido {
   id: string
@@ -69,10 +75,29 @@ export interface KitPedido {
   cliente_nome?: string
   observacoes?: string
   separador_atual?: string
+
+  // Novos campos estruturados para pedido especial e Shopee
+  pedido_especial?: string
+  tem_pedido_especial?: boolean
+  triagem_pedido_especial?: TriagemPedidoEspecial
+  origem_pedido_especial?: OrigemPedidoEspecial
+  data_expedicao?: string
+  variacao_anuncio?: string
+  produto_referencia?: string
+  shopee_order_id?: string
+
   created?: string
   updated?: string
   expand?: {
     tema?: KitTema
+    produto_referencia?: {
+      id: string
+      nome: string
+      sku: string
+      tipo: string
+      qtd_por_kit?: number
+      marca?: string
+    }
     separador_atual?: {
       id: string
       name?: string
@@ -119,6 +144,8 @@ export interface KitHistoricoSeparacao {
   data_fim?: string
   status: 'aguardando' | 'em_separacao' | 'finalizado'
   observacoes?: string
+  pedido_especial?: string
+  shopee_order_id?: string
   created?: string
   updated?: string
 }

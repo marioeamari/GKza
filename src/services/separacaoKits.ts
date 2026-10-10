@@ -102,19 +102,19 @@ export const separacaoKitsService = {
       filters.push(`status_separacao = "${options.status}"`)
     }
     if (options.apenasPersonalizados) {
-      filters.push('tipo_composicao = "personalizada"')
+      filters.push('(tipo_composicao = "personalizada" || tem_pedido_especial = true)')
     }
     if (options.search && options.search.trim()) {
       const q = options.search.trim()
       filters.push(
-        `(numero_pedido ~ "${q}" || sku ~ "${q}" || produto_nome ~ "${q}" || cliente_nome ~ "${q}")`,
+        `(numero_pedido ~ "${q}" || sku ~ "${q}" || produto_nome ~ "${q}" || cliente_nome ~ "${q}" || shopee_order_id ~ "${q}" || pedido_especial ~ "${q}")`,
       )
     }
 
     return pb.collection('kit_pedidos').getFullList<KitPedido>({
       filter: filters.join(' && '),
       sort: '-created',
-      expand: 'tema,separador_atual',
+      expand: 'tema,produto_referencia,separador_atual',
     })
   },
 
@@ -123,11 +123,11 @@ export const separacaoKitsService = {
     if (!clean) return null
 
     try {
-      // 1. Tenta por número exato
+      // 1. Tenta por número exato ou shopee_order_id exato
       const porNum = await pb
         .collection('kit_pedidos')
-        .getFirstListItem<KitPedido>(`numero_pedido = "${clean}"`, {
-          expand: 'tema,separador_atual',
+        .getFirstListItem<KitPedido>(`numero_pedido = "${clean}" || shopee_order_id = "${clean}"`, {
+          expand: 'tema,produto_referencia,separador_atual',
         })
       if (porNum) return porNum
     } catch {
@@ -139,8 +139,8 @@ export const separacaoKitsService = {
       const porFiltro = await pb
         .collection('kit_pedidos')
         .getFirstListItem<KitPedido>(
-          `numero_pedido ~ "${clean}" || sku = "${clean}" || sku ~ "${clean}"`,
-          { expand: 'tema,separador_atual' },
+          `numero_pedido ~ "${clean}" || shopee_order_id ~ "${clean}" || sku = "${clean}" || sku ~ "${clean}"`,
+          { expand: 'tema,produto_referencia,separador_atual' },
         )
       return porFiltro
     } catch (_) {
@@ -226,6 +226,8 @@ export const separacaoKitsService = {
     funcionarioNome?: string
     dataInicio?: string
     observacoes?: string
+    pedidoEspecial?: string
+    shopeeOrderId?: string
   }): Promise<KitHistoricoSeparacao> {
     // Se houver pedidoId, marca o pedido como 'finalizado'
     if (params.pedidoId) {
@@ -258,6 +260,8 @@ export const separacaoKitsService = {
       data_fim: agora,
       status: 'finalizado',
       observacoes: params.observacoes || '',
+      pedido_especial: params.pedidoEspecial || '',
+      shopee_order_id: params.shopeeOrderId || '',
     })
 
     return rec

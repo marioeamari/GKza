@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { ExpedicaoHeader } from '@/components/expedicao/ExpedicaoHeader'
+import { ImportarPedidosShopeeModal } from '@/components/expedicao/ImportarPedidosShopeeModal'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -57,7 +58,11 @@ export default function PedidosPersonalizadosPage() {
   const [pedidos, setPedidos] = useState<KitPedido[]>([])
   const [temas, setTemas] = useState<KitTema[]>([])
   const [modelos, setModelos] = useState<KitModelo[]>([])
+  const [catalogoProdutos, setCatalogoProdutos] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Modal de importação Shopee
+  const [importarModalOpen, setImportarModalOpen] = useState(false)
 
   // Filtros
   const [busca, setBusca] = useState('')
@@ -76,6 +81,9 @@ export default function PedidosPersonalizadosPage() {
   const [tipoComposicao, setTipoComposicao] = useState<TipoComposicaoPedido>('padrao')
   const [clienteNome, setClienteNome] = useState('')
   const [observacoes, setObservacoes] = useState('')
+  const [pedidoEspecial, setPedidoEspecial] = useState('')
+  const [variacaoAnuncio, setVariacaoAnuncio] = useState('')
+  const [shopeeOrderId, setShopeeOrderId] = useState('')
   const [quantidadesPersonalizadas, setQuantidadesPersonalizadas] = useState<
     Record<string, number>
   >({})
@@ -87,7 +95,7 @@ export default function PedidosPersonalizadosPage() {
   const carregarDados = async () => {
     try {
       setLoading(true)
-      const [temasData, modelosData, pedidosData] = await Promise.all([
+      const [temasData, modelosData, pedidosData, prodsData] = await Promise.all([
         separacaoKitsService.getTemas(),
         separacaoKitsService.getModelos(),
         separacaoKitsService.getPedidos({
@@ -95,10 +103,19 @@ export default function PedidosPersonalizadosPage() {
           search: busca,
           apenasPersonalizados: filtroTipo === 'personalizados',
         }),
+        (async () => {
+          try {
+            const { precificacaoService } = await import('@/services/precificacao')
+            return await precificacaoService.listProdutos()
+          } catch {
+            return []
+          }
+        })(),
       ])
       setTemas(temasData)
       setModelos(modelosData)
       setPedidos(pedidosData)
+      setCatalogoProdutos(prodsData)
     } catch (err) {
       console.error('Erro ao carregar pedidos:', err)
       toast({
@@ -139,6 +156,9 @@ export default function PedidosPersonalizadosPage() {
     setTipoComposicao(modoPersonalizado ? 'personalizada' : 'padrao')
     setClienteNome('')
     setObservacoes('')
+    setPedidoEspecial('')
+    setVariacaoAnuncio('')
+    setShopeeOrderId('')
 
     const initQtds: Record<string, number> = {}
     modelos
@@ -161,6 +181,9 @@ export default function PedidosPersonalizadosPage() {
     setTipoComposicao(p.tipo_composicao)
     setClienteNome(p.cliente_nome || '')
     setObservacoes(p.observacoes || '')
+    setPedidoEspecial(p.pedido_especial || '')
+    setVariacaoAnuncio(p.variacao_anuncio || '')
+    setShopeeOrderId(p.shopee_order_id || p.numero_pedido || '')
 
     const initQtds: Record<string, number> = {}
     if (Array.isArray(p.composicao_personalizada)) {
@@ -238,6 +261,10 @@ export default function PedidosPersonalizadosPage() {
           : ('aguardando' as const),
         cliente_nome: clienteNome.trim(),
         observacoes: observacoes.trim(),
+        pedido_especial: pedidoEspecial.trim(),
+        tem_pedido_especial: Boolean(pedidoEspecial.trim()),
+        shopee_order_id: (shopeeOrderId || numeroPedido).trim(),
+        variacao_anuncio: variacaoAnuncio.trim(),
       }
 
       if (pedidoEditando) {
@@ -330,6 +357,15 @@ export default function PedidosPersonalizadosPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setImportarModalOpen(true)}
+            className="h-10 gap-1.5 border-primary/40 bg-orange-50 text-primary font-bold hover:bg-orange-100"
+          >
+            <FileSpreadsheet className="h-4 w-4" /> Colar / Importar Shopee
+          </Button>
+
           <Button
             type="button"
             variant="outline"
@@ -446,6 +482,13 @@ export default function PedidosPersonalizadosPage() {
                           Total: {p.quantidade_total} un
                         </span>
                       </div>
+
+                      {/* Pedido especial do cliente em destaque */}
+                      {p.pedido_especial && (
+                        <div className="mt-1 rounded-lg border border-amber-300 bg-amber-100/80 px-2.5 py-1 text-xs font-black text-amber-950">
+                          ★ Pedido especial: {p.pedido_especial}
+                        </div>
+                      )}
 
                       {/* Modelos personalizados resumidos */}
                       {isPersonalizado && Array.isArray(p.composicao_personalizada) && (
@@ -698,13 +741,55 @@ export default function PedidosPersonalizadosPage() {
               </div>
             )}
 
+            <div className="rounded-xl border-2 border-primary/30 bg-orange-50/50 p-3 space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor="pedEsp" className="text-xs font-black uppercase text-primary">
+                  ★ Pedido Especial do Cliente (Destaque na Bipagem)
+                </Label>
+                <Input
+                  id="pedEsp"
+                  value={pedidoEspecial}
+                  onChange={(e) => setPedidoEspecial(e.target.value)}
+                  placeholder="Ex: Cliente escolheu modelos 1 e 4 no chat Shopee"
+                  className="font-bold text-sm bg-white"
+                />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="pedVar" className="text-xs">
+                    Variação do anúncio original
+                  </Label>
+                  <Input
+                    id="pedVar"
+                    value={variacaoAnuncio}
+                    onChange={(e) => setVariacaoAnuncio(e.target.value)}
+                    placeholder="Ex: Sortido 5 modelos"
+                    className="bg-white"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="pedShpId" className="text-xs">
+                    ID do Pedido Shopee (Webchat)
+                  </Label>
+                  <Input
+                    id="pedShpId"
+                    value={shopeeOrderId}
+                    onChange={(e) => setShopeeOrderId(e.target.value)}
+                    placeholder="Ex: 241014ABCD99"
+                    className="bg-white"
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="space-y-1.5">
-              <Label htmlFor="pedObs">Observações do Pedido / Mensagem do Cliente</Label>
+              <Label htmlFor="pedObs">Observações Gerais</Label>
               <Input
                 id="pedObs"
                 value={observacoes}
                 onChange={(e) => setObservacoes(e.target.value)}
-                placeholder="Ex: Cliente pediu 30 Mickey Clássico e 20 Minnie Rosa no chat"
+                placeholder="Outras notas operacionais"
               />
             </div>
 
@@ -757,6 +842,15 @@ export default function PedidosPersonalizadosPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* MODAL DE IMPORTAÇÃO SHOPEE */}
+      <ImportarPedidosShopeeModal
+        open={importarModalOpen}
+        onOpenChange={setImportarModalOpen}
+        catalogoProdutos={catalogoProdutos}
+        temas={temas}
+        onImportadoSucesso={() => carregarDados()}
+      />
     </div>
   )
 }

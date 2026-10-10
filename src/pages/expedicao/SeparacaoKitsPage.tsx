@@ -14,6 +14,9 @@ import {
 import { ExpedicaoHeader } from '@/components/expedicao/ExpedicaoHeader'
 import { ModeloSeparacaoCard } from '@/components/expedicao/ModeloSeparacaoCard'
 import { ConsultaRapidaTab } from '@/components/expedicao/ConsultaRapidaTab'
+import { CartaoPedidoEspecial } from '@/components/expedicao/CartaoPedidoEspecial'
+import { ImportarPedidosShopeeModal } from '@/components/expedicao/ImportarPedidosShopeeModal'
+import { FileSpreadsheet, Upload } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -57,18 +60,31 @@ export default function SeparacaoKitsPage() {
   const [finalizando, setFinalizando] = useState(false)
   const [finalizadoSucesso, setFinalizadoSucesso] = useState(false)
 
+  // Catálogo e modal de importação
+  const [catalogoProdutos, setCatalogoProdutos] = useState<any[]>([])
+  const [modalImportarOpen, setModalImportarOpen] = useState(false)
+
   // Carrega dados iniciais
   const loadData = async () => {
     try {
       setLoading(true)
-      const [temasData, modelosData, regrasData] = await Promise.all([
+      const [temasData, modelosData, regrasData, prodsData] = await Promise.all([
         separacaoKitsService.getTemas(),
         separacaoKitsService.getModelos(),
         separacaoKitsService.getRegras(),
+        (async () => {
+          try {
+            const { precificacaoService } = await import('@/services/precificacao')
+            return await precificacaoService.listProdutos()
+          } catch {
+            return []
+          }
+        })(),
       ])
       setTemas(temasData)
       setModelos(modelosData)
       setRegras(regrasData)
+      setCatalogoProdutos(prodsData)
     } catch (err) {
       console.error('Erro ao carregar dados de separação:', err)
       toast({
@@ -229,6 +245,8 @@ export default function SeparacaoKitsPage() {
         funcionarioId: user?.id,
         funcionarioNome: user?.name,
         dataInicio,
+        pedidoEspecial: pedidoAtivo.pedido_especial,
+        shopeeOrderId: pedidoAtivo.shopee_order_id || pedidoAtivo.numero_pedido,
       })
 
       setFinalizadoSucesso(true)
@@ -307,7 +325,7 @@ export default function SeparacaoKitsPage() {
                         type="text"
                         value={buscaTermo}
                         onChange={(e) => setBuscaTermo(e.target.value)}
-                        placeholder="Ex: 123456789 ou SHP-456123..."
+                        placeholder="Ex: 123456789, 241014ABCD99 ou SKU..."
                         className="h-16 pl-14 text-lg font-bold tracking-wider placeholder:text-muted-foreground/50 sm:text-xl"
                         autoFocus
                       />
@@ -325,6 +343,15 @@ export default function SeparacaoKitsPage() {
                           BUSCAR PEDIDO
                         </>
                       )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setModalImportarOpen(true)}
+                      className="h-16 px-5 border-primary/40 bg-orange-50 text-primary font-bold hover:bg-orange-100"
+                    >
+                      <Upload className="mr-2 h-5 w-5" />
+                      Colar Pedidos Shopee
                     </Button>
                   </div>
 
@@ -467,12 +494,30 @@ export default function SeparacaoKitsPage() {
                     </div>
                   </div>
 
+                  {/* NOVO CARTÃO ESTRUTURADO: PEDIDO ESPECIAL DO CLIENTE + ATALHOS SHOPEE */}
+                  <div className="mt-5">
+                    <CartaoPedidoEspecial
+                      pedido={pedidoAtivo}
+                      onAtualizarPedidoEspecial={async (novoTexto) => {
+                        if (!pedidoAtivo) return
+                        await separacaoKitsService.updatePedido(pedidoAtivo.id, {
+                          pedido_especial: novoTexto,
+                          tem_pedido_especial: Boolean(novoTexto.trim()),
+                        })
+                        setPedidoAtivo({
+                          ...pedidoAtivo,
+                          pedido_especial: novoTexto,
+                          tem_pedido_especial: Boolean(novoTexto.trim()),
+                        })
+                      }}
+                    />
+                  </div>
+
                   {pedidoAtivo.observacoes && (
                     <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs font-semibold text-amber-900">
                       <strong>Observação do cliente:</strong> {pedidoAtivo.observacoes}
                     </div>
                   )}
-
                   {/* Avisos do Cálculo */}
                   {resultadoComposicao?.avisos && resultadoComposicao.avisos.length > 0 && (
                     <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/70 p-3 text-xs text-blue-900">
@@ -608,6 +653,21 @@ export default function SeparacaoKitsPage() {
           <ConsultaRapidaTab temas={temas} modelos={modelos} regras={regras} />
         </TabsContent>
       </Tabs>
+
+      {/* MODAL DE IMPORTAÇÃO/COLAGEM SHOPEE */}
+      <ImportarPedidosShopeeModal
+        open={modalImportarOpen}
+        onOpenChange={setModalImportarOpen}
+        catalogoProdutos={catalogoProdutos}
+        temas={temas}
+        onImportadoSucesso={() => {
+          loadData()
+          toast({
+            title: 'Expedição Atualizada',
+            description: 'Os pedidos da Shopee já podem ser bipados pelo leitor ou código.',
+          })
+        }}
+      />
     </div>
   )
 }
