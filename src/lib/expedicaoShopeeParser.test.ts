@@ -1,11 +1,16 @@
 import { describe, it, expect } from 'vitest'
+import * as XLSX from 'xlsx'
 import {
   normalizarTexto,
   buildShopeeChatUrl,
   buildShopeeOrderUrl,
   encontrarProdutoCatalogo,
   inferirTemaKit,
+  detectarColuna,
+  inferirMapeamentoColunas,
   parseShopeeColagem,
+  parseShopeePlanilha,
+  SINONIMOS_COLUNAS_SHOPEE,
 } from './expedicaoShopeeParser'
 import type { PrecProdutoRecord } from '@/types/precificacao'
 import type { KitTema } from '@/types/separacaoKits'
@@ -58,8 +63,9 @@ describe('expedicaoShopeeParser', () => {
     { id: 'tema-sonic', nome: 'Sonic', ativo: true, ordem: 3 },
   ]
 
-  it('normaliza texto removendo acentos e espaços múltiplos', () => {
-    expect(normalizarTexto('  Mônica & Irmãos  ')).toBe('monica & irmaos')
+  it('normaliza texto removendo acentos, pontuação e espaços múltiplos', () => {
+    expect(normalizarTexto('  Mônica & Irmãos (Oficial)  ')).toBe('monica irmaos oficial')
+    expect(normalizarTexto('Nº do Pedido / ID:')).toBe('no do pedido id')
     expect(normalizarTexto('BANHÃO')).toBe('banhao')
   })
 
@@ -100,42 +106,196 @@ describe('expedicaoShopeeParser', () => {
     expect(inferirTemaKit('Produto sem tema', '', temasMock)).toBe('tema-monica')
   })
 
-  it('parseia texto TSV/colagem com pedido especial e detecção de kits', () => {
-    const textoColado = `ID do Pedido\tSKU\tNome do Produto\tVariação\tQuantidade\tCliente\tMensagem do Cliente
+  describe('Detecção dinâmica de cabeçalhos e sinônimos da Shopee BR', () => {
+    it('detecta coluna com acentos, pontuação e variações de caixa', () => {
+      const cabecalhos = [
+        'Nº do Pedido',
+        'Número de Referência do SKU',
+        'Nome do Produto',
+        'Nome da Variação',
+        'Quantidade',
+        'Nome de usuário do comprador',
+        'Observação do Comprador',
+      ]
+
+      expect(detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.numeroPedido)).toBe('Nº do Pedido')
+      expect(detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.sku)).toBe(
+        'Número de Referência do SKU',
+      )
+      expect(detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.produtoNome)).toBe(
+        'Nome do Produto',
+      )
+      expect(detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.variacao)).toBe('Nome da Variação')
+      expect(detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.quantidade)).toBe('Quantidade')
+      expect(detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.clienteNome)).toBe(
+        'Nome de usuário do comprador',
+      )
+      expect(detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.pedidoEspecial)).toBe(
+        'Observação do Comprador',
+      )
+    })
+
+    it('infere mapeamento com alta confiança quando cabeçalhos padrão estão presentes', () => {
+      const cabecalhos = [
+        'ID do pedido',
+        'SKU',
+        'Nome do produto',
+        'Variação',
+        'Quantidade',
+        'Comprador',
+      ]
+      const info = inferirMapeamentoColunas(cabecalhos)
+      expect(info.confianca.numeroPedido).toBe(true)
+      expect(info.confianca.sku).toBe(true)
+      expect(info.confianca.produtoNome).toBe(true)
+      expect(info.confianca.quantidade).toBe(true)
+      expect(info.mapeamento.numeroPedido).toBe('ID do pedido')
+      expect(info.mapeamento.sku).toBe('SKU')
+    })
+  })
+
+  describe('parseShopeePlanilha (.xlsx real / simulado)', () => {
+    it('lê arquivo .xlsx exportado da Shopee ("Pedidos a Enviar") com colunas reais em português', () => {
+      // Simula uma planilha real gerada com XLSX
+      const dadosPlanilha = [
+        [
+          'ID do pedido',
+          'Status do pedido',
+          'Número de referência do SKU',
+          'Nome do produto',
+          'Nome da variação',
+          'Quantidade',
+          'Nome de usuário do comprador',
+          'Observação do comprador',
+        ],
+        [
+          '241014SHP001',
+          'A Enviar',
+          'KIT-40-BLeve',
+          'Kit 40 Toalha Leve de Praia',
+          'Sortido 5 Modelos',
+          '40',
+          'marina_silva',
+          'Cliente pediu modelos 1 e 2 no chat',
+        ],
+        [
+          '241014SHP002',
+          'A Enviar',
+          'SHP-MON-30',
+          'Kit Toalha Mônica 30 un',
+          'Padrão',
+          '30',
+          'joao_souza',
+          '',
+        ],
+        [
+          '241014SHP003',
+          'A Enviar',
+          'DESCONHECIDO-99',
+          'Toalha Personalizada Infantil',
+          'Azul',
+          '2',
+          'carlos_lima',
+          '',
+        ],
+      ]
+
+      const ws = XLSX.utils.aoa_to_sheet(dadosPlanilha)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'orders')
+      const buffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
+
+      const res = parseShopeePlanilha(buffer, catalogoMock, temasMock, {
+        nomeArquivo: 'Order.toship.20261010.xlsx',
+      })
+
+      expect(res.origem).toBe('planilha_xlsx')
+      expect(res.nomeArquivo).toBe('Order.toship.20261010.xlsx')
+      expect(res.totalLinhas).toBe(3)
+      expect(res.reconhecidosCount).toBe(2)
+      expect(res.genericosCount).toBe(1)
+      expect(res.pedidosEspeciaisCount).toBe(1)
+
+      // Item 1
+      const item1 = res.itens[0]
+      expect(item1.numeroPedido).toBe('241014SHP001')
+      expect(item1.sku).toBe('KIT-40-BLeve')
+      expect(item1.produtoNome).toBe('Kit 40 Toalha Leve de Praia')
+      expect(item1.quantidade).toBe(40)
+      expect(item1.clienteNome).toBe('marina_silva')
+      expect(item1.temPedidoEspecial).toBe(true)
+      expect(item1.pedidoEspecial).toContain('Cliente pediu modelos 1 e 2 no chat')
+      expect(item1.triagemPedidoEspecial).toBe('pendente_analise')
+      expect(item1.reconhecido).toBe(true)
+      expect(item1.isKitOuCombo).toBe(true)
+
+      // Item 2 (SKU de canal)
+      const item2 = res.itens[1]
+      expect(item2.numeroPedido).toBe('241014SHP002')
+      expect(item2.reconhecido).toBe(true)
+      expect(item2.produtoEncontrado?.id).toBe('prod3')
+      expect(item2.temaId).toBe('tema-monica')
+
+      // Item 3 (genérico)
+      const item3 = res.itens[2]
+      expect(item3.numeroPedido).toBe('241014SHP003')
+      expect(item3.reconhecido).toBe(false)
+      expect(item3.motivoNaoReconhecido).toBeDefined()
+    })
+
+    it('permite override manual de mapeamento caso o usuário ajuste colunas na prévia', () => {
+      // Planilha com nomes exóticos/diferentes de colunas
+      const dadosPlanilha = [
+        ['CodVenda', 'ItemSKU', 'Descricao', 'QtdComprada', 'UsuarioShopee'],
+        ['PED-999', 'KIT-40-BLeve', 'Kit Toalha Leve', '50', 'cliente_teste'],
+      ]
+
+      const ws = XLSX.utils.aoa_to_sheet(dadosPlanilha)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'orders')
+      const buffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
+
+      // Fornece mapeamento manual customizado
+      const res = parseShopeePlanilha(buffer, catalogoMock, temasMock, {
+        mapeamentoCustomizado: {
+          numeroPedido: 'CodVenda',
+          sku: 'ItemSKU',
+          produtoNome: 'Descricao',
+          quantidade: 'QtdComprada',
+          clienteNome: 'UsuarioShopee',
+        },
+      })
+
+      expect(res.totalLinhas).toBe(1)
+      const item = res.itens[0]
+      expect(item.numeroPedido).toBe('PED-999')
+      expect(item.sku).toBe('KIT-40-BLeve')
+      expect(item.quantidade).toBe(50)
+      expect(item.clienteNome).toBe('cliente_teste')
+      expect(item.reconhecido).toBe(true)
+    })
+  })
+
+  describe('parseShopeeColagem (compatibilidade regressiva mantida)', () => {
+    it('parseia texto TSV com pedido especial e detecção de kits', () => {
+      const textoColado = `ID do Pedido\tSKU\tNome do Produto\tVariação\tQuantidade\tCliente\tMensagem do Cliente
 241014ABCD99\tKIT-40-BLeve\tKit 40 Toalha Leve de Praia\tSortido\t40\tAna Silva\tCliente pediu modelo 01 e 03 no chat
 241014XYZ888\tSHP-MON-30\tKit Toalha Mônica\tPadrão\t30\tBeatriz\t
 241014ZZZ111\tDESCONHECIDO\tToalha de Bebê Estampada\tAzul\t5\tCarlos\t`
 
-    const parsed = parseShopeeColagem(textoColado, catalogoMock, temasMock)
+      const parsed = parseShopeeColagem(textoColado, catalogoMock, temasMock)
 
-    expect(parsed.totalLinhas).toBe(3)
-    expect(parsed.reconhecidosCount).toBe(2)
-    expect(parsed.genericosCount).toBe(1)
-    expect(parsed.pedidosEspeciaisCount).toBe(1)
+      expect(parsed.totalLinhas).toBe(3)
+      expect(parsed.reconhecidosCount).toBe(2)
+      expect(parsed.genericosCount).toBe(1)
+      expect(parsed.pedidosEspeciaisCount).toBe(1)
 
-    // Primeiro item: reconhecido como kit do catálogo, com pedido especial
-    const item1 = parsed.itens[0]
-    expect(item1.numeroPedido).toBe('241014ABCD99')
-    expect(item1.reconhecido).toBe(true)
-    expect(item1.isKitOuCombo).toBe(true)
-    expect(item1.temPedidoEspecial).toBe(true)
-    expect(item1.pedidoEspecial).toContain('Cliente pediu modelo 01 e 03 no chat')
-    expect(item1.triagemPedidoEspecial).toBe('pendente_analise')
-
-    // Terceiro item: não reconhecido, vira genérico
-    const item3 = parsed.itens[2]
-    expect(item3.reconhecido).toBe(false)
-    expect(item3.motivoNaoReconhecido).toBeDefined()
-  })
-
-  it('lida com colagem com ponto e vírgula e variação indicativa de chat', () => {
-    const csv = `241015999;KIT-40-BLeve;Kit 40 Toalha Leve;escolha do cliente no chat modelo 2;40`
-    const parsed = parseShopeeColagem(csv, catalogoMock, temasMock)
-
-    expect(parsed.totalLinhas).toBe(1)
-    const item = parsed.itens[0]
-    expect(item.numeroPedido).toBe('241015999')
-    expect(item.temPedidoEspecial).toBe(true)
-    expect(item.pedidoEspecial).toContain('escolha do cliente no chat modelo 2')
+      const item1 = parsed.itens[0]
+      expect(item1.numeroPedido).toBe('241014ABCD99')
+      expect(item1.reconhecido).toBe(true)
+      expect(item1.isKitOuCombo).toBe(true)
+      expect(item1.temPedidoEspecial).toBe(true)
+      expect(item1.pedidoEspecial).toContain('Cliente pediu modelo 01 e 03 no chat')
+    })
   })
 })

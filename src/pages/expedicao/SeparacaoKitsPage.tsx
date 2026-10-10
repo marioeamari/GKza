@@ -348,10 +348,10 @@ export default function SeparacaoKitsPage() {
                       type="button"
                       variant="outline"
                       onClick={() => setModalImportarOpen(true)}
-                      className="h-16 px-5 border-primary/40 bg-orange-50 text-primary font-bold hover:bg-orange-100"
+                      className="h-16 px-5 border-emerald-500/40 bg-emerald-50 text-emerald-900 font-bold hover:bg-emerald-100 shadow-sm"
                     >
-                      <Upload className="mr-2 h-5 w-5" />
-                      Colar Pedidos Shopee
+                      <FileSpreadsheet className="mr-2 h-5 w-5 text-emerald-600" />
+                      Importar .XLSX / Pedidos Shopee
                     </Button>
                   </div>
 
