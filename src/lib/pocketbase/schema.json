@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-10T15:34:37.321Z",
+  "generatedAt": "2026-10-10T16:59:06.052Z",
   "collections": [
     {
       "name": "users",
@@ -5364,6 +5364,433 @@
       "indexes": [
         "CREATE INDEX idx_dividas_despesas_divida ON dividas_despesas (divida)",
         "CREATE INDEX idx_dividas_despesas_data ON dividas_despesas (data)"
+      ]
+    },
+    {
+      "name": "funcionarios",
+      "type": "base",
+      "apiRules": {
+        "list": "",
+        "view": "",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "",
+        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "cargo",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "valor_hora",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "salario_base",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dias_mes",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "horas_dia",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "hora_almoco_conta",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ciclo_pagamento",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["semanal", "quinzenal", "mensal", "personalizado"]
+        },
+        {
+          "name": "pix",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "telefone",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ativo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "token_sessao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "pin",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_func_nome ON funcionarios (nome)",
+        "CREATE INDEX idx_func_ativo ON funcionarios (ativo)",
+        "CREATE INDEX idx_func_token_sessao ON funcionarios (token_sessao)"
+      ]
+    },
+    {
+      "name": "funcionarios_dividas",
+      "type": "base",
+      "apiRules": {
+        "list": "",
+        "view": "",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+      },
+      "fields": [
+        {
+          "name": "funcionario",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "funcionarios"
+        },
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "valor_total",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "saldo_atual",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "percentual_abatimento",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "ativa",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_fdiv_func ON funcionarios_dividas (funcionario)",
+        "CREATE INDEX idx_fdiv_ativa ON funcionarios_dividas (ativa)"
+      ]
+    },
+    {
+      "name": "funcionarios_estacoes",
+      "type": "base",
+      "apiRules": {
+        "list": "",
+        "view": "",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "token",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "ativa",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "local_descricao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_fest_token ON funcionarios_estacoes (token)",
+        "CREATE INDEX idx_fest_ativa ON funcionarios_estacoes (ativa)"
+      ]
+    },
+    {
+      "name": "funcionarios_pontos",
+      "type": "base",
+      "apiRules": {
+        "list": "",
+        "view": "",
+        "create": "",
+        "update": "",
+        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+      },
+      "fields": [
+        {
+          "name": "funcionario",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "funcionarios"
+        },
+        {
+          "name": "data",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "entrada",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "saida",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "pausas",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "origem",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["estacao_qr", "fora_do_local", "manual", "admin"]
+        },
+        {
+          "name": "estacao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "local_aproximado",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "editado_por",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "observacao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_fponto_func ON funcionarios_pontos (funcionario)",
+        "CREATE INDEX idx_fponto_data ON funcionarios_pontos (data)",
+        "CREATE INDEX idx_fponto_origem ON funcionarios_pontos (origem)"
+      ]
+    },
+    {
+      "name": "funcionarios_folhas",
+      "type": "base",
+      "apiRules": {
+        "list": "",
+        "view": "",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+      },
+      "fields": [
+        {
+          "name": "funcionario",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "funcionarios"
+        },
+        {
+          "name": "periodo_inicio",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "periodo_fim",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "ganho_total",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "descontos",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "divida_semanal",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "a_receber",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "quitada",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "data_quitacao",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "lancamento_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_ffolha_func ON funcionarios_folhas (funcionario)",
+        "CREATE INDEX idx_ffolha_periodo ON funcionarios_folhas (periodo_inicio, periodo_fim)",
+        "CREATE INDEX idx_ffolha_quitada ON funcionarios_folhas (quitada)"
       ]
     }
   ]

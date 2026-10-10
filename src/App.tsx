@@ -42,6 +42,8 @@ import LembreteRapidoPage from '@/pages/LembreteRapidoPage'
 import MobileHubPage from '@/pages/MobileHubPage'
 import DividasPage from '@/pages/DividasPage'
 import ProducaoPage from '@/pages/ProducaoPage'
+import FuncionariosPage from '@/pages/FuncionariosPage'
+import FuncionarioPontoPage from '@/pages/FuncionarioPontoPage'
 
 // Redirecionador auxiliar caso algum fluxo do Google bata direto no frontend
 function GoogleCallbackRedirect() {
@@ -60,6 +62,9 @@ export default function App() {
       </Route>
       <Route path="/verificar-email" element={<TokenAction type="verification" />} />
       <Route path="/confirmar-email" element={<ConfirmEmail />} />
+      {/* Ponto Eletrônico do Empregado via QR da Estação (sem login exigido) */}
+      <Route path="/funcionarios/ponto/:token" element={<FuncionarioPontoPage />} />
+      <Route path="/funcionarios/ponto" element={<FuncionarioPontoPage />} />
       {/* Rotas de segurança para callbacks do Google redirecionarem para /configuracoes sem cair em NotFound */}
       <Route path="/backend/v1/google/callback" element={<GoogleCallbackRedirect />} />
       <Route path="/google/callback" element={<GoogleCallbackRedirect />} />
@@ -76,6 +81,7 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="/pendentes" element={<Pendentes />} />
           <Route path="/despesas" element={<Despesas />} />
+          <Route path="/funcionarios" element={<FuncionariosPage />} />
           <Route path="/producao" element={<ProducaoPage />} />
           <Route path="/dividas" element={<DividasPage />} />
           <Route path="/lancamentos" element={<Lancamentos />} />

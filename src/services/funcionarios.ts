@@ -1,0 +1,396 @@
+import pb from '@/lib/pocketbase/client'
+import type { PausaPonto } from '@/lib/funcionarios'
+
+export interface FuncionarioRecord {
+  id: string
+  nome: string
+  cargo?: string
+  valor_hora: number
+  salario_base?: number
+  dias_mes?: number
+  horas_dia?: number
+  hora_almoco_conta?: boolean
+  ciclo_pagamento: 'semanal' | 'quinzenal' | 'mensal' | 'personalizado'
+  pix?: string
+  telefone?: string
+  ativo: boolean
+  token_sessao?: string
+  pin?: string
+  created?: string
+  updated?: string
+}
+
+export interface FuncionarioDividaRecord {
+  id: string
+  funcionario: string
+  descricao: string
+  valor_total: number
+  saldo_atual: number
+  percentual_abatimento: number // ex: 60 para 60%
+  ativa: boolean
+  created?: string
+  updated?: string
+}
+
+export interface FuncionarioEstacaoRecord {
+  id: string
+  nome: string
+  token: string
+  ativa: boolean
+  local_descricao?: string
+  created?: string
+  updated?: string
+}
+
+export interface FuncionarioPontoRecord {
+  id: string
+  funcionario: string
+  data: string // YYYY-MM-DD
+  entrada: string // HH:mm
+  saida?: string // HH:mm
+  pausas?: PausaPonto[]
+  origem: 'estacao_qr' | 'fora_do_local' | 'manual' | 'admin'
+  estacao?: string
+  local_aproximado?: string
+  editado_por?: string
+  observacao?: string
+  created?: string
+  updated?: string
+  expand?: {
+    funcionario?: FuncionarioRecord
+  }
+}
+
+export interface FuncionarioFolhaRecord {
+  id: string
+  funcionario: string
+  periodo_inicio: string
+  periodo_fim: string
+  ganho_total: number
+  descontos?: any
+  divida_semanal: number
+  a_receber: number
+  quitada: boolean
+  data_quitacao?: string
+  lancamento_id?: string
+  observacoes?: string
+  created?: string
+  updated?: string
+  expand?: {
+    funcionario?: FuncionarioRecord
+  }
+}
+
+export const funcionariosService = {
+  // --- FUNCIONÁRIOS ---
+  async listarFuncionarios(somenteAtivos = false): Promise<FuncionarioRecord[]> {
+    const filter = somenteAtivos ? 'ativo = true' : ''
+    return await pb.collection('funcionarios').getFullList<FuncionarioRecord>({
+      filter,
+      sort: 'nome',
+    })
+  },
+
+  async buscarFuncionarioPorId(id: string): Promise<FuncionarioRecord> {
+    return await pb.collection('funcionarios').getOne<FuncionarioRecord>(id)
+  },
+
+  async buscarFuncionarioPorTokenSessao(token: string): Promise<FuncionarioRecord | null> {
+    if (!token) return null
+    try {
+      return await pb
+        .collection('funcionarios')
+        .getFirstListItem<FuncionarioRecord>(`token_sessao = "${token}"`)
+    } catch (_) {
+      return null
+    }
+  },
+
+  async criarFuncionario(
+    dados: Omit<FuncionarioRecord, 'id' | 'created' | 'updated'>,
+  ): Promise<FuncionarioRecord> {
+    return await pb.collection('funcionarios').create<FuncionarioRecord>(dados)
+  },
+
+  async atualizarFuncionario(
+    id: string,
+    dados: Partial<FuncionarioRecord>,
+  ): Promise<FuncionarioRecord> {
+    return await pb.collection('funcionarios').update<FuncionarioRecord>(id, dados)
+  },
+
+  async excluirFuncionario(id: string): Promise<boolean> {
+    return await pb.collection('funcionarios').delete(id)
+  },
+
+  // --- DÍVIDAS ---
+  async listarDividas(funcionarioId?: string): Promise<FuncionarioDividaRecord[]> {
+    const filter = funcionarioId ? `funcionario = "${funcionarioId}"` : ''
+    return await pb.collection('funcionarios_dividas').getFullList<FuncionarioDividaRecord>({
+      filter,
+      sort: '-created',
+    })
+  },
+
+  async criarDivida(
+    dados: Omit<FuncionarioDividaRecord, 'id' | 'created' | 'updated'>,
+  ): Promise<FuncionarioDividaRecord> {
+    return await pb.collection('funcionarios_dividas').create<FuncionarioDividaRecord>(dados)
+  },
+
+  async atualizarDivida(
+    id: string,
+    dados: Partial<FuncionarioDividaRecord>,
+  ): Promise<FuncionarioDividaRecord> {
+    return await pb.collection('funcionarios_dividas').update<FuncionarioDividaRecord>(id, dados)
+  },
+
+  async excluirDivida(id: string): Promise<boolean> {
+    return await pb.collection('funcionarios_dividas').delete(id)
+  },
+
+  // --- ESTAÇÕES (QR) ---
+  async listarEstacoes(): Promise<FuncionarioEstacaoRecord[]> {
+    return await pb.collection('funcionarios_estacoes').getFullList<FuncionarioEstacaoRecord>({
+      sort: 'nome',
+    })
+  },
+
+  async buscarEstacaoPorToken(token: string): Promise<FuncionarioEstacaoRecord | null> {
+    if (!token) return null
+    try {
+      return await pb
+        .collection('funcionarios_estacoes')
+        .getFirstListItem<FuncionarioEstacaoRecord>(`token = "${token}" && ativa = true`)
+    } catch (_) {
+      return null
+    }
+  },
+
+  async criarEstacao(dados: {
+    nome: string
+    token: string
+    ativa: boolean
+    local_descricao?: string
+  }): Promise<FuncionarioEstacaoRecord> {
+    return await pb.collection('funcionarios_estacoes').create<FuncionarioEstacaoRecord>(dados)
+  },
+
+  async atualizarEstacao(
+    id: string,
+    dados: Partial<FuncionarioEstacaoRecord>,
+  ): Promise<FuncionarioEstacaoRecord> {
+    return await pb.collection('funcionarios_estacoes').update<FuncionarioEstacaoRecord>(id, dados)
+  },
+
+  // --- PONTOS ---
+  async listarPontos(params?: {
+    funcionarioId?: string
+    dataInicio?: string
+    dataFim?: string
+  }): Promise<FuncionarioPontoRecord[]> {
+    const filters: string[] = []
+    if (params?.funcionarioId) filters.push(`funcionario = "${params.funcionarioId}"`)
+    if (params?.dataInicio) filters.push(`data >= "${params.dataInicio}"`)
+    if (params?.dataFim) filters.push(`data <= "${params.dataFim}"`)
+
+    return await pb.collection('funcionarios_pontos').getFullList<FuncionarioPontoRecord>({
+      filter: filters.join(' && '),
+      sort: 'data,entrada',
+      expand: 'funcionario',
+    })
+  },
+
+  async buscarPontoAbertoHoje(
+    funcionarioId: string,
+    dataHoje: string,
+  ): Promise<FuncionarioPontoRecord | null> {
+    try {
+      const records = await pb
+        .collection('funcionarios_pontos')
+        .getFullList<FuncionarioPontoRecord>({
+          filter: `funcionario = "${funcionarioId}" && data = "${dataHoje}"`,
+          sort: '-created',
+        })
+      // Procura primeiro um ponto sem saída registrada
+      const aberto = records.find((r) => !r.saida)
+      return aberto || null
+    } catch (_) {
+      return null
+    }
+  },
+
+  async registrarEntrada(params: {
+    funcionarioId: string
+    data: string // YYYY-MM-DD
+    hora: string // HH:mm
+    origem: 'estacao_qr' | 'fora_do_local' | 'manual' | 'admin'
+    estacao?: string
+    localAproximado?: string
+    editadoPor?: string
+    observacao?: string
+  }): Promise<FuncionarioPontoRecord> {
+    return await pb.collection('funcionarios_pontos').create<FuncionarioPontoRecord>({
+      funcionario: params.funcionarioId,
+      data: params.data,
+      entrada: params.hora,
+      pausas: [],
+      origem: params.origem,
+      estacao: params.estacao || '',
+      local_aproximado: params.localAproximado || '',
+      editado_por: params.editadoPor || '',
+      observacao: params.observacao || '',
+    })
+  },
+
+  async registrarSaida(pontoId: string, horaSaida: string): Promise<FuncionarioPontoRecord> {
+    return await pb.collection('funcionarios_pontos').update<FuncionarioPontoRecord>(pontoId, {
+      saida: horaSaida,
+    })
+  },
+
+  async registrarPausa(
+    pontoId: string,
+    pausasAtuais: PausaPonto[],
+    horaInicioPausa: string,
+  ): Promise<FuncionarioPontoRecord> {
+    const novasPausas = [...pausasAtuais, { inicio: horaInicioPausa }]
+    return await pb.collection('funcionarios_pontos').update<FuncionarioPontoRecord>(pontoId, {
+      pausas: novasPausas,
+    })
+  },
+
+  async retomarPausa(
+    pontoId: string,
+    pausasAtuais: PausaPonto[],
+    horaFimPausa: string,
+  ): Promise<FuncionarioPontoRecord> {
+    const novasPausas = pausasAtuais.map((p, index) => {
+      if (index === pausasAtuais.length - 1 && !p.fim) {
+        return { ...p, fim: horaFimPausa }
+      }
+      return p
+    })
+    return await pb.collection('funcionarios_pontos').update<FuncionarioPontoRecord>(pontoId, {
+      pausas: novasPausas,
+    })
+  },
+
+  async atualizarPontoManual(
+    pontoId: string,
+    dados: Partial<FuncionarioPontoRecord>,
+    adminNome: string,
+  ): Promise<FuncionarioPontoRecord> {
+    return await pb.collection('funcionarios_pontos').update<FuncionarioPontoRecord>(pontoId, {
+      ...dados,
+      editado_por: adminNome,
+    })
+  },
+
+  async excluirPonto(id: string): Promise<boolean> {
+    return await pb.collection('funcionarios_pontos').delete(id)
+  },
+
+  // --- FOLHAS DE PAGAMENTO ---
+  async listarFolhas(funcionarioId?: string): Promise<FuncionarioFolhaRecord[]> {
+    const filter = funcionarioId ? `funcionario = "${funcionarioId}"` : ''
+    return await pb.collection('funcionarios_folhas').getFullList<FuncionarioFolhaRecord>({
+      filter,
+      sort: '-periodo_fim',
+      expand: 'funcionario',
+    })
+  },
+
+  async buscarUltimaFolhaQuitada(funcionarioId: string): Promise<FuncionarioFolhaRecord | null> {
+    try {
+      const records = await pb
+        .collection('funcionarios_folhas')
+        .getFullList<FuncionarioFolhaRecord>({
+          filter: `funcionario = "${funcionarioId}" && quitada = true`,
+          sort: '-periodo_fim',
+          limit: 1,
+        })
+      return records[0] || null
+    } catch (_) {
+      return null
+    }
+  },
+
+  async fecharFolha(params: {
+    funcionarioId: string
+    periodoInicio: string
+    periodoFim: string
+    ganhoTotal: number
+    descontos: any
+    dividaSemanal: number
+    aReceber: number
+    quitada: boolean
+    observacoes?: string
+    gerarLancamentoFinanceiro?: boolean
+    contaId?: string
+    categoriaId?: string
+    usuarioNome?: string
+  }): Promise<FuncionarioFolhaRecord> {
+    let lancamentoId = ''
+
+    // Se optou por gerar despesa no financeiro e há valor positivo a pagar
+    if (params.gerarLancamentoFinanceiro && params.aReceber > 0 && params.contaId) {
+      try {
+        const descLancamento = `Pagamento Funcionário - ${params.periodoInicio} a ${params.periodoFim}`
+        const novoLanc = await pb.collection('lancamentos').create({
+          descricao: descLancamento,
+          valor: params.aReceber,
+          tipo: 'despesa',
+          data: new Date().toISOString().split('T')[0],
+          status: 'pago',
+          conta: params.contaId,
+          categoria: params.categoriaId || '',
+          observacoes: `Quitação de folha de pagamento do colaborador`,
+        })
+        lancamentoId = novoLanc.id
+      } catch (err) {
+        console.warn('Erro ao gerar lançamento no financeiro:', err)
+      }
+    }
+
+    // Criar a folha
+    const folha = await pb.collection('funcionarios_folhas').create<FuncionarioFolhaRecord>({
+      funcionario: params.funcionarioId,
+      periodo_inicio: params.periodoInicio,
+      periodo_fim: params.periodoFim,
+      ganho_total: params.ganhoTotal,
+      descontos: params.descontos,
+      divida_semanal: params.dividaSemanal,
+      a_receber: params.aReceber,
+      quitada: params.quitada,
+      data_quitacao: params.quitada ? new Date().toISOString().split('T')[0] : null,
+      lancamento_id: lancamentoId,
+      observacoes: params.observacoes || '',
+    })
+
+    // Se a folha for quitada, abater o saldo das dívidas envolvidas
+    if (params.quitada && params.descontos?.dividas && Array.isArray(params.descontos.dividas)) {
+      for (const d of params.descontos.dividas) {
+        if (d.dividaId && d.valorAbatido > 0) {
+          try {
+            const divAtual = await pb
+              .collection('funcionarios_dividas')
+              .getOne<FuncionarioDividaRecord>(d.dividaId)
+            const novoSaldo = Math.max(
+              0,
+              Math.round((divAtual.saldo_atual - d.valorAbatido) * 100) / 100,
+            )
+            await pb.collection('funcionarios_dividas').update(d.dividaId, {
+              saldo_atual: novoSaldo,
+              ativa: novoSaldo > 0,
+            })
+          } catch (err) {
+            console.warn(`Erro ao abater saldo da dívida ${d.dividaId}:`, err)
+          }
+        }
+      }
+    }
+
+    return folha
+  },
+}
