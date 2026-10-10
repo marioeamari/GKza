@@ -1035,14 +1035,16 @@ export default function PedidosPersonalizadosPage() {
             <AlertDialogTitle className="font-bold text-destructive flex items-center gap-2">
               <Trash2 className="h-5 w-5" /> Excluir {pedidosSelecionados.length} Pedido(s) em Massa
             </AlertDialogTitle>
-            <AlertDialogDescription className="space-y-2">
-              <p>
-                Tem certeza que deseja remover <strong>{pedidosSelecionados.length}</strong>{' '}
-                pedido(s) da fila de expedição?
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Esta ação é definitiva e removerá os pedidos selecionados do banco de dados.
-              </p>
+            <AlertDialogDescription className="space-y-2" asChild>
+              <div>
+                <p>
+                  Tem certeza que deseja remover <strong>{pedidosSelecionados.length}</strong>{' '}
+                  pedido(s) da fila de expedição?
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Esta ação é definitiva e removerá os pedidos selecionados do banco de dados.
+                </p>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
