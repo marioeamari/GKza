@@ -5,6 +5,9 @@ import {
   formatarMinutosEmHHMM,
   calcularLinhaPonto,
   calcularEspelhoFolha,
+  normalizarDataPonto,
+  buildFiltroPontoData,
+  validarPodeRegistrarEntrada,
 } from './funcionarios'
 
 describe('Regras do Módulo de Funcionários (Aritmética Exata da Planilha)', () => {
@@ -184,5 +187,69 @@ describe('Regras do Módulo de Funcionários (Aritmética Exata da Planilha)', (
     // A Receber: 117,67 - 537,74 = -420,07
     const aReceberFolha2 = Math.round((117.67 - dividaSemanalFolha2) * 100) / 100
     expect(aReceberFolha2).toBe(-420.07)
+  })
+
+  it('5. Normalização de datas e proteção contra ponto duplicado', () => {
+    // Normalização aceita formato com timestamp ISO PocketBase e date puro
+    expect(normalizarDataPonto('2026-10-10 00:00:00.000Z')).toBe('2026-10-10')
+    expect(normalizarDataPonto('2026-10-10T12:00:00.000Z')).toBe('2026-10-10')
+    expect(normalizarDataPonto('2026-10-10')).toBe('2026-10-10')
+
+    // Filtro PocketBase cobre dia inteiro
+    expect(buildFiltroPontoData('2026-10-10')).toBe(
+      '(data >= "2026-10-10 00:00:00" && data <= "2026-10-10 23:59:59")',
+    )
+
+    // Sem pontos no dia: pode bater entrada
+    const check1 = validarPodeRegistrarEntrada([], '2026-10-10')
+    expect(check1.pode).toBe(true)
+
+    // Com ponto em aberto (sem saída) no dia: BLOQUEIA nova entrada
+    const check2 = validarPodeRegistrarEntrada(
+      [
+        {
+          id: 'ponto_1',
+          funcionario: 'func_lara',
+          data: '2026-10-10 00:00:00.000Z',
+          entrada: '19:30',
+          saida: '',
+        },
+      ],
+      '2026-10-10',
+    )
+    expect(check2.pode).toBe(false)
+    expect(check2.motivo).toContain('Já existe uma entrada aberta')
+    expect(check2.pontoAberto?.entrada).toBe('19:30')
+
+    // Com ponto já finalizado no dia: BLOQUEIA nova entrada
+    const check3 = validarPodeRegistrarEntrada(
+      [
+        {
+          id: 'ponto_1',
+          funcionario: 'func_lara',
+          data: '2026-10-10',
+          entrada: '08:00',
+          saida: '17:00',
+        },
+      ],
+      '2026-10-10',
+    )
+    expect(check3.pode).toBe(false)
+    expect(check3.motivo).toContain('já foi registrado e finalizado')
+
+    // Ponto de OUTRO dia não interfere no dia atual
+    const check4 = validarPodeRegistrarEntrada(
+      [
+        {
+          id: 'ponto_ontem',
+          funcionario: 'func_lara',
+          data: '2026-10-09 00:00:00.000Z',
+          entrada: '08:00',
+          saida: '17:00',
+        },
+      ],
+      '2026-10-10',
+    )
+    expect(check4.pode).toBe(true)
   })
 })

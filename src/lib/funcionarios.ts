@@ -103,6 +103,72 @@ export interface EspelhoFolhaCalculado {
 }
 
 /**
+ * Normaliza qualquer formato de data retornado do PocketBase ou input HTML para YYYY-MM-DD
+ * Ex: '2026-10-10 00:00:00.000Z' -> '2026-10-10'
+ * Ex: '2026-10-10T12:00:00.000Z' -> '2026-10-10'
+ * Ex: '2026-10-10' -> '2026-10-10'
+ */
+export function normalizarDataPonto(dataStr: string | null | undefined): string {
+  if (!dataStr) return ''
+  return dataStr.trim().slice(0, 10)
+}
+
+/**
+ * Monta o filtro PocketBase seguro para consultas por data de ponto.
+ * Como o PocketBase armazena campos tipo date como ISO string ('YYYY-MM-DD 00:00:00.000Z'),
+ * para comparar uma data específica YYYY-MM-DD usamos a faixa do dia completo ou operador ~.
+ */
+export function buildFiltroPontoData(dataYYYYMMDD: string): string {
+  const limpa = normalizarDataPonto(dataYYYYMMDD)
+  if (!limpa) return ''
+  return `(data >= "${limpa} 00:00:00" && data <= "${limpa} 23:59:59")`
+}
+
+export interface PontoExistenteSimplificado {
+  id: string
+  funcionario: string
+  data: string
+  entrada: string
+  saida?: string
+}
+
+/**
+ * Regra de proteção contra entrada duplicada no mesmo dia.
+ * Retorna se o colaborador pode registrar uma nova entrada.
+ *
+ * Regras acordadas:
+ * 1. Se já existe ponto com entrada aberta (sem saída) no mesmo dia: BLOQUEADO.
+ * 2. Se já existe ponto completo (entrada e saída registradas) no mesmo dia: BLOQUEADO
+ *    (sem entrada duplicada no mesmo dia; se precisar de novo expediente, deve ser editado pelo admin).
+ */
+export function validarPodeRegistrarEntrada(
+  pontosDoDia: PontoExistenteSimplificado[],
+  dataHojeYYYYMMDD: string,
+): { pode: boolean; motivo?: string; pontoAberto?: PontoExistenteSimplificado } {
+  const diaNormalizado = normalizarDataPonto(dataHojeYYYYMMDD)
+  const pontosDesteDia = pontosDoDia.filter((p) => normalizarDataPonto(p.data) === diaNormalizado)
+
+  const pontoAberto = pontosDesteDia.find((p) => !p.saida || p.saida.trim() === '')
+  if (pontoAberto) {
+    return {
+      pode: false,
+      motivo: `Já existe uma entrada aberta às ${pontoAberto.entrada} para este colaborador hoje. Registre a saída ou pausa antes de nova entrada.`,
+      pontoAberto,
+    }
+  }
+
+  if (pontosDesteDia.length > 0) {
+    const ultimoPonto = pontosDesteDia[0]
+    return {
+      pode: false,
+      motivo: `O ponto de hoje já foi registrado e finalizado (Entrada: ${ultimoPonto.entrada}, Saída: ${ultimoPonto.saida}). Para correções, use a edição administrativa.`,
+    }
+  }
+
+  return { pode: true }
+}
+
+/**
  * Calcula o valor da hora a partir da base
  */
 export function calcularValorHoraBase(

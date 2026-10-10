@@ -58,10 +58,11 @@ import {
   calcularValorHoraBase,
   calcularEspelhoFolha,
   formatarDataExtensoPlanilha,
+  normalizarDataPonto,
   type EspelhoFolhaCalculado,
   type DescontoAvulsoItem,
 } from '@/lib/funcionarios'
-import { formatCurrency } from '@/lib/format'
+import { formatCurrency, getLocalDateStr } from '@/lib/format'
 import pb from '@/lib/pocketbase/client'
 
 export default function FuncionariosPage() {
@@ -157,13 +158,13 @@ export default function FuncionariosPage() {
         setSelectedFuncionarioId(funcs[0].id)
       }
 
-      // Definir período padrão se não estiver definido (últimos 7 dias)
+      // Definir período padrão se não estiver definido (últimos 7 dias no fuso oficial)
       if (!periodoInicio || !periodoFim) {
-        const hoje = new Date()
+        const hojeStr = getLocalDateStr()
         const inicio = new Date()
-        inicio.setDate(hoje.getDate() - 7)
-        setPeriodoInicio(inicio.toISOString().split('T')[0])
-        setPeriodoFim(hoje.toISOString().split('T')[0])
+        inicio.setDate(inicio.getDate() - 7)
+        setPeriodoInicio(getLocalDateStr(inicio))
+        setPeriodoFim(hojeStr)
       }
     } catch (err) {
       console.error('Erro ao carregar dados de funcionários:', err)
@@ -217,10 +218,15 @@ export default function FuncionariosPage() {
     return funcionarios.find((f) => f.id === selectedFuncionarioId) || null
   }, [funcionarios, selectedFuncionarioId])
 
-  // Pontos filtrados pelo período selecionado
+  // Pontos filtrados pelo período selecionado (com normalização segura YYYY-MM-DD)
   const pontosFiltradosPeriodo = useMemo(() => {
     if (!periodoInicio || !periodoFim) return pontos
-    return pontos.filter((p) => p.data >= periodoInicio && p.data <= periodoFim)
+    const ini = normalizarDataPonto(periodoInicio)
+    const fim = normalizarDataPonto(periodoFim)
+    return pontos.filter((p) => {
+      const dataP = normalizarDataPonto(p.data)
+      return dataP >= ini && dataP <= fim
+    })
   }, [pontos, periodoInicio, periodoFim])
 
   // 3. Cálculo do Espelho da Folha (Regras Aritméticas da Planilha Oficial)
@@ -453,7 +459,7 @@ export default function FuncionariosPage() {
       setEditingPonto(null)
       setPontoForm({
         funcionario: selectedFuncionarioId,
-        data: new Date().toISOString().split('T')[0],
+        data: getLocalDateStr(),
         entrada: '13:00',
         saida: '17:00',
         observacao: '',

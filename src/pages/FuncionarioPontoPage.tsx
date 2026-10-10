@@ -43,7 +43,8 @@ import {
   formatarMinutosEmHHMM,
   converterMinutosEmHorasDecimais,
 } from '@/lib/funcionarios'
-import { formatCurrency } from '@/lib/format'
+import { formatCurrency, getLocalDateStr } from '@/lib/format'
+import { normalizarDataPonto } from '@/lib/funcionarios'
 
 const SESSION_STORAGE_KEY = 'gkza_funcionario_session_token'
 
@@ -126,14 +127,20 @@ export default function FuncionarioPontoPage() {
   // 2. Carregar ponto de hoje e resumo do colaborador ativo
   const carregarDadosDoColaborador = useCallback(async (func: FuncionarioRecord) => {
     try {
-      const hojeStr = new Date().toISOString().split('T')[0]
-      const ponto = await funcionariosService.buscarPontoAbertoHoje(func.id, hojeStr)
-      setPontoHoje(ponto)
+      const hojeStr = getLocalDateStr() // Data atual no fuso America/Sao_Paulo
+      // Busca ponto de hoje: se houver aberto traz ele; se já foi finalizado traz o último do dia
+      const pontoAberto = await funcionariosService.buscarPontoAbertoHoje(func.id, hojeStr)
+      if (pontoAberto) {
+        setPontoHoje(pontoAberto)
+      } else {
+        const ultimoDoDia = await funcionariosService.buscarUltimoPontoDoDia(func.id, hojeStr)
+        setPontoHoje(ultimoDoDia)
+      }
 
       // Carregar histórico recente dos últimos 30 dias
       const dataInicio = new Date()
       dataInicio.setDate(dataInicio.getDate() - 30)
-      const dataInicioStr = dataInicio.toISOString().split('T')[0]
+      const dataInicioStr = getLocalDateStr(dataInicio)
 
       const pontos = await funcionariosService.listarPontos({
         funcionarioId: func.id,
@@ -213,15 +220,39 @@ export default function FuncionarioPontoPage() {
 
   // Ações de Ponto
   const horaAtualHHMM = () => {
-    const now = new Date()
-    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    try {
+      // Garante hora no fuso America/Sao_Paulo (horário oficial de Brasília)
+      const parts = new Intl.DateTimeFormat('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).formatToParts(new Date())
+      const hh = parts.find((p) => p.type === 'hour')?.value || '00'
+      const mm = parts.find((p) => p.type === 'minute')?.value || '00'
+      return `${hh.padStart(2, '0')}:${mm.padStart(2, '0')}`
+    } catch {
+      const now = new Date()
+      return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    }
   }
 
   const handleBaterEntrada = async () => {
-    if (!funcionarioAtual) return
+    if (!funcionarioAtual || submitting) return
+
+    // Proteção em memória contra duplo-clique se já existir entrada registrada hoje
+    if (pontoHoje?.entrada) {
+      toast({
+        title: 'Entrada já registrada',
+        description: `O colaborador já possui entrada registrada às ${pontoHoje.entrada}.`,
+        variant: 'destructive',
+      })
+      return
+    }
+
     setSubmitting(true)
     try {
-      const hojeStr = new Date().toISOString().split('T')[0]
+      const hojeStr = getLocalDateStr() // fuso America/Sao_Paulo
       const horaStr = horaAtualHHMM()
       const origemRegistro = estacaoValida ? 'estacao_qr' : 'fora_do_local'
 
@@ -238,7 +269,7 @@ export default function FuncionarioPontoPage() {
       await carregarDadosDoColaborador(funcionarioAtual)
 
       toast({
-        title: 'Entrada registrada!',
+        title: 'Entrada registrada com sucesso!',
         description: `Horário de entrada: ${horaStr}${
           origemRegistro === 'fora_do_local' ? ' (Registro marcado como Fora do Local)' : ''
         }`,
@@ -246,7 +277,7 @@ export default function FuncionarioPontoPage() {
     } catch (err: any) {
       console.error('Erro ao bater entrada:', err)
       toast({
-        title: 'Falha ao registrar',
+        title: 'Registro não permitido',
         description: err.message || 'Erro ao registrar entrada. Tente novamente.',
         variant: 'destructive',
       })
@@ -583,7 +614,6 @@ export default function FuncionarioPontoPage() {
                     </div>
                   </div>
                 </div>
-
                 {/* PAUSAS SE HOUVER */}
                 {pontoHoje?.pausas && pontoHoje.pausas.length > 0 && (
                   <div className="rounded-lg border border-border/60 bg-muted/30 p-2.5 text-xs space-y-1">
@@ -600,7 +630,6 @@ export default function FuncionarioPontoPage() {
                     ))}
                   </div>
                 )}
-
                 {/* BOTÕES GRANDES DE ACORDO COM O ESTADO */}
                 {!pontoHoje ? (
                   <Button
@@ -608,7 +637,11 @@ export default function FuncionarioPontoPage() {
                     disabled={submitting}
                     className="w-full h-16 text-lg font-bold bg-[#DF5830] hover:bg-[#c94b26] text-white shadow-md gap-2"
                   >
-                    <Play className="h-6 w-6" />
+                    {submitting ? (
+                      <RefreshCw className="h-6 w-6 animate-spin" />
+                    ) : (
+                      <Play className="h-6 w-6" />
+                    )}
                     Registrar Entrada
                   </Button>
                 ) : pontoFinalizado ? (
@@ -653,7 +686,7 @@ export default function FuncionarioPontoPage() {
                       Registrar Saída
                     </Button>
                   </div>
-                )}
+                )}{' '}
               </CardContent>
             </Card>
 

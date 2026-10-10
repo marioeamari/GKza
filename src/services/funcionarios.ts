@@ -1,5 +1,11 @@
 import pb from '@/lib/pocketbase/client'
 import type { PausaPonto } from '@/lib/funcionarios'
+import {
+  normalizarDataPonto,
+  buildFiltroPontoData,
+  validarPodeRegistrarEntrada,
+} from '@/lib/funcionarios'
+import { getLocalDateStr, toPocketBaseDate } from '@/lib/format'
 
 export interface FuncionarioRecord {
   id: string
@@ -191,30 +197,75 @@ export const funcionariosService = {
   }): Promise<FuncionarioPontoRecord[]> {
     const filters: string[] = []
     if (params?.funcionarioId) filters.push(`funcionario = "${params.funcionarioId}"`)
-    if (params?.dataInicio) filters.push(`data >= "${params.dataInicio}"`)
-    if (params?.dataFim) filters.push(`data <= "${params.dataFim}"`)
+    if (params?.dataInicio) {
+      const ini = normalizarDataPonto(params.dataInicio)
+      filters.push(`data >= "${ini} 00:00:00"`)
+    }
+    if (params?.dataFim) {
+      const fim = normalizarDataPonto(params.dataFim)
+      filters.push(`data <= "${fim} 23:59:59"`)
+    }
 
-    return await pb.collection('funcionarios_pontos').getFullList<FuncionarioPontoRecord>({
-      filter: filters.join(' && '),
-      sort: 'data,entrada',
-      expand: 'funcionario',
-    })
+    const registros = await pb
+      .collection('funcionarios_pontos')
+      .getFullList<FuncionarioPontoRecord>({
+        filter: filters.join(' && '),
+        sort: 'data,entrada',
+        expand: 'funcionario',
+      })
+
+    // Normaliza campo data para YYYY-MM-DD para consumo seguro e consistente em toda a UI
+    return registros.map((r) => ({
+      ...r,
+      data: normalizarDataPonto(r.data),
+    }))
+  },
+
+  async buscarPontosDoDia(
+    funcionarioId: string,
+    dataHoje?: string,
+  ): Promise<FuncionarioPontoRecord[]> {
+    if (!funcionarioId) return []
+    const diaStr = normalizarDataPonto(dataHoje || getLocalDateStr())
+    try {
+      const filtroData = buildFiltroPontoData(diaStr)
+      const records = await pb
+        .collection('funcionarios_pontos')
+        .getFullList<FuncionarioPontoRecord>({
+          filter: `funcionario = "${funcionarioId}" && ${filtroData}`,
+          sort: '-created',
+        })
+      return records.map((r) => ({
+        ...r,
+        data: normalizarDataPonto(r.data),
+      }))
+    } catch (err) {
+      console.warn('Erro ao buscar pontos do dia:', err)
+      return []
+    }
   },
 
   async buscarPontoAbertoHoje(
     funcionarioId: string,
-    dataHoje: string,
+    dataHoje?: string,
   ): Promise<FuncionarioPontoRecord | null> {
     try {
-      const records = await pb
-        .collection('funcionarios_pontos')
-        .getFullList<FuncionarioPontoRecord>({
-          filter: `funcionario = "${funcionarioId}" && data = "${dataHoje}"`,
-          sort: '-created',
-        })
+      const records = await this.buscarPontosDoDia(funcionarioId, dataHoje)
       // Procura primeiro um ponto sem saída registrada
-      const aberto = records.find((r) => !r.saida)
+      const aberto = records.find((r) => !r.saida || r.saida.trim() === '')
       return aberto || null
+    } catch (_) {
+      return null
+    }
+  },
+
+  async buscarUltimoPontoDoDia(
+    funcionarioId: string,
+    dataHoje?: string,
+  ): Promise<FuncionarioPontoRecord | null> {
+    try {
+      const records = await this.buscarPontosDoDia(funcionarioId, dataHoje)
+      return records[0] || null
     } catch (_) {
       return null
     }
@@ -222,7 +273,7 @@ export const funcionariosService = {
 
   async registrarEntrada(params: {
     funcionarioId: string
-    data: string // YYYY-MM-DD
+    data?: string // YYYY-MM-DD (se omitido usa getLocalDateStr() em America/Sao_Paulo)
     hora: string // HH:mm
     origem: 'estacao_qr' | 'fora_do_local' | 'manual' | 'admin'
     estacao?: string
@@ -230,9 +281,21 @@ export const funcionariosService = {
     editadoPor?: string
     observacao?: string
   }): Promise<FuncionarioPontoRecord> {
-    return await pb.collection('funcionarios_pontos').create<FuncionarioPontoRecord>({
+    const diaAlvo = normalizarDataPonto(params.data || getLocalDateStr())
+
+    // Regra anti-duplicidade estrita:
+    // Se não for lançamento administrativo retroativo, valida se já há ponto hoje
+    if (params.origem !== 'admin') {
+      const pontosHoje = await this.buscarPontosDoDia(params.funcionarioId, diaAlvo)
+      const validacao = validarPodeRegistrarEntrada(pontosHoje, diaAlvo)
+      if (!validacao.pode) {
+        throw new Error(validacao.motivo || 'Entrada não permitida: ponto já registrado hoje.')
+      }
+    }
+
+    const pontoCriado = await pb.collection('funcionarios_pontos').create<FuncionarioPontoRecord>({
       funcionario: params.funcionarioId,
-      data: params.data,
+      data: toPocketBaseDate(diaAlvo),
       entrada: params.hora,
       pausas: [],
       origem: params.origem,
@@ -241,6 +304,11 @@ export const funcionariosService = {
       editado_por: params.editadoPor || '',
       observacao: params.observacao || '',
     })
+
+    return {
+      ...pontoCriado,
+      data: normalizarDataPonto(pontoCriado.data),
+    }
   },
 
   async registrarSaida(pontoId: string, horaSaida: string): Promise<FuncionarioPontoRecord> {
@@ -281,10 +349,20 @@ export const funcionariosService = {
     dados: Partial<FuncionarioPontoRecord>,
     adminNome: string,
   ): Promise<FuncionarioPontoRecord> {
-    return await pb.collection('funcionarios_pontos').update<FuncionarioPontoRecord>(pontoId, {
+    const payload: any = {
       ...dados,
       editado_por: adminNome,
-    })
+    }
+    if (dados.data) {
+      payload.data = toPocketBaseDate(normalizarDataPonto(dados.data))
+    }
+    const atualizado = await pb
+      .collection('funcionarios_pontos')
+      .update<FuncionarioPontoRecord>(pontoId, payload)
+    return {
+      ...atualizado,
+      data: normalizarDataPonto(atualizado.data),
+    }
   },
 
   async excluirPonto(id: string): Promise<boolean> {
