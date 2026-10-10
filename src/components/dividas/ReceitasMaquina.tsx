@@ -10,30 +10,50 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { Plus, Trash2, Pencil, DollarSign, TrendingUp, Clock, Sparkles, Layers } from 'lucide-react'
+import {
+  Plus,
+  Trash2,
+  Pencil,
+  DollarSign,
+  TrendingUp,
+  Clock,
+  Sparkles,
+  Layers,
+  ReceiptText,
+} from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/format'
 import {
   calcularPaybackMaquina,
   type DividaRecord,
   type ParcelaRecord,
   type ReceitaRecord,
+  type DespesaAvulsaRecord,
 } from '@/lib/dividas'
 import { dividasService } from '@/services/dividas'
 import { toast } from '@/hooks/use-toast'
 import { ReceitaModal } from './ReceitaModal'
+import { DespesaAvulsaModal } from './DespesaAvulsaModal'
 
 interface ReceitasMaquinaProps {
   divida: DividaRecord
   parcelas: ParcelaRecord[]
   receitas: ReceitaRecord[]
+  despesas?: DespesaAvulsaRecord[]
   onRefresh: () => void
 }
 
-export function ReceitasMaquina({ divida, parcelas, receitas, onRefresh }: ReceitasMaquinaProps) {
+export function ReceitasMaquina({
+  divida,
+  parcelas,
+  receitas,
+  despesas = [],
+  onRefresh,
+}: ReceitasMaquinaProps) {
   const [modalNovaReceita, setModalNovaReceita] = useState(false)
   const [modalEditarReceita, setModalEditarReceita] = useState<ReceitaRecord | null>(null)
+  const [modalNovaDespesa, setModalNovaDespesa] = useState(false)
 
-  const payback = calcularPaybackMaquina(divida, parcelas, receitas)
+  const payback = calcularPaybackMaquina(divida, parcelas, receitas, despesas)
 
   const handleExcluirReceita = async (id: string, desc: string) => {
     if (!confirm(`Excluir a receita "${desc}"?`)) return
@@ -170,13 +190,23 @@ export function ReceitasMaquina({ divida, parcelas, receitas, onRefresh }: Recei
             específico da máquina.
           </p>
         </div>
-        <Button
-          size="sm"
-          onClick={() => setModalNovaReceita(true)}
-          className="text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
-        >
-          <Plus className="w-3.5 h-3.5" /> Lançar Receita da Máquina
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setModalNovaDespesa(true)}
+            className="text-xs gap-1.5 text-rose-700 border-rose-200 hover:bg-rose-50 font-semibold"
+          >
+            <Plus className="w-3.5 h-3.5" /> Despesa Avulsa (ex: frete)
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setModalNovaReceita(true)}
+            className="text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+          >
+            <Plus className="w-3.5 h-3.5" /> Lançar Receita da Máquina
+          </Button>
+        </div>
       </div>
 
       {/* TABELA DE RECEITAS */}
@@ -265,6 +295,17 @@ export function ReceitasMaquina({ divida, parcelas, receitas, onRefresh }: Recei
           dividaId={divida.id}
           dividaNome={divida.nome}
           receitaParaEditar={modalEditarReceita}
+          onSuccess={onRefresh}
+        />
+      )}
+
+      {/* MODAL RÁPIDO DESPESA AVULSA */}
+      {modalNovaDespesa && (
+        <DespesaAvulsaModal
+          open={modalNovaDespesa}
+          onOpenChange={setModalNovaDespesa}
+          dividaId={divida.id}
+          dividaNome={divida.nome}
           onSuccess={onRefresh}
         />
       )}

@@ -15,6 +15,7 @@ import {
   type DividaRecord,
   type ParcelaRecord,
   type ReceitaRecord,
+  type DespesaAvulsaRecord,
 } from './dividas'
 
 describe('Módulo de Dívidas Isolado - Regras e Cálculos Puros', () => {
@@ -393,7 +394,100 @@ describe('Módulo de Dívidas Isolado - Regras e Cálculos Puros', () => {
     })
   })
 
-  describe('5. Caixa por Máquina e Projeção Mês a Mês', () => {
+  describe('5. Caixa por Máquina e Projeção Mês a Mês com Despesas Avulsas', () => {
+    it('despesa avulsa (ex: frete da máquina) consome o caixa antes das parcelas e ajusta a cobertura', () => {
+      const divida: DividaRecord = {
+        id: 'div_maquina_frete',
+        nome: 'Prensa Térmica Industrial',
+        credor: 'Fornecedor Equipamentos',
+        valor_total: 50000,
+        data_contratacao: '2025-01-01',
+        saldo_inicial_caixa: 10000,
+        status: 'ativa',
+      }
+
+      // 3 parcelas de 5.000
+      const parcelas: ParcelaRecord[] = [
+        {
+          id: 'p1',
+          divida: 'div_maquina_frete',
+          numero: 1,
+          data_vencimento: '2025-02-10',
+          valor: 5000,
+          status: 'pendente',
+        },
+        {
+          id: 'p2',
+          divida: 'div_maquina_frete',
+          numero: 2,
+          data_vencimento: '2025-03-10',
+          valor: 5000,
+          status: 'pendente',
+        },
+        {
+          id: 'p3',
+          divida: 'div_maquina_frete',
+          numero: 3,
+          data_vencimento: '2025-04-10',
+          valor: 5000,
+          status: 'pendente',
+        },
+      ]
+
+      // Receita de 5.000 em fev
+      const receitas: ReceitaRecord[] = [
+        {
+          id: 'rec_1',
+          divida: 'div_maquina_frete',
+          data: '2025-02-05',
+          valor: 5000,
+          descricao: 'Produção lote 1',
+        },
+      ]
+
+      // Cenário A: SEM despesa avulsa
+      // Caixa = 10.000 (saldo inicial) + 5.000 (receita) = 15.000. Cobre p1, p2 e p3 (15.000 total).
+      const projecaoSemDespesa = projetarCaixaPorMaquina(
+        divida,
+        parcelas,
+        receitas,
+        [],
+        '2025-02-01',
+      )
+      expect(projecaoSemDespesa.caixa_atual_disponivel).toBe(10000) // em 01/02 a receita ainda não ocorreu
+      // Mas na simulação futura:
+      expect(projecaoSemDespesa.ultima_parcela_coberta?.numero).toBe(2) // 10k cobrem p1 e p2
+
+      // Cenário B: COM despesa avulsa de frete da máquina (ex: R$ 4.000 paga em 2025-01-15)
+      // Caixa em 01/02 = 10.000 - 4.000 (frete) = 6.000.
+      // Cobre p1 (5.000), sobra 1.000.
+      // Não cobre p2 (faltará 4.000).
+      const despesas: DespesaAvulsaRecord[] = [
+        {
+          id: 'desp_frete',
+          divida: 'div_maquina_frete',
+          data: '2025-01-15',
+          valor: 4000,
+          descricao: 'Frete da máquina não embutido nas parcelas',
+          origem: 'Transportadora TransMetal',
+        },
+      ]
+
+      const projecaoComDespesa = projetarCaixaPorMaquina(
+        divida,
+        parcelas,
+        receitas,
+        despesas,
+        '2025-02-01',
+      )
+      expect(projecaoComDespesa.total_despesas_historicas).toBe(4000)
+      expect(projecaoComDespesa.caixa_atual_disponivel).toBe(6000) // 10.000 - 4.000
+      expect(projecaoComDespesa.ultima_parcela_coberta?.numero).toBe(1)
+      expect(projecaoComDespesa.primeira_parcela_descoberta?.numero).toBe(2)
+      expect(projecaoComDespesa.primeira_parcela_descoberta?.saldo_faltante).toBe(4000)
+      expect(projecaoComDespesa.mes_esgotamento_caixa).toBe('2025-03')
+    })
+
     it('simula saldo mês a mês e marca qual é a última parcela coberta e onde faltará caixa', () => {
       const divida: DividaRecord = {
         id: 'div_torno',
@@ -472,7 +566,7 @@ describe('Módulo de Dívidas Isolado - Regras e Cálculos Puros', () => {
         },
       ]
 
-      const projecao = projetarCaixaPorMaquina(divida, parcelas, receitas, '2025-02-15')
+      const projecao = projetarCaixaPorMaquina(divida, parcelas, receitas, [], '2025-02-15')
 
       expect(projecao.caixa_atual_disponivel).toBe(22000)
       // Com R$ 22.000 disponíveis hoje:
@@ -547,7 +641,13 @@ describe('Módulo de Dívidas Isolado - Regras e Cálculos Puros', () => {
         ['m2', []],
       ])
 
-      const global = consolidarDemonstrativoGlobal([m1, m2], parcelasMap, receitasMap, '2025-02-01')
+      const global = consolidarDemonstrativoGlobal(
+        [m1, m2],
+        parcelasMap,
+        receitasMap,
+        new Map(),
+        '2025-02-01',
+      )
 
       expect(global.total_dividas).toBe(2)
       expect(global.valor_total_consolidado).toBe(70000)
@@ -566,7 +666,74 @@ describe('Módulo de Dívidas Isolado - Regras e Cálculos Puros', () => {
     })
   })
 
-  describe('7. Navegação e Total Mensal Previsto no Demonstrativo Global', () => {
+  describe('7. Demonstrativo Global com Despesas Avulsas', () => {
+    it('consolida despesas avulsas no demonstrativo global com soma separada de parcelas', () => {
+      const d1: DividaRecord = {
+        id: 'div_g1',
+        nome: 'Máquina Router',
+        credor: 'Credor R',
+        valor_total: 80000,
+        data_contratacao: '2025-01-01',
+        saldo_inicial_caixa: 15000,
+        status: 'ativa',
+      }
+
+      const p1: ParcelaRecord[] = [
+        {
+          id: 'p_r1',
+          divida: 'div_g1',
+          numero: 1,
+          data_vencimento: '2025-02-15',
+          valor: 8000,
+          status: 'paga',
+          valor_pago: 8000,
+        },
+        {
+          id: 'p_r2',
+          divida: 'div_g1',
+          numero: 2,
+          data_vencimento: '2025-03-15',
+          valor: 8000,
+          status: 'pendente',
+        },
+      ]
+
+      const desp1: DespesaAvulsaRecord[] = [
+        {
+          id: 'desp_g1',
+          divida: 'div_g1',
+          data: '2025-01-20',
+          valor: 3500,
+          descricao: 'Frete e seguro de transporte',
+        },
+      ]
+
+      const pMap = new Map([['div_g1', p1]])
+      const rMap = new Map<string, ReceitaRecord[]>([['div_g1', []]])
+      const dMap = new Map([['div_g1', desp1]])
+
+      const global = consolidarDemonstrativoGlobal([d1], pMap, rMap, dMap, '2025-02-01')
+      expect(global.valor_total_consolidado).toBe(80000)
+      expect(global.total_pago_consolidado).toBe(8000)
+      expect(global.total_despesas_consolidado).toBe(3500)
+      expect(global.saldo_devedor_consolidado).toBe(72000) // 80.000 - 8.000 (parcelas)
+
+      // Total mensal previsto em janeiro com a despesa avulsa
+      const mensJaneiro = calcularTotalMensalPrevisto({
+        mesAno: '2025-01',
+        dividas: [d1],
+        parcelasPorDivida: pMap,
+        receitasPorDivida: rMap,
+        despesasPorDivida: dMap,
+      })
+
+      expect(mensJaneiro.total_despesas_mes).toBe(3500)
+      expect(mensJaneiro.quantidade_despesas).toBe(1)
+      expect(mensJaneiro.falta_arrecadar).toBe(3500) // sem receitas, falta 3.500
+    })
+  })
+
+  describe('8. Navegação e Total Mensal Previsto no Demonstrativo Global', () => {
     it('navegarMesCompetencia avança e retrocede meses corretamente', () => {
       expect(navegarMesCompetencia('2026-10', 1)).toBe('2026-11')
       expect(navegarMesCompetencia('2026-10', -1)).toBe('2026-09')

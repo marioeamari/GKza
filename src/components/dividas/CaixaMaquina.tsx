@@ -27,10 +27,11 @@ interface CaixaMaquinaProps {
   divida: DividaRecord
   parcelas: ParcelaRecord[]
   receitas: ReceitaRecord[]
+  despesas?: import('@/lib/dividas').DespesaAvulsaRecord[]
 }
 
-export function CaixaMaquina({ divida, parcelas, receitas }: CaixaMaquinaProps) {
-  const projecao = projetarCaixaPorMaquina(divida, parcelas, receitas)
+export function CaixaMaquina({ divida, parcelas, receitas, despesas = [] }: CaixaMaquinaProps) {
+  const projecao = projetarCaixaPorMaquina(divida, parcelas, receitas, despesas)
 
   return (
     <div className="space-y-5">
@@ -49,7 +50,8 @@ export function CaixaMaquina({ divida, parcelas, receitas }: CaixaMaquinaProps) 
           </div>
           <p className="text-xs text-muted-foreground">
             Saldo Inicial ({formatCurrency(projecao.saldo_inicial_configurado)}) + Receitas (
-            {formatCurrency(projecao.total_receitas_historicas)}) - Pagos (
+            {formatCurrency(projecao.total_receitas_historicas)}) - Despesas Avulsas (
+            {formatCurrency(projecao.total_despesas_historicas)}) - Pagos (
             {formatCurrency(projecao.total_pago_historico)})
           </p>
         </div>
@@ -132,8 +134,9 @@ export function CaixaMaquina({ divida, parcelas, receitas }: CaixaMaquinaProps) 
               <TableRow>
                 <TableHead>Competência (Mês/Ano)</TableHead>
                 <TableHead className="text-right">Saldo Inicial</TableHead>
-                <TableHead className="text-right text-emerald-700">+ Receitas Previstas</TableHead>
-                <TableHead className="text-right text-rose-700">- Parcelas do Mês</TableHead>
+                <TableHead className="text-right text-emerald-700">+ Receitas</TableHead>
+                <TableHead className="text-right text-rose-700">- Despesas Avulsas</TableHead>
+                <TableHead className="text-right text-slate-700">- Parcelas do Mês</TableHead>
                 <TableHead className="text-right font-bold">Saldo Final Projetado</TableHead>
                 <TableHead className="text-center w-36">Status do Mês</TableHead>
               </TableRow>
@@ -141,7 +144,7 @@ export function CaixaMaquina({ divida, parcelas, receitas }: CaixaMaquinaProps) 
             <TableBody>
               {projecao.linhas_mensais.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-sm text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center py-8 text-sm text-muted-foreground">
                     Sem parcelas futuras ou movimentações para projeção.
                   </TableCell>
                 </TableRow>
@@ -164,6 +167,9 @@ export function CaixaMaquina({ divida, parcelas, receitas }: CaixaMaquinaProps) 
                       </TableCell>
                       <TableCell className="text-right text-xs font-semibold text-emerald-600">
                         {formatCurrency(linha.receitas_mes)}
+                      </TableCell>
+                      <TableCell className="text-right text-xs font-semibold text-rose-600">
+                        {formatCurrency(linha.despesas_mes)}
                       </TableCell>
                       <TableCell className="text-right text-xs font-semibold text-slate-700">
                         {formatCurrency(linha.parcelas_mes)}

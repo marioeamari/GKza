@@ -37,19 +37,27 @@ interface DemonstrativoGlobalViewProps {
   dividas: DividaRecord[]
   parcelasPorDivida: Map<string, ParcelaRecord[]>
   receitasPorDivida: Map<string, ReceitaRecord[]>
+  despesasPorDivida?: Map<string, import('@/lib/dividas').DespesaAvulsaRecord[]>
 }
 
 export function DemonstrativoGlobalView({
   dividas,
   parcelasPorDivida,
   receitasPorDivida,
+  despesasPorDivida = new Map(),
 }: DemonstrativoGlobalViewProps) {
   const mesAtualIso = useMemo(() => new Date().toISOString().slice(0, 7), [])
   const [mesNavegacao, setMesNavegacao] = useState<string>(mesAtualIso)
 
   const global = useMemo(
-    () => consolidarDemonstrativoGlobal(dividas, parcelasPorDivida, receitasPorDivida),
-    [dividas, parcelasPorDivida, receitasPorDivida],
+    () =>
+      consolidarDemonstrativoGlobal(
+        dividas,
+        parcelasPorDivida,
+        receitasPorDivida,
+        despesasPorDivida,
+      ),
+    [dividas, parcelasPorDivida, receitasPorDivida, despesasPorDivida],
   )
 
   const dadosMensalPrevisto = useMemo(
@@ -59,8 +67,9 @@ export function DemonstrativoGlobalView({
         dividas,
         parcelasPorDivida,
         receitasPorDivida,
+        despesasPorDivida,
       }),
-    [mesNavegacao, dividas, parcelasPorDivida, receitasPorDivida],
+    [mesNavegacao, dividas, parcelasPorDivida, receitasPorDivida, despesasPorDivida],
   )
 
   const handleMesAnterior = () => {
@@ -78,7 +87,9 @@ export function DemonstrativoGlobalView({
   const rotuloMesAtual = formatarRotuloMesAno(mesNavegacao)
   const isMesHoje = mesNavegacao === mesAtualIso
   const semMovimentoNoMes =
-    dadosMensalPrevisto.quantidade_parcelas === 0 && dadosMensalPrevisto.quantidade_receitas === 0
+    dadosMensalPrevisto.quantidade_parcelas === 0 &&
+    dadosMensalPrevisto.quantidade_receitas === 0 &&
+    dadosMensalPrevisto.quantidade_despesas === 0
 
   return (
     <div className="space-y-5">
@@ -146,7 +157,7 @@ export function DemonstrativoGlobalView({
         )}
 
         {/* INDICADORES CONSOLIDADOS */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-1">
           <div className="p-3 bg-slate-50/70 rounded-lg border border-border/60">
             <span className="text-[11px] font-semibold text-muted-foreground uppercase">
               Total em Máquinas
@@ -157,7 +168,7 @@ export function DemonstrativoGlobalView({
           </div>
           <div className="p-3 bg-slate-50/70 rounded-lg border border-border/60">
             <span className="text-[11px] font-semibold text-muted-foreground uppercase">
-              Total Quitado
+              Total Quitado (Parcelas)
             </span>
             <div className="text-lg font-black text-emerald-600 mt-0.5">
               {formatCurrency(global.total_pago_consolidado)}
@@ -165,7 +176,7 @@ export function DemonstrativoGlobalView({
           </div>
           <div className="p-3 bg-slate-50/70 rounded-lg border border-border/60">
             <span className="text-[11px] font-semibold text-muted-foreground uppercase">
-              Saldo Devedor Total
+              Saldo Devedor
             </span>
             <div className="text-lg font-black text-primary mt-0.5">
               {formatCurrency(global.saldo_devedor_consolidado)}
@@ -173,7 +184,15 @@ export function DemonstrativoGlobalView({
           </div>
           <div className="p-3 bg-slate-50/70 rounded-lg border border-border/60">
             <span className="text-[11px] font-semibold text-muted-foreground uppercase">
-              Receitas Geradas Totais
+              Despesas Avulsas
+            </span>
+            <div className="text-lg font-black text-rose-600 mt-0.5">
+              {formatCurrency(global.total_despesas_consolidado)}
+            </div>
+          </div>
+          <div className="p-3 bg-slate-50/70 rounded-lg border border-border/60">
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase">
+              Receitas Geradas
             </span>
             <div className="text-lg font-black text-emerald-700 mt-0.5">
               {formatCurrency(global.total_receitas_consolidado)}
@@ -263,7 +282,7 @@ export function DemonstrativoGlobalView({
         ) : (
           <div className="space-y-4">
             {/* CARDS DE DESTAQUE DO MÊS */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               {/* CARD 1: PARCELAS DO MÊS (TOTAL E ABERTO) */}
               <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs space-y-1">
                 <div className="flex items-center justify-between">
@@ -279,13 +298,31 @@ export function DemonstrativoGlobalView({
                   <span>{dadosMensalPrevisto.quantidade_parcelas_aberto} parcela(s) em aberto</span>
                   {dadosMensalPrevisto.total_parcelas_pagas > 0 && (
                     <span className="text-emerald-600 font-medium">
-                      +{formatCurrency(dadosMensalPrevisto.total_parcelas_pagas)} já pagas
+                      +{formatCurrency(dadosMensalPrevisto.total_parcelas_pagas)} pagas
                     </span>
                   )}
                 </div>
               </div>
 
-              {/* CARD 2: RECEITAS PREVISTAS/REGISTRADAS DAS MÁQUINAS NO MÊS */}
+              {/* CARD 2: DESPESAS AVULSAS DO MÊS */}
+              <div className="rounded-xl border border-rose-200 bg-white p-3.5 shadow-2xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-rose-800">
+                    Despesas Avulsas
+                  </span>
+                  <CircleDollarSign className="w-4 h-4 text-rose-500" />
+                </div>
+                <div className="text-xl font-black text-rose-600">
+                  {formatCurrency(dadosMensalPrevisto.total_despesas_mes)}
+                </div>
+                <div className="text-[11px] text-muted-foreground pt-1 border-t border-slate-100">
+                  <span>
+                    {dadosMensalPrevisto.quantidade_despesas} despesa(s) avulsa(s) (fretes, etc.)
+                  </span>
+                </div>
+              </div>
+
+              {/* CARD 3: RECEITAS PREVISTAS/REGISTRADAS DAS MÁQUINAS NO MÊS */}
               <div className="rounded-xl border border-emerald-200 bg-white p-3.5 shadow-2xs space-y-1">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
@@ -298,16 +335,14 @@ export function DemonstrativoGlobalView({
                 </div>
                 <div className="text-[11px] text-muted-foreground pt-1 border-t border-slate-100">
                   {dadosMensalPrevisto.quantidade_receitas > 0 ? (
-                    <span>
-                      {dadosMensalPrevisto.quantidade_receitas} lançamento(s) de receita no mês
-                    </span>
+                    <span>{dadosMensalPrevisto.quantidade_receitas} lançamento(s) de receita</span>
                   ) : (
-                    <span className="text-amber-700">Nenhuma receita registrada no mês</span>
+                    <span className="text-amber-700">Nenhuma receita no mês</span>
                   )}
                 </div>
               </div>
 
-              {/* CARD 3: RESULTADO - QUANTO FALTA ARRECADAR */}
+              {/* CARD 4: RESULTADO - QUANTO FALTA ARRECADAR */}
               <div
                 className={`rounded-xl border p-3.5 shadow-2xs space-y-1 ${
                   dadosMensalPrevisto.falta_arrecadar > 0
@@ -346,10 +381,10 @@ export function DemonstrativoGlobalView({
                   }`}
                 >
                   {dadosMensalPrevisto.falta_arrecadar > 0
-                    ? 'Meta de faturamento das máquinas para cobrir o mês'
+                    ? 'Meta para cobrir parcelas + despesas'
                     : dadosMensalPrevisto.superavit > 0
-                      ? `Superávit de ${formatCurrency(dadosMensalPrevisto.superavit)} nas receitas`
-                      : 'Parcelas do mês integralmente cobertas'}
+                      ? `Superávit de ${formatCurrency(dadosMensalPrevisto.superavit)}`
+                      : 'Compromissos do mês cobertos'}
                 </div>
               </div>
             </div>

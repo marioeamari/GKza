@@ -6,7 +6,7 @@
  */
 
 import pb from '@/lib/pocketbase/client'
-import type { DividaRecord, ParcelaRecord, ReceitaRecord } from '@/lib/dividas'
+import type { DividaRecord, ParcelaRecord, ReceitaRecord, DespesaAvulsaRecord } from '@/lib/dividas'
 
 export interface CreateDividaInput {
   nome: string
@@ -51,6 +51,18 @@ export interface CreateReceitaInput {
 }
 
 export interface UpdateReceitaInput extends Partial<CreateReceitaInput> {}
+
+export interface CreateDespesaAvulsaInput {
+  divida: string
+  data: string
+  valor: number
+  descricao?: string
+  origem?: string
+  observacoes?: string
+  lancamento_id?: string
+}
+
+export interface UpdateDespesaAvulsaInput extends Partial<CreateDespesaAvulsaInput> {}
 
 export const dividasService = {
   // --- DÍVIDAS ---
@@ -177,5 +189,26 @@ export const dividasService = {
 
   async deleteReceita(id: string): Promise<boolean> {
     return await pb.collection('dividas_receitas').delete(id)
+  },
+
+  // --- DESPESAS AVULSAS POR MÁQUINA ---
+  async listDespesas(dividaId?: string): Promise<DespesaAvulsaRecord[]> {
+    const filter = dividaId ? `divida = '${dividaId}'` : ''
+    return await pb.collection('dividas_despesas').getFullList<DespesaAvulsaRecord>({
+      filter: filter || undefined,
+      sort: '-data',
+    })
+  },
+
+  async createDespesa(input: CreateDespesaAvulsaInput): Promise<DespesaAvulsaRecord> {
+    return await pb.collection('dividas_despesas').create<DespesaAvulsaRecord>(input)
+  },
+
+  async updateDespesa(id: string, input: UpdateDespesaAvulsaInput): Promise<DespesaAvulsaRecord> {
+    return await pb.collection('dividas_despesas').update<DespesaAvulsaRecord>(id, input)
+  },
+
+  async deleteDespesa(id: string): Promise<boolean> {
+    return await pb.collection('dividas_despesas').delete(id)
   },
 }

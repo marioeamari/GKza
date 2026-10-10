@@ -63,6 +63,19 @@ export interface ReceitaRecord {
   updated?: string
 }
 
+export interface DespesaAvulsaRecord {
+  id: string
+  divida: string
+  data: string
+  valor: number
+  descricao?: string
+  origem?: string
+  observacoes?: string
+  lancamento_id?: string
+  created?: string
+  updated?: string
+}
+
 export interface ParcelaComSaldo extends ParcelaRecord {
   saldo_restante_apos: number
 }
@@ -100,6 +113,7 @@ export interface LinhaProjecaoCaixa {
   mes_ano: string // YYYY-MM
   saldo_inicial_mes: number
   receitas_mes: number
+  despesas_mes: number
   parcelas_mes: number
   saldo_final_mes: number
   parcelas_detalhe: {
@@ -118,6 +132,7 @@ export interface ProjecaoCaixaMaquina {
   divida_nome: string
   saldo_inicial_configurado: number
   total_receitas_historicas: number
+  total_despesas_historicas: number
   total_pago_historico: number
   caixa_atual_disponivel: number
   linhas_mensais: LinhaProjecaoCaixa[]
@@ -174,20 +189,32 @@ export interface ItemReceitaMensalPrevisto {
   descricao: string
 }
 
+export interface ItemDespesaMensalPrevisto {
+  divida_id: string
+  divida_nome: string
+  despesa_id: string
+  data: string
+  valor: number
+  descricao?: string
+}
+
 export interface TotalMensalPrevistoDemonstrativo {
   mes_ano: string // 'YYYY-MM'
   total_parcelas_mes: number // soma de todas as parcelas com vencimento no mês
   total_parcelas_aberto: number // parcelas pendentes ou atrasadas (não pagas)
   total_parcelas_pagas: number // parcelas pagas no mês
   total_receitas_mes: number // receitas registradas no mês
-  falta_arrecadar: number // max(0, parcelas em aberto - receitas do mês)
-  superavit: number // max(0, receitas do mês - parcelas em aberto)
+  total_despesas_mes: number // despesas avulsas registradas no mês
+  falta_arrecadar: number // max(0, (parcelas em aberto + despesas) - receitas do mês)
+  superavit: number // max(0, receitas do mês - (parcelas em aberto + despesas))
   quantidade_parcelas: number
   quantidade_parcelas_aberto: number
   quantidade_parcelas_pagas: number
   quantidade_receitas: number
+  quantidade_despesas: number
   parcelas: ItemParcelaMensalPrevisto[]
   receitas: ItemReceitaMensalPrevisto[]
+  despesas: ItemDespesaMensalPrevisto[]
 }
 
 export interface DemonstrativoGlobal {
@@ -196,6 +223,7 @@ export interface DemonstrativoGlobal {
   total_pago_consolidado: number
   saldo_devedor_consolidado: number
   total_receitas_consolidado: number
+  total_despesas_consolidado: number
   cronograma_unificado: DemonstrativoGlobalItem[]
   primeira_descoberta_global?: DemonstrativoGlobalItem
 }
@@ -452,6 +480,7 @@ export function calcularPaybackMaquina(
   divida: Pick<DividaRecord, 'valor_total'>,
   parcelas: ParcelaRecord[],
   receitas: ReceitaRecord[],
+  despesas: DespesaAvulsaRecord[] = [],
 ): ResumoPayback {
   const totalInvestimento = arredondarMoeda(divida.valor_total || 0)
 
@@ -534,16 +563,23 @@ export function projetarCaixaPorMaquina(
   divida: DividaRecord,
   parcelas: ParcelaRecord[],
   receitas: ReceitaRecord[],
+  despesas: DespesaAvulsaRecord[] = [],
   hojeIso = new Date().toISOString().slice(0, 10),
 ): ProjecaoCaixaMaquina {
   const saldoInicialConfigurado = arredondarMoeda(divida.saldo_inicial_caixa || 0)
 
   // 1. Calcular o caixa disponível hoje
-  // Caixa = Saldo Inicial + Total Receitas Realizadas - Total Parcelas Pagas
+  // Caixa = Saldo Inicial + Total Receitas Realizadas - Total Despesas Avulsas Realizadas - Total Parcelas Pagas
   const totalReceitasHistoricas = arredondarMoeda(
     receitas
       .filter((r) => r.data.slice(0, 10) <= hojeIso)
       .reduce((acc, r) => acc + (r.valor || 0), 0),
+  )
+
+  const totalDespesasHistoricas = arredondarMoeda(
+    despesas
+      .filter((d) => d.data.slice(0, 10) <= hojeIso)
+      .reduce((acc, d) => acc + (d.valor || 0), 0),
   )
 
   const totalPagoHistorico = arredondarMoeda(
@@ -557,10 +593,13 @@ export function projetarCaixaPorMaquina(
   )
 
   const caixaAtualDisponivel = arredondarMoeda(
-    saldoInicialConfigurado + totalReceitasHistoricas - totalPagoHistorico,
+    saldoInicialConfigurado +
+      totalReceitasHistoricas -
+      totalDespesasHistoricas -
+      totalPagoHistorico,
   )
 
-  // 2. Agrupar receitas futuras (data > hoje) e parcelas pendentes/atrasadas por mês
+  // 2. Agrupar receitas/despesas futuras (data > hoje) e parcelas pendentes/atrasadas por mês
   const parcelasPendentes = parcelas
     .filter((p) => p.status !== 'paga')
     .sort((a, b) => {
@@ -584,6 +623,13 @@ export function projetarCaixaPorMaquina(
 
   for (const r of receitas) {
     const m = r.data.slice(0, 7)
+    if (m >= mesAtual) {
+      mesesSet.add(m)
+    }
+  }
+
+  for (const d of despesas) {
+    const m = d.data.slice(0, 7)
     if (m >= mesAtual) {
       mesesSet.add(m)
     }
@@ -646,6 +692,14 @@ export function projetarCaixaPorMaquina(
         .reduce((acc, r) => acc + (r.valor || 0), 0),
     )
 
+    const despesasDoMes = arredondarMoeda(
+      despesas
+        .filter(
+          (d) => d.data.slice(0, 7) === mes && (mes > mesAtual || d.data.slice(0, 10) > hojeIso),
+        )
+        .reduce((acc, d) => acc + (d.valor || 0), 0),
+    )
+
     // Parcelas que vencem neste mês (se for o mês atual, inclui também as em atraso de meses anteriores)
     const parcelasDoMes = parcelasPendentes.filter((p) => {
       const pMes = p.data_vencimento.slice(0, 7)
@@ -658,13 +712,16 @@ export function projetarCaixaPorMaquina(
     const valorParcelasDoMes = arredondarMoeda(parcelasDoMes.reduce((acc, p) => acc + p.valor, 0))
 
     const saldoInicialMes = saldoCaixaSimulado
-    const saldoFinalMes = arredondarMoeda(saldoInicialMes + receitasDoMes - valorParcelasDoMes)
+    const saldoFinalMes = arredondarMoeda(
+      saldoInicialMes + receitasDoMes - despesasDoMes - valorParcelasDoMes,
+    )
     saldoCaixaSimulado = saldoFinalMes
 
     linhasMensais.push({
       mes_ano: mes,
       saldo_inicial_mes: saldoInicialMes,
       receitas_mes: receitasDoMes,
+      despesas_mes: despesasDoMes,
       parcelas_mes: valorParcelasDoMes,
       saldo_final_mes: saldoFinalMes,
       parcelas_detalhe: parcelasDoMes.map((p) => ({
@@ -684,6 +741,7 @@ export function projetarCaixaPorMaquina(
     divida_nome: divida.nome,
     saldo_inicial_configurado: saldoInicialConfigurado,
     total_receitas_historicas: totalReceitasHistoricas,
+    total_despesas_historicas: totalDespesasHistoricas,
     total_pago_historico: totalPagoHistorico,
     caixa_atual_disponivel: caixaAtualDisponivel,
     linhas_mensais: linhasMensais,
@@ -711,11 +769,13 @@ export function consolidarDemonstrativoGlobal(
   dividas: DividaRecord[],
   parcelasPorDivida: Map<string, ParcelaRecord[]>,
   receitasPorDivida: Map<string, ReceitaRecord[]>,
+  despesasPorDivida: Map<string, DespesaAvulsaRecord[]> = new Map(),
   hojeIso = new Date().toISOString().slice(0, 10),
 ): DemonstrativoGlobal {
   let valorTotalConsolidado = 0
   let totalPagoConsolidado = 0
   let totalReceitasConsolidado = 0
+  let totalDespesasConsolidado = 0
 
   const cronogramaUnificado: DemonstrativoGlobalItem[] = []
   const projecoesMap = new Map<string, ProjecaoCaixaMaquina>()
@@ -723,6 +783,7 @@ export function consolidarDemonstrativoGlobal(
   for (const div of dividas) {
     const pars = parcelasPorDivida.get(div.id) || []
     const recs = receitasPorDivida.get(div.id) || []
+    const desps = despesasPorDivida.get(div.id) || []
 
     const resumo = calcularResumoDivida(div, pars, hojeIso)
     valorTotalConsolidado += resumo.valor_total
@@ -731,7 +792,10 @@ export function consolidarDemonstrativoGlobal(
     const recTotal = recs.reduce((acc, r) => acc + (r.valor || 0), 0)
     totalReceitasConsolidado += recTotal
 
-    const projecao = projetarCaixaPorMaquina(div, pars, recs, hojeIso)
+    const despTotal = desps.reduce((acc, d) => acc + (d.valor || 0), 0)
+    totalDespesasConsolidado += despTotal
+
+    const projecao = projetarCaixaPorMaquina(div, pars, recs, desps, hojeIso)
     projecoesMap.set(div.id, projecao)
 
     // Agrega todas as parcelas pendentes daquela dívida com a indicação de cobertura individual
@@ -783,6 +847,7 @@ export function consolidarDemonstrativoGlobal(
     total_pago_consolidado: arredondarMoeda(totalPagoConsolidado),
     saldo_devedor_consolidado: saldoDevedorConsolidado,
     total_receitas_consolidado: arredondarMoeda(totalReceitasConsolidado),
+    total_despesas_consolidado: arredondarMoeda(totalDespesasConsolidado),
     cronograma_unificado: cronogramaUnificado,
     primeira_descoberta_global: primeiraDescoberta,
   }
@@ -851,9 +916,17 @@ export function calcularTotalMensalPrevisto(params: {
   dividas: DividaRecord[]
   parcelasPorDivida: Map<string, ParcelaRecord[]>
   receitasPorDivida: Map<string, ReceitaRecord[]>
+  despesasPorDivida?: Map<string, DespesaAvulsaRecord[]>
   apenasAtivas?: boolean // default true
 }): TotalMensalPrevistoDemonstrativo {
-  const { mesAno, dividas, parcelasPorDivida, receitasPorDivida, apenasAtivas = true } = params
+  const {
+    mesAno,
+    dividas,
+    parcelasPorDivida,
+    receitasPorDivida,
+    despesasPorDivida = new Map(),
+    apenasAtivas = true,
+  } = params
   const mesAlvo = (mesAno || '').slice(0, 7)
 
   const dividasFiltradas = dividas.filter((d) => {
@@ -865,16 +938,19 @@ export function calcularTotalMensalPrevisto(params: {
   let totalParcelasAberto = 0
   let totalParcelasPagas = 0
   let totalReceitasMes = 0
+  let totalDespesasMes = 0
 
   let countParcelasAberto = 0
   let countParcelasPagas = 0
 
   const parcelasDoMes: ItemParcelaMensalPrevisto[] = []
   const receitasDoMes: ItemReceitaMensalPrevisto[] = []
+  const despesasDoMes: ItemDespesaMensalPrevisto[] = []
 
   for (const div of dividasFiltradas) {
     const parcelas = parcelasPorDivida.get(div.id) || []
     const receitas = receitasPorDivida.get(div.id) || []
+    const despesas = despesasPorDivida.get(div.id) || []
 
     for (const p of parcelas) {
       const pMes = (p.data_vencimento || '').slice(0, 7)
@@ -922,6 +998,23 @@ export function calcularTotalMensalPrevisto(params: {
         })
       }
     }
+
+    for (const d of despesas) {
+      const dMes = (d.data || '').slice(0, 7)
+      if (dMes === mesAlvo) {
+        const val = arredondarMoeda(d.valor || 0)
+        totalDespesasMes += val
+
+        despesasDoMes.push({
+          divida_id: div.id,
+          divida_nome: div.nome,
+          despesa_id: d.id,
+          data: d.data,
+          valor: val,
+          descricao: d.descricao,
+        })
+      }
+    }
   }
 
   // Ordenações
@@ -939,13 +1032,23 @@ export function calcularTotalMensalPrevisto(params: {
     return a.divida_nome.localeCompare(b.divida_nome)
   })
 
+  despesasDoMes.sort((a, b) => {
+    if (a.data !== b.data) {
+      return a.data.localeCompare(b.data)
+    }
+    return a.divida_nome.localeCompare(b.divida_nome)
+  })
+
   totalParcelasMes = arredondarMoeda(totalParcelasMes)
   totalParcelasAberto = arredondarMoeda(totalParcelasAberto)
   totalParcelasPagas = arredondarMoeda(totalParcelasPagas)
   totalReceitasMes = arredondarMoeda(totalReceitasMes)
+  totalDespesasMes = arredondarMoeda(totalDespesasMes)
 
-  const faltaArrecadar = arredondarMoeda(Math.max(0, totalParcelasAberto - totalReceitasMes))
-  const superavit = arredondarMoeda(Math.max(0, totalReceitasMes - totalParcelasAberto))
+  // Necessidade do mês = Parcelas em aberto + Despesas avulsas
+  const totalCompromissosAberto = totalParcelasAberto + totalDespesasMes
+  const faltaArrecadar = arredondarMoeda(Math.max(0, totalCompromissosAberto - totalReceitasMes))
+  const superavit = arredondarMoeda(Math.max(0, totalReceitasMes - totalCompromissosAberto))
 
   return {
     mes_ano: mesAlvo,
@@ -953,13 +1056,16 @@ export function calcularTotalMensalPrevisto(params: {
     total_parcelas_aberto: totalParcelasAberto,
     total_parcelas_pagas: totalParcelasPagas,
     total_receitas_mes: totalReceitasMes,
+    total_despesas_mes: totalDespesasMes,
     falta_arrecadar: faltaArrecadar,
     superavit: superavit,
     quantidade_parcelas: parcelasDoMes.length,
     quantidade_parcelas_aberto: countParcelasAberto,
     quantidade_parcelas_pagas: countParcelasPagas,
     quantidade_receitas: receitasDoMes.length,
+    quantidade_despesas: despesasDoMes.length,
     parcelas: parcelasDoMes,
     receitas: receitasDoMes,
+    despesas: despesasDoMes,
   }
 }
