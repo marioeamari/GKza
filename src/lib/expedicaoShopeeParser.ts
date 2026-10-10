@@ -14,6 +14,14 @@ export interface ItemLinhaImportada {
   temPedidoEspecial: boolean
   triagemPedidoEspecial: TriagemPedidoEspecial
 
+  // Dedução e rastreamento de quantidade
+  quantidadePlanilhaOriginal?: number
+  quantidadeDeduzidaPorKit?: number
+  origemDeducaoQuantidade?: 'catalogo' | 'sku' | 'produto_nome' | 'planilha'
+
+  // Código de Rastreio (Shopee / Transportadora)
+  codigoRastreio?: string
+
   // Matching de produto e kit
   produtoEncontrado?: PrecProdutoRecord | null
   temaId?: string
@@ -36,6 +44,7 @@ export interface MapeamentoColunasShopee {
   clienteNome?: string
   pedidoEspecial?: string
   statusEnvio?: string
+  codigoRastreio?: string
 }
 
 export interface DetalheMapeamentoColunas {
@@ -270,6 +279,26 @@ export const SINONIMOS_COLUNAS_SHOPEE = {
     'shipping status',
     'tracking status',
   ],
+  codigoRastreio: [
+    'codigo de rastreamento',
+    'codigo de rastreio',
+    'numero de rastreamento',
+    'numero de rastreio',
+    'n de rastreamento',
+    'no de rastreamento',
+    'rastreamento',
+    'rastreio',
+    'cod rastreio',
+    'tracking number',
+    'tracking no',
+    'tracking code',
+    'tracking #',
+    'tracking',
+    'waybill no',
+    'waybill number',
+    'awb',
+    'numero de envio',
+  ],
 } as const
 
 /**
@@ -313,6 +342,7 @@ export function inferirMapeamentoColunas(cabecalhos: string[]): DetalheMapeament
     clienteNome: detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.clienteNome),
     pedidoEspecial: detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.pedidoEspecial),
     statusEnvio: detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.statusEnvio),
+    codigoRastreio: detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.codigoRastreio),
   }
 
   return {
@@ -325,6 +355,114 @@ export function inferirMapeamentoColunas(cabecalhos: string[]): DetalheMapeament
       quantidade: Boolean(mapeamento.quantidade),
     },
   }
+}
+
+/**
+ * Deduz a quantidade de peças por kit a partir do catálogo, SKU ou nome do produto / variação.
+ * Casos reais mapeados:
+ * - 'RMickeyMinnie-20' -> 20
+ * - '31 Rosto' -> 31
+ * - '40 Rosto' -> 40
+ * - '20 Toalhas de Rosto e Mão Mickey Mouse Minnie Mouse' -> 20
+ * - 'Kit 30 Toalhas Turma da Mônica' -> 30
+ * - 'Pacote com 50 unidades' -> 50
+ * - 'Combo 10 un' -> 10
+ */
+export function deduzirQuantidadeKit(
+  sku: string,
+  produtoNome: string,
+  produtoCatalogo?: PrecProdutoRecord | null,
+  variacao?: string,
+): { quantidade: number; origem: 'catalogo' | 'sku' | 'produto_nome' | null } {
+  // 1. Prioridade máxima: Produto reconhecido no catálogo com qtd_por_kit > 0
+  if (
+    produtoCatalogo &&
+    typeof produtoCatalogo.qtd_por_kit === 'number' &&
+    produtoCatalogo.qtd_por_kit > 0
+  ) {
+    return {
+      quantidade: Math.round(produtoCatalogo.qtd_por_kit),
+      origem: 'catalogo',
+    }
+  }
+
+  // 2. Extração pelo SKU:
+  // Padrões como: RMickeyMinnie-20, KIT-MONICA-30, SKU-40, RMickey-20, BLeve-20, KIT30, KIT_50
+  const skuLimpo = (sku || '').trim()
+  if (skuLimpo) {
+    // 2a. Sufixo com hífen ou underscore: -20, _40, -10
+    const matchSufixo = skuLimpo.match(/[-_](\d{1,4})$/i)
+    if (matchSufixo && matchSufixo[1]) {
+      const q = parseInt(matchSufixo[1], 10)
+      if (q > 0) return { quantidade: q, origem: 'sku' }
+    }
+
+    // 2b. 'KIT' ou 'K' seguido diretamente de dígitos: KIT30, KIT-30, K20
+    const matchKit = skuLimpo.match(/\bKIT[-_]?(\d{1,4})\b/i)
+    if (matchKit && matchKit[1]) {
+      const q = parseInt(matchKit[1], 10)
+      if (q > 0) return { quantidade: q, origem: 'sku' }
+    }
+
+    // 2c. Número isolado dentro do SKU cercado por letras ou delimitadores
+    // Ex: RMickeyMinnie20, Rosto20, etc. (se for >= 2 dígitos e <= 3 dígitos)
+    const matchNumSku = skuLimpo.match(/[a-zA-Z]([1-9]\d{1,2})$/)
+    if (matchNumSku && matchNumSku[1]) {
+      const q = parseInt(matchNumSku[1], 10)
+      if (q > 0) return { quantidade: q, origem: 'sku' }
+    }
+  }
+
+  // 3. Extração pelo Nome do Produto e Variação:
+  // Casos:
+  // - "20 Toalhas de Rosto e Mão..." -> 20
+  // - "31 Rosto", "40 Rosto" -> 31, 40
+  // - "Kit 30 Toalhas..." -> 30
+  // - "Pacote 50 un" -> 50
+  const textosParaVerificar = [produtoNome || '', variacao || '']
+
+  for (const texto of textosParaVerificar) {
+    const textoLimpo = texto.trim()
+    if (!textoLimpo) continue
+
+    // 3a. Início de string com número seguido de palavra indicativa de produto/kit
+    // Ex: "20 Toalhas...", "31 Rosto", "40 Rosto", "10 Panos..."
+    const matchInicio = textoLimpo.match(
+      /^(\d{1,4})\s+(?:toalhas?|rosto|lavabo|banho|pecas?|pçs?|unidades?|itens|modelos?)\b/i,
+    )
+    if (matchInicio && matchInicio[1]) {
+      const q = parseInt(matchInicio[1], 10)
+      if (q > 0) return { quantidade: q, origem: 'produto_nome' }
+    }
+
+    // 3b. "Kit [de|com]? N ..." ou "Combo [de|com]? N ..." ou "Pacote [de|com]? N ..." ou "Jogo [de|com]? N ..."
+    const matchKitNome = textoLimpo.match(
+      /\b(?:kit|combo|pacote|jogo|conjunto)\s+(?:de\s+|com\s+)?(\d{1,4})\b/i,
+    )
+    if (matchKitNome && matchKitNome[1]) {
+      const q = parseInt(matchKitNome[1], 10)
+      if (q > 0) return { quantidade: q, origem: 'produto_nome' }
+    }
+
+    // 3c. Número seguido de "un", "und", "unidades", "peças", "pçs", "toalhas"
+    // Ex: "40 un", "30 toalhas", "20 peças"
+    const matchUnidades = textoLimpo.match(
+      /\b(\d{1,4})\s*(?:un\b|und\b|unidades?\b|pecas?\b|pçs?\b|toalhas?\b)/i,
+    )
+    if (matchUnidades && matchUnidades[1]) {
+      const q = parseInt(matchUnidades[1], 10)
+      if (q > 0) return { quantidade: q, origem: 'produto_nome' }
+    }
+
+    // 3d. Padrão "N Rosto", "N Lavabo", "N Banho" em qualquer ponto da string
+    const matchNRosto = textoLimpo.match(/\b(\d{1,4})\s*(?:rosto|lavabo|banho)\b/i)
+    if (matchNRosto && matchNRosto[1]) {
+      const q = parseInt(matchNRosto[1], 10)
+      if (q > 0) return { quantidade: q, origem: 'produto_nome' }
+    }
+  }
+
+  return { quantidade: 0, origem: null }
 }
 
 /**
@@ -351,15 +489,15 @@ export function processarLinhaMapeada(
   const clienteNome = getVal(mapeamento.clienteNome)
   let pedidoEspecial = getVal(mapeamento.pedidoEspecial)
   const statusEnvio = getVal(mapeamento.statusEnvio)
+  const codigoRastreio = getVal(mapeamento.codigoRastreio)
 
   const rawQtd = getVal(mapeamento.quantidade)
-  let quantidade = parseInt(rawQtd, 10)
-  if (isNaN(quantidade) || quantidade <= 0) {
-    quantidade = 1
-  }
+  const quantidadePlanilha = parseInt(rawQtd, 10)
+  const quantidadeLinhaValida =
+    !isNaN(quantidadePlanilha) && quantidadePlanilha > 0 ? quantidadePlanilha : 1
 
   // Se a linha estiver totalmente em branco, ignora
-  if (!numeroPedido && !sku && !produtoNome && !clienteNome) {
+  if (!numeroPedido && !sku && !produtoNome && !clienteNome && !codigoRastreio) {
     return null
   }
 
@@ -395,9 +533,28 @@ export function processarLinhaMapeada(
   // Matching contra prec_produtos
   const produtoEncontrado = encontrarProdutoCatalogo(sku, produtoNome, catalogoProdutos)
   const reconhecido = Boolean(produtoEncontrado)
+
+  // DEDUÇÃO INTELIGENTE DE QUANTIDADE DO KIT
+  // O export da Shopee costuma registrar "Deal Quantity = 1" (1 kit comprado),
+  // mesmo quando o kit tem 20, 30, 40 ou 50 peças.
+  const deducao = deduzirQuantidadeKit(sku, produtoNome, produtoEncontrado, variacao)
+  let quantidadeFinal = quantidadeLinhaValida
+  let quantidadeDeduzidaPorKit: number | undefined = undefined
+  let origemDeducao: 'catalogo' | 'sku' | 'produto_nome' | 'planilha' = 'planilha'
+
+  if (deducao.quantidade > 1) {
+    quantidadeDeduzidaPorKit = deducao.quantidade
+    origemDeducao = deducao.origem || 'planilha'
+    // Se a planilha trouxe 1 kit (ou multiplos kits N), multiplicamos pela qtd de peças do kit
+    quantidadeFinal = quantidadeLinhaValida * deducao.quantidade
+  } else if (quantidadeLinhaValida > 1) {
+    quantidadeFinal = quantidadeLinhaValida
+    origemDeducao = 'planilha'
+  }
+
   const isKitOuCombo = produtoEncontrado
     ? produtoEncontrado.tipo === 'kit' || produtoEncontrado.tipo === 'combo'
-    : /kit|combo|conjunto|pacote|jogo/i.test(produtoNome) || quantidade > 1
+    : /kit|combo|conjunto|pacote|jogo/i.test(produtoNome) || quantidadeFinal > 1
 
   // Inferência de tema de kit
   const temaId = inferirTemaKit(
@@ -409,14 +566,18 @@ export function processarLinhaMapeada(
   const linhaOriginal =
     typeof indexOuOrigem === 'string'
       ? indexOuOrigem
-      : `Linha ${indexOuOrigem + 1}: ${numeroPedido} | ${sku} | ${produtoNome} | ${quantidade} un`
+      : `Linha ${indexOuOrigem + 1}: ${numeroPedido} | ${sku} | ${produtoNome} | ${quantidadeFinal} un`
 
   return {
     linhaOriginal,
     numeroPedido: numeroPedido.trim(),
     sku: (produtoEncontrado?.sku || sku).trim(),
     produtoNome: (produtoEncontrado?.nome || produtoNome).trim(),
-    quantidade: quantidade > 0 ? quantidade : 1,
+    quantidade: quantidadeFinal > 0 ? quantidadeFinal : 1,
+    quantidadePlanilhaOriginal: quantidadeLinhaValida,
+    quantidadeDeduzidaPorKit,
+    origemDeducaoQuantidade: origemDeducao,
+    codigoRastreio: codigoRastreio ? codigoRastreio.trim() : undefined,
     variacao: variacao.trim(),
     clienteNome: clienteNome.trim(),
     pedidoEspecial: pedidoEspecial.trim(),
@@ -639,10 +800,11 @@ export function parseShopeeColagem(
     let numeroPedido = ''
     let sku = ''
     let produtoNome = ''
-    let quantidade = 1
+    let quantidadeLinha = 1
     let variacao = ''
     let clienteNome = ''
     let pedidoEspecial = ''
+    let codigoRastreio = ''
 
     if (colunas.length >= 2) {
       numeroPedido = colunas[0] || ''
@@ -656,7 +818,7 @@ export function parseShopeeColagem(
         const numQtd = parseInt(colunas[2], 10)
         if (!isNaN(numQtd) && numQtd > 0) {
           produtoNome = colunas[1]
-          quantidade = numQtd
+          quantidadeLinha = numQtd
         } else {
           sku = colunas[1]
           produtoNome = colunas[2]
@@ -664,20 +826,23 @@ export function parseShopeeColagem(
       } else if (colunas.length === 4) {
         sku = colunas[1]
         produtoNome = colunas[2]
-        quantidade = parseInt(colunas[3], 10) || 1
+        quantidadeLinha = parseInt(colunas[3], 10) || 1
       } else if (colunas.length === 5) {
         sku = colunas[1]
         produtoNome = colunas[2]
         variacao = colunas[3]
-        quantidade = parseInt(colunas[4], 10) || 1
+        quantidadeLinha = parseInt(colunas[4], 10) || 1
       } else {
         numeroPedido = colunas[0]
         sku = colunas[1]
         produtoNome = colunas[2]
         variacao = colunas[3]
-        quantidade = parseInt(colunas[4], 10) || 1
+        quantidadeLinha = parseInt(colunas[4], 10) || 1
         clienteNome = colunas[5] || ''
-        pedidoEspecial = colunas[6] || colunas.slice(6).join(' ') || ''
+        pedidoEspecial = colunas[6] || ''
+        if (colunas[7]) {
+          codigoRastreio = colunas[7]
+        }
       }
     } else {
       const textoLinha = colunas[0]
@@ -689,7 +854,7 @@ export function parseShopeeColagem(
         /(?:qtd|quantidade|quant|x|\b)\s*[:=]?\s*(\d{1,4})\s*(?:un|und|unidades|pecas|pçs|\b)/i,
       )
       if (qtdMatch && qtdMatch[1]) {
-        quantidade = parseInt(qtdMatch[1], 10) || 1
+        quantidadeLinha = parseInt(qtdMatch[1], 10) || 1
       }
       let limpo = textoLinha
       if (numeroPedido) limpo = limpo.replace(numeroPedido, '')
@@ -719,9 +884,24 @@ export function parseShopeeColagem(
 
     const produtoEncontrado = encontrarProdutoCatalogo(sku, produtoNome, catalogoProdutos)
     const reconhecido = Boolean(produtoEncontrado)
+
+    const deducao = deduzirQuantidadeKit(sku, produtoNome, produtoEncontrado, variacao)
+    let quantidadeFinal = quantidadeLinha
+    let quantidadeDeduzidaPorKit: number | undefined = undefined
+    let origemDeducao: 'catalogo' | 'sku' | 'produto_nome' | 'planilha' = 'planilha'
+
+    if (deducao.quantidade > 1) {
+      quantidadeDeduzidaPorKit = deducao.quantidade
+      origemDeducao = deducao.origem || 'planilha'
+      quantidadeFinal = quantidadeLinha * deducao.quantidade
+    } else if (quantidadeLinha > 1) {
+      quantidadeFinal = quantidadeLinha
+      origemDeducao = 'planilha'
+    }
+
     const isKitOuCombo = produtoEncontrado
       ? produtoEncontrado.tipo === 'kit' || produtoEncontrado.tipo === 'combo'
-      : /kit|combo|conjunto|pacote|jogo/i.test(produtoNome) || quantidade > 1
+      : /kit|combo|conjunto|pacote|jogo/i.test(produtoNome) || quantidadeFinal > 1
 
     const temaId = inferirTemaKit(
       produtoEncontrado?.nome || produtoNome,
@@ -734,7 +914,11 @@ export function parseShopeeColagem(
       numeroPedido: numeroPedido.trim(),
       sku: (produtoEncontrado?.sku || sku).trim(),
       produtoNome: (produtoEncontrado?.nome || produtoNome).trim(),
-      quantidade: quantidade > 0 ? quantidade : 1,
+      quantidade: quantidadeFinal > 0 ? quantidadeFinal : 1,
+      quantidadePlanilhaOriginal: quantidadeLinha,
+      quantidadeDeduzidaPorKit,
+      origemDeducaoQuantidade: origemDeducao,
+      codigoRastreio: codigoRastreio ? codigoRastreio.trim() : undefined,
       variacao: variacao.trim(),
       clienteNome: clienteNome.trim(),
       pedidoEspecial: pedidoEspecial.trim(),

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-10T05:45:06.682Z",
+  "generatedAt": "2026-10-10T15:11:51.734Z",
   "collections": [
     {
       "name": "users",
@@ -4175,13 +4175,20 @@
           "type": "text",
           "required": false,
           "system": false
+        },
+        {
+          "name": "codigo_rastreio",
+          "type": "text",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [
         "CREATE UNIQUE INDEX idx_kit_pedidos_num ON kit_pedidos (numero_pedido)",
         "CREATE INDEX idx_kit_pedidos_sku ON kit_pedidos (sku)",
         "CREATE INDEX idx_kit_pedidos_status ON kit_pedidos (status_separacao)",
-        "CREATE INDEX idx_kit_pedidos_tema ON kit_pedidos (tema)"
+        "CREATE INDEX idx_kit_pedidos_tema ON kit_pedidos (tema)",
+        "CREATE INDEX `idx_kit_pedidos_rastreio` ON `kit_pedidos` (codigo_rastreio)"
       ]
     },
     {
@@ -4325,6 +4332,12 @@
         },
         {
           "name": "shopee_order_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "codigo_rastreio",
           "type": "text",
           "required": false,
           "system": false

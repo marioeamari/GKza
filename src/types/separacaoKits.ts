@@ -85,6 +85,7 @@ export interface KitPedido {
   variacao_anuncio?: string
   produto_referencia?: string
   shopee_order_id?: string
+  codigo_rastreio?: string
 
   created?: string
   updated?: string
@@ -146,6 +147,7 @@ export interface KitHistoricoSeparacao {
   observacoes?: string
   pedido_especial?: string
   shopee_order_id?: string
+  codigo_rastreio?: string
   created?: string
   updated?: string
 }

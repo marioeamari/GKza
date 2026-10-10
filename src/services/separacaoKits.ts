@@ -107,7 +107,7 @@ export const separacaoKitsService = {
     if (options.search && options.search.trim()) {
       const q = options.search.trim()
       filters.push(
-        `(numero_pedido ~ "${q}" || sku ~ "${q}" || produto_nome ~ "${q}" || cliente_nome ~ "${q}" || shopee_order_id ~ "${q}" || pedido_especial ~ "${q}")`,
+        `(numero_pedido ~ "${q}" || sku ~ "${q}" || produto_nome ~ "${q}" || cliente_nome ~ "${q}" || shopee_order_id ~ "${q}" || pedido_especial ~ "${q}" || codigo_rastreio ~ "${q}")`,
       )
     }
 
@@ -146,6 +146,89 @@ export const separacaoKitsService = {
     } catch (_) {
       return null
     }
+  },
+
+  async getPedidoByCodigoRastreio(codigoRastreio: string): Promise<KitPedido | null> {
+    const clean = codigoRastreio.trim()
+    if (!clean) return null
+
+    try {
+      // Busca exata por código de rastreio (requisito do usuário: busca exata por ele)
+      const porRastreio = await pb
+        .collection('kit_pedidos')
+        .getFirstListItem<KitPedido>(`codigo_rastreio = "${clean}"`, {
+          expand: 'tema,produto_referencia,separador_atual',
+        })
+      return porRastreio
+    } catch {
+      // Fallback tolerante caso venha com pequenas variações de espaços
+      try {
+        const porRastreioAprox = await pb
+          .collection('kit_pedidos')
+          .getFirstListItem<KitPedido>(`codigo_rastreio ~ "${clean}"`, {
+            expand: 'tema,produto_referencia,separador_atual',
+          })
+        return porRastreioAprox
+      } catch {
+        return null
+      }
+    }
+  },
+
+  async deletePedidosEmMassa(ids: string[]): Promise<{ sucesso: number; falhas: number }> {
+    let sucesso = 0
+    let falhas = 0
+    for (const id of ids) {
+      try {
+        await pb.collection('kit_pedidos').delete(id)
+        sucesso++
+      } catch (e) {
+        console.error(`Erro ao excluir pedido ${id}:`, e)
+        falhas++
+      }
+    }
+    return { sucesso, falhas }
+  },
+
+  async recalcularQuantidadesPedidos(catalogoProdutos: any[] = []): Promise<{
+    atualizados: number
+    inalterados: number
+  }> {
+    const { deduzirQuantidadeKit } = await import('@/lib/expedicaoShopeeParser')
+    const pedidos = await pb.collection('kit_pedidos').getFullList<KitPedido>({
+      expand: 'produto_referencia',
+    })
+
+    let atualizados = 0
+    let inalterados = 0
+
+    for (const pedido of pedidos) {
+      const prodRef =
+        pedido.expand?.produto_referencia ||
+        catalogoProdutos.find((p) => p.sku === pedido.sku || p.id === pedido.produto_referencia)
+      const ded = deduzirQuantidadeKit(
+        pedido.sku || '',
+        pedido.produto_nome,
+        prodRef,
+        pedido.variacao_anuncio,
+      )
+
+      if (ded.quantidade > 1 && pedido.quantidade_total !== ded.quantidade) {
+        try {
+          await pb.collection('kit_pedidos').update(pedido.id, {
+            quantidade_total: ded.quantidade,
+          })
+          atualizados++
+        } catch (err) {
+          console.error(`Erro ao recalcular quantidade do pedido ${pedido.numero_pedido}:`, err)
+          inalterados++
+        }
+      } else {
+        inalterados++
+      }
+    }
+
+    return { atualizados, inalterados }
   },
 
   async getPedidoById(id: string): Promise<KitPedido> {
@@ -228,6 +311,7 @@ export const separacaoKitsService = {
     observacoes?: string
     pedidoEspecial?: string
     shopeeOrderId?: string
+    codigoRastreio?: string
   }): Promise<KitHistoricoSeparacao> {
     // Se houver pedidoId, marca o pedido como 'finalizado'
     if (params.pedidoId) {
@@ -262,6 +346,7 @@ export const separacaoKitsService = {
       observacoes: params.observacoes || '',
       pedido_especial: params.pedidoEspecial || '',
       shopee_order_id: params.shopeeOrderId || '',
+      codigo_rastreio: params.codigoRastreio || '',
     })
 
     return rec

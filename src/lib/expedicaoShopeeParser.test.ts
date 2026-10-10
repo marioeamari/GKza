@@ -6,8 +6,10 @@ import {
   buildShopeeOrderUrl,
   encontrarProdutoCatalogo,
   inferirTemaKit,
+  deduzirQuantidadeKit,
   detectarColuna,
   inferirMapeamentoColunas,
+  processarLinhaMapeada,
   parseShopeeColagem,
   parseShopeePlanilha,
   SINONIMOS_COLUNAS_SHOPEE,
@@ -106,6 +108,84 @@ describe('expedicaoShopeeParser', () => {
     expect(inferirTemaKit('Produto sem tema', '', temasMock)).toBe('tema-monica')
   })
 
+  describe('Dedução inteligente de quantidade do kit', () => {
+    it('deduz pelo catálogo prec_produtos quando possui qtd_por_kit', () => {
+      const prod = catalogoMock[0] // qtd_por_kit = 40
+      const ded = deduzirQuantidadeKit('qualquer-sku', 'Nome Qualquer', prod)
+      expect(ded.quantidade).toBe(40)
+      expect(ded.origem).toBe('catalogo')
+    })
+
+    it('deduz casos reais do usuário pelo SKU com sufixo', () => {
+      // Caso real do usuário: RMickeyMinnie-20
+      const d1 = deduzirQuantidadeKit('RMickeyMinnie-20', 'Toalhas Variadas')
+      expect(d1.quantidade).toBe(20)
+      expect(d1.origem).toBe('sku')
+
+      const d2 = deduzirQuantidadeKit('KIT-MONICA-30', 'Toalha Mônica')
+      expect(d2.quantidade).toBe(30)
+      expect(d2.origem).toBe('sku')
+
+      const d3 = deduzirQuantidadeKit('SKU_40', 'Produto X')
+      expect(d3.quantidade).toBe(40)
+      expect(d3.origem).toBe('sku')
+    })
+
+    it('deduz casos reais pelo nome do produto e variação', () => {
+      // Caso real do usuário: "20 Toalhas de Rosto e Mão Mickey Mouse Minnie Mouse"
+      const d1 = deduzirQuantidadeKit(
+        'GENERICO',
+        '20 Toalhas de Rosto e Mão Personalizada Mickey Mouse Minnie Mouse Surtidas Infantil Menino Menina',
+      )
+      expect(d1.quantidade).toBe(20)
+      expect(d1.origem).toBe('produto_nome')
+
+      // Casos do usuário: "31 Rosto", "40 Rosto"
+      const d2 = deduzirQuantidadeKit('', '31 Rosto Toalhas Personalizadas')
+      expect(d2.quantidade).toBe(31)
+      expect(d2.origem).toBe('produto_nome')
+
+      const d3 = deduzirQuantidadeKit('', '40 Rosto')
+      expect(d3.quantidade).toBe(40)
+      expect(d3.origem).toBe('produto_nome')
+
+      // Outros padrões comuns de kit
+      const d4 = deduzirQuantidadeKit('', 'Kit com 50 unidades de toalhas')
+      expect(d4.quantidade).toBe(50)
+      expect(d4.origem).toBe('produto_nome')
+
+      const d5 = deduzirQuantidadeKit('', 'Pacote 15 peças Infantil')
+      expect(d5.quantidade).toBe(15)
+      expect(d5.origem).toBe('produto_nome')
+    })
+
+    it('multiplica quantidade de kits comprados pela quantidade de peças deduzida', () => {
+      // 2 kits de RMickeyMinnie-20 = 40 unidades
+      const linha = processarLinhaMapeada(
+        {
+          ID: 'PED-MULT-01',
+          SKU: 'RMickeyMinnie-20',
+          Produto: 'Toalhas Mickey',
+          Qtd: '2',
+        },
+        {
+          numeroPedido: 'ID',
+          sku: 'SKU',
+          produtoNome: 'Produto',
+          quantidade: 'Qtd',
+        },
+        catalogoMock,
+        temasMock,
+        0,
+      )
+
+      expect(linha?.quantidadePlanilhaOriginal).toBe(2)
+      expect(linha?.quantidadeDeduzidaPorKit).toBe(20)
+      expect(linha?.quantidade).toBe(40)
+      expect(linha?.origemDeducaoQuantidade).toBe('sku')
+    })
+  })
+
   describe('Detecção dinâmica de cabeçalhos e sinônimos da Shopee BR', () => {
     it('detecta coluna com acentos, pontuação e variações de caixa', () => {
       const cabecalhos = [
@@ -116,6 +196,7 @@ describe('expedicaoShopeeParser', () => {
         'Quantidade',
         'Nome de usuário do comprador',
         'Observação do Comprador',
+        'Código de Rastreamento',
       ]
 
       expect(detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.numeroPedido)).toBe('Nº do Pedido')
@@ -132,6 +213,9 @@ describe('expedicaoShopeeParser', () => {
       )
       expect(detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.pedidoEspecial)).toBe(
         'Observação do Comprador',
+      )
+      expect(detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.codigoRastreio)).toBe(
+        'Código de Rastreamento',
       )
     })
 
@@ -167,6 +251,7 @@ describe('expedicaoShopeeParser', () => {
           'Quantidade',
           'Nome de usuário do comprador',
           'Observação do comprador',
+          'Código de Rastreio',
         ],
         [
           '241014SHP001',
@@ -174,9 +259,10 @@ describe('expedicaoShopeeParser', () => {
           'KIT-40-BLeve',
           'Kit 40 Toalha Leve de Praia',
           'Sortido 5 Modelos',
-          '40',
+          '1', // Deal Quantity = 1 da Shopee, mas é kit de 40!
           'marina_silva',
           'Cliente pediu modelos 1 e 2 no chat',
+          'BR241014RASTREIO01',
         ],
         [
           '241014SHP002',
@@ -221,7 +307,9 @@ describe('expedicaoShopeeParser', () => {
       expect(item1.numeroPedido).toBe('241014SHP001')
       expect(item1.sku).toBe('KIT-40-BLeve')
       expect(item1.produtoNome).toBe('Kit 40 Toalha Leve de Praia')
+      // Corrigido para 40 peças mesmo a planilha trazendo Deal Quantity = 1
       expect(item1.quantidade).toBe(40)
+      expect(item1.codigoRastreio).toBe('BR241014RASTREIO01')
       expect(item1.clienteNome).toBe('marina_silva')
       expect(item1.temPedidoEspecial).toBe(true)
       expect(item1.pedidoEspecial).toContain('Cliente pediu modelos 1 e 2 no chat')

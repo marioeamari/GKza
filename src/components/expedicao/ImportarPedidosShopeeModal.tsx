@@ -244,20 +244,24 @@ export function ImportarPedidosShopeeModal({
           variacao_anuncio: item.variacao || '',
           produto_referencia: item.produtoEncontrado?.id || undefined,
           shopee_order_id: orderIdLimpo,
+          codigo_rastreio: item.codigoRastreio || '',
         })
         criados++
       } catch (err: any) {
         console.warn(`Erro ao criar pedido ${item.numeroPedido}:`, err)
-        // Se já existia, tenta atualizar o pedido especial e o shopee_order_id
+        // Se já existia, atualiza também a quantidade corrigida e o código de rastreio
         try {
           const existente = await separacaoKitsService.getPedidoByNumeroOuSku(item.numeroPedido)
           if (existente) {
             await separacaoKitsService.updatePedido(existente.id, {
+              quantidade_total: item.quantidade,
+              codigo_rastreio: item.codigoRastreio || existente.codigo_rastreio,
               pedido_especial: item.pedidoEspecial || existente.pedido_especial,
               tem_pedido_especial: Boolean(item.pedidoEspecial) || existente.tem_pedido_especial,
               shopee_order_id: item.numeroPedido,
               variacao_anuncio: item.variacao || existente.variacao_anuncio,
               cliente_nome: item.clienteNome || existente.cliente_nome,
+              produto_referencia: item.produtoEncontrado?.id || existente.produto_referencia,
             })
             criados++
           } else {
@@ -283,9 +287,9 @@ export function ImportarPedidosShopeeModal({
 
   // Preencher exemplo de teste para colagem
   const handleExemploShopee = () => {
-    const exemplo = `241014ABCD01\tKIT-40-BLeve\tKit 40 Toalha Leve de Praia\tSortido 5 Modelos\t40\tMariana Costa\tCliente pediu apenas modelo 1 e 2 no chat
-241014ABCD02\tKIT-TOALHA-MONICA-30\tKit Toalha de Rosto Mônica 30 un\tPadrão\t30\tJuliana Rios\t
-241014ABCD03\tComboBLeveBBanhao\tCombo Toalha Leve + Toalha Banhão\tAzul/Branco\t2\tRicardo Alves\t`
+    const exemplo = `241014ABCD01\tRMickeyMinnie-20\t20 Toalhas de Rosto e Mão Personalizada Mickey Mouse Minnie Mouse\tSortido 5 Modelos\t1\tMariana Costa\tCliente pediu apenas modelo 1 e 2 no chat\tBR241014RASTREIO01
+241014ABCD02\tKIT-TOALHA-MONICA-30\tKit Toalha de Rosto Mônica 30 un\tPadrão\t1\tJuliana Rios\t\tBR241014RASTREIO02
+241014ABCD03\tComboBLeveBBanhao\tCombo Toalha Leve + Toalha Banhão\tAzul/Branco\t2\tRicardo Alves\t\tBR241014RASTREIO03`
     setTextoColado(exemplo)
     const res = parseShopeeColagem(exemplo, catalogoProdutos, temas)
     setResultadoParse(res)
@@ -593,8 +597,29 @@ export function ImportarPedidosShopeeModal({
                     </Select>
                   </div>
 
+                  {/* CÓDIGO DE RASTREIO */}
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-bold">Código de Rastreio / Tracking:</Label>
+                    <Select
+                      value={mapeamentoCustom.codigoRastreio || '__vazio__'}
+                      onValueChange={(v) => handleAtualizarMapeamento('codigoRastreio', v)}
+                    >
+                      <SelectTrigger className="h-8 text-xs font-medium">
+                        <SelectValue placeholder="Selecione a coluna..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__vazio__">(Não mapeado)</SelectItem>
+                        {colunasDetectadas.map((col) => (
+                          <SelectItem key={col} value={col}>
+                            {col}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   {/* OBSERVAÇÃO / PEDIDO ESPECIAL */}
-                  <div className="space-y-1 sm:col-span-2 md:col-span-3">
+                  <div className="space-y-1 sm:col-span-2">
                     <Label className="text-[11px] font-bold">
                       Observação do Comprador (Pedido Especial):
                     </Label>
@@ -672,9 +697,24 @@ export function ImportarPedidosShopeeModal({
                           <span className="text-[11px] text-muted-foreground">({item.sku})</span>
                         )}
                       </div>
-                      <Badge variant="secondary" className="font-black text-xs">
-                        {item.quantidade} un
-                      </Badge>
+                      <div className="flex items-center gap-1.5">
+                        {item.quantidadeDeduzidaPorKit && item.quantidadePlanilhaOriginal === 1 ? (
+                          <Badge className="bg-emerald-600 text-white font-black text-xs">
+                            {item.quantidade} un (deduzido de 1 kit)
+                          </Badge>
+                        ) : item.quantidadeDeduzidaPorKit &&
+                          item.quantidadePlanilhaOriginal &&
+                          item.quantidadePlanilhaOriginal > 1 ? (
+                          <Badge className="bg-emerald-600 text-white font-black text-xs">
+                            {item.quantidade} un ({item.quantidadePlanilhaOriginal} kits ×{' '}
+                            {item.quantidadeDeduzidaPorKit})
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="font-black text-xs">
+                            {item.quantidade} un
+                          </Badge>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -687,6 +727,27 @@ export function ImportarPedidosShopeeModal({
                         <span className="inline-flex items-center text-amber-700 font-semibold">
                           <AlertTriangle className="mr-1 h-3 w-3" />
                           Não reconhecido no catálogo prec_produtos (item genérico)
+                        </span>
+                      )}
+
+                      {item.origemDeducaoQuantidade &&
+                        item.origemDeducaoQuantidade !== 'planilha' && (
+                          <Badge
+                            variant="outline"
+                            className="border-emerald-400 bg-emerald-50 text-emerald-800 text-[10px] font-bold"
+                          >
+                            ★ Qtd corrigida via{' '}
+                            {item.origemDeducaoQuantidade === 'catalogo'
+                              ? 'catálogo'
+                              : item.origemDeducaoQuantidade === 'sku'
+                                ? 'SKU'
+                                : 'nome'}
+                          </Badge>
+                        )}
+
+                      {item.codigoRastreio && (
+                        <span className="text-primary font-bold">
+                          Rastreio: <strong className="font-mono">{item.codigoRastreio}</strong>
                         </span>
                       )}
 

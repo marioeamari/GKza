@@ -48,6 +48,7 @@ export default function SeparacaoKitsPage() {
   const [loading, setLoading] = useState(true)
 
   // Estado da bipagem / busca
+  const [modoConsulta, setModoConsulta] = useState<'id_pedido' | 'codigo_rastreio'>('id_pedido')
   const [buscaTermo, setBuscaTermo] = useState('')
   const [buscando, setBuscando] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -109,17 +110,32 @@ export default function SeparacaoKitsPage() {
   }, [pedidoAtivo])
 
   // Processa a seleção ou busca de um pedido
-  const handleCarregarPedido = async (termoParaBuscar: string) => {
+  const handleCarregarPedido = async (
+    termoParaBuscar: string,
+    modoSobrescrito?: 'id_pedido' | 'codigo_rastreio',
+  ) => {
     const q = termoParaBuscar.trim()
     if (!q) return
 
+    const modo = modoSobrescrito || modoConsulta
+
     setBuscando(true)
     try {
-      const pedido = await separacaoKitsService.getPedidoByNumeroOuSku(q)
+      let pedido: KitPedido | null = null
+
+      if (modo === 'codigo_rastreio') {
+        pedido = await separacaoKitsService.getPedidoByCodigoRastreio(q)
+      } else {
+        pedido = await separacaoKitsService.getPedidoByNumeroOuSku(q)
+      }
+
       if (!pedido) {
         toast({
           title: 'Pedido não encontrado',
-          description: `Nenhum pedido localizado com o número ou SKU "${q}".`,
+          description:
+            modo === 'codigo_rastreio'
+              ? `Nenhum pedido localizado com o código de rastreio exato "${q}".`
+              : `Nenhum pedido localizado com o número, shopee order ID ou SKU "${q}".`,
           variant: 'destructive',
         })
         return
@@ -247,6 +263,7 @@ export default function SeparacaoKitsPage() {
         dataInicio,
         pedidoEspecial: pedidoAtivo.pedido_especial,
         shopeeOrderId: pedidoAtivo.shopee_order_id || pedidoAtivo.numero_pedido,
+        codigoRastreio: pedidoAtivo.codigo_rastreio || '',
       })
 
       setFinalizadoSucesso(true)
@@ -303,17 +320,54 @@ export default function SeparacaoKitsPage() {
             <Card className="border-2 border-primary/30 bg-card shadow-sm transition hover:border-primary/60">
               <CardContent className="p-6 sm:p-8">
                 <form onSubmit={handleBiparSubmit} className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                      <Barcode className="h-6 w-6" />
-                    </span>
-                    <div>
-                      <h2 className="text-lg font-black text-foreground">
-                        Bipar etiqueta ou digitar número do pedido
-                      </h2>
-                      <p className="text-xs text-muted-foreground">
-                        Aceita código de barras, número do pedido ou SKU do produto
-                      </p>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                        <Barcode className="h-6 w-6" />
+                      </span>
+                      <div>
+                        <h2 className="text-lg font-black text-foreground">
+                          Bipar etiqueta ou digitar número do pedido
+                        </h2>
+                        <p className="text-xs text-muted-foreground">
+                          Selecione o modo de consulta abaixo para bipagem com leitor ou digitação
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* SELETOR DE MODO DE CONSULTA (PEDIDO DO USUÁRIO) */}
+                    <div className="flex items-center gap-1 rounded-xl border border-border/80 bg-muted/40 p-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={modoConsulta === 'id_pedido' ? 'default' : 'ghost'}
+                        onClick={() => {
+                          setModoConsulta('id_pedido')
+                          inputRef.current?.focus()
+                        }}
+                        className={cn(
+                          'h-9 px-3 text-xs font-bold transition-all',
+                          modoConsulta === 'id_pedido' && 'bg-primary text-white shadow-sm',
+                        )}
+                      >
+                        ID do Pedido (Padrão)
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={modoConsulta === 'codigo_rastreio' ? 'default' : 'ghost'}
+                        onClick={() => {
+                          setModoConsulta('codigo_rastreio')
+                          inputRef.current?.focus()
+                        }}
+                        className={cn(
+                          'h-9 px-3 text-xs font-bold transition-all',
+                          modoConsulta === 'codigo_rastreio' &&
+                            'bg-emerald-700 text-white shadow-sm',
+                        )}
+                      >
+                        Código de Rastreio
+                      </Button>
                     </div>
                   </div>
 
@@ -325,22 +379,35 @@ export default function SeparacaoKitsPage() {
                         type="text"
                         value={buscaTermo}
                         onChange={(e) => setBuscaTermo(e.target.value)}
-                        placeholder="Ex: 123456789, 241014ABCD99 ou SKU..."
-                        className="h-16 pl-14 text-lg font-bold tracking-wider placeholder:text-muted-foreground/50 sm:text-xl"
+                        placeholder={
+                          modoConsulta === 'codigo_rastreio'
+                            ? 'Bipe ou digite o código de rastreio (ex: BR241014..., NL123456789BR)...'
+                            : 'Bipe ou digite o ID do pedido, shopee order ID ou SKU (ex: 2610108R4K8K0C)...'
+                        }
+                        className={cn(
+                          'h-16 pl-14 text-lg font-bold tracking-wider placeholder:text-muted-foreground/50 sm:text-xl transition-colors',
+                          modoConsulta === 'codigo_rastreio' &&
+                            'border-emerald-500/60 focus-visible:ring-emerald-500',
+                        )}
                         autoFocus
                       />
                     </div>
                     <Button
                       type="submit"
                       disabled={buscando || !buscaTermo.trim()}
-                      className="h-16 px-8 text-base font-black bg-primary text-white hover:bg-primary/90 shadow-sm"
+                      className={cn(
+                        'h-16 px-8 text-base font-black text-white shadow-sm transition-colors',
+                        modoConsulta === 'codigo_rastreio'
+                          ? 'bg-emerald-700 hover:bg-emerald-800'
+                          : 'bg-primary hover:bg-primary/90',
+                      )}
                     >
                       {buscando ? (
                         'Buscando...'
                       ) : (
                         <>
                           <Search className="mr-2 h-5 w-5" />
-                          BUSCAR PEDIDO
+                          {modoConsulta === 'codigo_rastreio' ? 'BUSCAR RASTREIO' : 'BUSCAR PEDIDO'}
                         </>
                       )}
                     </Button>
@@ -463,6 +530,14 @@ export default function SeparacaoKitsPage() {
                         {pedidoAtivo.sku && (
                           <span>
                             SKU: <strong className="text-foreground">{pedidoAtivo.sku}</strong>
+                          </span>
+                        )}
+                        {pedidoAtivo.codigo_rastreio && (
+                          <span className="text-primary font-bold">
+                            Rastreio:{' '}
+                            <strong className="font-mono text-foreground">
+                              {pedidoAtivo.codigo_rastreio}
+                            </strong>
                           </span>
                         )}
                         {temaDoPedido && (
