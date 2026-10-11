@@ -28,9 +28,28 @@ interface PrecProdutoPB {
   }
 }
 
+export interface PrecificacaoAprovadaItem {
+  id: string
+  produto_id: string
+  produto_nome: string
+  produto_sku?: string
+  produto_marca?: string
+  produto_categoria?: string
+  qtd_por_kit?: number
+  empresa_nome?: string
+  empresa_cnpj?: string
+  canal_id: string
+  canal_nome: string
+  marketplace_nome?: string
+  preco_venda: number
+  lucro_liquido_unitario: number
+  margem_liquida_percentual: number
+}
+
 interface PrecCanalPB {
   id: string
   nome: string
+  tipo?: 'site_proprio' | 'marketplace'
   marketplace?: string
   cor?: string
   ativo: boolean
@@ -51,8 +70,44 @@ interface PrecPrecificacaoPB {
   canal: string
   status: string
   preco_aprovado?: number
+  preco_venda_calculado?: number
+  lucro_liquido_calculado?: number
+  margem_liquida_calculada?: number
   resultado?: Record<string, unknown>
+  resultado_json?: Record<string, unknown>
   aprovado_em?: string
+  expand?: {
+    produto?: {
+      id: string
+      nome?: string
+      sku?: string
+      marca?: string
+      categoria?: string
+      qtd_por_kit?: number
+      empresa?: string
+      expand?: {
+        empresa?: {
+          id: string
+          nome_fantasia?: string
+          razao_social?: string
+          cnpj?: string
+        }
+      }
+    }
+    canal?: {
+      id: string
+      nome?: string
+      marketplace?: string
+      cor?: string
+      expand?: {
+        marketplace?: {
+          id: string
+          nome: string
+          cor?: string
+        }
+      }
+    }
+  }
 }
 
 interface TagPB {
@@ -138,12 +193,18 @@ export const lucroService = {
 
       return records.map((c, idx) => {
         const mktExpand = c.expand?.marketplace
+        // Se for canal próprio ou não tiver marketplace associado, rotula de forma clara
+        const marketplaceNome =
+          mktExpand?.nome || (c.tipo === 'site_proprio' ? 'Site Próprio' : c.nome)
+        const marketplaceCor = mktExpand?.cor || c.cor || '#0284C7'
+
         return {
           id: c.id,
           nome: c.nome,
-          marketplace_id: c.marketplace,
-          marketplace_nome: mktExpand?.nome || c.nome,
-          marketplace_cor: mktExpand?.cor || c.cor,
+          tipo: c.tipo,
+          marketplace_id: c.marketplace || (c.tipo === 'site_proprio' ? 'site_proprio' : c.id),
+          marketplace_nome: marketplaceNome,
+          marketplace_cor: marketplaceCor,
           ordem: c.ordem ?? idx,
         }
       })
@@ -189,70 +250,73 @@ export const lucroService = {
   },
 
   /**
-   * Busca despesas do mês (competência YYYY-MM) agrupadas por Destino (tag 'destino' ou compromisso.tag),
-   * mapeando para os grupos de contexto conhecidos (WeeKids, KzaMari, GrupoKza, Família Mari / Pessoal)
+   * Busca despesas reais do mês (competência YYYY-MM) agrupadas diretamente pelos Destinos
+   * cadastrados em /despesas ('Destino da despesa / Centro de custo' = coleção tags e direcionamentos).
+   * Dinâmico do banco: agrupa por cada tag real existente (ex: Eu, Eu/Casa, Rafa, Empresa, etc.)
    */
+  /**
+   * Busca todas as precificações APROVADAS com detalhes do produto e canal,
+   * para alimentar a busca e seleção do popup 'Adicionar Produto' (apenas pares produto+canal precificados).
+   */
+  async listarPrecificacoesAprovadasDetalhado(): Promise<PrecificacaoAprovadaItem[]> {
+    try {
+      const records = await pb.collection<PrecPrecificacaoPB>('prec_precificacoes').getFullList({
+        filter: 'status = "aprovada"',
+        expand: 'produto.empresa,canal.marketplace',
+      })
+
+      return records.map((p) => {
+        const prod = p.expand?.produto
+        const canal = p.expand?.canal
+        const mkt = canal?.expand?.marketplace
+        const empresa = prod?.expand?.empresa
+        const resultado = p.resultado_json || {}
+
+        return {
+          id: p.id,
+          produto_id: p.produto,
+          produto_nome: prod?.nome || prod?.sku || 'Produto Sem Nome',
+          produto_sku: prod?.sku,
+          produto_marca: prod?.marca,
+          produto_categoria: prod?.categoria,
+          qtd_por_kit: prod?.qtd_por_kit,
+          empresa_nome: empresa?.nome_fantasia || empresa?.razao_social,
+          empresa_cnpj: empresa?.cnpj,
+          canal_id: p.canal,
+          canal_nome: canal?.nome || 'Canal',
+          marketplace_nome: mkt?.nome || canal?.nome,
+          preco_venda: Number(resultado.preco_venda || p.preco_venda_calculado || 0),
+          lucro_liquido_unitario: Number(
+            resultado.lucro_liquido_unitario || p.lucro_liquido_calculado || 0,
+          ),
+          margem_liquida_percentual: Number(
+            resultado.margem_liquida_percentual || p.margem_liquida_calculada || 0,
+          ),
+        }
+      })
+    } catch (err) {
+      console.error('lucroService.listarPrecificacoesAprovadasDetalhado falhou:', err)
+      return []
+    }
+  },
+
   async carregarDespesasMes(competencia: string): Promise<DespesaGrupoItem[]> {
     try {
-      const [ocorrencias, gruposContexto, tags] = await Promise.all([
+      const [ocorrencias, tags] = await Promise.all([
         pb.collection<DespesaOcorrenciaPB>('despesas_ocorrencias').getFullList({
           filter: `competencia = '${competencia}' && status != 'cancelada'`,
           expand: 'compromisso.tag,compromisso',
-        }),
-        pb.collection<ContextoGrupoPB>('contexto_grupos').getFullList({
-          sort: 'ordem,nome',
         }),
         pb.collection<TagPB>('tags').getFullList({
           sort: 'nome',
         }),
       ])
 
-      // Mapa para localizar tag por id
       const tagMap = new Map<string, TagPB>()
       tags.forEach((t) => tagMap.set(t.id, t))
 
-      // Mapeamento de grupos de contexto conhecidos
-      // GrupoKza (com WeeKids, KzaMari, etc.) e Família Mari (com Eu, Eu/Casa, Rafa, etc.)
-      // Grupos padrão conforme layout do usuário:
-      const gruposDefinidos: Record<string, { nome: string; cor: string; tags: string[] }> = {
-        grupokza: {
-          nome: 'GrupoKza',
-          cor: '#4C3A8C',
-          tags: [
-            'weekids',
-            'weekids - site',
-            'weekids - mkt.plcs',
-            'kzamari',
-            'kzamari - site',
-            'kzamari - mkt.plcs',
-            'kzamari+weekids',
-            'grupokza',
-            'gkza - barracão',
-            'empresa',
-            'geral',
-          ],
-        },
-        familiamari: {
-          nome: 'Família Mari',
-          cor: '#2B5BA8',
-          tags: [
-            'cpf/cnpj',
-            'eu',
-            'eu/casa',
-            'casa',
-            'fer',
-            'fernanda',
-            'rafa',
-            'lara',
-            'mãe',
-            'mae',
-            'pessoal',
-          ],
-        },
-      }
-
-      // Agrupador de resultados
-      const acumuladorPorGrupo: Record<
+      // Mapa para agrupar por Destino real cadastrado
+      const mapaDestinos = new Map<
         string,
         {
           grupo_id: string
@@ -267,52 +331,33 @@ export const lucroService = {
             destino?: string
           }>
         }
-      > = {
-        grupokza: {
-          grupo_id: 'grupokza',
-          grupo_nome: 'GrupoKza',
-          cor: '#4C3A8C',
-          total: 0,
-          itens: [],
-        },
-        familiamari: {
-          grupo_id: 'familiamari',
-          grupo_nome: 'Família Mari',
-          cor: '#2B5BA8',
-          total: 0,
-          itens: [],
-        },
-        outros: {
-          grupo_id: 'outros',
-          grupo_nome: 'Outros Destinos',
-          cor: '#64748B',
-          total: 0,
-          itens: [],
-        },
-      }
+      >()
 
       for (const oc of ocorrencias) {
+        // Regra de valor: utiliza valor_pago se baixada, ou valor_previsto
         const valor = Number(oc.valor_pago || oc.valor_previsto || 0)
         if (valor <= 0) continue
 
         const comp = oc.expand?.compromisso
         const tagObj = comp?.expand?.tag || (comp?.tag ? tagMap.get(comp.tag) : undefined)
-        const tagNome = tagObj?.nome || oc.direcionamento || comp?.direcionamento || 'Sem Tag'
-        const tagKey = tagNome.toLowerCase().trim()
+        const tagNome =
+          tagObj?.nome || oc.direcionamento || comp?.direcionamento || 'Sem Destino Definido'
+        const tagId = tagObj?.id || tagNome.toLowerCase().trim()
+        const tagCor = tagObj?.cor || '#64748B'
 
-        // Determina grupo de destino
-        let chaveGrupo = 'outros'
-        if (gruposDefinidos.grupokza.tags.some((t) => tagKey.includes(t) || t.includes(tagKey))) {
-          chaveGrupo = 'grupokza'
-        } else if (
-          gruposDefinidos.familiamari.tags.some((t) => tagKey.includes(t) || t.includes(tagKey))
-        ) {
-          chaveGrupo = 'familiamari'
+        if (!mapaDestinos.has(tagId)) {
+          mapaDestinos.set(tagId, {
+            grupo_id: tagId,
+            grupo_nome: tagNome,
+            cor: tagCor,
+            total: 0,
+            itens: [],
+          })
         }
 
-        const grupoDest = acumuladorPorGrupo[chaveGrupo]
-        grupoDest.total += valor
-        grupoDest.itens.push({
+        const grupo = mapaDestinos.get(tagId)!
+        grupo.total = Math.round((grupo.total + valor + Number.EPSILON) * 100) / 100
+        grupo.itens.push({
           id: oc.id,
           descricao: comp?.descricao || 'Despesa',
           valor,
@@ -321,8 +366,8 @@ export const lucroService = {
         })
       }
 
-      // Constrói lista de grupos com subtotais por destino (tag)
-      return Object.values(acumuladorPorGrupo).filter((g) => g.total > 0 || g.grupo_id !== 'outros')
+      // Ordena por maior valor total
+      return Array.from(mapaDestinos.values()).sort((a, b) => b.total - a.total)
     } catch (err) {
       console.error('lucroService.carregarDespesasMes falhou:', err)
       return []

@@ -23,9 +23,10 @@ export interface ProdutoLucro {
 
 export interface CanalLojaLucro {
   id: string
-  nome: string // Ex: "Kza Mari", "Wee Kids"
+  nome: string
+  tipo?: 'site_proprio' | 'marketplace'
   marketplace_id?: string
-  marketplace_nome: string // Ex: "Shopee", "SHEIN", "Kwai", "Magalu", "TikTok", "Mercado Livre", "TEMU", "www.site.com.br"
+  marketplace_nome: string
   marketplace_cor?: string
   ordem?: number
 }
@@ -291,7 +292,7 @@ export function calcularGradeLucroMes(
 export function agruparLojasPorMarketplace(lojas: CanalLojaLucro[]): MarketplaceGrupoLojas[] {
   const gruposMap = new Map<string, MarketplaceGrupoLojas>()
 
-  // Cores de marca padrão para os principais marketplaces
+  // Cores de marca padrão para os marketplaces conhecidos caso não venham do cadastro
   const coresPadrao: Record<string, string> = {
     shopee: '#EE4D2D',
     shein: '#111111',
@@ -299,6 +300,8 @@ export function agruparLojasPorMarketplace(lojas: CanalLojaLucro[]): Marketplace
     magalu: '#0086FF',
     tiktok: '#000000',
     'mercado livre': '#FFE600',
+    mercadolivre: '#FFE600',
+    amazon: '#FF9900',
     temu: '#FF5722',
     'site próprio': '#0284C7',
     site: '#0284C7',
@@ -306,13 +309,14 @@ export function agruparLojasPorMarketplace(lojas: CanalLojaLucro[]): Marketplace
   }
 
   for (const loja of lojas) {
-    const nomeMkt = (loja.marketplace_nome || 'Outros').trim()
-    const chave = nomeMkt.toLowerCase()
+    const nomeMkt = (loja.marketplace_nome || 'Canais').trim()
+    // Identificador único do grupo: id do marketplace ou slug/nome minúsculo
+    const chave = (loja.marketplace_id || nomeMkt).toLowerCase()
 
     let cor = loja.marketplace_cor
     if (!cor) {
       for (const [k, c] of Object.entries(coresPadrao)) {
-        if (chave.includes(k)) {
+        if (chave.includes(k) || nomeMkt.toLowerCase().includes(k)) {
           cor = c
           break
         }
@@ -329,7 +333,12 @@ export function agruparLojasPorMarketplace(lojas: CanalLojaLucro[]): Marketplace
       })
     }
 
-    gruposMap.get(chave)!.lojas.push(loja)
+    const grp = gruposMap.get(chave)!
+    // Mantém a cor mais específica se estiver disponível
+    if (loja.marketplace_cor && grp.cor === '#475569') {
+      grp.cor = loja.marketplace_cor
+    }
+    grp.lojas.push(loja)
   }
 
   return Array.from(gruposMap.values())

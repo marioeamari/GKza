@@ -100,11 +100,11 @@ export const TabBalanco: React.FC<TabBalancoProps> = ({ balancoData, nomePeriodo
           <div>
             <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
               <Layers className="h-4 w-4 text-primary" />
-              Composição das Despesas por Destino / Contexto ({nomePeriodo})
+              Composição das Despesas por Destino / Centro de Custo ({nomePeriodo})
             </h3>
             <p className="text-xs text-muted-foreground">
-              Agrupamento conforme tags cadastradas: GrupoKza (WeeKids, KzaMari, etc.) e Família
-              Mari (Eu, Eu/Casa, Rafa, etc.)
+              Despesas reais do mês agrupadas pelos destinos cadastrados em /despesas ('Destino da
+              despesa / Centro de custo')
             </p>
           </div>
         </div>

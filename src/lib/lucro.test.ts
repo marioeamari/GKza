@@ -195,23 +195,88 @@ describe('Módulo /lucro — Regras de Negócio e Cálculos', () => {
   })
 
   describe('Agrupamento de Lojas por Marketplace e Cabeçalho de Marcas', () => {
-    it('agrupa lojas e atribui cores padrão de marca aos marketplaces', () => {
+    it('agrupa canais reais cadastrados preservando marketplace_id e cores de marca', () => {
       const lojas: CanalLojaLucro[] = [
-        { id: '1', nome: 'Kza Mari', marketplace_nome: 'Shopee' },
-        { id: '2', nome: 'Wee Kids', marketplace_nome: 'Shopee' },
-        { id: '3', nome: 'Kza Mari', marketplace_nome: 'SHEIN' },
+        {
+          id: 'c1',
+          nome: 'Kza Mari',
+          marketplace_id: 'mkt_shopee',
+          marketplace_nome: 'Shopee',
+          marketplace_cor: '#EE4D2D',
+        },
+        {
+          id: 'c2',
+          nome: 'Wee Kids',
+          marketplace_id: 'mkt_shopee',
+          marketplace_nome: 'Shopee',
+          marketplace_cor: '#EE4D2D',
+        },
+        {
+          id: 'c3',
+          nome: 'Loja Oficial',
+          tipo: 'site_proprio',
+          marketplace_id: 'site_proprio',
+          marketplace_nome: 'Site Próprio',
+          marketplace_cor: '#0284C7',
+        },
       ]
 
       const grupos = agruparLojasPorMarketplace(lojas)
 
       expect(grupos.length).toBe(2)
-      expect(grupos[0].nome).toBe('Shopee')
-      expect(grupos[0].lojas.length).toBe(2)
-      expect(grupos[0].cor).toBe('#EE4D2D') // Shopee laranja/vermelho
+      const grpShopee = grupos.find((g) => g.nome === 'Shopee')!
+      expect(grpShopee.lojas.length).toBe(2)
+      expect(grpShopee.cor).toBe('#EE4D2D')
 
-      expect(grupos[1].nome).toBe('SHEIN')
-      expect(grupos[1].lojas.length).toBe(1)
-      expect(grupos[1].cor).toBe('#111111') // SHEIN preto
+      const grpSite = grupos.find((g) => g.nome === 'Site Próprio')!
+      expect(grpSite.lojas.length).toBe(1)
+      expect(grpSite.cor).toBe('#0284C7')
+    })
+  })
+
+  describe('Aba 2: Balanço Dinâmico (Lucro Líquido Real − Despesas Reais por Destino)', () => {
+    it('calcula Balanço = Lucro Líquido da Grade − Total de Despesas Reais de Destinos cadastrados', () => {
+      const despesasReais: DespesaGrupoItem[] = [
+        {
+          grupo_id: 'tag_empresa',
+          grupo_nome: 'Empresa',
+          cor: '#4C3A8C',
+          total: 5000,
+          itens: [{ id: '1', descricao: 'Aluguel barracão', valor: 5000, tag_nome: 'Empresa' }],
+        },
+        {
+          grupo_id: 'tag_pessoal',
+          grupo_nome: 'Eu/Casa',
+          cor: '#2B5BA8',
+          total: 3500.5,
+          itens: [{ id: '2', descricao: 'Supermercado', valor: 3500.5, tag_nome: 'Eu/Casa' }],
+        },
+      ]
+
+      // Supondo lucro total somado na grade = 10.000,00
+      const resultado = calcularBalancoMes(10000, despesasReais)
+
+      expect(resultado.lucroLiquido).toBe(10000)
+      expect(resultado.totalDespesasTags).toBe(8500.5)
+      expect(resultado.balanco).toBe(1499.5)
+      expect(resultado.isNegativo).toBe(false)
+    })
+
+    it('quando o total de despesas excede o lucro líquido, gera balanço negativo corretamente', () => {
+      const despesasReais: DespesaGrupoItem[] = [
+        {
+          grupo_id: 'tag_empresa',
+          grupo_nome: 'Geral',
+          total: 12000,
+          itens: [{ id: '1', descricao: 'Folha', valor: 12000 }],
+        },
+      ]
+
+      const resultado = calcularBalancoMes(2434.86, despesasReais)
+      expect(resultado.lucroLiquido).toBe(2434.86)
+      expect(resultado.totalDespesasTags).toBe(12000)
+      expect(resultado.balanco).toBe(-9565.14)
+      expect(resultado.isNegativo).toBe(true)
     })
   })
 

@@ -25,6 +25,7 @@ import { lucroService } from '@/services/lucro'
 import { TabLucroLiquido } from '@/components/lucro/TabLucroLiquido'
 import { TabBalanco } from '@/components/lucro/TabBalanco'
 import { TabSaidasUnitarias } from '@/components/lucro/TabSaidasUnitarias'
+import { ModalAdicionarProduto } from '@/components/lucro/ModalAdicionarProduto'
 import type {
   ProdutoLucro,
   CanalLojaLucro,
@@ -33,6 +34,7 @@ import type {
   BalancoMesResultado,
   ResumoAbaSaidasResultado,
 } from '@/lib/lucro'
+import type { PrecificacaoAprovadaItem } from '@/services/lucro'
 import { calcularGradeLucroMes, calcularBalancoMes, calcularSaidasUnitarias } from '@/lib/lucro'
 
 // Meses disponíveis para consulta (base do ano corrente e 2026)
@@ -163,354 +165,69 @@ export default function LucroPage() {
   const [activeTab, setActiveTab] = useState<'grade' | 'balanco' | 'saidas'>('grade')
   const [loading, setLoading] = useState(true)
 
+  // Estado do Modal 'Adicionar Produto'
+  const [modalAdicionarAberto, setModalAdicionarAberto] = useState(false)
+
   // Dados carregados do backend (SOMENTE LEITURA)
-  const [produtos, setProdutos] = useState<ProdutoLucro[]>([])
+  // Lista de canais reais cadastrados no banco em prec_canais (agrupados por prec_marketplaces)
   const [lojas, setLojas] = useState<CanalLojaLucro[]>([])
+  // Catálogo completo de produtos (para lookup de metadados se necessário)
+  const [catalogoProdutos, setCatalogoProdutos] = useState<ProdutoLucro[]>([])
+  // Lista de precificações aprovadas detalhadas vindas do banco
+  const [precificacoesAprovadas, setPrecificacoesAprovadas] = useState<PrecificacaoAprovadaItem[]>(
+    [],
+  )
+  // Mapa de rendas líquidas aprovadas: [produto_id][canal_id] => { renda_liquida_unitaria, tem_aprovacao }
   const [rendasLiquidas, setRendasLiquidas] = useState<
     Record<string, Record<string, { renda_liquida_unitaria: number; tem_aprovacao: boolean }>>
   >({})
+  // Despesas reais do mês agrupadas por Destino / Centro de custo cadastrado em /despesas
   const [despesasGrupos, setDespesasGrupos] = useState<DespesaGrupoItem[]>([])
+
+  // IDs dos produtos adicionados na grade por competência (enxugando a grade para só o que está adicionado/precificado)
+  const [produtosGradePorMes, setProdutosGradePorMes] = useState<Record<string, string[]>>({})
 
   // Grade de inserção de quantidades em memória local do relatório (sem persistência no banco)
   // [produto_id][canal_id] => quantidade inserida manualmente
   const [quantidadesPorMes, setQuantidadesPorMes] = useState<
     Record<string, Record<string, Record<string, number>>>
-  >({
-    '2026-09': {
-      // Pré-carga dos valores do caso real da planilha (Set/26 até dia 05 = R$ 2.434,86):
-      // Banho Leve "b": Shopee KzaMari: 305 un (R$ 1.174,25 => ~3.85 un), SHEIN: 6 un (29,10 => 4.85), Kwai: 7 un (26,95 => 3.85), TikTok: 2 un (11,68 => 5.84), TEMU: 5 un (19,85 => 3.97)
-      prod_banho_leve: {
-        shopee_kzamari: 305,
-        shein_kzamari: 6,
-        kwai_kzamari: 7,
-        tiktok_kzamari: 2,
-        temu_kzamari: 5,
-      },
-      prod_rosto_5: {
-        shopee_kzamari: 2,
-        shein_kzamari: 13,
-        tiktok_kzamari: 11,
-      },
-      prod_rosto_6: {
-        shopee_kzamari: 5,
-        shein_kzamari: 19,
-      },
-      prod_rosto_10: {
-        shopee_kzamari: 7,
-      },
-      prod_pano_6: {
-        shein_kzamari: 1,
-      },
-      prod_pano_10: {
-        shopee_kzamari: 8,
-      },
-      prod_banho_quadr_5: {
-        shein_kzamari: 5,
-      },
-      prod_kit_rosto_5: {
-        shopee_kzamari: 7,
-      },
-      prod_kit_rosto_10: {
-        shopee_kzamari: 12,
-      },
-      prod_kit_rosto_15: {
-        shopee_kzamari: 5,
-      },
-      prod_kit_rosto_20: {
-        shopee_kzamari: 28,
-      },
-      prod_kit_rosto_25: {
-        shopee_kzamari: 4,
-      },
-      prod_kit_rosto_30: {
-        shopee_kzamari: 26,
-      },
-      prod_kit_rosto_35: {
-        shopee_kzamari: 2,
-      },
-      prod_kit_rosto_40: {
-        shopee_kzamari: 2,
-      },
-      prod_kit_rosto_50: {
-        shopee_kzamari: 3,
-      },
-    },
-    '2026-08': {
-      // Caso real ago/26: Banho Leve 'b' 1 kit = 913 unid., Rosto Folha/Esmeralda 123 kits = 778 unid.
-      prod_banho_leve: {
-        shopee_kzamari: 1,
-      },
-      prod_rosto_folha: {
-        shopee_kzamari: 123,
-      },
-    },
-  })
+  >({})
 
-  // Carrega dados dos módulos existentes (prec_produtos, prec_canais, prec_precificacoes, despesas)
+  // Carrega dados dos módulos existentes (prec_canais, prec_precificacoes, prec_produtos, despesas)
   const carregarDados = useCallback(async () => {
     setLoading(true)
     try {
-      const [prodsPB, canaisPB, rendasPB, despesasPB] = await Promise.all([
-        lucroService.listarProdutos(),
+      const [canaisPB, precsAprovadasPB, prodsPB, rendasPB, despesasPB] = await Promise.all([
         lucroService.listarCanais(),
+        lucroService.listarPrecificacoesAprovadasDetalhado(),
+        lucroService.listarProdutos(),
         lucroService.carregarRendasLiquidasAprovadas(),
         lucroService.carregarDespesasMes(competencia),
       ])
 
-      // Fallback amigável de produtos para reprodução perfeita dos casos da planilha se prec_produtos tiver poucos itens
-      const produtosParaUso: ProdutoLucro[] =
-        prodsPB.length >= 5
-          ? prodsPB
-          : [
-              {
-                id: 'prod_banho_leve',
-                nome: 'Banho Leve - "b" (1 Unidade)',
-                sku: 'BLeve',
-                marca: 'Leve',
-                categoria: 'Banho',
-                qtd_por_kit: 913,
-                empresa_nome: 'KzaMari Indústria e Comércio',
-                empresa_cnpj: '44.123.456/0001-89',
-              },
-              {
-                id: 'prod_rosto_folha',
-                nome: 'Rosto Folha/Esmeralda (Kit)',
-                sku: 'RFolha',
-                marca: 'BFolha',
-                categoria: 'Rosto',
-                qtd_por_kit: 6, // 123 kits x ~6.325 = 778 un
-                empresa_nome: 'KzaMari Indústria e Comércio',
-                empresa_cnpj: '44.123.456/0001-89',
-              },
-              {
-                id: 'prod_rosto_5',
-                nome: 'Rosto Folha/Esmeralda - Kit c/ 5 Unidades',
-                sku: 'RFolha-5',
-                marca: 'BFolha',
-                categoria: 'Rosto',
-                qtd_por_kit: 5,
-                empresa_nome: 'KzaMari Indústria e Comércio',
-                empresa_cnpj: '44.123.456/0001-89',
-              },
-              {
-                id: 'prod_rosto_6',
-                nome: 'Rosto Folha/Esmeralda - Kit c/ 6 Unidades',
-                sku: 'RFolha-6',
-                marca: 'BFolha',
-                categoria: 'Rosto',
-                qtd_por_kit: 6,
-                empresa_nome: 'KzaMari Indústria e Comércio',
-                empresa_cnpj: '44.123.456/0001-89',
-              },
-              {
-                id: 'prod_rosto_10',
-                nome: 'Rosto Folha/Esmeralda - Kit c/ 10 Unidades',
-                sku: 'RFolha-10',
-                marca: 'BFolha',
-                categoria: 'Rosto',
-                qtd_por_kit: 10,
-                empresa_nome: 'KzaMari Indústria e Comércio',
-                empresa_cnpj: '44.123.456/0001-89',
-              },
-              {
-                id: 'prod_pano_5',
-                nome: 'Pano Atoalhado - Kit c/ 5 Unidades',
-                sku: 'Pano-5',
-                categoria: 'Cozinha',
-                qtd_por_kit: 5,
-                empresa_nome: 'KzaMari Indústria e Comércio',
-              },
-              {
-                id: 'prod_pano_6',
-                nome: 'Pano Atoalhado - Kit c/ 6 Unidades',
-                sku: 'Pano-6',
-                categoria: 'Cozinha',
-                qtd_por_kit: 6,
-                empresa_nome: 'KzaMari Indústria e Comércio',
-              },
-              {
-                id: 'prod_pano_10',
-                nome: 'Pano Atoalhado - Kit c/ 10 Unidades',
-                sku: 'Pano-10',
-                categoria: 'Cozinha',
-                qtd_por_kit: 10,
-                empresa_nome: 'KzaMari Indústria e Comércio',
-              },
-              {
-                id: 'prod_banho_quadr_5',
-                nome: 'Banho Quadr. 75x160 - Kit c/ 5 Unidades',
-                sku: 'BQuadr-5',
-                categoria: 'Banho',
-                qtd_por_kit: 5,
-                empresa_nome: 'WeeKids Confecções',
-                empresa_cnpj: '51.987.654/0001-12',
-              },
-              {
-                id: 'prod_kit_rosto_5',
-                nome: 'Kit Rosto Leve - Kit c/ 5 Unidades',
-                sku: 'KRosto-5',
-                categoria: 'Rosto',
-                qtd_por_kit: 5,
-                empresa_nome: 'WeeKids Confecções',
-                empresa_cnpj: '51.987.654/0001-12',
-              },
-              {
-                id: 'prod_kit_rosto_10',
-                nome: 'Kit Rosto Leve - Kit c/ 10 Unidades',
-                sku: 'KRosto-10',
-                categoria: 'Rosto',
-                qtd_por_kit: 10,
-                empresa_nome: 'WeeKids Confecções',
-                empresa_cnpj: '51.987.654/0001-12',
-              },
-              {
-                id: 'prod_kit_rosto_15',
-                nome: 'Kit Rosto Leve - Kit c/ 15 Unidades',
-                sku: 'KRosto-15',
-                categoria: 'Rosto',
-                qtd_por_kit: 15,
-                empresa_nome: 'WeeKids Confecções',
-                empresa_cnpj: '51.987.654/0001-12',
-              },
-              {
-                id: 'prod_kit_rosto_20',
-                nome: 'Kit Rosto Leve - Kit c/ 20 Unidades',
-                sku: 'KRosto-20',
-                categoria: 'Rosto',
-                qtd_por_kit: 20,
-                empresa_nome: 'WeeKids Confecções',
-                empresa_cnpj: '51.987.654/0001-12',
-              },
-              {
-                id: 'prod_kit_rosto_25',
-                nome: 'Kit Rosto Leve - Kit c/ 25 Unidades',
-                sku: 'KRosto-25',
-                categoria: 'Rosto',
-                qtd_por_kit: 25,
-                empresa_nome: 'WeeKids Confecções',
-                empresa_cnpj: '51.987.654/0001-12',
-              },
-              {
-                id: 'prod_kit_rosto_30',
-                nome: 'Kit Rosto Leve - Kit c/ 30 Unidades',
-                sku: 'KRosto-30',
-                categoria: 'Rosto',
-                qtd_por_kit: 30,
-                empresa_nome: 'WeeKids Confecções',
-                empresa_cnpj: '51.987.654/0001-12',
-              },
-              {
-                id: 'prod_kit_rosto_35',
-                nome: 'Kit Rosto Leve - Kit c/ 35 Unidades',
-                sku: 'KRosto-35',
-                categoria: 'Rosto',
-                qtd_por_kit: 35,
-                empresa_nome: 'WeeKids Confecções',
-                empresa_cnpj: '51.987.654/0001-12',
-              },
-              {
-                id: 'prod_kit_rosto_40',
-                nome: 'Kit Rosto Leve - Kit c/ 40 Unidades',
-                sku: 'KRosto-40',
-                categoria: 'Rosto',
-                qtd_por_kit: 40,
-                empresa_nome: 'WeeKids Confecções',
-                empresa_cnpj: '51.987.654/0001-12',
-              },
-              {
-                id: 'prod_kit_rosto_50',
-                nome: 'Kit Rosto Leve - Kit c/ 50 Unidades',
-                sku: 'KRosto-50',
-                categoria: 'Rosto',
-                qtd_por_kit: 50,
-                empresa_nome: 'WeeKids Confecções',
-                empresa_cnpj: '51.987.654/0001-12',
-              },
-            ]
-
-      const lojasParaUso: CanalLojaLucro[] = canaisPB.length >= 6 ? canaisPB : LOJAS_PADRAO
-
-      // Mescla rendas líquidas aprovadas com as taxas unitárias reais da planilha para demonstração precisa
-      const rendasMescladas = { ...rendasPB }
-
-      // Garante rendas para os produtos da planilha
-      const setRenda = (pid: string, cid: string, val: number) => {
-        if (!rendasMescladas[pid]) rendasMescladas[pid] = {}
-        rendasMescladas[pid][cid] = {
-          renda_liquida_unitaria: val,
-          tem_aprovacao: true,
-        }
-      }
-
-      // Preenche dados da planilha caso ainda não estejam no banco:
-      setRenda('prod_banho_leve', 'shopee_kzamari', 3.85) // 305 * 3.85 = 1174.25
-      setRenda('prod_banho_leve', 'shein_kzamari', 4.85) // 6 * 4.85 = 29.10
-      setRenda('prod_banho_leve', 'kwai_kzamari', 3.85) // 7 * 3.85 = 26.95
-      setRenda('prod_banho_leve', 'tiktok_kzamari', 5.84) // 2 * 5.84 = 11.68
-      setRenda('prod_banho_leve', 'temu_kzamari', 3.97) // 5 * 3.97 = 19.85
-
-      setRenda('prod_rosto_5', 'shopee_kzamari', 4.07) // 2 * 4.07 = 8.14
-      setRenda('prod_rosto_5', 'shein_kzamari', 5.47) // 13 * 5.47 = 71.11
-      setRenda('prod_rosto_5', 'tiktok_kzamari', 8.06) // 11 * 8.06 = 88.66
-
-      setRenda('prod_rosto_6', 'shopee_kzamari', 3.67) // 5 * 3.67 = 18.35
-      setRenda('prod_rosto_6', 'shein_kzamari', 4.37) // 19 * 4.37 = 83.03
-
-      setRenda('prod_rosto_10', 'shopee_kzamari', 5.91) // 7 * 5.91 = 41.37
-      setRenda('prod_pano_6', 'shein_kzamari', 2.2) // 1 * 2.20 = 2.20
-      setRenda('prod_pano_10', 'shopee_kzamari', 6.43) // 8 * 6.43 = 51.44
-      setRenda('prod_banho_quadr_5', 'shein_kzamari', 1.38) // 5 * 1.38 = 6.90
-
-      setRenda('prod_kit_rosto_5', 'shopee_kzamari', 8.05) // 7 * 8.05 = 56.35
-      setRenda('prod_kit_rosto_10', 'shopee_kzamari', 9.75) // 12 * 9.75 = 117.00
-      setRenda('prod_kit_rosto_15', 'shopee_kzamari', 11.4) // 5 * 11.40 = 57.00
-      setRenda('prod_kit_rosto_20', 'shopee_kzamari', 9.2) // 28 * 9.20 = 257.60
-      setRenda('prod_kit_rosto_25', 'shopee_kzamari', 8.2) // 4 * 8.20 = 32.80
-      setRenda('prod_kit_rosto_30', 'shopee_kzamari', 6.6) // 26 * 6.60 = 171.60
-      setRenda('prod_kit_rosto_35', 'shopee_kzamari', 11.02) // 2 * 11.02 = 22.04
-      setRenda('prod_kit_rosto_40', 'shopee_kzamari', 11.94) // 2 * 11.94 = 23.88
-      setRenda('prod_kit_rosto_50', 'shopee_kzamari', 14.62) // 3 * 14.62 = 43.86
-
-      // Despesas: se o banco retornar vazio para a competência de teste (Set/26), preenche com os grupos reais do Balanço
-      // Total Tags = 16.235,70 (GrupoKza 8.052,27 + Família Mari 8.183,43)
-      const despesasParaUso: DespesaGrupoItem[] =
-        despesasPB.length > 0 && despesasPB.some((d) => d.total > 0)
-          ? despesasPB
-          : [
-              {
-                grupo_id: 'grupokza',
-                grupo_nome: 'GrupoKza',
-                cor: '#4C3A8C',
-                total: 8052.27,
-                itens: [
-                  { id: '1', descricao: 'Despesas WeeKids', valor: 214.05, tag_nome: 'WeeKids' },
-                  { id: '2', descricao: 'Despesas KzaMari', valor: 3689.3, tag_nome: 'KzaMari' },
-                  {
-                    id: '3',
-                    descricao: 'KzaMari + WeeKids',
-                    valor: 1989.89,
-                    tag_nome: 'KzaMari+WeeKids',
-                  },
-                  { id: '4', descricao: 'GrupoKza Geral', valor: 2159.03, tag_nome: 'GrupoKza' },
-                ],
-              },
-              {
-                grupo_id: 'familiamari',
-                grupo_nome: 'Família Mari',
-                cor: '#2B5BA8',
-                total: 8183.43,
-                itens: [
-                  { id: '5', descricao: 'Pessoal Eu', valor: 3463.23, tag_nome: 'Eu' },
-                  { id: '6', descricao: 'Eu/Casa', valor: 3850.42, tag_nome: 'Eu/Casa' },
-                  { id: '7', descricao: 'Rafa', valor: 869.78, tag_nome: 'Rafa' },
-                ],
-              },
-            ]
-
-      setProdutos(produtosParaUso)
+      // Ajusta canais reais cadastrados
+      const lojasParaUso: CanalLojaLucro[] = canaisPB.length > 0 ? canaisPB : LOJAS_PADRAO
       setLojas(lojasParaUso)
-      setRendasLiquidas(rendasMescladas)
-      setDespesasGrupos(despesasParaUso)
+      setCatalogoProdutos(prodsPB)
+      setPrecificacoesAprovadas(precsAprovadasPB)
+      setRendasLiquidas(rendasPB)
+      setDespesasGrupos(despesasPB)
+
+      // Se a competência ainda não tem produtos selecionados na grade,
+      // inicializa apenas com os produtos que já possuem precificação APROVADA no banco
+      setProdutosGradePorMes((prev) => {
+        if (prev[competencia] && prev[competencia].length > 0) {
+          return prev
+        }
+        // Identifica produtos com precificação aprovada no banco
+        const produtosComAprovacao = Array.from(new Set(precsAprovadasPB.map((p) => p.produto_id)))
+        return {
+          ...prev,
+          [competencia]: produtosComAprovacao,
+        }
+      })
+    } catch (err) {
+      console.error('Erro ao carregar dados do Lucro:', err)
     } finally {
       setLoading(false)
     }
@@ -519,6 +236,37 @@ export default function LucroPage() {
   useEffect(() => {
     carregarDados()
   }, [carregarDados])
+
+  // IDs dos produtos na grade do mês atual
+  const idsProdutosGradeAtual = useMemo(() => {
+    return produtosGradePorMes[competencia] || []
+  }, [produtosGradePorMes, competencia])
+
+  // Lista de produtos visíveis na grade do mês (enxuta para apenas os adicionados que tenham precificação aprovada)
+  const produtosGradeAtual: ProdutoLucro[] = useMemo(() => {
+    const mapaCatalogo = new Map<string, ProdutoLucro>()
+    catalogoProdutos.forEach((p) => mapaCatalogo.set(p.id, p))
+
+    // Também cria entrada a partir de precificacoesAprovadas caso o produto não esteja em catalogoProdutos
+    for (const pa of precificacoesAprovadas) {
+      if (!mapaCatalogo.has(pa.produto_id)) {
+        mapaCatalogo.set(pa.produto_id, {
+          id: pa.produto_id,
+          nome: pa.produto_nome,
+          sku: pa.produto_sku || '',
+          marca: pa.produto_marca,
+          categoria: pa.produto_categoria,
+          qtd_por_kit: pa.qtd_por_kit || 1,
+          empresa_nome: pa.empresa_nome,
+          empresa_cnpj: pa.empresa_cnpj,
+        })
+      }
+    }
+
+    return idsProdutosGradeAtual
+      .map((id) => mapaCatalogo.get(id))
+      .filter((p): p is ProdutoLucro => Boolean(p))
+  }, [catalogoProdutos, precificacoesAprovadas, idsProdutosGradeAtual])
 
   // Quantidades do mês selecionado
   const quantidadesMes = useMemo(() => {
@@ -546,38 +294,73 @@ export default function LucroPage() {
     })
   }
 
-  // (1) Cálculo da Aba 1: Lucro Líquido
-  const resumoGradeLucro: ResumoGradeLucroMes = useMemo(() => {
-    return calcularGradeLucroMes(produtos, lojas, quantidadesMes, rendasLiquidas)
-  }, [produtos, lojas, quantidadesMes, rendasLiquidas])
+  // Adiciona produto vindo do modal de precificações aprovadas
+  const handleAdicionarProduto = (item: PrecificacaoAprovadaItem, quantidadeInicial?: number) => {
+    // 1. Garante que o produto está na lista da grade do mês
+    setProdutosGradePorMes((prev) => {
+      const listaAtual = prev[competencia] || []
+      if (listaAtual.includes(item.produto_id)) {
+        return prev
+      }
+      return {
+        ...prev,
+        [competencia]: [...listaAtual, item.produto_id],
+      }
+    })
 
-  // (2) Cálculo da Aba 2: Balanço (Lucro Líquido − Despesas por Destino)
-  // Caso real da planilha: 6.334,31 (lucro consolidado) − 16.235,70 (despesas) = −9.901,39
-  // Usamos o totalGeralLucro da grade; caso o usuário queira verificar o fechamento completo da planilha (6.334,31)
-  // ou os dados parciais até dia 05 (2.434,86), o balanço reflete exatamente o lucro líquido da grade atual:
+    // 2. Se informou quantidade inicial, grava na célula correspondente
+    if (quantidadeInicial !== undefined && quantidadeInicial > 0) {
+      handleChangeQuantidade(item.produto_id, item.canal_id, String(quantidadeInicial))
+    }
+  }
+
+  // Remove produto da grade do período atual
+  const handleRemoverProduto = (produtoId: string) => {
+    setProdutosGradePorMes((prev) => {
+      const listaAtual = prev[competencia] || []
+      return {
+        ...prev,
+        [competencia]: listaAtual.filter((id) => id !== produtoId),
+      }
+    })
+
+    // Limpa também as quantidades digitadas para esse produto no mês
+    setQuantidadesPorMes((prev) => {
+      const mesAtual = { ...(prev[competencia] || {}) }
+      delete mesAtual[produtoId]
+      return {
+        ...prev,
+        [competencia]: mesAtual,
+      }
+    })
+  }
+
+  // (1) Cálculo da Aba 1: Lucro Líquido da Grade
+  const resumoGradeLucro: ResumoGradeLucroMes = useMemo(() => {
+    return calcularGradeLucroMes(produtosGradeAtual, lojas, quantidadesMes, rendasLiquidas)
+  }, [produtosGradeAtual, lojas, quantidadesMes, rendasLiquidas])
+
+  // (2) Cálculo da Aba 2: Balanço 100% DINÂMICO DO BANCO
+  // Lucro Líquido = soma real da aba 'Lucro Líquido' do período selecionado
+  // Total Tags = despesas reais do mês agrupadas pelos destinos cadastrados em /despesas
+  // Balanço = Lucro − Despesas
   const balancoData: BalancoMesResultado = useMemo(() => {
-    // Se a grade tiver valores inseridos, usa a soma real calculada;
-    // Se o usuário estiver no mês Set/26 sem edições, garante visualização comparativa clara
-    const lucroAba1 =
-      resumoGradeLucro.totalGeralLucro > 0 ? resumoGradeLucro.totalGeralLucro : 6334.31
+    const lucroAba1 = resumoGradeLucro.totalGeralLucro
     return calcularBalancoMes(lucroAba1, despesasGrupos)
   }, [resumoGradeLucro.totalGeralLucro, despesasGrupos])
 
   // (3) Cálculo da Aba 3: Saídas Unitárias e Kits/unid.
   // As quantidades da aba 1 alimentam a aba 3 (mesma fonte, somadas no mês)
   const saidasData: ResumoAbaSaidasResultado = useMemo(() => {
+    const produtosParaCalculo =
+      produtosGradeAtual.length > 0 ? produtosGradeAtual : catalogoProdutos
     const somaPorProduto: Record<string, number> = {}
     for (const linha of resumoGradeLucro.linhas) {
       somaPorProduto[linha.produto.id] = linha.totalQuantidade
     }
-    // Caso especial de teste para Ago/26 se não houver quantidades inseridas
-    if (competencia === '2026-08' && Object.values(somaPorProduto).every((v) => v === 0)) {
-      somaPorProduto['prod_banho_leve'] = 1
-      somaPorProduto['prod_rosto_folha'] = 123
-    }
 
-    return calcularSaidasUnitarias(produtos, somaPorProduto)
-  }, [resumoGradeLucro.linhas, produtos, competencia])
+    return calcularSaidasUnitarias(produtosParaCalculo, somaPorProduto)
+  }, [resumoGradeLucro.linhas, produtosGradeAtual, catalogoProdutos])
 
   const rotuloCompetenciaAtual = useMemo(() => {
     const item = MESES_OPCOES.find((m) => m.valor === competencia)
@@ -703,10 +486,12 @@ export default function LucroPage() {
           <div>
             {activeTab === 'grade' && (
               <TabLucroLiquido
-                produtos={produtos}
+                produtos={produtosGradeAtual}
                 lojas={lojas}
                 quantidades={quantidadesMes}
                 onChangeQuantidade={handleChangeQuantidade}
+                onRemoverProduto={handleRemoverProduto}
+                onAbrirModalAdicionar={() => setModalAdicionarAberto(true)}
                 resumoGrade={resumoGradeLucro}
                 nomePeriodo={rotuloCompetenciaAtual}
               />
@@ -719,6 +504,16 @@ export default function LucroPage() {
             {activeTab === 'saidas' && (
               <TabSaidasUnitarias saidasData={saidasData} nomePeriodo={rotuloCompetenciaAtual} />
             )}
+
+            {/* MODAL ADICIONAR PRODUTO */}
+            <ModalAdicionarProduto
+              open={modalAdicionarAberto}
+              onOpenChange={setModalAdicionarAberto}
+              canais={lojas}
+              precificacoesAprovadas={precificacoesAprovadas}
+              produtosJaAdicionadosIds={idsProdutosGradeAtual}
+              onAdicionar={handleAdicionarProduto}
+            />
           </div>
         )}
       </main>

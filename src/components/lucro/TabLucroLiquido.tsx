@@ -11,7 +11,16 @@ import {
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { AlertTriangle, AlertCircle, ShoppingCart, Info, TrendingUp } from 'lucide-react'
+import {
+  AlertTriangle,
+  AlertCircle,
+  ShoppingCart,
+  Info,
+  TrendingUp,
+  Plus,
+  Trash2,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { formatCurrency } from '@/lib/format'
 import type {
   ProdutoLucro,
@@ -21,11 +30,13 @@ import type {
 } from '@/lib/lucro'
 import { agruparLojasPorMarketplace } from '@/lib/lucro'
 
-interface TabLucroLiquidoProps {
+export interface TabLucroLiquidoProps {
   produtos: ProdutoLucro[]
   lojas: CanalLojaLucro[]
   quantidades: Record<string, Record<string, number>>
   onChangeQuantidade: (produtoId: string, canalId: string, valorStr: string) => void
+  onRemoverProduto?: (produtoId: string) => void
+  onAbrirModalAdicionar?: () => void
   resumoGrade: ResumoGradeLucroMes
   nomePeriodo: string
 }
@@ -35,6 +46,8 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
   lojas,
   quantidades,
   onChangeQuantidade,
+  onRemoverProduto,
+  onAbrirModalAdicionar,
   resumoGrade,
   nomePeriodo,
 }) => {
@@ -46,6 +59,31 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
   return (
     <TooltipProvider delayDuration={150}>
       <div className="space-y-4">
+        {/* BARRA SUPERIOR DA ABA: BOTÃO ADICIONAR PRODUTO E INFORMAÇÃO */}
+        <div className="flex items-center justify-between gap-3 flex-wrap bg-white p-3 rounded-xl border border-border/70 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-foreground">Produtos na Grade do Mês:</span>
+            <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md text-xs">
+              {produtos.length} item(ns)
+            </span>
+            <span className="text-muted-foreground/60 text-xs hidden sm:inline">•</span>
+            <span className="text-[11px] text-muted-foreground hidden sm:inline">
+              Grade enxuta contendo apenas pares com precificação aprovada cadastrada
+            </span>
+          </div>
+
+          {onAbrirModalAdicionar && (
+            <Button
+              size="sm"
+              onClick={onAbrirModalAdicionar}
+              className="h-8 gap-1.5 text-xs font-bold bg-purple-700 hover:bg-purple-800 text-white shadow-2xs"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Adicionar Produto</span>
+            </Button>
+          )}
+        </div>
+
         {/* Banner de status / alertas */}
         {resumoGrade.totalAlertasSemAprovacao > 0 && (
           <div className="flex items-center gap-2.5 rounded-lg border border-amber-300 bg-amber-50/80 p-3 text-xs text-amber-900 shadow-2xs">
@@ -70,7 +108,7 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
                 <tr className="border-b border-border/60">
                   <th
                     rowSpan={2}
-                    className="sticky left-0 z-30 min-w-[220px] max-w-[280px] bg-slate-100/90 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-slate-700 border-r border-border/60 backdrop-blur-xs"
+                    className="sticky left-0 z-30 min-w-[260px] max-w-[320px] bg-slate-100/90 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-slate-700 border-r border-border/60 backdrop-blur-xs"
                   >
                     Produto (Repositório)
                   </th>
@@ -140,10 +178,26 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
                   <tr>
                     <td
                       colSpan={lojas.length * 2 + 3}
-                      className="py-12 text-center text-muted-foreground"
+                      className="py-14 text-center text-muted-foreground"
                     >
-                      <Info className="h-6 w-6 mx-auto mb-2 text-muted-foreground/60" />
-                      Nenhum produto cadastrado no catálogo de precificação vigente.
+                      <Info className="h-7 w-7 mx-auto mb-2 text-muted-foreground/60" />
+                      <p className="font-medium text-foreground text-xs">
+                        Nenhum produto adicionado na grade de {nomePeriodo}.
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-1 max-w-md mx-auto">
+                        Clique em <strong>'Adicionar Produto'</strong> acima para selecionar os
+                        produtos com precificação aprovada no canal desejado.
+                      </p>
+                      {onAbrirModalAdicionar && (
+                        <Button
+                          size="sm"
+                          onClick={onAbrirModalAdicionar}
+                          className="mt-3 h-8 gap-1.5 text-xs font-semibold bg-purple-700 text-white hover:bg-purple-800"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>Adicionar Produto</span>
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -158,28 +212,43 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
                           temAlerta ? 'bg-amber-50/20' : ''
                         }`}
                       >
-                        {/* COLUNA FIXA: NOME DO PRODUTO */}
-                        <td className="sticky left-0 z-10 min-w-[220px] max-w-[280px] bg-white/95 px-3 py-1.5 border-r border-border/60 backdrop-blur-xs">
-                          <div className="flex items-center gap-1.5">
-                            {temAlerta && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-                                </TooltipTrigger>
-                                <TooltipContent side="right" className="text-xs max-w-xs">
-                                  Este produto possui vendas registradas em canais sem precificação
-                                  aprovada.
-                                </TooltipContent>
-                              </Tooltip>
-                            )}
-                            <div className="truncate">
-                              <span className="font-semibold text-foreground text-xs block truncate">
-                                {prod.nome}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground font-mono">
-                                {prod.sku} {prod.marca ? `• ${prod.marca}` : ''}
-                              </span>
+                        {/* COLUNA FIXA: NOME DO PRODUTO E BOTÃO REMOVER */}
+                        <td className="sticky left-0 z-10 min-w-[260px] max-w-[320px] bg-white/95 px-3 py-1.5 border-r border-border/60 backdrop-blur-xs">
+                          <div className="flex items-center justify-between gap-1.5">
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                              {temAlerta && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                                  </TooltipTrigger>
+                                  <TooltipContent side="right" className="text-xs max-w-xs">
+                                    Este produto possui vendas registradas em canais sem
+                                    precificação aprovada.
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
+                              <div className="truncate">
+                                <span className="font-semibold text-foreground text-xs block truncate">
+                                  {prod.nome}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground font-mono">
+                                  {prod.sku} {prod.marca ? `• ${prod.marca}` : ''}
+                                </span>
+                              </div>
                             </div>
+
+                            {onRemoverProduto && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => onRemoverProduto(prod.id)}
+                                className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                                title="Remover da grade deste período"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                           </div>
                         </td>
 
