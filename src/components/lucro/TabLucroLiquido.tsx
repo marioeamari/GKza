@@ -108,20 +108,19 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
                 <tr className="border-b border-border/80 bg-slate-50 text-[11px] font-semibold text-muted-foreground">
                   {gruposMarketplace.map((mkt) =>
                     mkt.lojas.map((loja) => (
-                      <React.Fragment key={loja.id}>
-                        <th
-                          colSpan={2}
-                          className="border-r border-border/60 px-2 py-1 text-center bg-slate-50/90 font-bold text-slate-700"
-                        >
-                          <div className="truncate max-w-[140px] mx-auto text-[11px]">
-                            {loja.nome}
-                          </div>
-                          <div className="grid grid-cols-2 text-[10px] text-muted-foreground font-medium pt-0.5 border-t border-border/40 mt-0.5">
-                            <span className="text-right pr-1">Qtd</span>
-                            <span className="text-right pr-1">Renda Líq.</span>
-                          </div>
-                        </th>
-                      </React.Fragment>
+                      <th
+                        key={loja.id}
+                        colSpan={2}
+                        className="border-r border-border/60 px-2 py-1 text-center bg-slate-50/90 font-bold text-slate-700"
+                      >
+                        <div className="truncate max-w-[140px] mx-auto text-[11px]">
+                          {loja.nome}
+                        </div>
+                        <div className="grid grid-cols-2 text-[10px] text-muted-foreground font-medium pt-0.5 border-t border-border/40 mt-0.5">
+                          <span className="text-right pr-1">Qtd</span>
+                          <span className="text-right pr-1">Renda Líq.</span>
+                        </div>
+                      </th>
                     )),
                   )}
 
@@ -185,7 +184,7 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
                         </td>
 
                         {/* CÉLULAS POR CANAL/LOJA */}
-                        {lojas.map((loja) => {
+                        {lojas.flatMap((loja) => {
                           const celula = linha.celulasPorCanal[loja.id] || {
                             produto_id: prod.id,
                             canal_id: loja.id,
@@ -200,61 +199,61 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
                           const valorQtd = celula.quantidade === 0 ? '' : celula.quantidade
                           const semAprovacaoComVenda = celula.requer_ajuste_precificacao
 
-                          return (
-                            <React.Fragment key={`${prod.id}-${loja.id}`}>
-                              {/* INPUT DE QUANTIDADE */}
-                              <td
-                                className={`py-1 px-1 text-right w-14 border-l border-border/30 ${
-                                  semAprovacaoComVenda ? 'bg-amber-100/60' : ''
-                                }`}
-                              >
-                                <input
-                                  type="number"
-                                  min="0"
-                                  placeholder="-"
-                                  value={valorQtd}
-                                  onChange={(e) =>
-                                    onChangeQuantidade(prod.id, loja.id, e.target.value)
-                                  }
-                                  className={`w-full rounded border px-1 py-0.5 text-right font-mono text-xs focus:outline-none ${
-                                    semAprovacaoComVenda
-                                      ? 'border-amber-400 bg-amber-50 text-amber-950 font-bold ring-1 ring-amber-400'
-                                      : 'border-border/60 bg-white hover:border-border text-foreground focus:border-primary'
-                                  }`}
-                                />
-                              </td>
-
-                              {/* RENDA LÍQUIDA CALCULADA (OU ALERTA VISUAL) */}
-                              <td
-                                className={`py-1 px-1.5 text-right font-mono text-[11px] w-20 border-r border-border/60 ${
+                          return [
+                            /* INPUT DE QUANTIDADE */
+                            <td
+                              key={`qtd-${prod.id}-${loja.id}`}
+                              className={`py-1 px-1 text-right w-14 border-l border-border/30 ${
+                                semAprovacaoComVenda ? 'bg-amber-100/60' : ''
+                              }`}
+                            >
+                              <input
+                                type="number"
+                                min="0"
+                                placeholder="-"
+                                value={valorQtd}
+                                onChange={(e) =>
+                                  onChangeQuantidade(prod.id, loja.id, e.target.value)
+                                }
+                                className={`w-full rounded border px-1 py-0.5 text-right font-mono text-xs focus:outline-none ${
                                   semAprovacaoComVenda
-                                    ? 'bg-amber-100/60 text-amber-900 font-bold'
-                                    : 'text-foreground'
+                                    ? 'border-amber-400 bg-amber-50 text-amber-950 font-bold ring-1 ring-amber-400'
+                                    : 'border-border/60 bg-white hover:border-border text-foreground focus:border-primary'
                                 }`}
-                              >
-                                {semAprovacaoComVenda ? (
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <div className="inline-flex items-center gap-1 text-amber-700 cursor-help font-semibold">
-                                        <AlertCircle className="h-3 w-3" />
-                                        <span>Sem Prec.</span>
-                                      </div>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top" className="text-xs">
-                                      Sem precificação aprovada! Célula NÃO entra na somatória.
-                                      Ajuste em /precificacao.
-                                    </TooltipContent>
-                                  </Tooltip>
-                                ) : celula.quantidade > 0 ? (
-                                  <span className="font-semibold text-emerald-700">
-                                    {formatCurrency(celula.lucro_total)}
-                                  </span>
-                                ) : (
-                                  <span className="text-muted-foreground/60">-</span>
-                                )}
-                              </td>
-                            </React.Fragment>
-                          )
+                              />
+                            </td>,
+
+                            /* RENDA LÍQUIDA CALCULADA (OU ALERTA VISUAL) */
+                            <td
+                              key={`renda-${prod.id}-${loja.id}`}
+                              className={`py-1 px-1.5 text-right font-mono text-[11px] w-20 border-r border-border/60 ${
+                                semAprovacaoComVenda
+                                  ? 'bg-amber-100/60 text-amber-900 font-bold'
+                                  : 'text-foreground'
+                              }`}
+                            >
+                              {semAprovacaoComVenda ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <div className="inline-flex items-center gap-1 text-amber-700 cursor-help font-semibold">
+                                      <AlertCircle className="h-3 w-3" />
+                                      <span>Sem Prec.</span>
+                                    </div>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="text-xs">
+                                    Sem precificação aprovada! Célula NÃO entra na somatória. Ajuste
+                                    em /precificacao.
+                                  </TooltipContent>
+                                </Tooltip>
+                              ) : celula.quantidade > 0 ? (
+                                <span className="font-semibold text-emerald-700">
+                                  {formatCurrency(celula.lucro_total)}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground/60">-</span>
+                              )}
+                            </td>,
+                          ]
                         })}
 
                         {/* TOTAL POR PRODUTO (LINHA) */}
@@ -278,18 +277,22 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
                     Total {nomePeriodo}
                   </td>
 
-                  {lojas.map((loja) => {
+                  {lojas.flatMap((loja) => {
                     const tot = resumoGrade.totaisPorLoja[loja.id] || { quantidade: 0, lucro: 0 }
-                    return (
-                      <React.Fragment key={`tot-${loja.id}`}>
-                        <td className="py-2 px-1 text-right font-mono text-slate-300 border-l border-slate-800">
-                          {tot.quantidade > 0 ? tot.quantidade : '-'}
-                        </td>
-                        <td className="py-2 px-1.5 text-right font-mono text-emerald-300 border-r border-slate-800">
-                          {tot.lucro > 0 ? formatCurrency(tot.lucro) : '-'}
-                        </td>
-                      </React.Fragment>
-                    )
+                    return [
+                      <td
+                        key={`tot-qtd-${loja.id}`}
+                        className="py-2 px-1 text-right font-mono text-slate-300 border-l border-slate-800"
+                      >
+                        {tot.quantidade > 0 ? tot.quantidade : '-'}
+                      </td>,
+                      <td
+                        key={`tot-lucro-${loja.id}`}
+                        className="py-2 px-1.5 text-right font-mono text-emerald-300 border-r border-slate-800"
+                      >
+                        {tot.lucro > 0 ? formatCurrency(tot.lucro) : '-'}
+                      </td>,
+                    ]
                   })}
 
                   {/* TOTAL GERAL DO MÊS */}
