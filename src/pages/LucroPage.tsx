@@ -271,7 +271,7 @@ export default function LucroPage() {
     const mapaCatalogo = new Map<string, ProdutoLucro>()
     catalogoProdutos.forEach((p) => mapaCatalogo.set(p.id, p))
 
-    // Também cria entrada ou atualiza empresa, modalidade, canal e marketplace a partir de precificacoesAprovadas
+    // Também cria entrada ou atualiza empresa, modalidade, canal, marketplace e valores de precificação a partir de precificacoesAprovadas
     for (const pa of precificacoesAprovadas) {
       if (!mapaCatalogo.has(pa.produto_id)) {
         mapaCatalogo.set(pa.produto_id, {
@@ -289,6 +289,9 @@ export default function LucroPage() {
           canal_id: pa.canal_id,
           canal_nome: pa.canal_nome,
           marketplace_nome: pa.marketplace_nome,
+          preco_venda: pa.preco_venda,
+          lucro_liquido_unitario: pa.lucro_liquido_unitario,
+          margem_liquida_percentual: pa.margem_liquida_percentual,
         })
       } else {
         const prod = mapaCatalogo.get(pa.produto_id)!
@@ -297,12 +300,18 @@ export default function LucroPage() {
         const precisaAtualizarModalidade = pa.modalidade_nome && !prod.modalidade_nome
         const precisaAtualizarCanal = pa.canal_nome && !prod.canal_nome
         const precisaAtualizarMkt = pa.marketplace_nome && !prod.marketplace_nome
+        const precisaAtualizarValores =
+          (prod.preco_venda === undefined && pa.preco_venda !== undefined) ||
+          (prod.lucro_liquido_unitario === undefined && pa.lucro_liquido_unitario !== undefined) ||
+          (prod.margem_liquida_percentual === undefined &&
+            pa.margem_liquida_percentual !== undefined)
 
         if (
           precisaAtualizarEmpresa ||
           precisaAtualizarModalidade ||
           precisaAtualizarCanal ||
-          precisaAtualizarMkt
+          precisaAtualizarMkt ||
+          precisaAtualizarValores
         ) {
           mapaCatalogo.set(pa.produto_id, {
             ...prod,
@@ -314,6 +323,10 @@ export default function LucroPage() {
             canal_id: pa.canal_id || prod.canal_id,
             canal_nome: pa.canal_nome || prod.canal_nome,
             marketplace_nome: pa.marketplace_nome || prod.marketplace_nome,
+            preco_venda: prod.preco_venda ?? pa.preco_venda,
+            lucro_liquido_unitario: prod.lucro_liquido_unitario ?? pa.lucro_liquido_unitario,
+            margem_liquida_percentual:
+              prod.margem_liquida_percentual ?? pa.margem_liquida_percentual,
           })
         }
       }
@@ -360,7 +373,7 @@ export default function LucroPage() {
 
   // Adiciona produto vindo do modal de precificações aprovadas
   const handleAdicionarProduto = (item: PrecificacaoAprovadaItem, quantidadeInicial?: number) => {
-    // 1. Garante que o catálogo local de produtos conheça a empresa e modalidade vinculadas à precificação selecionada
+    // 1. Garante que o catálogo local de produtos conheça a empresa, modalidade e valores de precificação
     setCatalogoProdutos((prev) => {
       const idx = prev.findIndex((p) => p.id === item.produto_id)
       if (idx >= 0) {
@@ -376,6 +389,9 @@ export default function LucroPage() {
           canal_id: item.canal_id || atual.canal_id,
           canal_nome: item.canal_nome || atual.canal_nome,
           marketplace_nome: item.marketplace_nome || atual.marketplace_nome,
+          preco_venda: item.preco_venda,
+          lucro_liquido_unitario: item.lucro_liquido_unitario,
+          margem_liquida_percentual: item.margem_liquida_percentual,
         }
         return copias
       }
@@ -396,6 +412,9 @@ export default function LucroPage() {
           canal_id: item.canal_id,
           canal_nome: item.canal_nome,
           marketplace_nome: item.marketplace_nome,
+          preco_venda: item.preco_venda,
+          lucro_liquido_unitario: item.lucro_liquido_unitario,
+          margem_liquida_percentual: item.margem_liquida_percentual,
         },
       ]
     })

@@ -322,6 +322,45 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
                                     )}
                                   </div>
                                 )}
+
+                                {/* VALORES DE PRECIFICAÇÃO DO PRODUTO: Preço Venda, Lucro Líq. Unit. e Margem % */}
+                                {((typeof prod.preco_venda === 'number' && prod.preco_venda > 0) ||
+                                  (typeof prod.lucro_liquido_unitario === 'number' &&
+                                    prod.lucro_liquido_unitario !== 0)) && (
+                                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-0.5 flex-wrap">
+                                    {typeof prod.preco_venda === 'number' &&
+                                      prod.preco_venda > 0 && (
+                                        <span>
+                                          Preço Venda:{' '}
+                                          <strong className="text-foreground font-mono">
+                                            {formatCurrency(prod.preco_venda)}
+                                          </strong>
+                                        </span>
+                                      )}
+                                    {typeof prod.preco_venda === 'number' &&
+                                      prod.preco_venda > 0 &&
+                                      typeof prod.lucro_liquido_unitario === 'number' &&
+                                      prod.lucro_liquido_unitario !== 0 && <span>•</span>}
+                                    {typeof prod.lucro_liquido_unitario === 'number' &&
+                                      prod.lucro_liquido_unitario !== 0 && (
+                                        <span>
+                                          Lucro Líq. Unit.:{' '}
+                                          <strong className="text-emerald-700 font-mono">
+                                            {formatCurrency(prod.lucro_liquido_unitario)}
+                                          </strong>
+                                        </span>
+                                      )}
+                                    {typeof prod.margem_liquida_percentual === 'number' &&
+                                      prod.margem_liquida_percentual > 0 && (
+                                        <>
+                                          <span>•</span>
+                                          <span className="text-emerald-600 font-mono">
+                                            ({prod.margem_liquida_percentual.toFixed(1)}%)
+                                          </span>
+                                        </>
+                                      )}
+                                  </div>
+                                )}
                               </div>
                             </div>
 

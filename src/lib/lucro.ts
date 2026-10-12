@@ -23,6 +23,9 @@ export interface ProdutoLucro {
   canal_id?: string
   canal_nome?: string
   marketplace_nome?: string
+  preco_venda?: number
+  lucro_liquido_unitario?: number
+  margem_liquida_percentual?: number
   ordem?: number
 }
 
@@ -173,6 +176,49 @@ export function arredondarMoeda(valor: number): number {
  * Extrai a renda líquida unitária de uma precificação APROVADA
  * A renda líquida é o lucro líquido unitário aprovado para o canal
  */
+/**
+ * Formata os valores monetários e margem percentual de precificação de um produto para exibição na grade.
+ * Formato padrão: "Preço Venda: R$ 24,90 • Lucro Líq. Unit.: R$ 3,95 • (15.9%)"
+ * Se não houver margem percentual calculada (<= 0 ou undefined), exibe apenas Preço Venda e Lucro Líq. Unit.
+ * Se nenhum valor estiver disponível, retorna string vazia.
+ */
+export function formatarValoresPrecificacaoGrade(
+  precoVenda?: number | null,
+  lucroLiquidoUnitario?: number | null,
+  margemLiquidaPercentual?: number | null,
+  formatarMoeda: (valor: number) => string = (v) =>
+    v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+): string {
+  const temPreco = typeof precoVenda === 'number' && !isNaN(precoVenda) && precoVenda > 0
+  const temLucro =
+    typeof lucroLiquidoUnitario === 'number' &&
+    !isNaN(lucroLiquidoUnitario) &&
+    lucroLiquidoUnitario !== 0
+
+  if (!temPreco && !temLucro) {
+    return ''
+  }
+
+  const partes: string[] = []
+  if (temPreco) {
+    partes.push(`Preço Venda: ${formatarMoeda(precoVenda!)}`)
+  }
+  if (temLucro) {
+    partes.push(`Lucro Líq. Unit.: ${formatarMoeda(lucroLiquidoUnitario!)}`)
+  }
+
+  const temMargem =
+    typeof margemLiquidaPercentual === 'number' &&
+    !isNaN(margemLiquidaPercentual) &&
+    margemLiquidaPercentual > 0
+
+  if (temMargem) {
+    partes.push(`(${margemLiquidaPercentual!.toFixed(1)}%)`)
+  }
+
+  return partes.join(' • ')
+}
+
 export function extrairRendaLiquidaDePrecificacao(precificacao: any): number {
   if (!precificacao) return 0
   const resultado = precificacao.resultado || {}

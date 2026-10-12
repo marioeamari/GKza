@@ -6,6 +6,7 @@ import {
   calcularSaidasUnitarias,
   agruparLojasPorMarketplace,
   extrairRendaLiquidaDePrecificacao,
+  formatarValoresPrecificacaoGrade,
   gerarSemanasDoMes,
   filtrarDespesasPorSemana,
   calcularBalancoSemanal,
@@ -539,6 +540,83 @@ describe('Módulo /lucro — Regras de Negócio e Cálculos', () => {
       expect(empWee?.empresa_nome).toBe('WeeKids')
       expect(empWee?.totalKits).toBe(20)
       expect(empWee?.totalUnidades).toBe(40) // 20 kits * 2 un
+    })
+  })
+
+  describe('Formatação e Exibição dos Valores de Precificação do Produto na Grade (/lucro)', () => {
+    it('formata Preço Venda, Lucro Líq. Unit. e Margem % exatamente no formato esperado com moeda pt-BR', () => {
+      // Exemplo da tarefa: "Preço Venda: R$ 24,90 • Lucro Líq. Unit.: R$ 3,95 • (15.9%)"
+      const texto = formatarValoresPrecificacaoGrade(24.9, 3.95, 15.9)
+      // Substitui espaço sem quebra (non-breaking space \u00a0 ou \u202f) para comparação resiliente
+      const textoNormalizado = texto.replace(/\u00a0|\u202f/g, ' ')
+      expect(textoNormalizado).toBe('Preço Venda: R$ 24,90 • Lucro Líq. Unit.: R$ 3,95 • (15.9%)')
+    })
+
+    it('quando o item não tem margem percentual calculada (<= 0 ou undefined), exibe apenas Preço Venda e Lucro Líq. Unit.', () => {
+      // Sem margem (margem 0)
+      const textoZero = formatarValoresPrecificacaoGrade(24.9, 3.95, 0).replace(
+        /\u00a0|\u202f/g,
+        ' ',
+      )
+      expect(textoZero).toBe('Preço Venda: R$ 24,90 • Lucro Líq. Unit.: R$ 3,95')
+      expect(textoZero).not.toContain('%')
+
+      // Margem undefined
+      const textoUndef = formatarValoresPrecificacaoGrade(50.0, 10.5, undefined).replace(
+        /\u00a0|\u202f/g,
+        ' ',
+      )
+      expect(textoUndef).toBe('Preço Venda: R$ 50,00 • Lucro Líq. Unit.: R$ 10,50')
+      expect(textoUndef).not.toContain('%')
+
+      // Margem negativa ou nula
+      const textoNeg = formatarValoresPrecificacaoGrade(15.0, 2.0, -5).replace(
+        /\u00a0|\u202f/g,
+        ' ',
+      )
+      expect(textoNeg).toBe('Preço Venda: R$ 15,00 • Lucro Líq. Unit.: R$ 2,00')
+      expect(textoNeg).not.toContain('%')
+    })
+
+    it('quando nenhum valor de precificação estiver disponível, retorna string vazia', () => {
+      expect(formatarValoresPrecificacaoGrade(undefined, undefined, undefined)).toBe('')
+      expect(formatarValoresPrecificacaoGrade(0, 0, 0)).toBe('')
+      expect(formatarValoresPrecificacaoGrade(null, null, null)).toBe('')
+    })
+
+    it('preserva os dados de preco_venda, lucro_liquido_unitario e margem_liquida_percentual no ProdutoLucro adicionado', () => {
+      const precAprovada = {
+        id: 'prec_teste_1',
+        produto_id: 'prod_123',
+        produto_nome: 'Toalha de Banho Leve',
+        produto_sku: 'BLEVE-01',
+        canal_id: 'c_shopee',
+        canal_nome: 'Shopee',
+        modalidade_nome: 'Padrão',
+        empresa_nome: 'Kza Mari',
+        preco_venda: 24.9,
+        lucro_liquido_unitario: 3.95,
+        margem_liquida_percentual: 15.9,
+      }
+
+      const produtoNaGrade: ProdutoLucro = {
+        id: precAprovada.produto_id,
+        nome: precAprovada.produto_nome,
+        sku: precAprovada.produto_sku,
+        canal_nome: precAprovada.canal_nome,
+        modalidade_nome: precAprovada.modalidade_nome,
+        empresa_nome: precAprovada.empresa_nome,
+        preco_venda: precAprovada.preco_venda,
+        lucro_liquido_unitario: precAprovada.lucro_liquido_unitario,
+        margem_liquida_percentual: precAprovada.margem_liquida_percentual,
+      }
+
+      expect(produtoNaGrade.preco_venda).toBe(24.9)
+      expect(produtoNaGrade.lucro_liquido_unitario).toBe(3.95)
+      expect(produtoNaGrade.margem_liquida_percentual).toBe(15.9)
+      expect(produtoNaGrade.canal_nome).toBe('Shopee')
+      expect(produtoNaGrade.modalidade_nome).toBe('Padrão')
+      expect(produtoNaGrade.empresa_nome).toBe('Kza Mari')
     })
   })
 
