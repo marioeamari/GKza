@@ -36,8 +36,11 @@ export interface PrecificacaoAprovadaItem {
   produto_marca?: string
   produto_categoria?: string
   qtd_por_kit?: number
+  empresa_id?: string
   empresa_nome?: string
   empresa_cnpj?: string
+  modalidade_id?: string
+  modalidade_nome?: string
   canal_id: string
   canal_nome: string
   marketplace_nome?: string
@@ -68,6 +71,8 @@ interface PrecPrecificacaoPB {
   id: string
   produto: string
   canal: string
+  modalidade?: string
+  empresa?: string
   status: string
   preco_aprovado?: number
   preco_venda_calculado?: number
@@ -106,6 +111,16 @@ interface PrecPrecificacaoPB {
           cor?: string
         }
       }
+    }
+    modalidade?: {
+      id: string
+      nome?: string
+    }
+    empresa?: {
+      id: string
+      nome_fantasia?: string
+      razao_social?: string
+      cnpj?: string
     }
   }
 }
@@ -262,15 +277,41 @@ export const lucroService = {
     try {
       const records = await pb.collection<PrecPrecificacaoPB>('prec_precificacoes').getFullList({
         filter: 'status = "aprovada"',
-        expand: 'produto.empresa,canal.marketplace',
+        expand: 'produto.empresa,canal.marketplace,modalidade,empresa',
       })
 
       return records.map((p) => {
         const prod = p.expand?.produto
         const canal = p.expand?.canal
         const mkt = canal?.expand?.marketplace
-        const empresa = prod?.expand?.empresa
-        const resultado = p.resultado_json || {}
+        const modalidade = p.expand?.modalidade
+        // Empresa: prioriza relação direta da precificação; se ausente, faz fallback para a empresa do produto
+        const empresaPrec = p.expand?.empresa
+        const empresaProd = prod?.expand?.empresa
+        const empresa = empresaPrec || empresaProd
+        const empresaId = p.empresa || prod?.empresa || empresa?.id
+
+        const resultado = (p.resultado || p.resultado_json || {}) as Record<string, unknown>
+
+        // 1. preco_venda de resultado.preco_venda com fallback para preco_aprovado
+        const precoVenda = Number(
+          resultado.preco_venda ??
+            resultado.preco_anunciado ??
+            p.preco_aprovado ??
+            p.preco_venda_calculado ??
+            0,
+        )
+
+        // 2. lucro_liquido_unitario usando o mesmo extrator da grade (extrairRendaLiquidaDePrecificacao)
+        const lucroLiquidoUnitario = extrairRendaLiquidaDePrecificacao(p)
+
+        // 3. margem_liquida_percentual de resultado.margem_liquida_pct com fallback para margem_liquida_calculada
+        const margemLiquidaPct = Number(
+          resultado.margem_liquida_pct ??
+            resultado.margem_liquida_percentual ??
+            p.margem_liquida_calculada ??
+            0,
+        )
 
         return {
           id: p.id,
@@ -280,18 +321,17 @@ export const lucroService = {
           produto_marca: prod?.marca,
           produto_categoria: prod?.categoria,
           qtd_por_kit: prod?.qtd_por_kit,
+          empresa_id: empresaId,
           empresa_nome: empresa?.nome_fantasia || empresa?.razao_social,
           empresa_cnpj: empresa?.cnpj,
+          modalidade_id: p.modalidade,
+          modalidade_nome: modalidade?.nome,
           canal_id: p.canal,
           canal_nome: canal?.nome || 'Canal',
           marketplace_nome: mkt?.nome || canal?.nome,
-          preco_venda: Number(resultado.preco_venda || p.preco_venda_calculado || 0),
-          lucro_liquido_unitario: Number(
-            resultado.lucro_liquido_unitario || p.lucro_liquido_calculado || 0,
-          ),
-          margem_liquida_percentual: Number(
-            resultado.margem_liquida_percentual || p.margem_liquida_calculada || 0,
-          ),
+          preco_venda: precoVenda,
+          lucro_liquido_unitario: lucroLiquidoUnitario,
+          margem_liquida_percentual: margemLiquidaPct,
         }
       })
     } catch (err) {

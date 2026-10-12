@@ -247,7 +247,7 @@ export default function LucroPage() {
     const mapaCatalogo = new Map<string, ProdutoLucro>()
     catalogoProdutos.forEach((p) => mapaCatalogo.set(p.id, p))
 
-    // Também cria entrada a partir de precificacoesAprovadas caso o produto não esteja em catalogoProdutos
+    // Também cria entrada ou atualiza empresa a partir de precificacoesAprovadas
     for (const pa of precificacoesAprovadas) {
       if (!mapaCatalogo.has(pa.produto_id)) {
         mapaCatalogo.set(pa.produto_id, {
@@ -257,9 +257,21 @@ export default function LucroPage() {
           marca: pa.produto_marca,
           categoria: pa.produto_categoria,
           qtd_por_kit: pa.qtd_por_kit || 1,
+          empresa_id: pa.empresa_id,
           empresa_nome: pa.empresa_nome,
           empresa_cnpj: pa.empresa_cnpj,
         })
+      } else {
+        // Se a precificação aprovada traz empresa específica e o catálogo não tem empresa vinculada, enriquece
+        const prod = mapaCatalogo.get(pa.produto_id)!
+        if (pa.empresa_nome && (!prod.empresa_nome || prod.empresa_nome === 'Sem Empresa')) {
+          mapaCatalogo.set(pa.produto_id, {
+            ...prod,
+            empresa_id: pa.empresa_id || prod.empresa_id,
+            empresa_nome: pa.empresa_nome,
+            empresa_cnpj: pa.empresa_cnpj || prod.empresa_cnpj,
+          })
+        }
       }
     }
 
@@ -302,7 +314,39 @@ export default function LucroPage() {
 
   // Adiciona produto vindo do modal de precificações aprovadas
   const handleAdicionarProduto = (item: PrecificacaoAprovadaItem, quantidadeInicial?: number) => {
-    // 1. Garante que o produto está na lista da grade do mês sem duplicatas
+    // 1. Garante que o catálogo local de produtos conheça a empresa vinculada à precificação selecionada
+    if (item.empresa_nome) {
+      setCatalogoProdutos((prev) => {
+        const idx = prev.findIndex((p) => p.id === item.produto_id)
+        if (idx >= 0) {
+          const atual = prev[idx]
+          const copias = [...prev]
+          copias[idx] = {
+            ...atual,
+            empresa_id: item.empresa_id || atual.empresa_id,
+            empresa_nome: item.empresa_nome,
+            empresa_cnpj: item.empresa_cnpj || atual.empresa_cnpj,
+          }
+          return copias
+        }
+        return [
+          ...prev,
+          {
+            id: item.produto_id,
+            nome: item.produto_nome,
+            sku: item.produto_sku || '',
+            marca: item.produto_marca,
+            categoria: item.produto_categoria,
+            qtd_por_kit: item.qtd_por_kit || 1,
+            empresa_id: item.empresa_id,
+            empresa_nome: item.empresa_nome,
+            empresa_cnpj: item.empresa_cnpj,
+          },
+        ]
+      })
+    }
+
+    // 2. Garante que o produto está na lista da grade do mês sem duplicatas
     setProdutosGradePorMes((prev) => {
       const listaAtual = prev[competencia] || []
       if (listaAtual.includes(item.produto_id)) {
@@ -314,7 +358,7 @@ export default function LucroPage() {
       }
     })
 
-    // 2. Se informou quantidade inicial, grava na célula correspondente
+    // 3. Se informou quantidade inicial, grava na célula correspondente
     if (quantidadeInicial !== undefined && quantidadeInicial > 0) {
       handleChangeQuantidade(item.produto_id, item.canal_id, String(quantidadeInicial))
     }

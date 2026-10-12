@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Search, Plus, Check, ShoppingBag, Store, AlertCircle } from 'lucide-react'
+import { Search, Plus, Check, ShoppingBag, Store, AlertCircle, Building2 } from 'lucide-react'
 import { formatCurrency } from '@/lib/format'
 import { CanalLojaLucro } from '@/lib/lucro'
 import { PrecificacaoAprovadaItem } from '@/services/lucro'
@@ -42,12 +42,27 @@ export const ModalAdicionarProduto: React.FC<ModalAdicionarProdutoProps> = ({
 }) => {
   // Canal selecionado no dropdown (filtro principal, padrão "todos" ou primeiro canal)
   const [canalSelecionadoId, setCanalSelecionadoId] = useState<string>('todos')
+  // Empresa selecionada no dropdown (filtro por empresa, padrão "todas")
+  const [empresaSelecionada, setEmpresaSelecionada] = useState<string>('todas')
   // Termo de busca de produto (nome ou SKU)
   const [termoBusca, setTermoBusca] = useState<string>('')
   // Quantidade inicial opcional para adicionar diretamente
   const [quantidadeInicial, setQuantidadeInicial] = useState<string>('')
 
-  // Filtra itens com precificação aprovada de acordo com o canal e termo de busca
+  // Lista de empresas únicas encontradas nas precificações aprovadas
+  const empresasOpcoes = useMemo(() => {
+    const mapa = new Map<string, { id: string; nome: string }>()
+    for (const p of precificacoesAprovadas) {
+      const nome = p.empresa_nome || 'Sem Empresa'
+      const chave = p.empresa_id || nome
+      if (!mapa.has(chave)) {
+        mapa.set(chave, { id: chave, nome })
+      }
+    }
+    return Array.from(mapa.values())
+  }, [precificacoesAprovadas])
+
+  // Filtra itens com precificação aprovada de acordo com canal, empresa e termo de busca
   const itensFiltrados = useMemo(() => {
     return precificacoesAprovadas.filter((item) => {
       // Filtro de canal
@@ -55,21 +70,38 @@ export const ModalAdicionarProduto: React.FC<ModalAdicionarProdutoProps> = ({
         return false
       }
 
-      // Filtro de texto (nome, SKU, marca, categoria)
+      // Filtro de empresa
+      if (empresaSelecionada !== 'todas') {
+        const itemChaveEmpresa = item.empresa_id || item.empresa_nome || 'Sem Empresa'
+        if (itemChaveEmpresa !== empresaSelecionada) {
+          return false
+        }
+      }
+
+      // Filtro de texto (nome, SKU, marca, categoria, modalidade, empresa)
       if (termoBusca.trim()) {
         const termo = termoBusca.toLowerCase().trim()
         const matchNome = item.produto_nome.toLowerCase().includes(termo)
         const matchSku = (item.produto_sku || '').toLowerCase().includes(termo)
         const matchMarca = (item.produto_marca || '').toLowerCase().includes(termo)
         const matchCanal = item.canal_nome.toLowerCase().includes(termo)
-        if (!matchNome && !matchSku && !matchMarca && !matchCanal) {
+        const matchModalidade = (item.modalidade_nome || '').toLowerCase().includes(termo)
+        const matchEmpresa = (item.empresa_nome || '').toLowerCase().includes(termo)
+        if (
+          !matchNome &&
+          !matchSku &&
+          !matchMarca &&
+          !matchCanal &&
+          !matchModalidade &&
+          !matchEmpresa
+        ) {
           return false
         }
       }
 
       return true
     })
-  }, [precificacoesAprovadas, canalSelecionadoId, termoBusca])
+  }, [precificacoesAprovadas, canalSelecionadoId, empresaSelecionada, termoBusca])
 
   const handleSelecionar = (item: PrecificacaoAprovadaItem) => {
     const qtd = parseInt(quantidadeInicial, 10)
@@ -101,13 +133,13 @@ export const ModalAdicionarProduto: React.FC<ModalAdicionarProdutoProps> = ({
           </div>
         </DialogHeader>
 
-        {/* FILTROS: CANAL E BUSCA DE PRODUTO */}
+        {/* FILTROS: CANAL, EMPRESA E BUSCA DE PRODUTO */}
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-3">
           {/* Dropdown de Canal */}
-          <div className="sm:col-span-5 space-y-1">
+          <div className="sm:col-span-4 space-y-1">
             <Label className="text-xs font-semibold flex items-center gap-1.5">
               <Store className="h-3.5 w-3.5 text-purple-600" />
-              Filtrar por Canal / Loja
+              Canal / Loja
             </Label>
             <Select value={canalSelecionadoId} onValueChange={(val) => setCanalSelecionadoId(val)}>
               <SelectTrigger className="h-9 text-xs">
@@ -115,7 +147,7 @@ export const ModalAdicionarProduto: React.FC<ModalAdicionarProdutoProps> = ({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="todos" className="text-xs font-medium">
-                  Todos os Canais Aprovados ({precificacoesAprovadas.length})
+                  Todos os Canais ({precificacoesAprovadas.length})
                 </SelectItem>
                 {canais.map((c, idx) => {
                   const qtdPrecs = precificacoesAprovadas.filter((p) => p.canal_id === c.id).length
@@ -146,15 +178,44 @@ export const ModalAdicionarProduto: React.FC<ModalAdicionarProdutoProps> = ({
             </Select>
           </div>
 
+          {/* Dropdown de Empresa */}
+          <div className="sm:col-span-3 space-y-1">
+            <Label className="text-xs font-semibold flex items-center gap-1.5">
+              <Building2 className="h-3.5 w-3.5 text-primary" />
+              Empresa
+            </Label>
+            <Select value={empresaSelecionada} onValueChange={(val) => setEmpresaSelecionada(val)}>
+              <SelectTrigger className="h-9 text-xs">
+                <SelectValue placeholder="Todas as empresas..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todas" className="text-xs font-medium">
+                  Todas as Empresas
+                </SelectItem>
+                {empresasOpcoes.map((emp) => {
+                  const qtdEmp = precificacoesAprovadas.filter(
+                    (p) => (p.empresa_id || p.empresa_nome || 'Sem Empresa') === emp.id,
+                  ).length
+                  return (
+                    <SelectItem key={`filtro-emp-${emp.id}`} value={emp.id} className="text-xs">
+                      <span>{emp.nome}</span>
+                      <span className="text-[10px] text-muted-foreground ml-1">[{qtdEmp}]</span>
+                    </SelectItem>
+                  )
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* Campo de Busca por Nome / SKU */}
-          <div className="sm:col-span-5 space-y-1">
+          <div className="sm:col-span-3 space-y-1">
             <Label className="text-xs font-semibold flex items-center gap-1.5">
               <Search className="h-3.5 w-3.5 text-muted-foreground" />
               Buscar Produto / SKU
             </Label>
             <div className="relative">
               <Input
-                placeholder="Ex: Banho Leve, RFolha, Pano..."
+                placeholder="Ex: Banho Leve, RFolha..."
                 value={termoBusca}
                 onChange={(e) => setTermoBusca(e.target.value)}
                 className="h-9 text-xs pl-8"
@@ -225,6 +286,23 @@ export const ModalAdicionarProduto: React.FC<ModalAdicionarProdutoProps> = ({
                         >
                           {item.canal_nome}
                         </Badge>
+                        {item.modalidade_nome && (
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px] py-0 bg-blue-50 text-blue-700 border border-blue-200 font-semibold"
+                          >
+                            {item.modalidade_nome}
+                          </Badge>
+                        )}
+                        {item.empresa_nome && (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] py-0 border-slate-300 text-slate-700 bg-slate-50 font-medium"
+                          >
+                            <Building2 className="h-2.5 w-2.5 mr-1 text-slate-500" />
+                            {item.empresa_nome}
+                          </Badge>
+                        )}
                         {jaNaGrade && (
                           <Badge
                             variant="outline"

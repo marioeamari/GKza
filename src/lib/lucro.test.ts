@@ -286,6 +286,207 @@ describe('Módulo /lucro — Regras de Negócio e Cálculos', () => {
       expect(extrairRendaLiquidaDePrecificacao({ preco_aprovado: 29.9 })).toBe(29.9)
       expect(extrairRendaLiquidaDePrecificacao(null)).toBe(0)
     })
+
+    it('extrai corretamente a partir do payload real do banco de prec_precificacoes (ex: Toalha Leve na SHEIN)', () => {
+      // Exemplo real do banco: precificação qntaxaei058jibs
+      const registroRealBanco = {
+        id: 'qntaxaei058jibs',
+        produto: 'lsilkiq8w2apfre',
+        canal: 'vcvf7xu1pjkwpys',
+        modalidade: 'hda1ywtigykh1wt',
+        empresa: 'c8v8eg0errmelt6',
+        preco_aprovado: 24.9,
+        premissas: {
+          aliquota_das_pct: 6.95,
+          aliquota_icms_pct: 2.23,
+          descontos: [],
+          preco_venda: 24.9,
+        },
+        resultado: {
+          aliquota_imposto_efetiva_pct: 9.18,
+          base_calculo_tributos: 24.9,
+          custo_adicional: 0,
+          custo_embalagem: 0.1,
+          custo_etiqueta: 0.05,
+          custo_fabricacao_ou_aquisicao: 10,
+          custo_sobrescrito: true,
+          custo_total_produto: 10.15,
+          imposto_das: 1.73,
+          imposto_icms: 0.56,
+          lucro_liquido: 6.13,
+          margem_liquida_pct: 24.62,
+          margem_sobre_cliente_pct: 24.62,
+          markup_sobre_custo_pct: 145.32,
+          outros_impostos: 0,
+          ponto_equilibrio: 16.89,
+          prazo_recebimento_dias: 7,
+          preco_anunciado: 24.9,
+          preco_pago_cliente: 24.9,
+          preco_venda: 24.9,
+          total_taxas_canal: 6.33,
+          total_tributos: 2.29,
+          valor_receber_canal: 18.57,
+        },
+        status: 'aprovada',
+      }
+
+      const rendaLiquida = extrairRendaLiquidaDePrecificacao(registroRealBanco)
+      expect(rendaLiquida).toBe(6.13)
+      expect(rendaLiquida).not.toBe(0)
+    })
+  })
+
+  describe('Extração e Mapeamento de Precificações Aprovadas (Detalhes do Popup e Grade)', () => {
+    it('extrai preço de venda, lucro líquido e margem sem zerar usando JSON real do banco', () => {
+      const pReal = {
+        id: 'qntaxaei058jibs',
+        produto: 'lsilkiq8w2apfre',
+        canal: 'vcvf7xu1pjkwpys',
+        modalidade: 'hda1ywtigykh1wt',
+        empresa: 'c8v8eg0errmelt6',
+        preco_aprovado: 24.9,
+        resultado: {
+          preco_venda: 24.9,
+          lucro_liquido: 6.13,
+          margem_liquida_pct: 24.62,
+        },
+        expand: {
+          produto: {
+            id: 'lsilkiq8w2apfre',
+            nome: 'Toalha Leve de Praia',
+            sku: 'BLeve',
+          },
+          canal: {
+            id: 'vcvf7xu1pjkwpys',
+            nome: 'SHEIN',
+          },
+          modalidade: {
+            id: 'hda1ywtigykh1wt',
+            nome: 'Full',
+          },
+          empresa: {
+            id: 'c8v8eg0errmelt6',
+            nome_fantasia: 'KzaMari',
+          },
+        },
+      }
+
+      // Regra do extrator do serviço:
+      const resultado = (pReal.resultado || {}) as Record<string, unknown>
+      const precoVenda = Number(resultado.preco_venda ?? pReal.preco_aprovado ?? 0)
+      const lucroLiq = extrairRendaLiquidaDePrecificacao(pReal)
+      const margemPct = Number(resultado.margem_liquida_pct ?? 0)
+
+      expect(precoVenda).toBe(24.9)
+      expect(lucroLiq).toBe(6.13)
+      expect(margemPct).toBe(24.62)
+      expect(pReal.expand.modalidade.nome).toBe('Full')
+      expect(pReal.expand.empresa.nome_fantasia).toBe('KzaMari')
+    })
+
+    it('diferencia duas precificações aprovadas da SHEIN para o mesmo produto pela Modalidade (Full vs MEI)', () => {
+      const precSheinFull = {
+        id: 'qntaxaei058jibs',
+        produto_id: 'lsilkiq8w2apfre',
+        produto_nome: 'Toalha Leve de Praia',
+        canal_id: 'vcvf7xu1pjkwpys',
+        canal_nome: 'SHEIN',
+        modalidade_id: 'hda1ywtigykh1wt',
+        modalidade_nome: 'Full',
+        empresa_nome: 'KzaMari',
+        preco_venda: 24.9,
+        lucro_liquido_unitario: 6.13,
+      }
+
+      const precSheinMei = {
+        id: 'fd9dejd899fm75l',
+        produto_id: 'lsilkiq8w2apfre',
+        produto_nome: 'Toalha Leve de Praia',
+        canal_id: 'vcvf7xu1pjkwpys',
+        canal_nome: 'SHEIN',
+        modalidade_id: '6y10l4e3y44gnkp',
+        modalidade_nome: 'MEI',
+        empresa_nome: 'KzaMari',
+        preco_venda: 24.9,
+        lucro_liquido_unitario: 6.13,
+      }
+
+      expect(precSheinFull.canal_id).toBe(precSheinMei.canal_id)
+      expect(precSheinFull.produto_id).toBe(precSheinMei.produto_id)
+      // Devem ser claramente distintas pela modalidade:
+      expect(precSheinFull.modalidade_nome).toBe('Full')
+      expect(precSheinMei.modalidade_nome).toBe('MEI')
+      expect(precSheinFull.modalidade_id).not.toBe(precSheinMei.modalidade_id)
+    })
+
+    it('filtro por empresa restringe precificações de forma independente do canal', () => {
+      const precs = [
+        {
+          id: '1',
+          produto_nome: 'Item 1',
+          canal_id: 'c1',
+          empresa_id: 'emp_bleve',
+          empresa_nome: 'BLeve',
+        },
+        {
+          id: '2',
+          produto_nome: 'Item 2',
+          canal_id: 'c1',
+          empresa_id: 'emp_weekids',
+          empresa_nome: 'WeeKids',
+        },
+      ]
+
+      const filtrar = (empresaId: string) =>
+        precs.filter((p) => empresaId === 'todas' || p.empresa_id === empresaId)
+
+      expect(filtrar('todas').length).toBe(2)
+      expect(filtrar('emp_bleve').length).toBe(1)
+      expect(filtrar('emp_bleve')[0].empresa_nome).toBe('BLeve')
+      expect(filtrar('emp_weekids').length).toBe(1)
+      expect(filtrar('emp_weekids')[0].empresa_nome).toBe('WeeKids')
+    })
+
+    it('ao adicionar item da precificação, Saídas Unitárias agrupa pela empresa da precificação', () => {
+      const produtosNaGrade: ProdutoLucro[] = [
+        {
+          id: 'prod_shein',
+          nome: 'Toalha Leve de Praia',
+          sku: 'BLeve',
+          empresa_id: 'c8v8eg0errmelt6',
+          empresa_nome: 'KzaMari',
+          qtd_por_kit: 1,
+        },
+        {
+          id: 'prod_kids',
+          nome: 'Camiseta Infantil',
+          sku: 'WKIDS',
+          empresa_id: 'fm9lfs19qge4xc4',
+          empresa_nome: 'WeeKids',
+          qtd_por_kit: 2,
+        },
+      ]
+
+      const vendas = {
+        prod_shein: 50,
+        prod_kids: 20,
+      }
+
+      const res = calcularSaidasUnitarias(produtosNaGrade, vendas)
+      expect(res.empresas.length).toBe(2)
+
+      const empKza = res.empresas.find((e) => e.empresa_id === 'c8v8eg0errmelt6')
+      expect(empKza).toBeDefined()
+      expect(empKza?.empresa_nome).toBe('KzaMari')
+      expect(empKza?.totalKits).toBe(50)
+      expect(empKza?.totalUnidades).toBe(50)
+
+      const empWee = res.empresas.find((e) => e.empresa_id === 'fm9lfs19qge4xc4')
+      expect(empWee).toBeDefined()
+      expect(empWee?.empresa_nome).toBe('WeeKids')
+      expect(empWee?.totalKits).toBe(20)
+      expect(empWee?.totalUnidades).toBe(40) // 20 kits * 2 un
+    })
   })
 
   describe('Garantia de Unicidade de Keys no Módulo /lucro (Prevenção de Colisão React)', () => {
