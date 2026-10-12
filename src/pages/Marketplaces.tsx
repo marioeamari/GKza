@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight,
   Banknote,
-  CheckCircle2,
   Clock3,
   Coins,
   ExternalLink,
@@ -14,7 +13,6 @@ import {
   ShieldAlert,
   Sparkles,
   Store,
-  Trash2,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 
@@ -159,9 +157,7 @@ export default function Marketplaces() {
   const remove = async () => {
     if (!deleteTarget) return
     try {
-      if (deleteTarget.type === 'sale') await marketplacesService.deleteVenda(deleteTarget.id)
-      else if (deleteTarget.type === 'account')
-        await marketplacesService.deleteConta(deleteTarget.id)
+      if (deleteTarget.type === 'account') await marketplacesService.deleteConta(deleteTarget.id)
       else await marketplacesService.deleteRepasse(deleteTarget.id)
       toast({ title: 'Registro excluído' })
       load()
@@ -175,7 +171,7 @@ export default function Marketplaces() {
       setDeleteTarget(null)
     }
   }
-  if (loading) return <LoadingState label="Conciliando marketplaces..." />
+
   // Seleção padrão do marketplace na ficha de consulta
   const activeMarketplace = useMemo(() => {
     if (!marketplaces.length) return null
@@ -221,6 +217,8 @@ export default function Marketplaces() {
 
   const actionLabel =
     tab === 'contas' ? 'Nova conta de repasse' : tab === 'repasses' ? 'Novo repasse' : undefined
+
+  if (loading) return <LoadingState label="Conciliando marketplaces..." />
 
   return (
     <>
@@ -417,7 +415,9 @@ export default function Marketplaces() {
                           <div className="flex items-center justify-between">
                             <strong className="text-sm">{mod.nome}</strong>
                             <Badge variant="outline" className="text-[10px]">
-                              {mod.codigo || 'Padrão'}
+                              {mod.prazo_recebimento_dias !== undefined
+                                ? `${mod.prazo_recebimento_dias}d`
+                                : 'Padrão'}
                             </Badge>
                           </div>
                           <p className="text-xs text-muted-foreground">
@@ -426,9 +426,9 @@ export default function Marketplaces() {
                               {canalDono?.nome || 'Canal'}
                             </strong>
                           </p>
-                          {mod.descricao && (
-                            <p className="text-[11px] text-muted-foreground italic line-clamp-2">
-                              {mod.descricao}
+                          {mod.prazo_recebimento_dias !== undefined && (
+                            <p className="text-[11px] text-muted-foreground">
+                              Prazo de recebimento: {mod.prazo_recebimento_dias} dias
                             </p>
                           )}
                         </div>
