@@ -36,6 +36,7 @@ import {
   WalletCards,
   Receipt,
   Wallet,
+  Sparkles,
   X,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -47,6 +48,7 @@ import { ClientResponseError } from 'pocketbase'
 import { LoadingState } from '@/components/LoadingState'
 import { PageHeader } from '@/components/PageHeader'
 import { PermissionButton } from '@/components/PermissionButton'
+import { MobileSubpagesMenu, MobileSubpageItem } from '@/components/MobileSubpagesMenu'
 import { BaixaOcorrenciaDialog } from '@/components/despesas/BaixaOcorrenciaDialog'
 import { DespesaCompromissoDialog } from '@/components/despesas/DespesaCompromissoDialog'
 import { CronogramaParcelasDialog } from '@/components/despesas/CronogramaParcelasDialog'
@@ -1502,8 +1504,36 @@ export default function Despesas() {
     return <LoadingState label="Carregando módulo de despesas e compromissos..." />
   }
 
+  const subpaginasDespesas: MobileSubpageItem[] = [
+    {
+      to: '/contas',
+      label: 'Contas & Cartões',
+      description: 'Gestão de contas correntes, cartões e limites',
+      icon: CreditCard,
+    },
+    {
+      to: '/despesa-rapida',
+      label: '⚡ Despesa Rápida (Sub-app)',
+      description: 'Captura ágil com comprovante e foto para triagem',
+      icon: Sparkles,
+    },
+    {
+      to: '/pendentes',
+      label: 'Triagem de Pendentes',
+      description: 'Aprovar lançamentos e comprovantes capturados',
+      icon: Clock,
+    },
+  ]
+
   return (
     <>
+      {/* Menu Vertical de Subpáginas exclusivo Mobile na raiz de despesas */}
+      <MobileSubpagesMenu
+        titulo="Atalhos de Despesas & Contas"
+        descricao="Acesse contas, cartões e registros rápidos:"
+        subpaginas={subpaginasDespesas}
+      />
+
       {/* Banner discreto de aviso em falhas de recarga (mantendo os dados existentes em tela) */}
       {bannerError && (
         <div className="mb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl border border-primary/30 bg-[#FAF9F6] p-3 text-xs shadow-soft text-foreground">

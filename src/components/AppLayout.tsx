@@ -10,7 +10,6 @@ import {
   Grid2X2,
   Home,
   LogOut,
-  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Receipt,
@@ -54,14 +53,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet'
 import { Brand } from '@/components/Brand'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
@@ -94,7 +85,6 @@ export function AppLayout() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const [moreOpen, setMoreOpen] = useState(false)
   const [pendentesCount, setPendentesCount] = useState(0)
 
   // Persistência do estado recolhido/expandido
@@ -255,16 +245,38 @@ export function AppLayout() {
     { to: '/configuracoes', label: 'Configurações', icon: Settings },
   ]
 
-  const mobileItems = [
+  const mobileItems: NavItemConfig[] = [
     { to: '/', label: 'Início', icon: Home, end: true },
-    { to: '/expedicao/separacao', label: 'Separação', icon: Boxes },
+    {
+      to: '/expedicao/separacao',
+      label: 'Expedição',
+      icon: Boxes,
+      highlight: true,
+    },
     {
       to: '/pendentes',
-      label: 'Triagem',
+      label: 'Pendentes',
       icon: Sparkles,
       badge: pendentesCount,
+      highlight: pendentesCount > 0,
     },
     { to: '/despesas', label: 'Despesas', icon: Receipt },
+    { to: '/lucro', label: 'Lucro', icon: TrendingUp },
+    { to: '/funcionarios', label: 'Funcionários', icon: Users },
+    { to: '/producao', label: 'Produção', icon: Factory },
+    { to: '/dividas', label: 'Dívidas', icon: Coins },
+    { to: '/lancamentos', label: 'Lançamentos', icon: BadgeDollarSign },
+    { to: '/precificacao', label: 'Precificação', icon: Calculator },
+    { to: '/metas-agenda', label: 'Metas & Agenda', icon: Target },
+    { to: '/habitos', label: 'Hábitos', icon: CalendarCheck2 },
+    { to: '/agenda', label: 'Agenda', icon: CalendarDays },
+    { to: '/projetos', label: 'Projetos', icon: ListTodo },
+    { to: '/contas', label: 'Contas', icon: WalletCards },
+    { to: '/dizimos', label: 'Dízimos', icon: HeartHandshake },
+    { to: '/categorias', label: 'Categorias', icon: Tags },
+    { to: '/marketplaces', label: 'Marketplaces', icon: Store },
+    { to: '/cadastros', label: 'Cadastros', icon: Building2 },
+    { to: '/configuracoes', label: 'Configurações', icon: Settings },
   ]
 
   return (
@@ -722,7 +734,11 @@ export function AppLayout() {
         </main>
 
         {/* NAVEGAÇÃO MOBILE */}
-        <nav className="mobile-nav lg:hidden" aria-label="Navegação móvel">
+        <nav
+          className="mobile-nav lg:hidden"
+          aria-label="Navegação móvel com rolagem horizontal"
+          data-testid="mobile-nav-bar"
+        >
           {mobileItems.map(({ to, label, icon: Icon, end, badge }) => (
             <NavLink
               key={to}
@@ -740,90 +756,9 @@ export function AppLayout() {
                   </span>
                 )}
               </div>
-              <span>{label}</span>
+              <span className="truncate max-w-[76px] text-center leading-tight">{label}</span>
             </NavLink>
           ))}
-          <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
-            <SheetTrigger asChild>
-              <button className="mobile-nav-item">
-                <MoreHorizontal className="h-5 w-5" />
-                <span>Mais</span>
-              </button>
-            </SheetTrigger>
-            <SheetContent
-              side="bottom"
-              className="max-h-[85vh] overflow-y-auto rounded-t-[24px] pb-[calc(24px+env(safe-area-inset-bottom))]"
-            >
-              <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-border" />
-              <SheetHeader className="text-left">
-                <SheetTitle>Mais opções</SheetTitle>
-                <SheetDescription>
-                  Acesse todos os recursos e configurações da sua conta.
-                </SheetDescription>
-              </SheetHeader>
-              <div className="mt-6 grid gap-2">
-                {[
-                  ['/expedicao/separacao', 'Expedição: Separação de Kits', Boxes],
-                  ['/expedicao/temas-modelos', 'Expedição: Temas e Modelos', Layers],
-                  ['/expedicao/regras', 'Expedição: Regras de Composição', SlidersHorizontal],
-                  ['/expedicao/pedidos', 'Expedição: Pedidos / Personalizações', FileSpreadsheet],
-                  ['/expedicao/historico', 'Expedição: Histórico de Separações', History],
-                  ['/precificacao', 'Precificação & Margens (Hub)', Calculator],
-                  ['/precificacao/comparar', 'Precificação: Comparador Lado a Lado', Calculator],
-                  [
-                    '/precificacao/aprovados',
-                    'Precificação: Cenários & Repositório',
-                    BookmarkCheck,
-                  ],
-                  [
-                    '/precificacao/dashboard',
-                    'Precificação: Dashboard de Margens',
-                    LayoutDashboard,
-                  ],
-                  ['/precificacao/produtos', 'Precificação: Produtos & Kits', PackageCheck],
-                  ['/precificacao/canais', 'Precificação: Canais & Taxas', Store],
-                  ['/lucro', 'Lucro por Canais (Relatório)', TrendingUp],
-                  ['/producao', 'Produção Semanal & Saques', Factory],
-                  ['/metas-agenda', 'Painel Metas & Agenda', Target],
-                  ['/dividas', 'Dívidas de Máquinas & Ativos', Coins],
-                  ['/habitos', 'Hábitos & Rotinas', CalendarCheck2],
-                  ['/agenda', 'Agenda de Compromissos', CalendarDays],
-                  ['/projetos', 'Projetos & Tarefas', ListTodo],
-                  ['/dizimos', 'Dízimos, Ofertas & Primícias', HeartHandshake],
-                  ['/marketplaces', 'Marketplaces & Vendas', Store],
-                  ['/contas', 'Contas financeiras & Cartões', WalletCards],
-                  ['/categorias', 'Hub de Classificações', Tags],
-                  ['/empresas', 'Empresas (CNPJ)', Building2],
-                  ['/fornecedores', 'Fornecedores (PJ/PF)', Truck],
-                  ['/pessoas', 'Pessoas (CPF)', CircleUserRound],
-                  ['/cadastros', 'Central de Cadastros', Building2],
-                  ['/configuracoes', 'Configurações', SlidersHorizontal],
-                  ['/despesa-rapida', '⚡ Despesa Rápida (Sub-app Móvel)', Sparkles],
-                ].map(([to, label, Icon]) => (
-                  <Button
-                    key={to as string}
-                    variant="ghost"
-                    className="h-12 justify-start"
-                    asChild
-                    onClick={() => setMoreOpen(false)}
-                  >
-                    <Link to={to as string}>
-                      <Icon className="mr-3 h-5 w-5 shrink-0" />
-                      <span className="truncate">{label as string}</span>
-                    </Link>
-                  </Button>
-                ))}
-                <Button
-                  variant="ghost"
-                  className="h-12 justify-start text-destructive"
-                  onClick={signOut}
-                >
-                  <LogOut className="mr-3 h-5 w-5 shrink-0" />
-                  Sair
-                </Button>
-              </div>
-            </SheetContent>
-          </Sheet>
         </nav>
       </div>
     </TooltipProvider>

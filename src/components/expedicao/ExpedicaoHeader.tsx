@@ -46,8 +46,8 @@ export function ExpedicaoHeader({
         </div>
       </div>
 
-      {/* Navegação entre as 4 áreas + histórico */}
-      <div className="flex overflow-x-auto border-b border-border/70 pb-px scrollbar-none">
+      {/* Navegação entre as 4 áreas + histórico (visível no desktop; no mobile a raiz possui menu vertical) */}
+      <div className="hidden lg:flex overflow-x-auto border-b border-border/70 pb-px scrollbar-none">
         <nav className="flex min-w-max gap-1">
           {tabs.map((tab) => {
             const Icon = tab.icon

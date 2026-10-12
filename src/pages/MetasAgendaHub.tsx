@@ -20,11 +20,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { ContextBadge } from '@/components/ContextBadge'
+import { MobileSubpagesMenu, MobileSubpageItem } from '@/components/MobileSubpagesMenu'
 import { habitosService } from '@/services/habitos'
 import { agendaService } from '@/services/agenda'
 import { projetosTarefasService } from '@/services/projetosTarefas'
 import { useAppContext } from '@/contexts/AppContext'
 import { getLocalDateStr } from '@/lib/format'
+import { CalendarCheck2 } from 'lucide-react'
 import type {
   MetaHabito,
   MetaHabitoRegistro,
@@ -33,6 +35,27 @@ import type {
   Tarefa,
   MetaMeta,
 } from '@/types/domain'
+
+const SUBPAGINAS_METAS_AGENDA: MobileSubpageItem[] = [
+  {
+    to: '/habitos',
+    label: 'Hábitos & Rotinas',
+    description: 'Acompanhamento de rotinas diárias e cumprimento',
+    icon: CalendarCheck2,
+  },
+  {
+    to: '/agenda',
+    label: 'Agenda de Compromissos',
+    description: 'Eventos diários, semanais e Google Calendar',
+    icon: CalendarDays,
+  },
+  {
+    to: '/projetos',
+    label: 'Projetos & Tarefas',
+    description: 'Metas estratégicas, prazos e prioridades',
+    icon: ListTodo,
+  },
+]
 
 export default function MetasAgendaHub() {
   const { matchesContext, activeContext, grupos } = useAppContext()
@@ -211,6 +234,13 @@ export default function MetasAgendaHub() {
           </Button>
         </div>
       </PageHeader>
+
+      {/* Menu Vertical de Subpáginas exclusivo Mobile na raiz de Metas & Agenda */}
+      <MobileSubpagesMenu
+        titulo="Áreas de Metas & Agenda"
+        descricao="Acesse as ferramentas de rotina, tarefas e compromissos:"
+        subpaginas={SUBPAGINAS_METAS_AGENDA}
+      />
 
       {/* CARDS DE RESUMO DO DIA */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

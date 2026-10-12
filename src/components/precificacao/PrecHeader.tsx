@@ -49,8 +49,8 @@ export function PrecHeader({ titulo, subtitulo, acoes }: PrecHeaderProps) {
         {acoes && <div className="flex flex-wrap items-center gap-2">{acoes}</div>}
       </div>
 
-      {/* Navegação Própria do Módulo */}
-      <div className="flex overflow-x-auto border-b border-border/80 scrollbar-none pb-0.5">
+      {/* Navegação Própria do Módulo (visível no desktop; no mobile a raiz possui menu vertical) */}
+      <div className="hidden lg:flex overflow-x-auto border-b border-border/80 scrollbar-none pb-0.5">
         <nav className="flex space-x-2" aria-label="Abas do módulo de precificação">
           {tabs.map((tab) => {
             const Icon = tab.icon

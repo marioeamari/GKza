@@ -23,6 +23,40 @@ import { precificacaoService } from '@/services/precificacao'
 import { PrecProdutoRecord, PrecPrecificacaoRecord, PrecCanalRecord } from '@/types/precificacao'
 import { formatCurrency } from '@/lib/format'
 import { Skeleton } from '@/components/ui/skeleton'
+import { MobileSubpagesMenu, MobileSubpageItem } from '@/components/MobileSubpagesMenu'
+
+const SUBPAGINAS_PRECIFICACAO: MobileSubpageItem[] = [
+  {
+    to: '/precificacao/comparar',
+    label: 'Comparador Lado a Lado',
+    description: 'Simulações matemáticas e margens por marketplace',
+    icon: Calculator,
+  },
+  {
+    to: '/precificacao/aprovados',
+    label: 'Cenários & Repositório',
+    description: 'Preços vigentes aprovados por canal e data',
+    icon: BookmarkCheck,
+  },
+  {
+    to: '/precificacao/dashboard',
+    label: 'Dashboard de Margens',
+    description: 'Sensibilidade de custos e dispersão de preços',
+    icon: LayoutDashboard,
+  },
+  {
+    to: '/precificacao/produtos',
+    label: 'Produtos & Kits',
+    description: 'Custos de insumos, embalagem e composição',
+    icon: Layers,
+  },
+  {
+    to: '/precificacao/canais',
+    label: 'Canais & Taxas',
+    description: 'Comissões, fretes e faixas de marketplace',
+    icon: Store,
+  },
+]
 
 export default function PrecificacaoHub() {
   const [loading, setLoading] = useState(true)
@@ -98,6 +132,13 @@ export default function PrecificacaoHub() {
             </Button>
           </div>
         }
+      />
+
+      {/* Menu Vertical de Subpáginas exclusivo Mobile */}
+      <MobileSubpagesMenu
+        titulo="Áreas de Precificação"
+        descricao="Acesse as ferramentas e tabelas do módulo:"
+        subpaginas={SUBPAGINAS_PRECIFICACAO}
       />
 
       {/* Aviso de Isolamento das Finanças Reais */}

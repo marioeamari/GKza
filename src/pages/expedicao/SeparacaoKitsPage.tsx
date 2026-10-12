@@ -10,12 +10,16 @@ import {
   Clock,
   Layers,
   ArrowRight,
+  Boxes,
+  SlidersHorizontal,
+  History,
 } from 'lucide-react'
 import { ExpedicaoHeader } from '@/components/expedicao/ExpedicaoHeader'
 import { ModeloSeparacaoCard } from '@/components/expedicao/ModeloSeparacaoCard'
 import { ConsultaRapidaTab } from '@/components/expedicao/ConsultaRapidaTab'
 import { CartaoPedidoEspecial } from '@/components/expedicao/CartaoPedidoEspecial'
 import { ImportarPedidosShopeeModal } from '@/components/expedicao/ImportarPedidosShopeeModal'
+import { MobileSubpagesMenu, MobileSubpageItem } from '@/components/MobileSubpagesMenu'
 import { FileSpreadsheet, Upload } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -296,11 +300,51 @@ export default function SeparacaoKitsPage() {
 
   const temaDoPedido = temas.find((t) => t.id === pedidoAtivo?.tema)
 
+  const subpaginasExpedicao: MobileSubpageItem[] = [
+    {
+      to: '/expedicao/separacao',
+      label: 'Separação de Kits (Atual)',
+      description: 'Bipagem e conferência operacional de kits',
+      icon: Boxes,
+    },
+    {
+      to: '/expedicao/temas-modelos',
+      label: 'Temas e Modelos',
+      description: 'Modelos e quantidades padrão por tema',
+      icon: Layers,
+    },
+    {
+      to: '/expedicao/regras',
+      label: 'Regras de Composição',
+      description: 'Cálculo analítico e parametrização',
+      icon: SlidersHorizontal,
+    },
+    {
+      to: '/expedicao/pedidos',
+      label: 'Pedidos / Personalizações',
+      description: 'Importações Shopee e pedidos especiais',
+      icon: FileSpreadsheet,
+    },
+    {
+      to: '/expedicao/historico',
+      label: 'Histórico de Separação',
+      description: 'Registro de kits já finalizados',
+      icon: History,
+    },
+  ]
+
   return (
     <div className="space-y-6">
       <ExpedicaoHeader
         title="Expedição → Separação de Kits"
         description="Painel operacional com cálculo exato de modelos e checklist visual para empacotamento rápido."
+      />
+
+      {/* Menu Vertical de Subpáginas exclusivo Mobile na raiz da expedição */}
+      <MobileSubpagesMenu
+        titulo="Áreas da Expedição"
+        descricao="Navegue entre as ferramentas do fluxo de separação:"
+        subpaginas={subpaginasExpedicao}
       />
 
       <Tabs defaultValue="separacao" className="w-full">

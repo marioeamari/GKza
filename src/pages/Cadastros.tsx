@@ -8,10 +8,12 @@ import {
   Plus,
   Search,
   Trash2,
+  Truck,
   UserRound,
 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { EmpresaDialog } from '@/components/cadastros/EmpresaDialog'
+import { MobileSubpagesMenu, MobileSubpageItem } from '@/components/MobileSubpagesMenu'
 import { PessoaDialog } from '@/components/cadastros/PessoaDialog'
 import { EmptyState, LoadingState } from '@/components/LoadingState'
 import { PageHeader } from '@/components/PageHeader'
@@ -121,6 +123,28 @@ export default function Cadastros() {
   }
   if (loading) return <LoadingState />
   const writable = can(user?.role, 'writeRegistry')
+
+  const subpaginasCadastros: MobileSubpageItem[] = [
+    {
+      to: '/empresas',
+      label: 'Empresas (CNPJ)',
+      description: 'Gestão de empresas e fabricação própria',
+      icon: Building2,
+    },
+    {
+      to: '/pessoas',
+      label: 'Pessoas (CPF)',
+      description: 'Pessoas físicas, sócios e titulares',
+      icon: UserRound,
+    },
+    {
+      to: '/fornecedores',
+      label: 'Fornecedores (PJ/PF)',
+      description: 'Fornecedores, insumos e revenda',
+      icon: Truck,
+    },
+  ]
+
   return (
     <>
       <PageHeader
@@ -132,6 +156,13 @@ export default function Cadastros() {
             {type === 'empresas' ? 'Nova empresa' : 'Nova pessoa'}
           </PermissionButton>
         }
+      />
+
+      {/* Menu Vertical de Subpáginas exclusivo Mobile na raiz de cadastros */}
+      <MobileSubpagesMenu
+        titulo="Áreas de Cadastros"
+        descricao="Acesse os módulos cadastrais:"
+        subpaginas={subpaginasCadastros}
       />
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
