@@ -176,6 +176,9 @@ export default function LucroPage() {
   // Estado do Modal 'Adicionar Produto'
   const [modalAdicionarAberto, setModalAdicionarAberto] = useState(false)
 
+  // Filtro de Empresa da Aba 3 (Saídas Unitárias), padrão 'todas'
+  const [empresaFiltroSaidas, setEmpresaFiltroSaidas] = useState<string>('todas')
+
   // Dados carregados do backend (SOMENTE LEITURA)
   // Lista de canais reais cadastrados no banco em prec_canais (agrupados por prec_marketplaces)
   const [lojas, setLojas] = useState<CanalLojaLucro[]>([])
@@ -268,7 +271,7 @@ export default function LucroPage() {
     const mapaCatalogo = new Map<string, ProdutoLucro>()
     catalogoProdutos.forEach((p) => mapaCatalogo.set(p.id, p))
 
-    // Também cria entrada ou atualiza empresa e modalidade a partir de precificacoesAprovadas
+    // Também cria entrada ou atualiza empresa, modalidade, canal e marketplace a partir de precificacoesAprovadas
     for (const pa of precificacoesAprovadas) {
       if (!mapaCatalogo.has(pa.produto_id)) {
         mapaCatalogo.set(pa.produto_id, {
@@ -283,13 +286,24 @@ export default function LucroPage() {
           empresa_cnpj: pa.empresa_cnpj,
           modalidade_id: pa.modalidade_id,
           modalidade_nome: pa.modalidade_nome,
+          canal_id: pa.canal_id,
+          canal_nome: pa.canal_nome,
+          marketplace_nome: pa.marketplace_nome,
         })
       } else {
         const prod = mapaCatalogo.get(pa.produto_id)!
         const precisaAtualizarEmpresa =
           pa.empresa_nome && (!prod.empresa_nome || prod.empresa_nome === 'Sem Empresa')
         const precisaAtualizarModalidade = pa.modalidade_nome && !prod.modalidade_nome
-        if (precisaAtualizarEmpresa || precisaAtualizarModalidade) {
+        const precisaAtualizarCanal = pa.canal_nome && !prod.canal_nome
+        const precisaAtualizarMkt = pa.marketplace_nome && !prod.marketplace_nome
+
+        if (
+          precisaAtualizarEmpresa ||
+          precisaAtualizarModalidade ||
+          precisaAtualizarCanal ||
+          precisaAtualizarMkt
+        ) {
           mapaCatalogo.set(pa.produto_id, {
             ...prod,
             empresa_id: pa.empresa_id || prod.empresa_id,
@@ -297,6 +311,9 @@ export default function LucroPage() {
             empresa_cnpj: pa.empresa_cnpj || prod.empresa_cnpj,
             modalidade_id: pa.modalidade_id || prod.modalidade_id,
             modalidade_nome: pa.modalidade_nome || prod.modalidade_nome,
+            canal_id: pa.canal_id || prod.canal_id,
+            canal_nome: pa.canal_nome || prod.canal_nome,
+            marketplace_nome: pa.marketplace_nome || prod.marketplace_nome,
           })
         }
       }
@@ -356,6 +373,9 @@ export default function LucroPage() {
           empresa_cnpj: item.empresa_cnpj || atual.empresa_cnpj,
           modalidade_id: item.modalidade_id || atual.modalidade_id,
           modalidade_nome: item.modalidade_nome || atual.modalidade_nome,
+          canal_id: item.canal_id || atual.canal_id,
+          canal_nome: item.canal_nome || atual.canal_nome,
+          marketplace_nome: item.marketplace_nome || atual.marketplace_nome,
         }
         return copias
       }
@@ -373,6 +393,9 @@ export default function LucroPage() {
           empresa_cnpj: item.empresa_cnpj,
           modalidade_id: item.modalidade_id,
           modalidade_nome: item.modalidade_nome,
+          canal_id: item.canal_id,
+          canal_nome: item.canal_nome,
+          marketplace_nome: item.marketplace_nome,
         },
       ]
     })
@@ -472,12 +495,34 @@ export default function LucroPage() {
     return calcularBalancoMes(totalLucroMesConsolidado, despesasGrupos)
   }, [totalLucroMesConsolidado, despesasGrupos])
 
-  // (3) Cálculo da Aba 3: Saídas Unitárias e Kits/unid. (Mensal, alimentada pelas semanas somadas)
+  // Lista de empresas únicas dos produtos presentes na grade/contagem do mês para o dropdown de filtro
+  const empresasOpcoesSaidas = useMemo(() => {
+    const produtosBase = produtosGradeAtual.length > 0 ? produtosGradeAtual : catalogoProdutos
+    const mapa = new Map<string, { id: string; nome: string; qtdProdutos: number }>()
+
+    for (const prod of produtosBase) {
+      const empId = prod.empresa_id || 'sem_empresa'
+      const empNome = prod.empresa_nome || 'Sem Empresa'
+      if (!mapa.has(empId)) {
+        mapa.set(empId, { id: empId, nome: empNome, qtdProdutos: 0 })
+      }
+      const item = mapa.get(empId)!
+      item.qtdProdutos++
+    }
+
+    return Array.from(mapa.values())
+  }, [produtosGradeAtual, catalogoProdutos])
+
+  // (3) Cálculo da Aba 3: Saídas Unitárias e Kits/unid. (Mensal, alimentada pelas semanas somadas e filtrada por empresa se selecionada)
   const saidasData: ResumoAbaSaidasResultado = useMemo(() => {
     const produtosParaCalculo =
       produtosGradeAtual.length > 0 ? produtosGradeAtual : catalogoProdutos
-    return calcularSaidasUnitarias(produtosParaCalculo, quantidadesConsolidadasMes)
-  }, [produtosGradeAtual, catalogoProdutos, quantidadesConsolidadasMes])
+    return calcularSaidasUnitarias(
+      produtosParaCalculo,
+      quantidadesConsolidadasMes,
+      empresaFiltroSaidas,
+    )
+  }, [produtosGradeAtual, catalogoProdutos, quantidadesConsolidadasMes, empresaFiltroSaidas])
 
   const rotuloCompetenciaAtual = useMemo(() => {
     const item = MESES_OPCOES.find((m) => m.valor === competencia)
@@ -630,7 +675,13 @@ export default function LucroPage() {
             )}
 
             {activeTab === 'saidas' && (
-              <TabSaidasUnitarias saidasData={saidasData} nomePeriodo={rotuloCompetenciaAtual} />
+              <TabSaidasUnitarias
+                saidasData={saidasData}
+                nomePeriodo={rotuloCompetenciaAtual}
+                empresasOpcoes={empresasOpcoesSaidas}
+                empresaFiltro={empresaFiltroSaidas}
+                onEmpresaFiltroChange={setEmpresaFiltroSaidas}
+              />
             )}
 
             {/* MODAL ADICIONAR PRODUTO */}

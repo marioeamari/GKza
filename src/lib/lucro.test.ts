@@ -450,6 +450,56 @@ describe('Módulo /lucro — Regras de Negócio e Cálculos', () => {
       expect(filtrar('emp_weekids')[0].empresa_nome).toBe('WeeKids')
     })
 
+    it('filtro de empresa na aba Saídas Unitárias recalcula totais e filtra apenas itens da empresa', () => {
+      const produtosNaGrade: ProdutoLucro[] = [
+        {
+          id: 'prod_shein',
+          nome: 'Toalha Leve de Praia',
+          sku: 'BLeve',
+          empresa_id: 'c8v8eg0errmelt6',
+          empresa_nome: 'KzaMari',
+          canal_nome: 'SHEIN',
+          modalidade_nome: 'Full',
+          qtd_por_kit: 1,
+        },
+        {
+          id: 'prod_kids',
+          nome: 'Camiseta Infantil',
+          sku: 'WKIDS',
+          empresa_id: 'fm9lfs19qge4xc4',
+          empresa_nome: 'WeeKids',
+          canal_nome: 'Shopee',
+          modalidade_nome: 'Padrão',
+          qtd_por_kit: 2,
+        },
+      ]
+
+      const vendas = {
+        prod_shein: 50,
+        prod_kids: 20,
+      }
+
+      // 1. Sem filtro ('todas')
+      const resTodas = calcularSaidasUnitarias(produtosNaGrade, vendas, 'todas')
+      expect(resTodas.empresas.length).toBe(2)
+      expect(resTodas.totalGeralKits).toBe(70)
+      expect(resTodas.totalGeralUnidades).toBe(90) // 50*1 + 20*2
+
+      // 2. Filtro KzaMari
+      const resKza = calcularSaidasUnitarias(produtosNaGrade, vendas, 'c8v8eg0errmelt6')
+      expect(resKza.empresas.length).toBe(1)
+      expect(resKza.empresas[0].empresa_nome).toBe('KzaMari')
+      expect(resKza.totalGeralKits).toBe(50)
+      expect(resKza.totalGeralUnidades).toBe(50)
+
+      // 3. Filtro WeeKids
+      const resWee = calcularSaidasUnitarias(produtosNaGrade, vendas, 'fm9lfs19qge4xc4')
+      expect(resWee.empresas.length).toBe(1)
+      expect(resWee.empresas[0].empresa_nome).toBe('WeeKids')
+      expect(resWee.totalGeralKits).toBe(20)
+      expect(resWee.totalGeralUnidades).toBe(40)
+    })
+
     it('ao adicionar item da precificação, Saídas Unitárias agrupa pela empresa da precificação', () => {
       const produtosNaGrade: ProdutoLucro[] = [
         {
@@ -503,6 +553,20 @@ describe('Módulo /lucro — Regras de Negócio e Cálculos', () => {
       expect(keyQtd).not.toBe(keyRenda)
       expect(keyQtd).toBe('cel-qtd-lsilkiq8w2apfre:vcvf7xu1pjkwpys')
       expect(keyRenda).toBe('cel-renda-lsilkiq8w2apfre:vcvf7xu1pjkwpys')
+    })
+
+    it('badges completas na grade (canal, modalidade, empresa) possuem chaves exclusivas com prefixo estável', () => {
+      const prodId = 'lsilkiq8w2apfre'
+      const keyCanal = `badge-canal-${prodId}`
+      const keyMod = `badge-mod-${prodId}`
+      const keyEmp = `badge-emp-${prodId}`
+
+      expect(keyCanal).not.toBe(keyMod)
+      expect(keyCanal).not.toBe(keyEmp)
+      expect(keyMod).not.toBe(keyEmp)
+      expect(keyCanal).toBe('badge-canal-lsilkiq8w2apfre')
+      expect(keyMod).toBe('badge-mod-lsilkiq8w2apfre')
+      expect(keyEmp).toBe('badge-emp-lsilkiq8w2apfre')
     })
 
     it('quando há múltiplas precificações para o mesmo par produto+canal, as chaves do modal são únicas usando item.id', () => {

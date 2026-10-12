@@ -1,48 +1,127 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Building2, Package, Layers, Info } from 'lucide-react'
 import type { ResumoAbaSaidasResultado } from '@/lib/lucro'
+
+export interface EmpresaOpcaoFiltroSaidas {
+  id: string
+  nome: string
+  qtdProdutos?: number
+}
 
 interface TabSaidasUnitariasProps {
   saidasData: ResumoAbaSaidasResultado
   nomePeriodo: string
+  empresasOpcoes?: EmpresaOpcaoFiltroSaidas[]
+  empresaFiltro?: string
+  onEmpresaFiltroChange?: (empresaId: string) => void
 }
 
 export const TabSaidasUnitarias: React.FC<TabSaidasUnitariasProps> = ({
   saidasData,
   nomePeriodo,
+  empresasOpcoes = [],
+  empresaFiltro = 'todas',
+  onEmpresaFiltroChange,
 }) => {
   const { empresas, totalGeralKits, totalGeralUnidades } = saidasData
 
+  // Se não forem passadas opções externas, deduz a partir das empresas presentes na contagem
+  const opcoesExibicao = useMemo(() => {
+    if (empresasOpcoes.length > 0) return empresasOpcoes
+    return empresas.map((e) => ({
+      id: e.empresa_id,
+      nome: e.empresa_nome,
+      qtdProdutos: e.itens.length,
+    }))
+  }, [empresasOpcoes, empresas])
+
   return (
     <div className="space-y-6">
-      {/* Banner explicativo */}
-      <div className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50/70 p-3.5 text-xs text-blue-900 shadow-2xs">
-        <Info className="h-4 w-4 shrink-0 text-blue-600 mt-0.5" />
-        <div className="space-y-1">
-          <p className="font-semibold text-blue-950">
-            Contagem Mensal para Emissão de Notas de Entrada ({nomePeriodo})
-          </p>
-          <p className="text-blue-800/90 leading-relaxed">
-            As quantidades vendidas na Aba 1 alimentam automaticamente esta aba, somadas no mês por
-            produto. A contagem é separada por <strong>Empresa / CNPJ</strong> (vinculada a cada
-            produto no repositório de precificação) para conferência e geração das notas de entrada
-            do mês:
-            <br />
-            <strong>Kits:</strong> kits ou itens vendidos no período. | <strong>Unid.:</strong>{' '}
-            unidades totais calculadas via kits × qtd_por_kit do catálogo (ex: 1 kit de 913 un = 913
-            unid.; 123 kits de 6 un = 778 unid., etc.).
-          </p>
+      {/* Banner explicativo e Barra de Filtro de Empresa */}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50/70 p-3.5 text-xs text-blue-900 shadow-2xs">
+          <Info className="h-4 w-4 shrink-0 text-blue-600 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-semibold text-blue-950">
+              Contagem Mensal para Emissão de Notas de Entrada ({nomePeriodo})
+            </p>
+            <p className="text-blue-800/90 leading-relaxed">
+              As quantidades vendidas na Aba 1 alimentam automaticamente esta aba, somadas no mês
+              por produto. A contagem é separada por <strong>Empresa / CNPJ</strong> (vinculada a
+              cada produto no repositório de precificação) para conferência e geração das notas de
+              entrada do mês:
+              <br />
+              <strong>Kits:</strong> kits ou itens vendidos no período. | <strong>Unid.:</strong>{' '}
+              unidades totais calculadas via kits × qtd_por_kit do catálogo (ex: 1 kit de 913 un =
+              913 unid.; 123 kits de 6 un = 778 unid., etc.).
+            </p>
+          </div>
         </div>
+
+        {/* BARRA DE FILTRO DE EMPRESA (mesmo padrão do popup "Adicionar Produto") */}
+        {onEmpresaFiltroChange && (
+          <div className="flex items-center justify-between gap-3 flex-wrap bg-white p-3 rounded-xl border border-border/70 shadow-2xs">
+            <div className="flex items-center gap-3 flex-wrap">
+              <Label className="text-xs font-semibold flex items-center gap-1.5 text-foreground shrink-0">
+                <Building2 className="h-4 w-4 text-primary" />
+                <span>Empresa:</span>
+              </Label>
+              <Select value={empresaFiltro} onValueChange={onEmpresaFiltroChange}>
+                <SelectTrigger className="h-9 min-w-[220px] max-w-xs text-xs font-medium bg-white">
+                  <SelectValue placeholder="Todas as empresas..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas" className="text-xs font-medium">
+                    Todas as Empresas
+                  </SelectItem>
+                  {opcoesExibicao.map((emp) => (
+                    <SelectItem
+                      key={`filtro-saidas-emp-${emp.id}`}
+                      value={emp.id}
+                      className="text-xs"
+                    >
+                      <span>{emp.nome}</span>
+                      {typeof emp.qtdProdutos === 'number' && emp.qtdProdutos > 0 && (
+                        <span className="text-[10px] text-muted-foreground ml-1.5">
+                          [{emp.qtdProdutos} item(ns)]
+                        </span>
+                      )}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="text-xs text-muted-foreground font-medium">
+              {empresaFiltro === 'todas' ? (
+                <span>Exibindo contagem de todas as empresas ({empresas.length})</span>
+              ) : (
+                <span className="text-primary font-semibold">
+                  Filtro ativo:{' '}
+                  {opcoesExibicao.find((e) => e.id === empresaFiltro)?.nome || empresaFiltro}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Cards de Resumo Geral */}
+      {/* Cards de Resumo Geral com Totais Recalculados */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Card className="border border-border/80 bg-white shadow-xs">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-              <span>Total Geral de Kits Vendidos</span>
+              <span>Total {empresaFiltro === 'todas' ? 'Geral' : 'Filtrado'} de Kits Vendidos</span>
               <Package className="h-4 w-4 text-primary" />
             </CardTitle>
           </CardHeader>
@@ -57,7 +136,9 @@ export const TabSaidasUnitarias: React.FC<TabSaidasUnitariasProps> = ({
         <Card className="border border-border/80 bg-white shadow-xs">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-              <span>Total Geral de Unidades (Peças)</span>
+              <span>
+                Total {empresaFiltro === 'todas' ? 'Geral' : 'Filtrado'} de Unidades (Peças)
+              </span>
               <Layers className="h-4 w-4 text-emerald-600" />
             </CardTitle>
           </CardHeader>

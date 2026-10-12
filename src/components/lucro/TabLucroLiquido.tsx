@@ -290,10 +290,20 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
                                 <span className="text-[10px] text-muted-foreground font-mono">
                                   {prod.sku} {prod.marca ? `• ${prod.marca}` : ''}
                                 </span>
-                                {(prod.modalidade_nome || prod.empresa_nome) && (
-                                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                {(prod.canal_nome || prod.modalidade_nome || prod.empresa_nome) && (
+                                  <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                                    {prod.canal_nome && (
+                                      <Badge
+                                        key={`badge-canal-${prod.id}`}
+                                        variant="secondary"
+                                        className="text-[10px] py-0 px-1.5 h-4 bg-purple-50 text-purple-800 font-semibold border border-purple-200/60"
+                                      >
+                                        {prod.canal_nome}
+                                      </Badge>
+                                    )}
                                     {prod.modalidade_nome && (
                                       <Badge
+                                        key={`badge-mod-${prod.id}`}
                                         variant="secondary"
                                         className="text-[10px] py-0 px-1.5 h-4 bg-blue-50 text-blue-700 border border-blue-200 font-semibold"
                                       >
@@ -302,6 +312,7 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
                                     )}
                                     {prod.empresa_nome && (
                                       <Badge
+                                        key={`badge-emp-${prod.id}`}
                                         variant="outline"
                                         className="text-[10px] py-0 px-1.5 h-4 border-slate-300 text-slate-700 bg-slate-50 font-medium"
                                       >

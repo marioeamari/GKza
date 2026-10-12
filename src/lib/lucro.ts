@@ -20,6 +20,9 @@ export interface ProdutoLucro {
   empresa_cnpj?: string
   modalidade_id?: string
   modalidade_nome?: string
+  canal_id?: string
+  canal_nome?: string
+  marketplace_nome?: string
   ordem?: number
 }
 
@@ -596,6 +599,7 @@ export function calcularBalancoSemanal(
 export function calcularSaidasUnitarias(
   produtos: ProdutoLucro[],
   quantidadesTotaisPorProduto: Record<string, number>, // soma de todas as lojas no mês
+  empresaFiltroId?: string, // 'todas' ou id/nome específico da empresa para filtrar
 ): ResumoAbaSaidasResultado {
   const empresasMap = new Map<string, EmpresaSaidasConsolidada>()
 
@@ -615,6 +619,15 @@ export function calcularSaidasUnitarias(
     const empId = prod.empresa_id || 'sem_empresa'
     const empNome = prod.empresa_nome || 'Sem Empresa Vinculada'
     const empCnpj = prod.empresa_cnpj || ''
+
+    // Se houver filtro de empresa e não for 'todas', ignora produtos que não pertençam à empresa selecionada
+    if (empresaFiltroId && empresaFiltroId !== 'todas') {
+      const matchId = empId === empresaFiltroId
+      const matchNome = empNome === empresaFiltroId
+      if (!matchId && !matchNome) {
+        continue
+      }
+    }
 
     if (!empresasMap.has(empId)) {
       empresasMap.set(empId, {
