@@ -115,7 +115,7 @@ export const TabBalanco: React.FC<TabBalancoProps> = ({ balancoData, nomePeriodo
           </Card>
         ) : (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            {grupos.map((grupo) => {
+            {grupos.map((grupo, gIdx) => {
               // Agrupa subtotais por tag/destino dentro do grupo
               const subTotaisTag: Record<string, { nome: string; total: number; count: number }> =
                 {}
@@ -128,9 +128,13 @@ export const TabBalanco: React.FC<TabBalancoProps> = ({ balancoData, nomePeriodo
                 subTotaisTag[tagNome].count++
               }
 
+              const grupoKey = grupo.grupo_id
+                ? `grupo-balanco-${grupo.grupo_id}`
+                : `grupo-balanco-idx-${gIdx}`
+
               return (
                 <Card
-                  key={grupo.grupo_id}
+                  key={grupoKey}
                   className="border border-border/80 bg-white shadow-xs overflow-hidden"
                 >
                   <CardHeader
@@ -164,9 +168,9 @@ export const TabBalanco: React.FC<TabBalancoProps> = ({ balancoData, nomePeriodo
                       ) : (
                         Object.values(subTotaisTag)
                           .sort((a, b) => b.total - a.total)
-                          .map((sub) => (
+                          .map((sub, sIdx) => (
                             <div
-                              key={sub.nome}
+                              key={`subtag-${grupo.grupo_id || gIdx}-${sub.nome || sIdx}`}
                               className="flex items-center justify-between px-4 py-2 hover:bg-slate-50/50 transition-colors"
                             >
                               <div className="flex items-center gap-2">

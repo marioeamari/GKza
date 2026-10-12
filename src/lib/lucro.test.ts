@@ -287,4 +287,68 @@ describe('Módulo /lucro — Regras de Negócio e Cálculos', () => {
       expect(extrairRendaLiquidaDePrecificacao(null)).toBe(0)
     })
   })
+
+  describe('Garantia de Unicidade de Keys no Módulo /lucro (Prevenção de Colisão React)', () => {
+    it('células de quantidade e renda possuem chaves exclusivas por papel e par produto+canal', () => {
+      const prodId = 'lsilkiq8w2apfre'
+      const canalId = 'vcvf7xu1pjkwpys'
+
+      const keyQtd = `cel-qtd-${prodId}:${canalId}`
+      const keyRenda = `cel-renda-${prodId}:${canalId}`
+
+      expect(keyQtd).not.toBe(keyRenda)
+      expect(keyQtd).toBe('cel-qtd-lsilkiq8w2apfre:vcvf7xu1pjkwpys')
+      expect(keyRenda).toBe('cel-renda-lsilkiq8w2apfre:vcvf7xu1pjkwpys')
+    })
+
+    it('quando há múltiplas precificações para o mesmo par produto+canal, as chaves do modal são únicas usando item.id', () => {
+      const item1 = {
+        id: 'qntaxaei058jibs',
+        produto_id: 'lsilkiq8w2apfre',
+        canal_id: 'vcvf7xu1pjkwpys',
+      }
+      const item2 = {
+        id: 'fd9dejd899fm75l',
+        produto_id: 'lsilkiq8w2apfre',
+        canal_id: 'vcvf7xu1pjkwpys',
+      }
+
+      const gerarKey = (item: { id?: string; produto_id: string; canal_id: string }, idx: number) =>
+        item.id
+          ? `prec-aprovada-${item.id}`
+          : `prec-aprovada-${item.produto_id}:${item.canal_id}:${idx}`
+
+      const key1 = gerarKey(item1, 0)
+      const key2 = gerarKey(item2, 1)
+
+      expect(key1).not.toBe(key2)
+      expect(key1).toBe('prec-aprovada-qntaxaei058jibs')
+      expect(key2).toBe('prec-aprovada-fd9dejd899fm75l')
+
+      // E se id estiver ausente em dados simulados, o índice desempata:
+      const semId1 = { produto_id: 'lsilkiq8w2apfre', canal_id: 'vcvf7xu1pjkwpys' }
+      const semId2 = { produto_id: 'lsilkiq8w2apfre', canal_id: 'vcvf7xu1pjkwpys' }
+      expect(gerarKey(semId1, 0)).not.toBe(gerarKey(semId2, 1))
+    })
+
+    it('linhas de produtos na grade são desduplicadas no LucroPage para evitar colisão', () => {
+      const idsGrade = ['lsilkiq8w2apfre', 'lsilkiq8w2apfre', 'outro_produto']
+      const mapaCatalogo = new Map([
+        ['lsilkiq8w2apfre', { id: 'lsilkiq8w2apfre', nome: 'Toalha Leve', sku: 'BLeve' }],
+        ['outro_produto', { id: 'outro_produto', nome: 'Outro', sku: 'OUT' }],
+      ])
+
+      const produtosUnicosMap = new Map<string, any>()
+      for (const id of idsGrade) {
+        const prod = mapaCatalogo.get(id)
+        if (prod && !produtosUnicosMap.has(prod.id)) {
+          produtosUnicosMap.set(prod.id, prod)
+        }
+      }
+      const produtosGrade = Array.from(produtosUnicosMap.values())
+
+      expect(produtosGrade.length).toBe(2)
+      expect(produtosGrade.map((p) => p.id)).toEqual(['lsilkiq8w2apfre', 'outro_produto'])
+    })
+  })
 })

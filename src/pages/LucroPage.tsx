@@ -263,9 +263,15 @@ export default function LucroPage() {
       }
     }
 
-    return idsProdutosGradeAtual
-      .map((id) => mapaCatalogo.get(id))
-      .filter((p): p is ProdutoLucro => Boolean(p))
+    // Garante que a lista de produtos retornada para a grade não contenha ids repetidos
+    const produtosUnicosMap = new Map<string, ProdutoLucro>()
+    for (const id of idsProdutosGradeAtual) {
+      const prod = mapaCatalogo.get(id)
+      if (prod && !produtosUnicosMap.has(prod.id)) {
+        produtosUnicosMap.set(prod.id, prod)
+      }
+    }
+    return Array.from(produtosUnicosMap.values())
   }, [catalogoProdutos, precificacoesAprovadas, idsProdutosGradeAtual])
 
   // Quantidades do mês selecionado
@@ -296,7 +302,7 @@ export default function LucroPage() {
 
   // Adiciona produto vindo do modal de precificações aprovadas
   const handleAdicionarProduto = (item: PrecificacaoAprovadaItem, quantidadeInicial?: number) => {
-    // 1. Garante que o produto está na lista da grade do mês
+    // 1. Garante que o produto está na lista da grade do mês sem duplicatas
     setProdutosGradePorMes((prev) => {
       const listaAtual = prev[competencia] || []
       if (listaAtual.includes(item.produto_id)) {
@@ -304,7 +310,7 @@ export default function LucroPage() {
       }
       return {
         ...prev,
-        [competencia]: [...listaAtual, item.produto_id],
+        [competencia]: Array.from(new Set([...listaAtual, item.produto_id])),
       }
     })
 

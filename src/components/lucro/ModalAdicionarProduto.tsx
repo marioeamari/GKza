@@ -47,12 +47,6 @@ export const ModalAdicionarProduto: React.FC<ModalAdicionarProdutoProps> = ({
   // Quantidade inicial opcional para adicionar diretamente
   const [quantidadeInicial, setQuantidadeInicial] = useState<string>('')
 
-  // Canais que possuem ao menos uma precificação aprovada
-  const canaisComPrecificacao = useMemo(() => {
-    const canaisIdsComPrec = new Set(precificacoesAprovadas.map((p) => p.canal_id))
-    return canais.filter((c) => canaisIdsComPrec.has(c.id))
-  }, [canais, precificacoesAprovadas])
-
   // Filtra itens com precificação aprovada de acordo com o canal e termo de busca
   const itensFiltrados = useMemo(() => {
     return precificacoesAprovadas.filter((item) => {
@@ -123,12 +117,13 @@ export const ModalAdicionarProduto: React.FC<ModalAdicionarProdutoProps> = ({
                 <SelectItem value="todos" className="text-xs font-medium">
                   Todos os Canais Aprovados ({precificacoesAprovadas.length})
                 </SelectItem>
-                {canais.map((c) => {
+                {canais.map((c, idx) => {
                   const qtdPrecs = precificacoesAprovadas.filter((p) => p.canal_id === c.id).length
+                  const keyCanal = c.id ? `select-canal-${c.id}` : `select-canal-idx-${idx}`
                   return (
                     <SelectItem
-                      key={c.id}
-                      value={c.id}
+                      key={keyCanal}
+                      value={c.id || `canal-${idx}`}
                       className="text-xs flex items-center justify-between"
                       disabled={qtdPrecs === 0}
                     >
@@ -198,12 +193,16 @@ export const ModalAdicionarProduto: React.FC<ModalAdicionarProdutoProps> = ({
               </p>
             </div>
           ) : (
-            itensFiltrados.map((item) => {
+            itensFiltrados.map((item, idx) => {
               const jaNaGrade = produtosJaAdicionadosIds.includes(item.produto_id)
+              // Chave única e estável: prefere o id único da precificação (item.id) ou compõe produto:canal:id/indice
+              const itemKey = item.id
+                ? `prec-aprovada-${item.id}`
+                : `prec-aprovada-${item.produto_id}:${item.canal_id}:${idx}`
 
               return (
                 <div
-                  key={`${item.produto_id}-${item.canal_id}`}
+                  key={itemKey}
                   className="flex items-center justify-between p-3 hover:bg-slate-50 transition text-xs"
                 >
                   <div className="flex items-start gap-3 min-w-0 pr-2">

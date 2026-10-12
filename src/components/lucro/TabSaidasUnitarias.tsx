@@ -78,9 +78,9 @@ export const TabSaidasUnitarias: React.FC<TabSaidasUnitariasProps> = ({
             &apos;Lucro Líquido&apos;.
           </Card>
         ) : (
-          empresas.map((emp) => (
+          empresas.map((emp, empIdx) => (
             <Card
-              key={emp.empresa_id}
+              key={`empresa-saida-${emp.empresa_id || empIdx}`}
               className="border border-border/80 bg-white shadow-xs overflow-hidden"
             >
               <CardHeader className="bg-slate-50 py-3 px-4 border-b border-border/60">
@@ -126,11 +126,12 @@ export const TabSaidasUnitarias: React.FC<TabSaidasUnitariasProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/40 font-medium">
-                      {emp.itens.map((it) => {
+                      {emp.itens.map((it, itIdx) => {
                         const isZero = it.kits_vendidos === 0
+                        const itemSaidaKey = `saida-${emp.empresa_id || empIdx}-${it.produto_id || itIdx}`
                         return (
                           <tr
-                            key={it.produto_id}
+                            key={itemSaidaKey}
                             className={`hover:bg-slate-50/50 transition-colors ${
                               isZero ? 'text-muted-foreground/60' : 'text-foreground'
                             }`}
