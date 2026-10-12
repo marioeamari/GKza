@@ -6,6 +6,9 @@ import {
   calcularSaidasUnitarias,
   agruparLojasPorMarketplace,
   extrairRendaLiquidaDePrecificacao,
+  gerarSemanasDoMes,
+  filtrarDespesasPorSemana,
+  calcularBalancoSemanal,
   type ProdutoLucro,
   type CanalLojaLucro,
   type DespesaGrupoItem,
@@ -550,6 +553,343 @@ describe('Módulo /lucro — Regras de Negócio e Cálculos', () => {
 
       expect(produtosGrade.length).toBe(2)
       expect(produtosGrade.map((p) => p.id)).toEqual(['lsilkiq8w2apfre', 'outro_produto'])
+    })
+  })
+
+  describe('Fechamento Semanal de Domingo a Sábado no Mês (Regra Obrigatória)', () => {
+    describe('Geração das Semanas com mês começando em qualquer dia da semana', () => {
+      it('Setembro/2026 (começa na terça-feira dia 01 e termina na quarta-feira dia 30)', () => {
+        const semanas = gerarSemanasDoMes('2026-09')
+        expect(semanas.length).toBe(5)
+
+        // Semana 1: 01 a 05 (terça a sábado, 5 dias)
+        expect(semanas[0].numero).toBe(1)
+        expect(semanas[0].dataInicio).toBe('2026-09-01')
+        expect(semanas[0].dataFim).toBe('2026-09-05')
+        expect(semanas[0].diasCount).toBe(5)
+        expect(semanas[0].diasIso).toEqual([
+          '2026-09-01',
+          '2026-09-02',
+          '2026-09-03',
+          '2026-09-04',
+          '2026-09-05',
+        ])
+        expect(semanas[0].rotulo).toContain('ter a sáb')
+
+        // Semana 2: 06 a 12 (domingo a sábado, 7 dias)
+        expect(semanas[1].numero).toBe(2)
+        expect(semanas[1].dataInicio).toBe('2026-09-06')
+        expect(semanas[1].dataFim).toBe('2026-09-12')
+        expect(semanas[1].diasCount).toBe(7)
+
+        // Semana 3: 13 a 19 (domingo a sábado, 7 dias)
+        expect(semanas[2].numero).toBe(3)
+        expect(semanas[2].dataInicio).toBe('2026-09-13')
+        expect(semanas[2].dataFim).toBe('2026-09-19')
+        expect(semanas[2].diasCount).toBe(7)
+
+        // Semana 4: 20 a 26 (domingo a sábado, 7 dias)
+        expect(semanas[3].numero).toBe(4)
+        expect(semanas[3].dataInicio).toBe('2026-09-20')
+        expect(semanas[3].dataFim).toBe('2026-09-26')
+        expect(semanas[3].diasCount).toBe(7)
+
+        // Semana 5: 27 a 30 (domingo a quarta-feira, 4 dias, última semana nunca atravessa o mês)
+        expect(semanas[4].numero).toBe(5)
+        expect(semanas[4].dataInicio).toBe('2026-09-27')
+        expect(semanas[4].dataFim).toBe('2026-09-30')
+        expect(semanas[4].diasCount).toBe(4)
+        expect(semanas[4].rotulo).toContain('dom a qua')
+
+        // Soma dos dias de todas as semanas = 30 dias de setembro
+        const somaDias = semanas.reduce((acc, s) => acc + s.diasCount, 0)
+        expect(somaDias).toBe(30)
+      })
+
+      it('Mês começando na quinta-feira (exemplo do enunciado: qui-sáb, 3 dias)', () => {
+        // Outubro/2026 começa exatamente numa quinta-feira! (01/10/2026 é quinta)
+        const semanas = gerarSemanasDoMes('2026-10')
+        expect(semanas.length).toBe(5)
+
+        // Semana 1: 01 a 03 (quinta a sábado = 3 dias)
+        expect(semanas[0].dataInicio).toBe('2026-10-01')
+        expect(semanas[0].dataFim).toBe('2026-10-03')
+        expect(semanas[0].diasCount).toBe(3)
+        expect(semanas[0].rotulo).toContain('qui a sáb')
+
+        // Semana 2: 04 a 10 (dom a sáb, 7 dias)
+        expect(semanas[1].dataInicio).toBe('2026-10-04')
+        expect(semanas[1].dataFim).toBe('2026-10-10')
+        expect(semanas[1].diasCount).toBe(7)
+
+        // Semana 5: 25 a 31 (dom a sáb, 7 dias pois 31/10/2026 é sábado)
+        expect(semanas[4].dataInicio).toBe('2026-10-25')
+        expect(semanas[4].dataFim).toBe('2026-10-31')
+        expect(semanas[4].diasCount).toBe(7)
+
+        const totalDias = semanas.reduce((acc, s) => acc + s.diasCount, 0)
+        expect(totalDias).toBe(31)
+      })
+
+      it('Mês começando no domingo (ex: Novembro/2026 dia 01 é domingo)', () => {
+        const semanas = gerarSemanasDoMes('2026-11')
+        expect(semanas.length).toBe(5)
+
+        // Semana 1 começa no domingo dia 01 e vai até sábado dia 07 (7 dias cheios)
+        expect(semanas[0].dataInicio).toBe('2026-11-01')
+        expect(semanas[0].dataFim).toBe('2026-11-07')
+        expect(semanas[0].diasCount).toBe(7)
+        expect(semanas[0].rotulo).toContain('dom a sáb')
+
+        // Semana 5 termina no dia 30 (segunda-feira)
+        expect(semanas[4].dataInicio).toBe('2026-11-29')
+        expect(semanas[4].dataFim).toBe('2026-11-30')
+        expect(semanas[4].diasCount).toBe(2)
+
+        const totalDias = semanas.reduce((acc, s) => acc + s.diasCount, 0)
+        expect(totalDias).toBe(30)
+      })
+
+      it('Mês começando no sábado (ex: Agosto/2026 dia 01 é sábado)', () => {
+        const semanas = gerarSemanasDoMes('2026-08')
+        expect(semanas.length).toBe(6)
+
+        // Semana 1 tem apenas 1 dia: 01/08 (sábado)
+        expect(semanas[0].dataInicio).toBe('2026-08-01')
+        expect(semanas[0].dataFim).toBe('2026-08-01')
+        expect(semanas[0].diasCount).toBe(1)
+        expect(semanas[0].rotulo).toContain('sáb')
+
+        // Semana 2: 02 a 08 (dom a sáb, 7 dias)
+        expect(semanas[1].dataInicio).toBe('2026-08-02')
+        expect(semanas[1].dataFim).toBe('2026-08-08')
+
+        // Semana 6: 30 a 31 (dom a seg, 2 dias)
+        expect(semanas[5].dataInicio).toBe('2026-08-30')
+        expect(semanas[5].dataFim).toBe('2026-08-31')
+        expect(semanas[5].diasCount).toBe(2)
+
+        const totalDias = semanas.reduce((acc, s) => acc + s.diasCount, 0)
+        expect(totalDias).toBe(31)
+      })
+
+      it('Fevereiro em ano bissexto (2028: 29 dias)', () => {
+        const semanas = gerarSemanasDoMes('2028-02')
+        const totalDias = semanas.reduce((acc, s) => acc + s.diasCount, 0)
+        expect(totalDias).toBe(29)
+      })
+    })
+
+    describe('Totais semanais = soma dos dias e Soma das semanas = total do mês', () => {
+      it('calcula a soma das semanas conferindo exatamente com o consolidado mensal da grade', () => {
+        const semanas = gerarSemanasDoMes('2026-09')
+        const produtos: ProdutoLucro[] = [
+          { id: 'p1', nome: 'Produto 1', sku: 'SKU1' },
+          { id: 'p2', nome: 'Produto 2', sku: 'SKU2' },
+        ]
+        const lojas: CanalLojaLucro[] = [
+          { id: 'c1', nome: 'Shopee Kza', marketplace_nome: 'Shopee' },
+          { id: 'c2', nome: 'SHEIN Kza', marketplace_nome: 'SHEIN' },
+        ]
+        const rendas = {
+          p1: {
+            c1: { renda_liquida_unitaria: 10, tem_aprovacao: true },
+            c2: { renda_liquida_unitaria: 15, tem_aprovacao: true },
+          },
+          p2: {
+            c1: { renda_liquida_unitaria: 20, tem_aprovacao: true },
+            c2: { renda_liquida_unitaria: 25, tem_aprovacao: true },
+          },
+        }
+
+        // Simulando quantidades inseridas em cada semana
+        const quantidadesPorSemana: Record<number, Record<string, Record<string, number>>> = {
+          1: { p1: { c1: 5, c2: 2 }, p2: { c1: 1, c2: 0 } }, // p1: 50 + 30 = 80; p2: 20 = 100
+          2: { p1: { c1: 10, c2: 4 }, p2: { c1: 2, c2: 1 } }, // p1: 100 + 60 = 160; p2: 40 + 25 = 65 => 225
+          3: { p1: { c1: 0, c2: 0 }, p2: { c1: 3, c2: 2 } }, // p2: 60 + 50 = 110
+          4: { p1: { c1: 8, c2: 1 }, p2: { c1: 0, c2: 0 } }, // p1: 80 + 15 = 95
+          5: { p1: { c1: 2, c2: 0 }, p2: { c1: 1, c2: 1 } }, // p1: 20; p2: 20 + 25 = 45 => 65
+        }
+
+        let somaLucroSemanas = 0
+        let somaQtdSemanas = 0
+        const quantidadesConsolidadasMes: Record<string, Record<string, number>> = {
+          p1: { c1: 0, c2: 0 },
+          p2: { c1: 0, c2: 0 },
+        }
+
+        for (const sem of semanas) {
+          const qtdsSem = quantidadesPorSemana[sem.numero] || {}
+          const gradeSem = calcularGradeLucroMes(produtos, lojas, qtdsSem, rendas)
+
+          somaLucroSemanas += gradeSem.totalGeralLucro
+          somaQtdSemanas += gradeSem.totalGeralQuantidade
+
+          // Acumula no mês
+          for (const pId of ['p1', 'p2']) {
+            for (const cId of ['c1', 'c2']) {
+              quantidadesConsolidadasMes[pId][cId] += qtdsSem[pId]?.[cId] || 0
+            }
+          }
+        }
+
+        // Grade mensal consolidada
+        const gradeMes = calcularGradeLucroMes(produtos, lojas, quantidadesConsolidadasMes, rendas)
+
+        expect(somaQtdSemanas).toBe(gradeMes.totalGeralQuantidade)
+        expect(somaLucroSemanas).toBe(gradeMes.totalGeralLucro)
+        expect(gradeMes.totalGeralLucro).toBe(100 + 225 + 110 + 95 + 65) // 595.00
+      })
+    })
+
+    describe('Balanço Semanal: Lucro da semana − Despesas da semana', () => {
+      it('filtra despesas cujas datas de competência/pagamento pertençam aos dias da semana', () => {
+        const semanas = gerarSemanasDoMes('2026-09')
+        const semana1 = semanas[0] // 01/09 a 05/09
+
+        const despesasMes: DespesaGrupoItem[] = [
+          {
+            grupo_id: 'tag_empresa',
+            grupo_nome: 'Empresa',
+            cor: '#4C3A8C',
+            total: 3000,
+            itens: [
+              {
+                id: 'd1',
+                descricao: 'Aluguel dia 02',
+                valor: 2000,
+                data: '2026-09-02',
+                destino: 'Empresa',
+              },
+              {
+                id: 'd2',
+                descricao: 'Internet dia 15',
+                valor: 1000,
+                data: '2026-09-15',
+                destino: 'Empresa',
+              },
+            ],
+          },
+          {
+            grupo_id: 'tag_pessoal',
+            grupo_nome: 'Eu/Casa',
+            cor: '#2B5BA8',
+            total: 1500,
+            itens: [
+              {
+                id: 'd3',
+                descricao: 'Feira dia 05',
+                valor: 500,
+                data: '2026-09-05',
+                destino: 'Eu/Casa',
+              },
+              {
+                id: 'd4',
+                descricao: 'Farmácia dia 20',
+                valor: 1000,
+                data: '2026-09-20',
+                destino: 'Eu/Casa',
+              },
+            ],
+          },
+        ]
+
+        const despesasSem1 = filtrarDespesasPorSemana(despesasMes, semana1)
+        expect(despesasSem1.length).toBe(2)
+
+        const grpEmpresa = despesasSem1.find((g) => g.grupo_id === 'tag_empresa')!
+        expect(grpEmpresa.total).toBe(2000)
+        expect(grpEmpresa.itens.length).toBe(1)
+        expect(grpEmpresa.itens[0].id).toBe('d1')
+
+        const grpPessoal = despesasSem1.find((g) => g.grupo_id === 'tag_pessoal')!
+        expect(grpPessoal.total).toBe(500)
+        expect(grpPessoal.itens.length).toBe(1)
+        expect(grpPessoal.itens[0].id).toBe('d3')
+      })
+
+      it('calcula o Balanço Semanal para todas as semanas destacando balanço negativo e totalizando com o mês', () => {
+        const semanas = gerarSemanasDoMes('2026-09') // 5 semanas
+
+        const despesasMes: DespesaGrupoItem[] = [
+          {
+            grupo_id: 'tag_empresa',
+            grupo_nome: 'Empresa',
+            cor: '#4C3A8C',
+            total: 4500,
+            itens: [
+              {
+                id: 'd1',
+                descricao: 'Despesa sem 1',
+                valor: 1000,
+                data: '2026-09-03',
+                destino: 'Empresa',
+              },
+              {
+                id: 'd2',
+                descricao: 'Despesa sem 2',
+                valor: 1500,
+                data: '2026-09-10',
+                destino: 'Empresa',
+              },
+              {
+                id: 'd3',
+                descricao: 'Despesa sem 3',
+                valor: 2000,
+                data: '2026-09-17',
+                destino: 'Empresa',
+              },
+            ],
+          },
+        ]
+
+        // Lucro da grade para cada semana:
+        // Sem 1: 1500 (Lucro 1500 - Desp 1000 = +500)
+        // Sem 2: 1200 (Lucro 1200 - Desp 1500 = -300 DÉFICIT)
+        // Sem 3: 2000 (Lucro 2000 - Desp 2000 = 0)
+        // Sem 4: 800  (Lucro 800  - Desp 0 = +800)
+        // Sem 5: 500  (Lucro 500  - Desp 0 = +500)
+        const lucroPorSemana: Record<number, number> = {
+          1: 1500,
+          2: 1200,
+          3: 2000,
+          4: 800,
+          5: 500,
+        }
+
+        const resultado = calcularBalancoSemanal(semanas, lucroPorSemana, despesasMes)
+
+        expect(resultado.semanas.length).toBe(5)
+
+        // Sem 1
+        expect(resultado.semanas[0].lucroSemana).toBe(1500)
+        expect(resultado.semanas[0].despesasSemana).toBe(1000)
+        expect(resultado.semanas[0].balanco).toBe(500)
+        expect(resultado.semanas[0].isNegativo).toBe(false)
+
+        // Sem 2 (déficit em destaque)
+        expect(resultado.semanas[1].lucroSemana).toBe(1200)
+        expect(resultado.semanas[1].despesasSemana).toBe(1500)
+        expect(resultado.semanas[1].balanco).toBe(-300)
+        expect(resultado.semanas[1].isNegativo).toBe(true)
+
+        // Sem 3 (zero)
+        expect(resultado.semanas[2].balanco).toBe(0)
+
+        // Totais do mês conferindo com a soma das semanas
+        const somaLucroSemanas = resultado.semanas.reduce((acc, s) => acc + s.lucroSemana, 0)
+        const somaDespesasSemanas = resultado.semanas.reduce((acc, s) => acc + s.despesasSemana, 0)
+        const somaBalancoSemanas = resultado.semanas.reduce((acc, s) => acc + s.balanco, 0)
+
+        expect(resultado.totalLucroMes).toBe(somaLucroSemanas)
+        expect(resultado.totalDespesasMes).toBe(somaDespesasSemanas)
+        expect(resultado.balancoMes).toBe(somaBalancoSemanas)
+
+        expect(resultado.totalLucroMes).toBe(6000)
+        expect(resultado.totalDespesasMes).toBe(4500)
+        expect(resultado.balancoMes).toBe(1500)
+        expect(resultado.isNegativoMes).toBe(false)
+      })
     })
   })
 })

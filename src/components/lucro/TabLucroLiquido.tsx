@@ -19,6 +19,7 @@ import {
   TrendingUp,
   Plus,
   Trash2,
+  Building2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { formatCurrency } from '@/lib/format'
@@ -30,6 +31,16 @@ import type {
 } from '@/lib/lucro'
 import { agruparLojasPorMarketplace } from '@/lib/lucro'
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { CalendarDays } from 'lucide-react'
+import type { SemanaMesInfo } from '@/lib/lucro'
+
 export interface TabLucroLiquidoProps {
   produtos: ProdutoLucro[]
   lojas: CanalLojaLucro[]
@@ -39,6 +50,10 @@ export interface TabLucroLiquidoProps {
   onAbrirModalAdicionar?: () => void
   resumoGrade: ResumoGradeLucroMes
   nomePeriodo: string
+  // Fechamento Semanal de Domingo a Sábado
+  semanas: SemanaMesInfo[]
+  semanaSelecionada: number
+  onSelecionarSemana: (semanaNum: number) => void
 }
 
 export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
@@ -50,6 +65,9 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
   onAbrirModalAdicionar,
   resumoGrade,
   nomePeriodo,
+  semanas,
+  semanaSelecionada,
+  onSelecionarSemana,
 }) => {
   // Agrupa lojas por marketplace para renderizar a faixa de marca colorida no cabeçalho
   const gruposMarketplace: MarketplaceGrupoLojas[] = useMemo(() => {
@@ -59,29 +77,58 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
   return (
     <TooltipProvider delayDuration={150}>
       <div className="space-y-4">
-        {/* BARRA SUPERIOR DA ABA: BOTÃO ADICIONAR PRODUTO E INFORMAÇÃO */}
+        {/* BARRA SUPERIOR DA ABA: SELETOR DE FECHAMENTO SEMANAL + BOTÃO ADICIONAR PRODUTO */}
         <div className="flex items-center justify-between gap-3 flex-wrap bg-white p-3 rounded-xl border border-border/70 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-foreground">Produtos na Grade do Mês:</span>
-            <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md text-xs">
-              {produtos.length} item(ns)
-            </span>
-            <span className="text-muted-foreground/60 text-xs hidden sm:inline">•</span>
-            <span className="text-[11px] text-muted-foreground hidden sm:inline">
-              Grade enxuta contendo apenas pares com precificação aprovada cadastrada
+          {/* Seletor de Fechamento Semanal */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+              <CalendarDays className="h-4 w-4 text-purple-600" />
+              <span>Fechamento Semanal:</span>
+            </div>
+            <Select
+              value={String(semanaSelecionada)}
+              onValueChange={(val) => onSelecionarSemana(parseInt(val, 10))}
+            >
+              <SelectTrigger className="h-8 min-w-[280px] max-w-md text-xs font-bold bg-purple-50/50 border-purple-200 text-purple-950">
+                <SelectValue placeholder="Selecione a semana..." />
+              </SelectTrigger>
+              <SelectContent>
+                {semanas.map((sem) => (
+                  <SelectItem
+                    key={`seletor-sem-${sem.numero}`}
+                    value={String(sem.numero)}
+                    className="text-xs font-medium"
+                  >
+                    <span>{sem.rotulo}</span>
+                    <span className="text-[10px] text-muted-foreground ml-1.5">
+                      ({sem.diasCount} {sem.diasCount === 1 ? 'dia' : 'dias'})
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <span className="text-muted-foreground/60 text-xs hidden md:inline">•</span>
+            <span className="text-[11px] text-muted-foreground hidden md:inline font-medium">
+              Grade e totais valendo para o fechamento da semana selecionada
             </span>
           </div>
 
-          {onAbrirModalAdicionar && (
-            <Button
-              size="sm"
-              onClick={onAbrirModalAdicionar}
-              className="h-8 gap-1.5 text-xs font-bold bg-purple-700 hover:bg-purple-800 text-white shadow-2xs"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Adicionar Produto</span>
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md text-xs">
+              {produtos.length} produto(s)
+            </span>
+            {onAbrirModalAdicionar && (
+              <Button
+                size="sm"
+                onClick={onAbrirModalAdicionar}
+                className="h-8 gap-1.5 text-xs font-bold bg-purple-700 hover:bg-purple-800 text-white shadow-2xs"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Adicionar Produto</span>
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Banner de status / alertas */}
@@ -243,6 +290,27 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
                                 <span className="text-[10px] text-muted-foreground font-mono">
                                   {prod.sku} {prod.marca ? `• ${prod.marca}` : ''}
                                 </span>
+                                {(prod.modalidade_nome || prod.empresa_nome) && (
+                                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                    {prod.modalidade_nome && (
+                                      <Badge
+                                        variant="secondary"
+                                        className="text-[10px] py-0 px-1.5 h-4 bg-blue-50 text-blue-700 border border-blue-200 font-semibold"
+                                      >
+                                        {prod.modalidade_nome}
+                                      </Badge>
+                                    )}
+                                    {prod.empresa_nome && (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] py-0 px-1.5 h-4 border-slate-300 text-slate-700 bg-slate-50 font-medium"
+                                      >
+                                        <Building2 className="h-2.5 w-2.5 mr-0.5 text-slate-500" />
+                                        {prod.empresa_nome}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             </div>
 
@@ -353,7 +421,7 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
                 {/* LINHA 1 DO RODAPÉ: TOTAIS POR LOJA */}
                 <tr className="border-t-2 border-purple-900 bg-slate-900 text-white">
                   <td className="sticky left-0 z-30 bg-slate-900 px-3 py-2 text-left uppercase tracking-wider text-xs border-r border-slate-700">
-                    Total {nomePeriodo}
+                    Total Semana {semanaSelecionada} ({nomePeriodo})
                   </td>
 
                   {lojas.flatMap((loja, lojaIdx) => {

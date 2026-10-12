@@ -141,6 +141,8 @@ interface ContextoGrupoPB {
 interface DespesaOcorrenciaPB {
   id: string
   competencia: string
+  data_pagamento?: string
+  data_vencimento?: string
   valor_pago?: number
   valor_previsto?: number
   status: string
@@ -367,6 +369,7 @@ export const lucroService = {
             id: string
             descricao: string
             valor: number
+            data?: string
             tag_nome?: string
             destino?: string
           }>
@@ -385,6 +388,13 @@ export const lucroService = {
         const tagId = tagObj?.id || tagNome.toLowerCase().trim()
         const tagCor = tagObj?.cor || '#64748B'
 
+        // Extrai a data de referência para competência/pagamento na semana
+        const dataReferencia = (oc.data_pagamento ||
+          (oc as any).data_vencimento ||
+          (oc as any).created ||
+          '') as string
+        const dataIso = dataReferencia ? dataReferencia.substring(0, 10) : `${competencia}-01`
+
         if (!mapaDestinos.has(tagId)) {
           mapaDestinos.set(tagId, {
             grupo_id: tagId,
@@ -401,6 +411,7 @@ export const lucroService = {
           id: oc.id,
           descricao: comp?.descricao || 'Despesa',
           valor,
+          data: dataIso,
           tag_nome: tagNome,
           destino: tagNome,
         })

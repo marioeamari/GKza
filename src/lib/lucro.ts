@@ -18,6 +18,8 @@ export interface ProdutoLucro {
   empresa_id?: string
   empresa_nome?: string
   empresa_cnpj?: string
+  modalidade_id?: string
+  modalidade_nome?: string
   ordem?: number
 }
 
@@ -87,6 +89,7 @@ export interface DespesaGrupoItem {
     id: string
     descricao: string
     valor: number
+    data?: string // Data de competência / pagamento efetiva (YYYY-MM-DD)
     tag_nome?: string
     destino?: string
   }>
@@ -98,6 +101,34 @@ export interface BalancoMesResultado {
   balanco: number // lucro - despesas
   isNegativo: boolean
   grupos: DespesaGrupoItem[]
+}
+
+// Fechamento Semanal de Domingo a Sábado dentro do mês
+export interface SemanaMesInfo {
+  numero: number // 1, 2, 3...
+  rotulo: string // ex: "Semana 1 (01/09 a 05/09 - qui a sáb)"
+  rotuloCurto: string // ex: "Semana 1 (01 a 05/09)"
+  dataInicio: string // YYYY-MM-DD
+  dataFim: string // YYYY-MM-DD
+  diasCount: number
+  diasIso: string[] // lista de todos os dias YYYY-MM-DD desta semana
+}
+
+export interface BalancoSemanalItem {
+  semana: SemanaMesInfo
+  lucroSemana: number
+  despesasSemana: number
+  balanco: number // lucro - despesas
+  isNegativo: boolean
+  gruposDespesas: DespesaGrupoItem[]
+}
+
+export interface BalancoSemanalResultado {
+  semanas: BalancoSemanalItem[]
+  totalLucroMes: number
+  totalDespesasMes: number
+  balancoMes: number
+  isNegativoMes: boolean
 }
 
 // Aba 3: Saídas Unitárias e Kits/unid.
@@ -365,6 +396,194 @@ export function calcularBalancoMes(
     balanco,
     isNegativo: balanco < 0,
     grupos: gruposDespesas,
+  }
+}
+
+/**
+ * Nomes abreviados dos dias da semana (0 = dom, 1 = seg, ..., 6 = sáb)
+ */
+export const DIAS_SEMANA_ABREV = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
+
+/**
+ * Gera as semanas fechadas de domingo a sábado AUTOMATICAMENTE dentro do mês selecionado.
+ * Regra acordada:
+ * - A semana 1 começa no dia 01 do mês e termina no primeiro sábado (ex: começa na quinta => qui a sáb, 3 dias).
+ * - As semanas seguintes vão de domingo a sábado.
+ * - A última semana termina no último dia do mês (podendo ficar curta).
+ * - As semanas NUNCA atravessam a fronteira do mês.
+ *
+ * @param competencia Formato 'YYYY-MM' (ex: '2026-09')
+ */
+export function gerarSemanasDoMes(competencia: string): SemanaMesInfo[] {
+  const partes = competencia.split('-')
+  if (partes.length < 2) return []
+
+  const ano = parseInt(partes[0], 10)
+  const mes = parseInt(partes[1], 10) // 1 a 12
+  if (isNaN(ano) || isNaN(mes) || mes < 1 || mes > 12) return []
+
+  // Último dia do mês: dia 0 do mês seguinte
+  const ultimoDiaNum = new Date(ano, mes, 0).getDate()
+
+  const semanas: SemanaMesInfo[] = []
+  let diaAtual = 1
+  let numeroSemana = 1
+
+  const format2 = (n: number) => String(n).padStart(2, '0')
+
+  while (diaAtual <= ultimoDiaNum) {
+    const diaInicio = diaAtual
+    const dtInicio = new Date(ano, mes - 1, diaInicio, 12, 0, 0)
+    const diaSemanaInicio = dtInicio.getDay() // 0 = dom, 6 = sáb
+
+    // Quantos dias até o sábado (6)?
+    // Se diaSemanaInicio = 6 (sábado), diasAteSabado = 0
+    // Se diaSemanaInicio = 4 (quinta), diasAteSabado = 6 - 4 = 2 (qui, sex, sáb)
+    const diasAteSabado = 6 - diaSemanaInicio
+    let diaFim = diaInicio + diasAteSabado
+    if (diaFim > ultimoDiaNum) {
+      diaFim = ultimoDiaNum
+    }
+
+    const dtFim = new Date(ano, mes - 1, diaFim, 12, 0, 0)
+    const diaSemanaFim = dtFim.getDay()
+
+    const dtInicioIso = `${ano}-${format2(mes)}-${format2(diaInicio)}`
+    const dtFimIso = `${ano}-${format2(mes)}-${format2(diaFim)}`
+
+    const diasIso: string[] = []
+    for (let d = diaInicio; d <= diaFim; d++) {
+      diasIso.push(`${ano}-${format2(mes)}-${format2(d)}`)
+    }
+
+    const siglaInicio = DIAS_SEMANA_ABREV[diaSemanaInicio]
+    const siglaFim = DIAS_SEMANA_ABREV[diaSemanaFim]
+
+    const rotuloExtenso =
+      diaInicio === diaFim
+        ? `Semana ${numeroSemana} (${format2(diaInicio)}/${format2(mes)} - ${siglaInicio})`
+        : `Semana ${numeroSemana} (${format2(diaInicio)}/${format2(mes)} a ${format2(diaFim)}/${format2(mes)} - ${siglaInicio} a ${siglaFim})`
+
+    const rotuloCurto =
+      diaInicio === diaFim
+        ? `Semana ${numeroSemana} (${format2(diaInicio)}/${format2(mes)})`
+        : `Semana ${numeroSemana} (${format2(diaInicio)} a ${format2(diaFim)}/${format2(mes)})`
+
+    semanas.push({
+      numero: numeroSemana,
+      rotulo: rotuloExtenso,
+      rotuloCurto,
+      dataInicio: dtInicioIso,
+      dataFim: dtFimIso,
+      diasCount: diaFim - diaInicio + 1,
+      diasIso,
+    })
+
+    diaAtual = diaFim + 1
+    numeroSemana++
+  }
+
+  return semanas
+}
+
+/**
+ * Normaliza uma data para 'YYYY-MM-DD' extraindo ano, mês e dia
+ */
+export function extrairDataIso(dataStr?: string | null): string {
+  if (!dataStr) return ''
+  // Se for ISO com T ou espaço: "2026-09-05 12:00:00.000Z" => "2026-09-05"
+  const limpo = dataStr.trim()
+  if (limpo.length >= 10 && limpo[4] === '-' && limpo[7] === '-') {
+    return limpo.substring(0, 10)
+  }
+  return ''
+}
+
+/**
+ * Filtra grupos de despesas cujos itens pertençam ao intervalo de datas de uma semana.
+ * Utiliza o campo `data` de cada item (data_pagamento ou data_vencimento na competência).
+ * Preserva os mesmos grupos/destinos de custo cadastrados em /despesas.
+ */
+export function filtrarDespesasPorSemana(
+  gruposDespesasMes: DespesaGrupoItem[],
+  semana: SemanaMesInfo,
+): DespesaGrupoItem[] {
+  const dtInicio = semana.dataInicio
+  const dtFim = semana.dataFim
+
+  const gruposFiltrados: DespesaGrupoItem[] = []
+
+  for (const grupo of gruposDespesasMes) {
+    const itensSemana = grupo.itens.filter((it) => {
+      const dataIso = extrairDataIso(it.data)
+      if (!dataIso) return false
+      return dataIso >= dtInicio && dataIso <= dtFim
+    })
+
+    if (itensSemana.length > 0) {
+      const totalSemana = arredondarMoeda(
+        itensSemana.reduce((acc, it) => acc + (Number(it.valor) || 0), 0),
+      )
+      gruposFiltrados.push({
+        grupo_id: grupo.grupo_id,
+        grupo_nome: grupo.grupo_nome,
+        cor: grupo.cor,
+        total: totalSemana,
+        itens: itensSemana,
+      })
+    }
+  }
+
+  return gruposFiltrados
+}
+
+/**
+ * Calcula o Balanço Semanal completo para todas as semanas do mês:
+ * Para cada semana:
+ *   Lucro da semana = soma da grade daquela semana
+ *   Despesas da semana = despesas com competência/pagamento na semana
+ *   Balanço da semana = Lucro - Despesas
+ * Mantém também o Balanço do mês como totalizante (soma das semanas = total do mês)
+ */
+export function calcularBalancoSemanal(
+  semanas: SemanaMesInfo[],
+  lucroPorSemana: Record<number, number>, // semana.numero => lucro líquido da grade
+  gruposDespesasMes: DespesaGrupoItem[],
+): BalancoSemanalResultado {
+  let totalLucroMes = 0
+  let totalDespesasMes = 0
+
+  const itensSemana: BalancoSemanalItem[] = semanas.map((sem) => {
+    const lucroSem = arredondarMoeda(lucroPorSemana[sem.numero] || 0)
+    const despesasGrupoSem = filtrarDespesasPorSemana(gruposDespesasMes, sem)
+    const despesasSem = arredondarMoeda(
+      despesasGrupoSem.reduce((acc, g) => acc + (Number(g.total) || 0), 0),
+    )
+    const balancoSem = arredondarMoeda(lucroSem - despesasSem)
+
+    totalLucroMes += lucroSem
+    totalDespesasMes += despesasSem
+
+    return {
+      semana: sem,
+      lucroSemana: lucroSem,
+      despesasSemana: despesasSem,
+      balanco: balancoSem,
+      isNegativo: balancoSem < 0,
+      gruposDespesas: despesasGrupoSem,
+    }
+  })
+
+  totalLucroMes = arredondarMoeda(totalLucroMes)
+  totalDespesasMes = arredondarMoeda(totalDespesasMes)
+  const balancoMes = arredondarMoeda(totalLucroMes - totalDespesasMes)
+
+  return {
+    semanas: itensSemana,
+    totalLucroMes,
+    totalDespesasMes,
+    balancoMes,
+    isNegativoMes: balancoMes < 0,
   }
 }
 

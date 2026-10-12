@@ -33,9 +33,17 @@ import type {
   ResumoGradeLucroMes,
   BalancoMesResultado,
   ResumoAbaSaidasResultado,
+  SemanaMesInfo,
+  BalancoSemanalResultado,
 } from '@/lib/lucro'
 import type { PrecificacaoAprovadaItem } from '@/services/lucro'
-import { calcularGradeLucroMes, calcularBalancoMes, calcularSaidasUnitarias } from '@/lib/lucro'
+import {
+  calcularGradeLucroMes,
+  calcularBalancoMes,
+  calcularSaidasUnitarias,
+  gerarSemanasDoMes,
+  calcularBalancoSemanal,
+} from '@/lib/lucro'
 
 // Meses disponíveis para consulta (base do ano corrente e 2026)
 const MESES_OPCOES = [
@@ -187,10 +195,23 @@ export default function LucroPage() {
   // IDs dos produtos adicionados na grade por competência (enxugando a grade para só o que está adicionado/precificado)
   const [produtosGradePorMes, setProdutosGradePorMes] = useState<Record<string, string[]>>({})
 
+  // Semanas geradas automaticamente para a competência selecionada (domingo a sábado, nunca atravessa o mês)
+  const semanasDoMes: SemanaMesInfo[] = useMemo(() => {
+    return gerarSemanasDoMes(competencia)
+  }, [competencia])
+
+  // Semana atualmente selecionada na aba Lucro Líquido (padrão: 1)
+  const [semanaSelecionada, setSemanaSelecionada] = useState<number>(1)
+
+  // Ao mudar de mês/competência, reseta semana selecionada para 1
+  useEffect(() => {
+    setSemanaSelecionada(1)
+  }, [competencia])
+
   // Grade de inserção de quantidades em memória local do relatório (sem persistência no banco)
-  // [produto_id][canal_id] => quantidade inserida manualmente
-  const [quantidadesPorMes, setQuantidadesPorMes] = useState<
-    Record<string, Record<string, Record<string, number>>>
+  // Estrutura por SEMANA: [competencia][semana_numero][produto_id][canal_id] => quantidade inserida manualmente
+  const [quantidadesPorSemana, setQuantidadesPorSemana] = useState<
+    Record<string, Record<number, Record<string, Record<string, number>>>>
   >({})
 
   // Carrega dados dos módulos existentes (prec_canais, prec_precificacoes, prec_produtos, despesas)
@@ -247,7 +268,7 @@ export default function LucroPage() {
     const mapaCatalogo = new Map<string, ProdutoLucro>()
     catalogoProdutos.forEach((p) => mapaCatalogo.set(p.id, p))
 
-    // Também cria entrada ou atualiza empresa a partir de precificacoesAprovadas
+    // Também cria entrada ou atualiza empresa e modalidade a partir de precificacoesAprovadas
     for (const pa of precificacoesAprovadas) {
       if (!mapaCatalogo.has(pa.produto_id)) {
         mapaCatalogo.set(pa.produto_id, {
@@ -260,16 +281,22 @@ export default function LucroPage() {
           empresa_id: pa.empresa_id,
           empresa_nome: pa.empresa_nome,
           empresa_cnpj: pa.empresa_cnpj,
+          modalidade_id: pa.modalidade_id,
+          modalidade_nome: pa.modalidade_nome,
         })
       } else {
-        // Se a precificação aprovada traz empresa específica e o catálogo não tem empresa vinculada, enriquece
         const prod = mapaCatalogo.get(pa.produto_id)!
-        if (pa.empresa_nome && (!prod.empresa_nome || prod.empresa_nome === 'Sem Empresa')) {
+        const precisaAtualizarEmpresa =
+          pa.empresa_nome && (!prod.empresa_nome || prod.empresa_nome === 'Sem Empresa')
+        const precisaAtualizarModalidade = pa.modalidade_nome && !prod.modalidade_nome
+        if (precisaAtualizarEmpresa || precisaAtualizarModalidade) {
           mapaCatalogo.set(pa.produto_id, {
             ...prod,
             empresa_id: pa.empresa_id || prod.empresa_id,
-            empresa_nome: pa.empresa_nome,
+            empresa_nome: pa.empresa_nome || prod.empresa_nome,
             empresa_cnpj: pa.empresa_cnpj || prod.empresa_cnpj,
+            modalidade_id: pa.modalidade_id || prod.modalidade_id,
+            modalidade_nome: pa.modalidade_nome || prod.modalidade_nome,
           })
         }
       }
@@ -286,17 +313,18 @@ export default function LucroPage() {
     return Array.from(produtosUnicosMap.values())
   }, [catalogoProdutos, precificacoesAprovadas, idsProdutosGradeAtual])
 
-  // Quantidades do mês selecionado
-  const quantidadesMes = useMemo(() => {
-    return quantidadesPorMes[competencia] || {}
-  }, [quantidadesPorMes, competencia])
+  // Quantidades da semana atualmente selecionada
+  const quantidadesSemanaAtual = useMemo(() => {
+    return quantidadesPorSemana[competencia]?.[semanaSelecionada] || {}
+  }, [quantidadesPorSemana, competencia, semanaSelecionada])
 
-  // Atualiza quantidade inserida na célula
+  // Atualiza quantidade inserida na célula da semana ativa
   const handleChangeQuantidade = (produtoId: string, canalId: string, valorStr: string) => {
     const valNum = Math.max(0, parseInt(valorStr, 10) || 0)
-    setQuantidadesPorMes((prev) => {
+    setQuantidadesPorSemana((prev) => {
       const mesAtual = { ...(prev[competencia] || {}) }
-      const prodAtual = { ...(mesAtual[produtoId] || {}) }
+      const semanaAtual = { ...(mesAtual[semanaSelecionada] || {}) }
+      const prodAtual = { ...(semanaAtual[produtoId] || {}) }
 
       if (valNum === 0) {
         delete prodAtual[canalId]
@@ -304,7 +332,8 @@ export default function LucroPage() {
         prodAtual[canalId] = valNum
       }
 
-      mesAtual[produtoId] = prodAtual
+      semanaAtual[produtoId] = prodAtual
+      mesAtual[semanaSelecionada] = semanaAtual
       return {
         ...prev,
         [competencia]: mesAtual,
@@ -314,37 +343,39 @@ export default function LucroPage() {
 
   // Adiciona produto vindo do modal de precificações aprovadas
   const handleAdicionarProduto = (item: PrecificacaoAprovadaItem, quantidadeInicial?: number) => {
-    // 1. Garante que o catálogo local de produtos conheça a empresa vinculada à precificação selecionada
-    if (item.empresa_nome) {
-      setCatalogoProdutos((prev) => {
-        const idx = prev.findIndex((p) => p.id === item.produto_id)
-        if (idx >= 0) {
-          const atual = prev[idx]
-          const copias = [...prev]
-          copias[idx] = {
-            ...atual,
-            empresa_id: item.empresa_id || atual.empresa_id,
-            empresa_nome: item.empresa_nome,
-            empresa_cnpj: item.empresa_cnpj || atual.empresa_cnpj,
-          }
-          return copias
+    // 1. Garante que o catálogo local de produtos conheça a empresa e modalidade vinculadas à precificação selecionada
+    setCatalogoProdutos((prev) => {
+      const idx = prev.findIndex((p) => p.id === item.produto_id)
+      if (idx >= 0) {
+        const atual = prev[idx]
+        const copias = [...prev]
+        copias[idx] = {
+          ...atual,
+          empresa_id: item.empresa_id || atual.empresa_id,
+          empresa_nome: item.empresa_nome || atual.empresa_nome,
+          empresa_cnpj: item.empresa_cnpj || atual.empresa_cnpj,
+          modalidade_id: item.modalidade_id || atual.modalidade_id,
+          modalidade_nome: item.modalidade_nome || atual.modalidade_nome,
         }
-        return [
-          ...prev,
-          {
-            id: item.produto_id,
-            nome: item.produto_nome,
-            sku: item.produto_sku || '',
-            marca: item.produto_marca,
-            categoria: item.produto_categoria,
-            qtd_por_kit: item.qtd_por_kit || 1,
-            empresa_id: item.empresa_id,
-            empresa_nome: item.empresa_nome,
-            empresa_cnpj: item.empresa_cnpj,
-          },
-        ]
-      })
-    }
+        return copias
+      }
+      return [
+        ...prev,
+        {
+          id: item.produto_id,
+          nome: item.produto_nome,
+          sku: item.produto_sku || '',
+          marca: item.produto_marca,
+          categoria: item.produto_categoria,
+          qtd_por_kit: item.qtd_por_kit || 1,
+          empresa_id: item.empresa_id,
+          empresa_nome: item.empresa_nome,
+          empresa_cnpj: item.empresa_cnpj,
+          modalidade_id: item.modalidade_id,
+          modalidade_nome: item.modalidade_nome,
+        },
+      ]
+    })
 
     // 2. Garante que o produto está na lista da grade do mês sem duplicatas
     setProdutosGradePorMes((prev) => {
@@ -374,48 +405,88 @@ export default function LucroPage() {
       }
     })
 
-    // Limpa também as quantidades digitadas para esse produto no mês
-    setQuantidadesPorMes((prev) => {
+    // Limpa também as quantidades digitadas para esse produto em todas as semanas do mês
+    setQuantidadesPorSemana((prev) => {
       const mesAtual = { ...(prev[competencia] || {}) }
-      delete mesAtual[produtoId]
+      const novoMes: Record<number, Record<string, Record<string, number>>> = {}
+      for (const [sNum, semanaData] of Object.entries(mesAtual)) {
+        const num = parseInt(sNum, 10)
+        const copiaSemana = { ...semanaData }
+        delete copiaSemana[produtoId]
+        novoMes[num] = copiaSemana
+      }
       return {
         ...prev,
-        [competencia]: mesAtual,
+        [competencia]: novoMes,
       }
     })
   }
 
-  // (1) Cálculo da Aba 1: Lucro Líquido da Grade
-  const resumoGradeLucro: ResumoGradeLucroMes = useMemo(() => {
-    return calcularGradeLucroMes(produtosGradeAtual, lojas, quantidadesMes, rendasLiquidas)
-  }, [produtosGradeAtual, lojas, quantidadesMes, rendasLiquidas])
+  // (1) Cálculo da Aba 1: Lucro Líquido da Grade para a SEMANA ATIVA
+  // A grade, os totais por produto/loja/marketplace e o total do período passam a valer por SEMANA
+  const resumoGradeLucroSemana: ResumoGradeLucroMes = useMemo(() => {
+    return calcularGradeLucroMes(produtosGradeAtual, lojas, quantidadesSemanaAtual, rendasLiquidas)
+  }, [produtosGradeAtual, lojas, quantidadesSemanaAtual, rendasLiquidas])
 
-  // (2) Cálculo da Aba 2: Balanço 100% DINÂMICO DO BANCO
-  // Lucro Líquido = soma real da aba 'Lucro Líquido' do período selecionado
-  // Total Tags = despesas reais do mês agrupadas pelos destinos cadastrados em /despesas
-  // Balanço = Lucro − Despesas
+  // Mapa de Lucro Líquido por Semana para alimentar o Balanço Semanal e Mensal
+  const lucroPorSemanaMap = useMemo(() => {
+    const map: Record<number, number> = {}
+    const mesQtds = quantidadesPorSemana[competencia] || {}
+
+    for (const sem of semanasDoMes) {
+      const qtdsSem = mesQtds[sem.numero] || {}
+      const resGradeSem = calcularGradeLucroMes(produtosGradeAtual, lojas, qtdsSem, rendasLiquidas)
+      map[sem.numero] = resGradeSem.totalGeralLucro
+    }
+    return map
+  }, [quantidadesPorSemana, competencia, semanasDoMes, produtosGradeAtual, lojas, rendasLiquidas])
+
+  // Quantidades consolidadas de todas as semanas do mês para a Aba 3 (Saídas Unitárias é mensal)
+  const quantidadesConsolidadasMes = useMemo(() => {
+    const consolidadas: Record<string, number> = {}
+    const mesQtds = quantidadesPorSemana[competencia] || {}
+
+    for (const sem of semanasDoMes) {
+      const qtdsSem = mesQtds[sem.numero] || {}
+      for (const [prodId, canais] of Object.entries(qtdsSem)) {
+        for (const qtd of Object.values(canais)) {
+          consolidadas[prodId] = (consolidadas[prodId] || 0) + (Number(qtd) || 0)
+        }
+      }
+    }
+    return consolidadas
+  }, [quantidadesPorSemana, competencia, semanasDoMes])
+
+  // Total consolidado de Lucro Líquido no mês (soma de todas as semanas)
+  const totalLucroMesConsolidado = useMemo(() => {
+    return Object.values(lucroPorSemanaMap).reduce((acc, v) => acc + (Number(v) || 0), 0)
+  }, [lucroPorSemanaMap])
+
+  // (2) Balanço Semanal Completo: para cada semana, Lucro da semana − Despesas da semana
+  const balancoSemanalData: BalancoSemanalResultado = useMemo(() => {
+    return calcularBalancoSemanal(semanasDoMes, lucroPorSemanaMap, despesasGrupos)
+  }, [semanasDoMes, lucroPorSemanaMap, despesasGrupos])
+
+  // Balanço Mensal Totalizante: Lucro do Mês (soma das semanas) − Despesas do Mês
   const balancoData: BalancoMesResultado = useMemo(() => {
-    const lucroAba1 = resumoGradeLucro.totalGeralLucro
-    return calcularBalancoMes(lucroAba1, despesasGrupos)
-  }, [resumoGradeLucro.totalGeralLucro, despesasGrupos])
+    return calcularBalancoMes(totalLucroMesConsolidado, despesasGrupos)
+  }, [totalLucroMesConsolidado, despesasGrupos])
 
-  // (3) Cálculo da Aba 3: Saídas Unitárias e Kits/unid.
-  // As quantidades da aba 1 alimentam a aba 3 (mesma fonte, somadas no mês)
+  // (3) Cálculo da Aba 3: Saídas Unitárias e Kits/unid. (Mensal, alimentada pelas semanas somadas)
   const saidasData: ResumoAbaSaidasResultado = useMemo(() => {
     const produtosParaCalculo =
       produtosGradeAtual.length > 0 ? produtosGradeAtual : catalogoProdutos
-    const somaPorProduto: Record<string, number> = {}
-    for (const linha of resumoGradeLucro.linhas) {
-      somaPorProduto[linha.produto.id] = linha.totalQuantidade
-    }
-
-    return calcularSaidasUnitarias(produtosParaCalculo, somaPorProduto)
-  }, [resumoGradeLucro.linhas, produtosGradeAtual, catalogoProdutos])
+    return calcularSaidasUnitarias(produtosParaCalculo, quantidadesConsolidadasMes)
+  }, [produtosGradeAtual, catalogoProdutos, quantidadesConsolidadasMes])
 
   const rotuloCompetenciaAtual = useMemo(() => {
     const item = MESES_OPCOES.find((m) => m.valor === competencia)
     return item?.rotulo || competencia
   }, [competencia])
+
+  const semanaAtivaInfo = useMemo(() => {
+    return semanasDoMes.find((s) => s.numero === semanaSelecionada) || semanasDoMes[0]
+  }, [semanasDoMes, semanaSelecionada])
 
   return (
     <div className="min-h-screen bg-neutral-50/50 pb-20">
@@ -497,9 +568,9 @@ export default function LucroPage() {
                 >
                   <TrendingUp className="mr-1.5 h-4 w-4" />
                   (1) Lucro Líquido {rotuloCompetenciaAtual.split('/')[0]}
-                  {resumoGradeLucro.totalAlertasSemAprovacao > 0 && (
+                  {resumoGradeLucroSemana.totalAlertasSemAprovacao > 0 && (
                     <Badge variant="destructive" className="ml-1.5 h-4 px-1 text-[10px] font-bold">
-                      {resumoGradeLucro.totalAlertasSemAprovacao}
+                      {resumoGradeLucroSemana.totalAlertasSemAprovacao}
                     </Badge>
                   )}
                 </TabsTrigger>
@@ -538,17 +609,24 @@ export default function LucroPage() {
               <TabLucroLiquido
                 produtos={produtosGradeAtual}
                 lojas={lojas}
-                quantidades={quantidadesMes}
+                quantidades={quantidadesSemanaAtual}
                 onChangeQuantidade={handleChangeQuantidade}
                 onRemoverProduto={handleRemoverProduto}
                 onAbrirModalAdicionar={() => setModalAdicionarAberto(true)}
-                resumoGrade={resumoGradeLucro}
-                nomePeriodo={rotuloCompetenciaAtual}
+                resumoGrade={resumoGradeLucroSemana}
+                nomePeriodo={semanaAtivaInfo ? semanaAtivaInfo.rotuloCurto : rotuloCompetenciaAtual}
+                semanas={semanasDoMes}
+                semanaSelecionada={semanaSelecionada}
+                onSelecionarSemana={setSemanaSelecionada}
               />
             )}
 
             {activeTab === 'balanco' && (
-              <TabBalanco balancoData={balancoData} nomePeriodo={rotuloCompetenciaAtual} />
+              <TabBalanco
+                balancoData={balancoData}
+                balancoSemanalData={balancoSemanalData}
+                nomePeriodo={rotuloCompetenciaAtual}
+              />
             )}
 
             {activeTab === 'saidas' && (

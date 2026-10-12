@@ -136,7 +136,20 @@ export const TabSaidasUnitarias: React.FC<TabSaidasUnitariasProps> = ({
                               isZero ? 'text-muted-foreground/60' : 'text-foreground'
                             }`}
                           >
-                            <td className="py-2 pl-4 pr-2 font-medium">{it.produto_nome}</td>
+                            <td className="py-2 pl-4 pr-2 font-medium">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span>{it.produto_nome}</span>
+                                {emp.empresa_nome && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] py-0 px-1.5 h-4 border-slate-300 text-slate-700 bg-slate-50 font-medium"
+                                  >
+                                    <Building2 className="h-2.5 w-2.5 mr-0.5 text-slate-500" />
+                                    {emp.empresa_nome}
+                                  </Badge>
+                                )}
+                              </div>
+                            </td>{' '}
                             <td className="py-2 px-2 text-center font-mono text-muted-foreground">
                               {it.qtd_por_kit} un/kit
                             </td>
