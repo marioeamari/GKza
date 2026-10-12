@@ -3,6 +3,52 @@ import type { Marketplace, MarketplaceConta, Repasse, Venda } from '@/types/doma
 
 export const marketplacesService = {
   listMarketplaces: () => pb.collection<Marketplace>('marketplaces').getFullList({ sort: 'nome' }),
+  saveMarketplace: (data: { nome: string; slug: string; cor?: string }, id?: string) =>
+    id
+      ? pb.collection<Marketplace>('marketplaces').update(id, data)
+      : pb.collection<Marketplace>('marketplaces').create(data),
+  ensureMarketplace: async (input: {
+    nome: string
+    cor: string
+    slug?: string
+  }): Promise<Marketplace> => {
+    const nomeLimpo = input.nome.trim()
+    const gerarSlug = (str: string) =>
+      str
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'marketplace'
+
+    const slugBase = input.slug?.trim() || gerarSlug(nomeLimpo)
+
+    try {
+      const existente = await pb
+        .collection<Marketplace>('marketplaces')
+        .getFirstListItem(`slug = "${slugBase}" || nome = "${nomeLimpo}"`)
+      if (existente) {
+        if (input.cor && existente.cor !== input.cor) {
+          try {
+            return await pb
+              .collection<Marketplace>('marketplaces')
+              .update(existente.id, { cor: input.cor })
+          } catch {
+            /* intentionally ignored */
+          }
+        }
+        return existente
+      }
+    } catch (_) {
+      // cria novo
+    }
+
+    return pb.collection<Marketplace>('marketplaces').create({
+      nome: nomeLimpo,
+      slug: slugBase,
+      cor: input.cor || '#DF5830',
+    })
+  },
   listContas: () =>
     pb
       .collection<MarketplaceConta>('marketplace_contas')

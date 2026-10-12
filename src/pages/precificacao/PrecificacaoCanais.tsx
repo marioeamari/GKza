@@ -138,16 +138,45 @@ export default function PrecificacaoCanais() {
       return
     }
 
+    const tipoCanal = canalEditando?.tipo || 'marketplace'
+    const corCanal = (canalEditando?.cor || '').trim()
+
+    // Regra acordada da PORTA ÚNICA:
+    // - site_proprio permanece sem vínculo com marketplace (é esperado)
+    // - canais tipo marketplace exigem vínculo ou criação imediata no catálogo marketplaces
+    // - cor de marca é obrigatória
+    if (tipoCanal === 'marketplace' && !corCanal) {
+      toast({
+        variant: 'destructive',
+        title: 'Cor de marca obrigatória',
+        description: 'Informe uma cor de destaque para a marca do marketplace.',
+      })
+      return
+    }
+
     try {
-      const marketplaceVinculo =
-        (canalEditando?.tipo || 'marketplace') === 'marketplace'
-          ? canalEditando?.marketplace || ''
-          : ''
+      let marketplaceVinculo = ''
+
+      if (tipoCanal === 'marketplace') {
+        const selecao = canalEditando?.marketplace || ''
+        if (selecao && selecao !== 'none' && selecao !== '__novo__') {
+          marketplaceVinculo = selecao
+        } else {
+          // Criação atômica no catálogo marketplaces quando não existe
+          const novoMp = await marketplacesService.ensureMarketplace({
+            nome: nomeLimpo,
+            cor: corCanal || '#DF5830',
+          })
+          marketplaceVinculo = novoMp.id
+        }
+      }
 
       if (canalEditando?.id) {
         await precificacaoService.updateCanal(canalEditando.id, {
           ...canalEditando,
           nome: nomeLimpo,
+          tipo: tipoCanal,
+          cor: corCanal || '#DF5830',
           marketplace: marketplaceVinculo,
         })
         toast({ title: 'Canal atualizado com sucesso' })
@@ -156,10 +185,10 @@ export default function PrecificacaoCanais() {
       } else {
         const { canal, reativado } = await precificacaoService.createCanal({
           nome: nomeLimpo,
-          tipo: canalEditando?.tipo || 'marketplace',
+          tipo: tipoCanal,
           marketplace: marketplaceVinculo,
           ativo: true,
-          cor: canalEditando?.cor || '#DF5830',
+          cor: corCanal || '#DF5830',
           vigencia: canalEditando?.vigencia || 'Vigente',
         })
 
@@ -171,7 +200,7 @@ export default function PrecificacaoCanais() {
         } else {
           toast({
             title: 'Canal criado com sucesso!',
-            description: `O canal "${canal.nome}" foi cadastrado e já está disponível para simulações.`,
+            description: `O canal "${canal.nome}" foi cadastrado e vinculado ao catálogo de marketplaces.`,
           })
         }
 
@@ -971,23 +1000,25 @@ export default function PrecificacaoCanais() {
 
               {canalEditando?.tipo !== 'site_proprio' && (
                 <div className="space-y-1">
-                  <Label>Marketplace Vinculado (Coleção Marketplaces)</Label>
+                  <Label>Marketplace Vinculado (Catálogo Único) *</Label>
                   <Select
-                    value={canalEditando?.marketplace || 'none'}
+                    value={canalEditando?.marketplace || '__novo__'}
                     onValueChange={(v) => {
                       const selectedMp = marketplacesList.find((m) => m.id === v)
                       setCanalEditando((prev) => ({
                         ...prev,
-                        marketplace: v === 'none' ? '' : v,
+                        marketplace: v,
                         cor: selectedMp?.cor || prev?.cor,
                       }))
                     }}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecione o marketplace correspondente..." />
+                      <SelectValue placeholder="Selecione ou crie novo no catálogo..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">Nenhum vínculo (avulso)</SelectItem>
+                      <SelectItem value="__novo__" className="font-bold text-primary">
+                        + Criar automaticamente no catálogo (slug único)
+                      </SelectItem>
                       {marketplacesList.map((mp) => (
                         <SelectItem key={mp.id} value={mp.id}>
                           <div className="flex items-center gap-2">
@@ -1002,21 +1033,23 @@ export default function PrecificacaoCanais() {
                     </SelectContent>
                   </Select>
                   <p className="text-[10px] text-muted-foreground">
-                    Vincula este canal de precificação com o marketplace do módulo financeiro.
+                    Porta única: se o marketplace não existir no catálogo, ele é criado
+                    automaticamente com slug único e cor de marca.
                   </p>
                 </div>
               )}
 
               <div className="space-y-1">
-                <Label>Cor de Destaque (Hex)</Label>
+                <Label>Cor de Marca Obrigatória (Hex) *</Label>
                 <div className="flex items-center gap-2">
                   <Input
                     type="color"
-                    className="h-8 w-12 p-0.5"
+                    className="h-8 w-12 p-0.5 cursor-pointer"
                     value={canalEditando?.cor || '#DF5830'}
                     onChange={(e) => setCanalEditando((prev) => ({ ...prev, cor: e.target.value }))}
                   />
                   <Input
+                    required
                     placeholder="#DF5830"
                     value={canalEditando?.cor || ''}
                     onChange={(e) => setCanalEditando((prev) => ({ ...prev, cor: e.target.value }))}

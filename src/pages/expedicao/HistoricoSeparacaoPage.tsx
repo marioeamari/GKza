@@ -39,9 +39,11 @@ export default function HistoricoSeparacaoPage() {
   const filtrados = historico.filter((h) => {
     if (!busca.trim()) return true
     const q = busca.toLowerCase()
+    const mktNome = h.expand?.marketplace?.nome?.toLowerCase() || ''
     return (
       h.numero_pedido?.toLowerCase().includes(q) ||
       h.marketplace?.toLowerCase().includes(q) ||
+      mktNome.includes(q) ||
       h.funcionario_nome?.toLowerCase().includes(q) ||
       h.tema_nome?.toLowerCase().includes(q)
     )
@@ -99,11 +101,33 @@ export default function HistoricoSeparacaoPage() {
                         >
                           Pedido #{h.numero_pedido}
                         </Badge>
-                        {h.marketplace && (
-                          <Badge variant="secondary" className="font-bold text-xs">
-                            {h.marketplace}
-                          </Badge>
-                        )}
+                        {(() => {
+                          const mkt = h.expand?.marketplace
+                          const label = mkt?.nome || h.marketplace
+                          if (!label) return null
+                          return (
+                            <Badge
+                              variant="secondary"
+                              className="font-bold text-xs flex items-center gap-1.5"
+                              style={
+                                mkt?.cor
+                                  ? {
+                                      backgroundColor: `${mkt.cor}18`,
+                                      borderColor: `${mkt.cor}40`,
+                                    }
+                                  : undefined
+                              }
+                            >
+                              {mkt?.cor && (
+                                <span
+                                  className="h-2 w-2 rounded-full inline-block"
+                                  style={{ backgroundColor: mkt.cor }}
+                                />
+                              )}
+                              <span>{label}</span>
+                            </Badge>
+                          )
+                        })()}
                         <Badge
                           className={cn(
                             'text-[10px] font-bold uppercase',

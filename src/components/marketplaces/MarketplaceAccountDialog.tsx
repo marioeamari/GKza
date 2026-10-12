@@ -111,22 +111,39 @@ export function MarketplaceAccountDialog({
             {errors.apelido && <p className="field-error">{errors.apelido}</p>}
           </div>
           <div className="space-y-2">
-            <Label>Marketplace</Label>
+            <div className="flex items-center justify-between">
+              <Label>Marketplace (Catálogo)</Label>
+              <a
+                href="/precificacao/canais"
+                className="text-[11px] font-semibold text-primary hover:underline"
+              >
+                + Cadastrar novo marketplace
+              </a>
+            </div>
             <Select
               value={form.marketplace}
               onValueChange={(marketplace) => setForm({ ...form, marketplace })}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Selecione" />
+                <SelectValue placeholder="Selecione do catálogo..." />
               </SelectTrigger>
               <SelectContent>
                 {marketplaces.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
-                    {m.nome}
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-2 w-2 rounded-full inline-block"
+                        style={{ backgroundColor: m.cor || '#DF5830' }}
+                      />
+                      <span>{m.nome}</span>
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-[10px] text-muted-foreground">
+              O catálogo de marketplaces é centralizado com criação única em /precificacao/canais.
+            </p>
             {errors.marketplace && <p className="field-error">{errors.marketplace}</p>}
           </div>
           <div className="space-y-2">

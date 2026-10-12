@@ -91,6 +91,12 @@ export interface KitPedido {
   updated?: string
   expand?: {
     tema?: KitTema
+    marketplace?: {
+      id: string
+      nome: string
+      slug: string
+      cor?: string
+    }
     produto_referencia?: {
       id: string
       nome: string
@@ -150,4 +156,14 @@ export interface KitHistoricoSeparacao {
   codigo_rastreio?: string
   created?: string
   updated?: string
+  expand?: {
+    marketplace?: {
+      id: string
+      nome: string
+      slug: string
+      cor?: string
+    }
+    pedido?: KitPedido
+    tema?: KitTema
+  }
 }

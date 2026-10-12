@@ -544,11 +544,33 @@ export default function SeparacaoKitsPage() {
                         >
                           Pedido #{pedidoAtivo.numero_pedido}
                         </Badge>
-                        {pedidoAtivo.marketplace && (
-                          <Badge variant="secondary" className="px-2.5 py-0.5 font-bold">
-                            {pedidoAtivo.marketplace}
-                          </Badge>
-                        )}
+                        {(() => {
+                          const mkt = pedidoAtivo.expand?.marketplace
+                          const label = mkt?.nome || pedidoAtivo.marketplace
+                          if (!label) return null
+                          return (
+                            <Badge
+                              variant="secondary"
+                              className="px-2.5 py-0.5 font-bold flex items-center gap-1.5"
+                              style={
+                                mkt?.cor
+                                  ? {
+                                      backgroundColor: `${mkt.cor}18`,
+                                      borderColor: `${mkt.cor}40`,
+                                    }
+                                  : undefined
+                              }
+                            >
+                              {mkt?.cor && (
+                                <span
+                                  className="h-2 w-2 rounded-full inline-block"
+                                  style={{ backgroundColor: mkt.cor }}
+                                />
+                              )}
+                              <span>{label}</span>
+                            </Badge>
+                          )
+                        })()}
                         <Badge
                           variant={
                             pedidoAtivo.tipo_composicao === 'personalizada' ? 'default' : 'outline'

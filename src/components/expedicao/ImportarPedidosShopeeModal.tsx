@@ -221,12 +221,24 @@ export function ImportarPedidosShopeeModal({
 
     const hoje = new Date().toISOString().split('T')[0]
 
+    let shopeeMpId = 'shopee'
+    try {
+      const { marketplacesService } = await import('@/services/marketplaces')
+      const allMps = await marketplacesService.listMarketplaces()
+      const shopeeMp = allMps.find((m) => m.slug === 'shopee')
+      if (shopeeMp) {
+        shopeeMpId = shopeeMp.id
+      }
+    } catch {
+      /* intentionally ignored */
+    }
+
     for (const item of resultadoParse.itens) {
       try {
         const orderIdLimpo = item.numeroPedido || ''
         await separacaoKitsService.createPedido({
           numero_pedido: orderIdLimpo,
-          marketplace: 'Shopee',
+          marketplace: shopeeMpId,
           produto_nome: item.produtoNome,
           sku: item.sku || '',
           tema: item.temaId || temas[0]?.id || '',

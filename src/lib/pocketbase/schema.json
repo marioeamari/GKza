@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-12T12:34:30.206Z",
+  "generatedAt": "2026-10-12T22:25:22.539Z",
   "collections": [
     {
       "name": "users",
@@ -4037,12 +4037,6 @@
           "system": false
         },
         {
-          "name": "marketplace",
-          "type": "text",
-          "required": false,
-          "system": false
-        },
-        {
           "name": "produto_nome",
           "type": "text",
           "required": true,
@@ -4181,6 +4175,13 @@
           "type": "text",
           "required": false,
           "system": false
+        },
+        {
+          "name": "marketplace",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "marketplaces"
         }
       ],
       "indexes": [
@@ -4213,12 +4214,6 @@
           "name": "numero_pedido",
           "type": "text",
           "required": true,
-          "system": false
-        },
-        {
-          "name": "marketplace",
-          "type": "text",
-          "required": false,
           "system": false
         },
         {
@@ -4341,6 +4336,13 @@
           "type": "text",
           "required": false,
           "system": false
+        },
+        {
+          "name": "marketplace",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "marketplaces"
         }
       ],
       "indexes": [

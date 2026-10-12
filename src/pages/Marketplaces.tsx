@@ -4,14 +4,17 @@ import {
   Banknote,
   CheckCircle2,
   Clock3,
+  Coins,
   ExternalLink,
+  Layers,
   Pencil,
+  Percent,
   Plus,
   Receipt,
   ShieldAlert,
+  Sparkles,
   Store,
   Trash2,
-  TrendingUp,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 
@@ -19,12 +22,10 @@ import { AuditoriaTaxasTab } from '@/components/marketplaces/AuditoriaTaxasTab'
 import { ConfirmPayoutDialog } from '@/components/marketplaces/ConfirmPayoutDialog'
 import { MarketplaceAccountDialog } from '@/components/marketplaces/MarketplaceAccountDialog'
 import { PayoutDialog } from '@/components/marketplaces/PayoutDialog'
-import { SaleDialog } from '@/components/marketplaces/SaleDialog'
 import { LoadingState } from '@/components/LoadingState'
 import { PageHeader } from '@/components/PageHeader'
 import { PeriodSelector } from '@/components/PeriodSelector'
 import { PermissionButton } from '@/components/PermissionButton'
-import { StatusBadge } from '@/components/StatusBadge'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -73,12 +74,15 @@ export default function Marketplaces() {
   const { user } = useAuth(),
     { toast } = useToast()
   const [params, setParams] = useSearchParams(),
-    tab = params.get('tab') || 'contas',
+    rawTab = params.get('tab') || 'catalogo',
+    // Aba "vendas" removida: redireciona para "catalogo" caso chegue na URL
+    tab = rawTab === 'vendas' ? 'catalogo' : rawTab,
     periodKey = (params.get('periodo') || 'current') as PeriodRange['key'],
     period = getPeriodRange(
       ['current', 'previous', '90days'].includes(periodKey) ? periodKey : 'current',
     )
   const [marketplaces, setMarketplaces] = useState<Marketplace[]>([]),
+    [selectedMarketplaceId, setSelectedMarketplaceId] = useState<string>(''),
     [accounts, setAccounts] = useState<MarketplaceConta[]>([]),
     [financial, setFinancial] = useState<Conta[]>([]),
     [precCanais, setPrecCanais] = useState<PrecCanalRecord[]>([]),
@@ -89,12 +93,10 @@ export default function Marketplaces() {
     [loading, setLoading] = useState(true)
   const [accountDialog, setAccountDialog] = useState(false),
     [editingAccount, setEditingAccount] = useState<MarketplaceConta | null>(null),
-    [saleDialog, setSaleDialog] = useState(false),
-    [editingSale, setEditingSale] = useState<Venda | null>(null),
     [payoutDialog, setPayoutDialog] = useState(false),
     [confirmPayout, setConfirmPayout] = useState<Repasse | null>(null),
     [deleteTarget, setDeleteTarget] = useState<{
-      type: 'sale' | 'account' | 'payout'
+      type: 'account' | 'payout'
       id: string
       label: string
     } | null>(null)
@@ -174,41 +176,82 @@ export default function Marketplaces() {
     }
   }
   if (loading) return <LoadingState label="Conciliando marketplaces..." />
+  // Seleção padrão do marketplace na ficha de consulta
+  const activeMarketplace = useMemo(() => {
+    if (!marketplaces.length) return null
+    if (selectedMarketplaceId) {
+      return marketplaces.find((m) => m.id === selectedMarketplaceId) || marketplaces[0]
+    }
+    return marketplaces[0]
+  }, [marketplaces, selectedMarketplaceId])
+
+  // Detalhes do marketplace ativo: canais vinculados, modalidades e taxas
+  const canaisDoMarketplace = useMemo(() => {
+    if (!activeMarketplace) return []
+    return precCanais.filter((c) => c.marketplace === activeMarketplace.id)
+  }, [activeMarketplace, precCanais])
+
+  const canalIds = useMemo(
+    () => new Set(canaisDoMarketplace.map((c) => c.id)),
+    [canaisDoMarketplace],
+  )
+
+  const modalidadesDoMarketplace = useMemo(() => {
+    return precModalidades.filter((m) => canalIds.has(m.canal))
+  }, [precModalidades, canalIds])
+
+  const taxasDoMarketplace = useMemo(() => {
+    return precTaxas.filter((t) => canalIds.has(t.canal))
+  }, [precTaxas, canalIds])
+
+  const contasDoMarketplace = useMemo(() => {
+    if (!activeMarketplace) return []
+    return accounts.filter((a) => a.marketplace === activeMarketplace.id)
+  }, [activeMarketplace, accounts])
+
   const action =
     tab === 'contas'
       ? () => {
           setEditingAccount(null)
           setAccountDialog(true)
         }
-      : tab === 'vendas' || tab === 'auditoria'
-        ? () => {
-            setEditingSale(null)
-            setSaleDialog(true)
-          }
-        : () => setPayoutDialog(true)
+      : tab === 'repasses'
+        ? () => setPayoutDialog(true)
+        : undefined
+
   const actionLabel =
-    tab === 'contas'
-      ? 'Nova conta'
-      : tab === 'vendas' || tab === 'auditoria'
-        ? 'Registrar venda'
-        : 'Novo repasse'
+    tab === 'contas' ? 'Nova conta de repasse' : tab === 'repasses' ? 'Novo repasse' : undefined
+
   return (
     <>
       <PageHeader
         title="Marketplaces"
-        description="Concilie vendas, comissões e repasses em um só lugar com auditoria direta contra a precificação."
+        description="Ficha central de consulta do catálogo de marketplaces, canais vinculados, modalidades, taxas e conciliação de repasses financeiros."
         action={
-          <PermissionButton allowed={can(user?.role, 'writeMarketplace')} onClick={action}>
-            <Plus className="mr-2 h-4 w-4" />
-            {actionLabel}
-          </PermissionButton>
+          action ? (
+            <PermissionButton allowed={can(user?.role, 'writeMarketplace')} onClick={action}>
+              <Plus className="mr-2 h-4 w-4" />
+              {actionLabel}
+            </PermissionButton>
+          ) : (
+            <Button asChild variant="outline">
+              <Link to="/precificacao/canais">
+                <Store className="mr-2 h-4 w-4 text-primary" />
+                Gerenciar canais no catálogo
+              </Link>
+            </Button>
+          )
         }
       />
+
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Tabs value={tab} onValueChange={(v) => setParam('tab', v)}>
           <TabsList className="grid w-full grid-cols-4 sm:w-auto">
-            <TabsTrigger value="contas">Contas</TabsTrigger>
-            <TabsTrigger value="vendas">Vendas</TabsTrigger>
+            <TabsTrigger value="catalogo" className="gap-1.5">
+              <Store className="h-3.5 w-3.5" />
+              Ficha do Catálogo
+            </TabsTrigger>
+            <TabsTrigger value="contas">Contas de Repasse</TabsTrigger>
             <TabsTrigger value="repasses">Repasses</TabsTrigger>
             <TabsTrigger value="auditoria" className="gap-1.5">
               <ShieldAlert className="h-3.5 w-3.5 text-primary" />
@@ -216,14 +259,288 @@ export default function Marketplaces() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
-        {tab !== 'contas' && (
+        {tab === 'repasses' && (
           <PeriodSelector
             value={period.key}
             onChange={(v) => setParam('periodo', v === 'current' ? '' : v)}
           />
         )}
       </div>
+
       <Tabs value={tab} onValueChange={(v) => setParam('tab', v)}>
+        {/* ABA 1: FICHA DE CONSULTA DO MARKETPLACE (SEM CRIAÇÃO - PORTA ÚNICA É /precificacao/canais) */}
+        <TabsContent value="catalogo" className="mt-0 space-y-6">
+          <Card className="border-border shadow-soft overflow-hidden">
+            <div className="border-b border-border bg-slate-50/70 p-4 sm:p-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="grid h-12 w-12 place-items-center rounded-2xl shadow-sm border border-black/5"
+                    style={{ backgroundColor: activeMarketplace?.cor || '#DF5830' }}
+                  >
+                    <Store className="h-6 w-6 text-white" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl font-bold tracking-tight">
+                        {activeMarketplace?.nome || 'Selecione um Marketplace'}
+                      </h2>
+                      {activeMarketplace && (
+                        <Badge variant="outline" className="text-xs font-mono">
+                          slug: {activeMarketplace.slug}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Catálogo centralizado. Criação e edição estrutural acontecem na Porta Única.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <Select
+                    value={activeMarketplace?.id || ''}
+                    onValueChange={(id) => setSelectedMarketplaceId(id)}
+                  >
+                    <SelectTrigger className="w-full sm:w-[220px]">
+                      <SelectValue placeholder="Escolher marketplace..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {marketplaces.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="h-2.5 w-2.5 rounded-full inline-block"
+                              style={{ backgroundColor: m.cor || '#DF5830' }}
+                            />
+                            <span>{m.nome}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Button asChild variant="outline" size="sm" className="whitespace-nowrap">
+                    <Link to="/precificacao/canais">
+                      <ExternalLink className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                      Cadastrar novo canal
+                    </Link>
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <CardContent className="p-5 sm:p-6 space-y-6">
+              {/* SEÇÃO 1: CANAIS CADASTRADOS VINCULADOS */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Layers className="h-4 w-4 text-primary" />
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+                      Canais Cadastrados Vinculados ({canaisDoMarketplace.length})
+                    </h3>
+                  </div>
+                  <Link
+                    to="/precificacao/canais"
+                    className="text-xs font-semibold text-primary hover:underline flex items-center"
+                  >
+                    Gerenciar canais <ArrowRight className="ml-1 h-3 w-3" />
+                  </Link>
+                </div>
+
+                {canaisDoMarketplace.length > 0 ? (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {canaisDoMarketplace.map((canal) => (
+                      <div
+                        key={canal.id}
+                        className="rounded-xl border border-border p-4 bg-white shadow-xs space-y-2"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="h-3 w-3 rounded-full"
+                              style={{ backgroundColor: canal.cor || '#DF5830' }}
+                            />
+                            <strong className="text-sm">{canal.nome}</strong>
+                          </div>
+                          <Badge
+                            variant={canal.ativo ? 'default' : 'secondary'}
+                            className="text-[10px]"
+                          >
+                            {canal.ativo ? 'Ativo' : 'Inativo'}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t border-border/50">
+                          <span>
+                            Tipo: <strong className="text-foreground">{canal.tipo}</strong>
+                          </span>
+                          <span>
+                            Vigência:{' '}
+                            <strong className="text-foreground">
+                              {canal.vigencia || 'Vigente'}
+                            </strong>
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+                    Nenhum canal de precificação vinculado a este marketplace no momento.{' '}
+                    <Link to="/precificacao/canais" className="text-primary font-bold underline">
+                      Vincular agora na porta única de canais.
+                    </Link>
+                  </div>
+                )}
+              </div>
+
+              {/* SEÇÃO 2: MODALIDADES DOS CANAIS */}
+              <div className="space-y-3 pt-2 border-t border-border">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+                      Modalidades de Operação ({modalidadesDoMarketplace.length})
+                    </h3>
+                  </div>
+                </div>
+
+                {modalidadesDoMarketplace.length > 0 ? (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {modalidadesDoMarketplace.map((mod) => {
+                      const canalDono = canaisDoMarketplace.find((c) => c.id === mod.canal)
+                      return (
+                        <div
+                          key={mod.id}
+                          className="rounded-xl border border-border p-3.5 bg-slate-50/50 space-y-1.5"
+                        >
+                          <div className="flex items-center justify-between">
+                            <strong className="text-sm">{mod.nome}</strong>
+                            <Badge variant="outline" className="text-[10px]">
+                              {mod.codigo || 'Padrão'}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Canal:{' '}
+                            <strong className="text-foreground">
+                              {canalDono?.nome || 'Canal'}
+                            </strong>
+                          </p>
+                          {mod.descricao && (
+                            <p className="text-[11px] text-muted-foreground italic line-clamp-2">
+                              {mod.descricao}
+                            </p>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+                    Nenhuma modalidade configurada para os canais deste marketplace.
+                  </div>
+                )}
+              </div>
+
+              {/* SEÇÃO 3: REGRAS DE TAXAS & COMISSÕES (PRECIFICAÇÃO + REPASSES) */}
+              <div className="space-y-3 pt-2 border-t border-border">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Percent className="h-4 w-4 text-primary" />
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+                      Regras de Taxas & Comissões (Precificação & Contas de Repasse)
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  {/* Taxas cadastradas na precificação */}
+                  <div className="rounded-xl border border-border p-4 bg-white space-y-3">
+                    <div className="flex items-center justify-between border-b border-border pb-2">
+                      <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                        <Coins className="h-3.5 w-3.5 text-primary" />
+                        Taxas da Precificação
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {taxasDoMarketplace.length} regra(s)
+                      </span>
+                    </div>
+
+                    {taxasDoMarketplace.length > 0 ? (
+                      <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                        {taxasDoMarketplace.map((tx) => {
+                          const canalDono = canaisDoMarketplace.find((c) => c.id === tx.canal)
+                          return (
+                            <div
+                              key={tx.id}
+                              className="flex items-center justify-between text-xs p-2 rounded-lg bg-slate-50 border border-border/50"
+                            >
+                              <div>
+                                <span className="font-semibold block">{tx.nome}</span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {canalDono?.nome} · {tx.tipo_regra}
+                                </span>
+                              </div>
+                              <Badge variant="secondary" className="font-mono text-xs">
+                                {tx.tipo_valor === 'percentual'
+                                  ? `${tx.valor.toFixed(2).replace('.', ',')}%`
+                                  : formatCurrency(tx.valor)}
+                              </Badge>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic py-3 text-center">
+                        Nenhuma taxa específica configurada para este canal na precificação.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Comissões das Contas Financeiras de Repasse */}
+                  <div className="rounded-xl border border-border p-4 bg-white space-y-3">
+                    <div className="flex items-center justify-between border-b border-border pb-2">
+                      <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                        <Banknote className="h-3.5 w-3.5 text-success" />
+                        Comissões Cadastradas nas Contas de Repasse
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {contasDoMarketplace.length} conta(s)
+                      </span>
+                    </div>
+
+                    {contasDoMarketplace.length > 0 ? (
+                      <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                        {contasDoMarketplace.map((acc) => (
+                          <div
+                            key={acc.id}
+                            className="flex items-center justify-between text-xs p-2 rounded-lg bg-slate-50 border border-border/50"
+                          >
+                            <div>
+                              <span className="font-semibold block">{acc.apelido}</span>
+                              <span className="text-[10px] text-muted-foreground">
+                                Destino: {acc.expand?.conta?.nome || 'Conta bancária'}
+                              </span>
+                            </div>
+                            <Badge className="bg-primary/10 text-primary hover:bg-primary/20 font-mono text-xs">
+                              {acc.comissao_percentual.toFixed(2).replace('.', ',')}% comissão
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic py-3 text-center">
+                        Nenhuma conta financeira de repasse vinculada a este marketplace.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ABA 2: CONTAS DE REPASSE */}
         <TabsContent value="contas" className="mt-0">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {accounts.map((account, index) => {
@@ -284,7 +601,7 @@ export default function Marketplaces() {
                     </div>
                     <div className="mt-5 grid grid-cols-3 gap-2 border-t border-border pt-4">
                       <span>
-                        <small className="micro-label block">Bruto</small>
+                        <small className="micro-label block">Bruto concil.</small>
                         <strong className="mt-1 block text-sm tabular-nums">
                           {formatCurrency(gross)}
                         </strong>
@@ -308,252 +625,8 @@ export default function Marketplaces() {
             })}
           </div>
         </TabsContent>
-        <TabsContent value="vendas" className="mt-0">
-          <div className="mb-4 grid gap-2 rounded-2xl border border-border bg-white p-3 sm:grid-cols-3">
-            <Select value={selectedSlug || 'all'} onValueChange={(v) => setParam('marketplace', v)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Marketplace" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos os marketplaces</SelectItem>
-                {marketplaces.map((m) => (
-                  <SelectItem key={m.id} value={m.slug}>
-                    {m.nome}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={selectedAccount || 'all'} onValueChange={(v) => setParam('conta', v)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Conta" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas as contas</SelectItem>
-                {accounts.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.apelido}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={selectedStatus || 'all'} onValueChange={(v) => setParam('status', v)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos os status</SelectItem>
-                <SelectItem value="pendente">Pendente</SelectItem>
-                <SelectItem value="paga">Paga</SelectItem>
-                <SelectItem value="repassada">Repassada</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="hidden overflow-hidden rounded-2xl border border-border bg-white shadow-soft lg:block">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Pedido</th>
-                  <th>Marketplace</th>
-                  <th>Data</th>
-                  <th>Bruto</th>
-                  <th>Comissão + taxas</th>
-                  <th>Líquido</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSales.map((s) => {
-                  const acc = accounts.find((a) => a.id === s.marketplace_conta),
-                    mp = acc?.expand?.marketplace
-                  return (
-                    <tr key={s.id}>
-                      <td>
-                        <strong>{s.pedido_id}</strong>
-                        {Array.isArray(s.itens) && s.itens.length > 0 && (
-                          <div className="mt-1 space-y-0.5">
-                            <span className="text-[10px] font-medium text-muted-foreground block">
-                              {s.itens.length} {s.itens.length === 1 ? 'item' : 'itens'}:
-                            </span>
-                            <div className="max-w-xs space-y-0.5">
-                              {s.itens.slice(0, 2).map((it, idx) => (
-                                <p key={idx} className="text-[11px] text-foreground truncate">
-                                  • {it.quantidade}x {it.descricao || 'Item'}
-                                </p>
-                              ))}
-                              {s.itens.length > 2 && (
-                                <p className="text-[10px] text-muted-foreground italic">
-                                  + {s.itens.length - 2} outro(s)...
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                        {s.lancamento && (
-                          <Link
-                            to={`/lancamentos?editar=${s.lancamento}`}
-                            className="mt-1 block text-[10px] font-bold text-success"
-                          >
-                            <ExternalLink className="mr-1 inline h-3 w-3" />
-                            Lançamento criado
-                          </Link>
-                        )}
-                      </td>
-                      <td>
-                        <Badge style={{ background: `${mp?.cor}25`, color: '#211A14' }}>
-                          {mp?.nome}
-                        </Badge>
-                      </td>
-                      <td>{formatDate(s.data)}</td>
-                      <td>{formatCurrency(s.valor_bruto)}</td>
-                      <td className="text-primary">{formatCurrency(s.comissao + s.taxas)}</td>
-                      <td className="font-bold text-success">{formatCurrency(s.valor_liquido)}</td>
-                      <td>
-                        <StatusBadge status={s.status} />
-                      </td>
-                      <td>
-                        <div className="flex justify-end gap-1">
-                          {s.status === 'pendente' && can(user?.role, 'writeMarketplace') && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={async () => {
-                                try {
-                                  await marketplacesService.saveVenda({ status: 'paga' }, s.id)
-                                  toast({ title: 'Venda marcada como paga' })
-                                  setTimeout(load, 350)
-                                } catch (e) {
-                                  toast({
-                                    variant: 'destructive',
-                                    title: 'Falha ao atualizar',
-                                    description: apiMessage(e),
-                                  })
-                                }
-                              }}
-                            >
-                              Marcar paga
-                            </Button>
-                          )}
-                          {can(user?.role, 'writeMarketplace') && (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              onClick={() => {
-                                setEditingSale(s)
-                                setSaleDialog(true)
-                              }}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {can(user?.role, 'deleteFinance') && (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="text-destructive"
-                              onClick={() =>
-                                setDeleteTarget({ type: 'sale', id: s.id, label: s.pedido_id })
-                              }
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="space-y-3 lg:hidden">
-            {filteredSales.map((s) => {
-              const acc = accounts.find((a) => a.id === s.marketplace_conta),
-                mp = acc?.expand?.marketplace
-              return (
-                <article
-                  key={s.id}
-                  className="rounded-2xl border border-border bg-white p-4 shadow-soft"
-                  onClick={() => {
-                    if (can(user?.role, 'writeMarketplace')) {
-                      setEditingSale(s)
-                      setSaleDialog(true)
-                    }
-                  }}
-                >
-                  <div className="flex items-start justify-between">
-                    <span>
-                      <strong>{s.pedido_id}</strong>
-                      <Badge
-                        className="ml-2"
-                        style={{ background: `${mp?.cor}30`, color: '#211A14' }}
-                      >
-                        {mp?.nome}
-                      </Badge>
-                      {Array.isArray(s.itens) && s.itens.length > 0 && (
-                        <span className="ml-2 text-[11px] text-muted-foreground">
-                          ({s.itens.length} {s.itens.length === 1 ? 'item' : 'itens'})
-                        </span>
-                      )}
-                    </span>
-                    <StatusBadge status={s.status} />
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {formatDate(s.data)} · {acc?.apelido}
-                  </p>
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <span>
-                      <small className="micro-label block">Valor bruto</small>
-                      <strong className="tabular-nums">{formatCurrency(s.valor_bruto)}</strong>
-                    </span>
-                    <span className="text-right">
-                      <small className="micro-label block">Valor líquido</small>
-                      <strong className="tabular-nums text-success">
-                        {formatCurrency(s.valor_liquido)}
-                      </strong>
-                    </span>
-                    <span>
-                      <small className="micro-label block">Comissão</small>
-                      <span className="text-sm tabular-nums">{formatCurrency(s.comissao)}</span>
-                    </span>
-                    <span className="text-right">
-                      <small className="micro-label block">Taxas</small>
-                      <span className="text-sm tabular-nums">{formatCurrency(s.taxas)}</span>
-                    </span>
-                  </div>
-                  {s.status === 'pendente' && can(user?.role, 'writeMarketplace') && (
-                    <Button
-                      size="sm"
-                      className="mt-4 w-full"
-                      onClick={async (e) => {
-                        e.stopPropagation()
-                        await marketplacesService.saveVenda({ status: 'paga' }, s.id)
-                        setTimeout(load, 300)
-                      }}
-                    >
-                      <CheckCircle2 className="mr-2 h-4 w-4" />
-                      Marcar como paga
-                    </Button>
-                  )}
-                  {s.lancamento && (
-                    <Link
-                      to={`/lancamentos?editar=${s.lancamento}`}
-                      className="mt-3 block text-xs font-bold text-success"
-                    >
-                      <ExternalLink className="mr-1 inline h-3 w-3" />
-                      Lançamento criado
-                    </Link>
-                  )}
-                </article>
-              )
-            })}
-          </div>
-          {!filteredSales.length && (
-            <div className="rounded-2xl border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
-              Nenhuma venda encontrada neste período.
-            </div>
-          )}
-        </TabsContent>
+
+        {/* ABA 3: REPASSES FINANCEIROS REAIS */}
         <TabsContent value="repasses" className="mt-0">
           <div className="grid gap-5 lg:grid-cols-2">
             {(['previsto', 'realizado'] as const).map((status) => (
@@ -720,6 +793,8 @@ export default function Marketplaces() {
             ))}
           </div>
         </TabsContent>
+
+        {/* ABA 4: AUDITORIA DE TAXAS */}
         <TabsContent value="auditoria" className="mt-0">
           <AuditoriaTaxasTab
             sales={filteredSales}
@@ -731,19 +806,13 @@ export default function Marketplaces() {
           />
         </TabsContent>
       </Tabs>
+
       <MarketplaceAccountDialog
         open={accountDialog}
         onOpenChange={setAccountDialog}
         record={editingAccount}
         marketplaces={marketplaces}
         contas={financial}
-        onSaved={load}
-      />
-      <SaleDialog
-        open={saleDialog}
-        onOpenChange={setSaleDialog}
-        record={editingSale}
-        contas={accounts}
         onSaved={load}
       />
       <PayoutDialog

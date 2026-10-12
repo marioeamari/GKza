@@ -236,6 +236,57 @@ describe('Módulo /lucro — Regras de Negócio e Cálculos', () => {
       expect(grpSite.lojas.length).toBe(1)
       expect(grpSite.cor).toBe('#0284C7')
     })
+
+    it('após backfill, agrupa 100% dos canais tipo marketplace pelo vínculo real do catálogo (Shopee e SHEIN)', () => {
+      // Simulação de dados reais vindos de lucroService.listarCanais com backfill aplicado:
+      // SHEIN vinculada à coleção marketplaces (slug 'shein', cor #000000)
+      const canaisDoBanco: CanalLojaLucro[] = [
+        {
+          id: 'nnnk28chx9llzmm',
+          nome: 'Shopee',
+          tipo: 'marketplace',
+          marketplace_id: 'pn7xlgmclquqogt',
+          marketplace_nome: 'Shopee',
+          marketplace_cor: '#DF5830',
+        },
+        {
+          id: 'vcvf7xu1pjkwpys',
+          nome: 'SHEIN',
+          tipo: 'marketplace',
+          marketplace_id: 'c4bd51pyc70ryt2',
+          marketplace_nome: 'SHEIN',
+          marketplace_cor: '#000000',
+        },
+        {
+          id: 'ixleboajfvbhbyy',
+          nome: 'Site Loja Integrada KzaMari',
+          tipo: 'site_proprio',
+          marketplace_id: 'site_proprio',
+          marketplace_nome: 'Site Próprio',
+          marketplace_cor: '#30c1df',
+        },
+      ]
+
+      // Todos os canais tipo marketplace possuem marketplace_id do catálogo
+      const canaisMarketplace = canaisDoBanco.filter((c) => c.tipo === 'marketplace')
+      expect(
+        canaisMarketplace.every((c) => c.marketplace_id && c.marketplace_id !== 'site_proprio'),
+      ).toBe(true)
+
+      const grupos = agruparLojasPorMarketplace(canaisDoBanco)
+      expect(grupos.length).toBe(3)
+
+      const grupoShein = grupos.find((g) => g.id === 'c4bd51pyc70ryt2')
+      expect(grupoShein).toBeDefined()
+      expect(grupoShein?.nome).toBe('SHEIN')
+      expect(grupoShein?.cor).toBe('#000000')
+      expect(grupoShein?.lojas[0].id).toBe('vcvf7xu1pjkwpys')
+
+      const grupoShopee = grupos.find((g) => g.id === 'pn7xlgmclquqogt')
+      expect(grupoShopee).toBeDefined()
+      expect(grupoShopee?.nome).toBe('Shopee')
+      expect(grupoShopee?.lojas[0].id).toBe('nnnk28chx9llzmm')
+    })
   })
 
   describe('Aba 2: Balanço Dinâmico (Lucro Líquido Real − Despesas Reais por Destino)', () => {

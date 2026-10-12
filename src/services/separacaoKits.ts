@@ -114,7 +114,7 @@ export const separacaoKitsService = {
     return pb.collection('kit_pedidos').getFullList<KitPedido>({
       filter: filters.join(' && '),
       sort: '-created',
-      expand: 'tema,produto_referencia,separador_atual',
+      expand: 'tema,produto_referencia,separador_atual,marketplace',
     })
   },
 
@@ -127,7 +127,7 @@ export const separacaoKitsService = {
       const porNum = await pb
         .collection('kit_pedidos')
         .getFirstListItem<KitPedido>(`numero_pedido = "${clean}" || shopee_order_id = "${clean}"`, {
-          expand: 'tema,produto_referencia,separador_atual',
+          expand: 'tema,produto_referencia,separador_atual,marketplace',
         })
       if (porNum) return porNum
     } catch {
@@ -140,7 +140,7 @@ export const separacaoKitsService = {
         .collection('kit_pedidos')
         .getFirstListItem<KitPedido>(
           `numero_pedido ~ "${clean}" || shopee_order_id ~ "${clean}" || sku = "${clean}" || sku ~ "${clean}"`,
-          { expand: 'tema,produto_referencia,separador_atual' },
+          { expand: 'tema,produto_referencia,separador_atual,marketplace' },
         )
       return porFiltro
     } catch (_) {
@@ -157,7 +157,7 @@ export const separacaoKitsService = {
       const porRastreio = await pb
         .collection('kit_pedidos')
         .getFirstListItem<KitPedido>(`codigo_rastreio = "${clean}"`, {
-          expand: 'tema,produto_referencia,separador_atual',
+          expand: 'tema,produto_referencia,separador_atual,marketplace',
         })
       return porRastreio
     } catch {
@@ -166,7 +166,7 @@ export const separacaoKitsService = {
         const porRastreioAprox = await pb
           .collection('kit_pedidos')
           .getFirstListItem<KitPedido>(`codigo_rastreio ~ "${clean}"`, {
-            expand: 'tema,produto_referencia,separador_atual',
+            expand: 'tema,produto_referencia,separador_atual,marketplace',
           })
         return porRastreioAprox
       } catch {
@@ -233,7 +233,7 @@ export const separacaoKitsService = {
 
   async getPedidoById(id: string): Promise<KitPedido> {
     return pb.collection('kit_pedidos').getOne<KitPedido>(id, {
-      expand: 'tema,separador_atual',
+      expand: 'tema,separador_atual,marketplace',
     })
   },
 
@@ -255,6 +255,7 @@ export const separacaoKitsService = {
       .collection('kit_historico_separacao')
       .getList<KitHistoricoSeparacao>(1, limit, {
         sort: '-created',
+        expand: 'marketplace,pedido,tema',
       })
       .then((res) => res.items)
   },

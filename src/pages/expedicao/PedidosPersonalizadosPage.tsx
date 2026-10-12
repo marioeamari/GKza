@@ -62,6 +62,9 @@ export default function PedidosPersonalizadosPage() {
   const [pedidos, setPedidos] = useState<KitPedido[]>([])
   const [temas, setTemas] = useState<KitTema[]>([])
   const [modelos, setModelos] = useState<KitModelo[]>([])
+  const [catalogoMarketplaces, setCatalogoMarketplaces] = useState<
+    Array<{ id: string; nome: string; slug: string; cor?: string }>
+  >([])
   const [catalogoProdutos, setCatalogoProdutos] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -77,7 +80,7 @@ export default function PedidosPersonalizadosPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [pedidoEditando, setPedidoEditando] = useState<KitPedido | null>(null)
   const [numeroPedido, setNumeroPedido] = useState('')
-  const [marketplace, setMarketplace] = useState('Shopee')
+  const [marketplace, setMarketplace] = useState('')
   const [produtoNome, setProdutoNome] = useState('Kit Toalha de Rosto Personagens')
   const [sku, setSku] = useState('')
   const [temaId, setTemaId] = useState('')
@@ -108,7 +111,7 @@ export default function PedidosPersonalizadosPage() {
   const carregarDados = async () => {
     try {
       setLoading(true)
-      const [temasData, modelosData, pedidosData, prodsData] = await Promise.all([
+      const [temasData, modelosData, pedidosData, prodsData, mktsData] = await Promise.all([
         separacaoKitsService.getTemas(),
         separacaoKitsService.getModelos(),
         separacaoKitsService.getPedidos({
@@ -124,11 +127,20 @@ export default function PedidosPersonalizadosPage() {
             return []
           }
         })(),
+        (async () => {
+          try {
+            const { marketplacesService } = await import('@/services/marketplaces')
+            return await marketplacesService.listMarketplaces()
+          } catch {
+            return []
+          }
+        })(),
       ])
       setTemas(temasData)
       setModelos(modelosData)
       setPedidos(pedidosData)
       setCatalogoProdutos(prodsData)
+      setCatalogoMarketplaces(mktsData)
     } catch (err) {
       console.error('Erro ao carregar pedidos:', err)
       toast({
@@ -160,7 +172,8 @@ export default function PedidosPersonalizadosPage() {
   const abrirNovoPedido = (modoPersonalizado = false) => {
     setPedidoEditando(null)
     setNumeroPedido(String(Math.floor(100000000 + Math.random() * 900000000)))
-    setMarketplace('Shopee')
+    const shopeeMp = catalogoMarketplaces.find((m) => m.slug === 'shopee')
+    setMarketplace(shopeeMp?.id || catalogoMarketplaces[0]?.id || '')
     setProdutoNome('Kit Toalha de Rosto Personagens')
     setSku('KIT-TOALHA-30')
     const tId = temas[0]?.id || ''
@@ -187,7 +200,7 @@ export default function PedidosPersonalizadosPage() {
   const abrirEditarPedido = (p: KitPedido) => {
     setPedidoEditando(p)
     setNumeroPedido(p.numero_pedido)
-    setMarketplace(p.marketplace || 'Shopee')
+    setMarketplace(p.marketplace || '')
     setProdutoNome(p.produto_nome)
     setSku(p.sku || '')
     setTemaId(p.tema)
@@ -591,11 +604,35 @@ export default function PedidosPersonalizadosPage() {
                           >
                             #{p.numero_pedido}
                           </Badge>
-                          {p.marketplace && (
-                            <Badge variant="secondary" className="text-[11px] font-bold">
-                              {p.marketplace}
-                            </Badge>
-                          )}
+                          {(() => {
+                            const mktObj =
+                              p.expand?.marketplace ||
+                              catalogoMarketplaces.find((m) => m.id === p.marketplace)
+                            const nomeMkt = mktObj?.nome || p.marketplace
+                            if (!nomeMkt) return null
+                            return (
+                              <Badge
+                                variant="secondary"
+                                className="text-[11px] font-bold flex items-center gap-1.5"
+                                style={
+                                  mktObj?.cor
+                                    ? {
+                                        backgroundColor: `${mktObj.cor}18`,
+                                        borderColor: `${mktObj.cor}40`,
+                                      }
+                                    : undefined
+                                }
+                              >
+                                {mktObj?.cor && (
+                                  <span
+                                    className="h-2 w-2 rounded-full inline-block"
+                                    style={{ backgroundColor: mktObj.cor }}
+                                  />
+                                )}
+                                <span>{nomeMkt}</span>
+                              </Badge>
+                            )
+                          })()}
                           <Badge
                             className={cn(
                               'text-[10px] font-black uppercase',
@@ -730,17 +767,23 @@ export default function PedidosPersonalizadosPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="pedMarketplace">Marketplace</Label>
+                <Label htmlFor="pedMarketplace">Marketplace (Catálogo)</Label>
                 <Select value={marketplace} onValueChange={setMarketplace}>
                   <SelectTrigger id="pedMarketplace">
-                    <SelectValue />
+                    <SelectValue placeholder="Selecione o catálogo..." />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Shopee">Shopee</SelectItem>
-                    <SelectItem value="Mercado Livre">Mercado Livre</SelectItem>
-                    <SelectItem value="Amazon">Amazon</SelectItem>
-                    <SelectItem value="Magalu">Magazine Luiza</SelectItem>
-                    <SelectItem value="Site Próprio">Site Próprio</SelectItem>
+                    {catalogoMarketplaces.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="h-2 w-2 rounded-full inline-block"
+                            style={{ backgroundColor: m.cor || '#DF5830' }}
+                          />
+                          <span>{m.nome}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
