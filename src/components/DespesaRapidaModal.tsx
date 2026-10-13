@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/hooks/use-toast'
+import { LocalQRCode } from '@/components/LocalQRCode'
 
 interface DespesaRapidaModalProps {
   children?: React.ReactNode
@@ -28,11 +29,6 @@ export function DespesaRapidaModal({
 
   const mobileUrl =
     typeof window !== 'undefined' ? `${window.location.origin}/m` : 'https://seuerp.com/m'
-
-  // Gera o QR Code para o Hub móvel /m
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
-    mobileUrl,
-  )}&color=DF5830&bgcolor=FFFFFF&margin=2`
 
   const handleCopy = async () => {
     try {
@@ -116,11 +112,12 @@ export function DespesaRapidaModal({
         <div className="mt-4 flex flex-col items-center justify-center space-y-4">
           {/* Card com QR Code */}
           <div className="rounded-2xl border border-border/80 bg-white p-4 shadow-sm flex flex-col items-center">
-            <img
-              src={qrCodeUrl}
+            <LocalQRCode
+              value={mobileUrl}
+              size={192}
+              colorDark="#DF5830"
               alt="QR Code para Despesa Rápida"
               className="h-48 w-48 rounded-lg object-contain"
-              loading="lazy"
             />
             <p className="mt-2 text-center text-[11px] font-medium text-muted-foreground">
               Aponte a câmera do celular para abrir direto

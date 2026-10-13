@@ -21,8 +21,10 @@ import {
   Unlock,
   ShieldCheck,
   Building,
+  RefreshCw,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { LocalQRCode } from '@/components/LocalQRCode'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -565,9 +567,59 @@ export default function FuncionariosPage() {
     }
   }
 
-  // URL do Ponto da Estação
-  const getPontoUrl = (estacaoToken: string) => {
-    return `${window.location.origin}/funcionarios/ponto/${estacaoToken}`
+  // Atualização automática à meia-noite (America/Sao_Paulo) para renovar os tokens diários na tela
+  useEffect(() => {
+    let timerId: NodeJS.Timeout | null = null
+
+    const agendarProximaMeiaNoite = () => {
+      // Calcula o tempo até a próxima meia-noite em America/Sao_Paulo
+      const agora = new Date()
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Sao_Paulo',
+        hour: 'numeric',
+        minute: 'numeric',
+        second: 'numeric',
+        hour12: false,
+      }).formatToParts(agora)
+
+      const h = parseInt(parts.find((p) => p.type === 'hour')?.value || '0', 10)
+      const m = parseInt(parts.find((p) => p.type === 'minute')?.value || '0', 10)
+      const s = parseInt(parts.find((p) => p.type === 'second')?.value || '0', 10)
+
+      const segundosPassadosHoje = h * 3600 + m * 60 + s
+      const segundosAteMeiaNoite = 86400 - segundosPassadosHoje + 2 // +2s de margem de virada
+      const msAteMeiaNoite = Math.max(1000, segundosAteMeiaNoite * 1000)
+
+      timerId = setTimeout(async () => {
+        try {
+          const ests = await funcionariosService.listarEstacoes()
+          setEstacoes(ests)
+          // Se houver estação selecionada no modal, atualiza a referência
+          setSelectedEstacaoQR((prev) => {
+            if (!prev) return null
+            return ests.find((e) => e.id === prev.id) || prev
+          })
+        } catch (err) {
+          console.warn('Erro ao atualizar estações à meia-noite:', err)
+        }
+        agendarProximaMeiaNoite()
+      }, msAteMeiaNoite)
+    }
+
+    agendarProximaMeiaNoite()
+
+    return () => {
+      if (timerId) clearTimeout(timerId)
+    }
+  }, [])
+
+  // URL do Ponto da Estação: utiliza prioritariamente o token_diario rotativo do dia
+  const getPontoUrl = (estacao: FuncionarioEstacaoRecord | string) => {
+    if (typeof estacao === 'string') {
+      return `${window.location.origin}/funcionarios/ponto/${estacao}`
+    }
+    const tokenEfetivo = estacao.token_diario || estacao.token
+    return `${window.location.origin}/funcionarios/ponto/${tokenEfetivo}`
   }
 
   return (
@@ -1168,14 +1220,11 @@ export default function FuncionariosPage() {
           </div>
         </TabsContent>
 
-        {/* TAB 4: ESTAÇÕES DE PONTO (QR CODE FIXO NA PAREDE) */}
+        {/* TAB 4: ESTAÇÕES DE PONTO (QR CODE DIGITAL / CARTAZ) */}
         <TabsContent value="estacoes" className="space-y-4 focus-visible:outline-none">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {estacoes.map((est) => {
-              const urlPonto = getPontoUrl(est.token)
-              const qrCodeImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
-                urlPonto,
-              )}`
+              const urlPonto = getPontoUrl(est)
 
               return (
                 <Card key={est.id} className="border border-border/80 bg-white shadow-xs">
@@ -1189,24 +1238,38 @@ export default function FuncionariosPage() {
                           {est.local_descricao || 'Estação física na empresa'}
                         </CardDescription>
                       </div>
-                      <Badge variant={est.ativa ? 'default' : 'secondary'}>
-                        {est.ativa ? 'Ativa' : 'Inativa'}
-                      </Badge>
+                      <div className="flex items-center gap-1.5">
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200"
+                        >
+                          Link Diário Rotativo
+                        </Badge>
+                        <Badge variant={est.ativa ? 'default' : 'secondary'}>
+                          {est.ativa ? 'Ativa' : 'Inativa'}
+                        </Badge>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="flex items-center justify-center p-4 bg-gray-50 rounded-xl border border-gray-200">
-                      <img
-                        src={qrCodeImgUrl}
+                      <LocalQRCode
+                        value={urlPonto}
+                        size={176}
                         alt={`QR Code Estação ${est.nome}`}
                         className="h-44 w-44 rounded-lg bg-white p-2 shadow-xs"
                       />
                     </div>
 
                     <div className="space-y-1.5 text-xs">
-                      <Label className="text-muted-foreground font-semibold">
-                        Link de Acesso Direto da Estação:
-                      </Label>
+                      <div className="flex items-center justify-between">
+                        <Label className="text-muted-foreground font-semibold">
+                          Link Rotativo de Hoje (Expira à meia-noite):
+                        </Label>
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          Auto-renovável
+                        </span>
+                      </div>
                       <div className="flex gap-1.5">
                         <Input
                           readOnly
@@ -1219,7 +1282,7 @@ export default function FuncionariosPage() {
                           className="h-8"
                           onClick={() => {
                             navigator.clipboard.writeText(urlPonto)
-                            toast({ title: 'Link copiado!' })
+                            toast({ title: 'Link diário copiado!' })
                           }}
                         >
                           <Copy className="h-3.5 w-3.5" />
@@ -1233,7 +1296,7 @@ export default function FuncionariosPage() {
                         className="w-full bg-gray-900 hover:bg-black text-white text-xs font-bold gap-1.5"
                       >
                         <Printer className="h-3.5 w-3.5" />
-                        Imprimir Cartaz QR para Parede
+                        Exibir QR em Tela Cheia / Imprimir
                       </Button>
                     </div>
                   </CardContent>
@@ -1701,20 +1764,23 @@ export default function FuncionariosPage() {
               </div>
 
               <div className="flex justify-center">
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
-                    getPontoUrl(selectedEstacaoQR.token),
-                  )}`}
-                  alt="QR Code Ponto"
+                <LocalQRCode
+                  value={getPontoUrl(selectedEstacaoQR)}
+                  size={240}
+                  alt="QR Code Ponto Digital"
                   className="h-56 w-56 rounded-xl border border-gray-200 p-2 shadow-sm"
                 />
               </div>
 
               <div className="text-center space-y-1">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 text-[11px] font-semibold border border-emerald-200">
+                  <Clock className="h-3.5 w-3.5" />
+                  QR Code Digital Diário (Válido para hoje)
+                </div>
                 <p className="text-sm font-bold text-gray-900">Aponte a câmera do seu celular</p>
                 <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-                  Registre Entrada, Intervalo e Saída. Registros fora da empresa são marcados
-                  automaticamente.
+                  Registre Entrada, Intervalo e Saída. Este link atualiza automaticamente à
+                  meia-noite para segurança contra acessos salvos fora do dia.
                 </p>
               </div>
             </div>
@@ -1723,8 +1789,8 @@ export default function FuncionariosPage() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  navigator.clipboard.writeText(getPontoUrl(selectedEstacaoQR.token))
-                  toast({ title: 'Link copiado!' })
+                  navigator.clipboard.writeText(getPontoUrl(selectedEstacaoQR))
+                  toast({ title: 'Link diário copiado!' })
                 }}
                 className="gap-1.5 text-xs"
               >

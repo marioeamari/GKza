@@ -42,6 +42,8 @@ export interface FuncionarioEstacaoRecord {
   id: string
   nome: string
   token: string
+  token_diario?: string
+  token_diario_validade?: string
   ativa: boolean
   local_descricao?: string
   created?: string
@@ -164,13 +166,67 @@ export const funcionariosService = {
 
   async buscarEstacaoPorToken(token: string): Promise<FuncionarioEstacaoRecord | null> {
     if (!token) return null
+    const hojeStr = getLocalDateStr() // Data atual no fuso America/Sao_Paulo (YYYY-MM-DD)
+
     try {
-      return await pb
+      // 1. Busca por token_diario nas estações ativas
+      const estacao = await pb
+        .collection('funcionarios_estacoes')
+        .getFirstListItem<FuncionarioEstacaoRecord>(`token_diario = "${token}" && ativa = true`)
+
+      if (estacao) {
+        // Validação estrita de data: somente aceito se a validade bater com hoje
+        const validadeStr = estacao.token_diario_validade
+          ? dateOnly(estacao.token_diario_validade)
+          : ''
+        if (validadeStr === hojeStr) {
+          return estacao
+        }
+        // Token diário antigo / expirado -> rejeitado como "estação não localizada"
+        return null
+      }
+    } catch (_) {
+      // Nenhum registro encontrado com token_diario
+    }
+
+    // 2. Compatibilidade / Fallback de transição:
+    // Se ainda não tiver token_diario gerado no banco ou for a primeira leitura de estação antiga
+    try {
+      const estacaoLegada = await pb
         .collection('funcionarios_estacoes')
         .getFirstListItem<FuncionarioEstacaoRecord>(`token = "${token}" && ativa = true`)
+
+      if (estacaoLegada) {
+        // Se a estação ainda não possuía token_diario ou está expirada, gera na primeira leitura
+        const validadeLegada = estacaoLegada.token_diario_validade
+          ? dateOnly(estacaoLegada.token_diario_validade)
+          : ''
+
+        if (!estacaoLegada.token_diario || validadeLegada !== hojeStr) {
+          const novoToken = crypto.randomUUID().replace(/-/g, '')
+          const tokenDiario = `ponto_${novoToken}`
+          const agoraIso = new Date().toISOString()
+          try {
+            const atualizada = await pb
+              .collection('funcionarios_estacoes')
+              .update<FuncionarioEstacaoRecord>(estacaoLegada.id, {
+                token_diario: tokenDiario,
+                token_diario_validade: agoraIso,
+              })
+            return atualizada
+          } catch {
+            return estacaoLegada
+          }
+        }
+        // Se a estação legada já tinha token_diario gerado para hoje, o acesso pelo token fixo antigo
+        // não é mais aceito (somente o token_diario de hoje é aceito)
+        return null
+      }
     } catch (_) {
-      return null
+      // Estação não localizada
     }
+
+    return null
   },
 
   async criarEstacao(dados: {

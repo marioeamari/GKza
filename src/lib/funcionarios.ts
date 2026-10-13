@@ -103,6 +103,82 @@ export interface EspelhoFolhaCalculado {
 }
 
 /**
+ * Validação pura do token rotativo diário de uma estação.
+ * Regra acordada:
+ * - Apenas estações ativas são aceitas
+ * - O token deve coincidir com o `token_diario` vigente E ter validade compatível com hoje
+ * - Tokens de ontem / expirados são estritamente rejeitados
+ */
+export function validarTokenDiarioEstacao(
+  estacao:
+    | {
+        ativa?: boolean
+        token?: string
+        token_diario?: string
+        token_diario_validade?: string
+      }
+    | null
+    | undefined,
+  tokenFornecido: string,
+  hojeReferencia?: string, // YYYY-MM-DD
+): { valido: boolean; motivo?: string } {
+  if (!estacao) {
+    return { valido: false, motivo: 'Estação não encontrada' }
+  }
+
+  if (!estacao.ativa) {
+    return { valido: false, motivo: 'Estação inativa' }
+  }
+
+  if (!tokenFornecido) {
+    return { valido: false, motivo: 'Token não fornecido' }
+  }
+
+  const hoje = hojeReferencia || getLocalDateStr()
+
+  // Se o token fornecido for o token_diario
+  if (estacao.token_diario && estacao.token_diario === tokenFornecido) {
+    const validade = estacao.token_diario_validade ? dateOnly(estacao.token_diario_validade) : ''
+    if (validade === hoje) {
+      return { valido: true }
+    }
+    return { valido: false, motivo: 'Token diário expirado (pertence a outra data)' }
+  }
+
+  // Se o token fornecido for o token fixo antigo:
+  // Só aceito se a estação ainda NÃO tem token_diario gerado (compatibilidade na primeira leitura)
+  if (estacao.token && estacao.token === tokenFornecido) {
+    if (!estacao.token_diario) {
+      return { valido: true, motivo: 'Compatibilidade: primeira leitura sem token diário prévio' }
+    }
+    return {
+      valido: false,
+      motivo: 'Link expirado: esta estação já opera com link rotativo diário',
+    }
+  }
+
+  return { valido: false, motivo: 'Token não confere com esta estação' }
+}
+
+/**
+ * Utilitário de regeneração de token diário criptográfico (client/server helper).
+ * NÃO usa Math.random — usa crypto.randomUUID ou Web Crypto API.
+ */
+export function gerarTokenDiarioCriptografico(prefixo = 'ponto_'): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefixo}${crypto.randomUUID().replace(/-/g, '')}`
+  }
+  // Fallback seguro usando getRandomValues
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16)
+    crypto.getRandomValues(bytes)
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+    return `${prefixo}${hex}`
+  }
+  throw new Error('Ambiente sem suporte a gerador criptográfico seguro.')
+}
+
+/**
  * Normaliza qualquer formato de data retornado do PocketBase ou input HTML para YYYY-MM-DD
  * Ex: '2026-10-10 00:00:00.000Z' -> '2026-10-10'
  * Ex: '2026-10-10T12:00:00.000Z' -> '2026-10-10'

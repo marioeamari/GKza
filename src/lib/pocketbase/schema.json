@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-13T12:27:28.055Z",
+  "generatedAt": "2026-10-13T21:26:34.515Z",
   "collections": [
     {
       "name": "users",
@@ -5595,11 +5595,25 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "token_diario",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "token_diario_validade",
+          "type": "date",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [
         "CREATE UNIQUE INDEX idx_fest_token ON funcionarios_estacoes (token)",
-        "CREATE INDEX idx_fest_ativa ON funcionarios_estacoes (ativa)"
+        "CREATE INDEX idx_fest_ativa ON funcionarios_estacoes (ativa)",
+        "CREATE INDEX `idx_fest_token_diario` ON `funcionarios_estacoes` (token_diario)",
+        "CREATE INDEX `idx_fest_token_diario_validade` ON `funcionarios_estacoes` (token_diario_validade)"
       ]
     },
     {
