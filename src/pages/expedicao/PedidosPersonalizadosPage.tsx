@@ -1111,6 +1111,7 @@ export default function PedidosPersonalizadosPage() {
         onOpenChange={setImportarModalOpen}
         catalogoProdutos={catalogoProdutos}
         temas={temas}
+        modelos={modelos}
         onImportadoSucesso={() => carregarDados()}
       />
     </div>

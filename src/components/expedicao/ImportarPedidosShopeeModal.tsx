@@ -41,7 +41,9 @@ import {
   ResultadoParseShopee,
   ItemLinhaImportada,
   MapeamentoColunasShopee,
+  normalizarTexto,
 } from '@/lib/expedicaoShopeeParser'
+import pb from '@/lib/pocketbase/client'
 import { separacaoKitsService } from '@/services/separacaoKits'
 import type { PrecProdutoRecord } from '@/types/precificacao'
 import type { KitTema } from '@/types/separacaoKits'
@@ -51,7 +53,15 @@ interface ImportarPedidosShopeeModalProps {
   onOpenChange: (open: boolean) => void
   catalogoProdutos: PrecProdutoRecord[]
   temas: KitTema[]
+  modelos?: Array<{ id: string; codigo?: string; nome?: string; tema?: string }>
   onImportadoSucesso?: () => void
+}
+
+interface RelatorioImportacaoShopee {
+  criados: number
+  atualizados: number
+  problemas: number
+  detalhesProblemas: Array<{ orderSn: string; motivo: string }>
 }
 
 export function ImportarPedidosShopeeModal({
@@ -59,6 +69,7 @@ export function ImportarPedidosShopeeModal({
   onOpenChange,
   catalogoProdutos,
   temas,
+  modelos = [],
   onImportadoSucesso,
 }: ImportarPedidosShopeeModalProps) {
   const [tabAtiva, setTabAtiva] = useState<'planilha' | 'colagem'>('planilha')
@@ -77,6 +88,8 @@ export function ImportarPedidosShopeeModal({
   // Resultado comum de prévia
   const [resultadoParse, setResultadoParse] = useState<ResultadoParseShopee | null>(null)
   const [salvando, setSalvando] = useState(false)
+  const [relatorioPosImportacao, setRelatorioPosImportacao] =
+    useState<RelatorioImportacaoShopee | null>(null)
 
   // Limpa estados ao fechar ou reabrir
   const handleFechar = (aberto: boolean) => {
@@ -87,6 +100,7 @@ export function ImportarPedidosShopeeModal({
       setResultadoParse(null)
       setMostrarAjusteColunas(false)
       setMapeamentoCustom({})
+      setRelatorioPosImportacao(null)
     }
     onOpenChange(aberto)
   }
@@ -99,9 +113,11 @@ export function ImportarPedidosShopeeModal({
   ) => {
     try {
       setIsProcessandoArquivo(true)
+      setRelatorioPosImportacao(null)
       const res = parseShopeePlanilha(buffer, catalogoProdutos, temas, {
         nomeArquivo: nome,
         mapeamentoCustomizado: mapOverride || mapeamentoCustom,
+        modelos,
       })
       setResultadoParse(res)
       if (res.detalheMapeamento) {
@@ -114,7 +130,11 @@ export function ImportarPedidosShopeeModal({
       }
       toast({
         title: 'Planilha lida com sucesso!',
-        description: `${res.itens.length} pedido(s) identificado(s) no arquivo ${nome}.`,
+        description: `${res.itens.length} pedido(s) identificado(s) no arquivo ${nome}${
+          res.formatoDetectado === 'lista_empacotamento_product_info'
+            ? ' (Formato: Lista de Empacotamento / product_info)'
+            : ''
+        }.`,
       })
     } catch (err: any) {
       console.error('Erro ao ler planilha .xlsx:', err)
@@ -207,25 +227,33 @@ export function ImportarPedidosShopeeModal({
       setResultadoParse(null)
       return
     }
-    const res = parseShopeeColagem(textoColado, catalogoProdutos, temas)
+    setRelatorioPosImportacao(null)
+    const res = parseShopeeColagem(textoColado, catalogoProdutos, temas, modelos)
     setResultadoParse(res)
   }
 
-  // Salvar no PocketBase (criação / atualização com shopee_order_id garantido)
+  // Salvar no PocketBase com deduplicação por order_sn (cria se novo, atualiza se existente)
   const handleConfirmarImportacao = async () => {
     if (!resultadoParse || resultadoParse.itens.length === 0) return
 
     setSalvando(true)
     let criados = 0
-    let falhas = 0
+    let atualizados = 0
+    let problemas = 0
+    const detalhesProblemas: Array<{ orderSn: string; motivo: string }> = []
 
     const hoje = new Date().toISOString().split('T')[0]
 
-    let shopeeMpId = 'shopee'
+    // 1. Obter o registro oficial do marketplace Shopee no catálogo marketplaces (relação obrigatória)
+    let shopeeMpId = ''
     try {
       const { marketplacesService } = await import('@/services/marketplaces')
       const allMps = await marketplacesService.listMarketplaces()
-      const shopeeMp = allMps.find((m) => m.slug === 'shopee')
+      const shopeeMp = allMps.find(
+        (m) =>
+          (m.slug || '').toLowerCase() === 'shopee' ||
+          (m.nome || '').toLowerCase().includes('shopee'),
+      )
       if (shopeeMp) {
         shopeeMpId = shopeeMp.id
       }
@@ -233,65 +261,132 @@ export function ImportarPedidosShopeeModal({
       /* intentionally ignored */
     }
 
-    for (const item of resultadoParse.itens) {
+    // Fallback: se não encontrou por service, busca direto
+    if (!shopeeMpId) {
       try {
-        const orderIdLimpo = item.numeroPedido || ''
-        await separacaoKitsService.createPedido({
-          numero_pedido: orderIdLimpo,
-          marketplace: shopeeMpId,
-          produto_nome: item.produtoNome,
-          sku: item.sku || '',
-          tema: item.temaId || temas[0]?.id || '',
-          quantidade_total: item.quantidade,
-          tipo_composicao: item.temPedidoEspecial ? 'personalizada' : 'padrao',
-          status_separacao: 'aguardando',
-          cliente_nome: item.clienteNome || '',
-          observacoes: item.variacao ? `Variação: ${item.variacao}` : '',
-          pedido_especial: item.pedidoEspecial || '',
-          tem_pedido_especial: item.temPedidoEspecial,
-          triagem_pedido_especial: item.triagemPedidoEspecial,
-          origem_pedido_especial:
-            resultadoParse.origem === 'planilha_xlsx' ? 'colagem_shopee' : 'colagem_shopee',
-          data_expedicao: hoje,
-          variacao_anuncio: item.variacao || '',
-          produto_referencia: item.produtoEncontrado?.id || undefined,
-          shopee_order_id: orderIdLimpo,
-          codigo_rastreio: item.codigoRastreio || '',
+        const mpRec = await pb
+          .collection('marketplaces')
+          .getFirstListItem('slug="shopee" || nome ~ "Shopee"')
+        shopeeMpId = mpRec.id
+      } catch {
+        /* intentionally ignored */
+      }
+    }
+
+    // Obter tema padrão de fallback ('A Vincular' ou primeiro ativo)
+    const temaFallback =
+      temas.find((t) => normalizarTexto(t.nome) === 'a vincular')?.id ||
+      temas.find((t) => t.ativo)?.id ||
+      temas[0]?.id ||
+      ''
+
+    for (const item of resultadoParse.itens) {
+      const orderSn = (item.shopeeOrderId || item.numeroPedido || '').trim()
+
+      // Validação de problema estrutural
+      if (item.problema) {
+        problemas++
+        detalhesProblemas.push({
+          orderSn: orderSn || '(Sem ID)',
+          motivo: item.problema,
         })
-        criados++
-      } catch (err: any) {
-        console.warn(`Erro ao criar pedido ${item.numeroPedido}:`, err)
-        // Se já existia, atualiza também a quantidade corrigida e o código de rastreio
-        try {
-          const existente = await separacaoKitsService.getPedidoByNumeroOuSku(item.numeroPedido)
-          if (existente) {
-            await separacaoKitsService.updatePedido(existente.id, {
-              quantidade_total: item.quantidade,
-              codigo_rastreio: item.codigoRastreio || existente.codigo_rastreio,
-              pedido_especial: item.pedidoEspecial || existente.pedido_especial,
-              tem_pedido_especial: Boolean(item.pedidoEspecial) || existente.tem_pedido_especial,
-              shopee_order_id: item.numeroPedido,
-              variacao_anuncio: item.variacao || existente.variacao_anuncio,
-              cliente_nome: item.clienteNome || existente.cliente_nome,
-              produto_referencia: item.produtoEncontrado?.id || existente.produto_referencia,
-            })
-            criados++
-          } else {
-            falhas++
-          }
-        } catch {
-          falhas++
+        continue
+      }
+
+      if (!orderSn) {
+        problemas++
+        detalhesProblemas.push({
+          orderSn: '(Vazio)',
+          motivo: 'Número do pedido / order_sn não informado na linha.',
+        })
+        continue
+      }
+
+      const temaParaUsar = item.temaId || temaFallback
+
+      // Observações combinando comprador + vendedor + variação
+      const obsPartes: string[] = []
+      if (item.observacaoComprador) obsPartes.push(item.observacaoComprador)
+      if (item.notaVendedor) obsPartes.push(`Nota do vendedor: ${item.notaVendedor}`)
+      if (item.variacao) obsPartes.push(`Variação: ${item.variacao}`)
+      const observacoesTexto = obsPartes.join(' | ')
+
+      try {
+        // Regra (3): Deduplicação por order_sn: se já existe, atualiza em vez de duplicar
+        const pedidoExistente = await separacaoKitsService.getPedidoByOrderSnOuNumero(orderSn)
+
+        if (pedidoExistente) {
+          // Atualiza pedido existente com os novos dados
+          await separacaoKitsService.updatePedido(pedidoExistente.id, {
+            shopee_order_id: orderSn,
+            numero_pedido: orderSn,
+            codigo_rastreio: item.codigoRastreio || pedidoExistente.codigo_rastreio || '',
+            produto_nome: item.produtoNome || pedidoExistente.produto_nome,
+            sku: item.sku || pedidoExistente.sku,
+            quantidade_total: item.quantidade,
+            tema: temaParaUsar || pedidoExistente.tema,
+            marketplace: shopeeMpId || pedidoExistente.marketplace,
+            cliente_nome: item.clienteNome || pedidoExistente.cliente_nome || '',
+            observacoes: observacoesTexto || pedidoExistente.observacoes || '',
+            pedido_especial: item.pedidoEspecial || pedidoExistente.pedido_especial || '',
+            tem_pedido_especial:
+              Boolean(item.pedidoEspecial) || pedidoExistente.tem_pedido_especial,
+            variacao_anuncio: item.variacao || pedidoExistente.variacao_anuncio || '',
+            produto_referencia:
+              item.produtoEncontrado?.id || pedidoExistente.produto_referencia || undefined,
+          })
+          atualizados++
+        } else {
+          // Cria novo pedido
+          await separacaoKitsService.createPedido({
+            numero_pedido: orderSn,
+            shopee_order_id: orderSn,
+            marketplace: shopeeMpId,
+            produto_nome: item.produtoNome,
+            sku: item.sku || '',
+            tema: temaParaUsar,
+            quantidade_total: item.quantidade,
+            codigo_rastreio: item.codigoRastreio || '',
+            tipo_composicao: item.temPedidoEspecial ? 'personalizada' : 'padrao',
+            status_separacao: 'aguardando',
+            cliente_nome: item.clienteNome || '',
+            observacoes: observacoesTexto,
+            pedido_especial: item.pedidoEspecial || '',
+            tem_pedido_especial: item.temPedidoEspecial,
+            triagem_pedido_especial: item.triagemPedidoEspecial,
+            origem_pedido_especial:
+              resultadoParse.origem === 'planilha_xlsx' ? 'colagem_shopee' : 'colagem_shopee',
+            data_expedicao: hoje,
+            variacao_anuncio: item.variacao || '',
+            produto_referencia: item.produtoEncontrado?.id || undefined,
+          })
+          criados++
         }
+      } catch (err: any) {
+        console.error(`Erro ao importar pedido ${orderSn}:`, err)
+        problemas++
+        detalhesProblemas.push({
+          orderSn,
+          motivo: err?.message || 'Erro inesperado ao salvar no banco.',
+        })
       }
     }
 
     setSalvando(false)
+    const relatorio: RelatorioImportacaoShopee = {
+      criados,
+      atualizados,
+      problemas,
+      detalhesProblemas,
+    }
+    setRelatorioPosImportacao(relatorio)
+
     toast({
       title: 'Importação Concluída!',
-      description: `${criados} pedido(s) processado(s) com sucesso na expedição.${falhas > 0 ? ` (${falhas} falharam)` : ''}`,
+      description: `${criados} criado(s), ${atualizados} atualizado(s), ${problemas} com problema.`,
+      variant: problemas > 0 && criados === 0 && atualizados === 0 ? 'destructive' : 'default',
     })
 
-    handleFechar(false)
     if (onImportadoSucesso) {
       onImportadoSucesso()
     }
@@ -438,6 +533,80 @@ export function ImportarPedidosShopeeModal({
               </div>
             </TabsContent>
           </Tabs>
+
+          {/* RELATÓRIO PÓS-IMPORTAÇÃO (REGRA 4) */}
+          {relatorioPosImportacao && (
+            <div className="rounded-2xl border-2 border-primary/40 bg-card p-4 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <CheckCircle2 className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-foreground">
+                      Relatório Pós-Importação Shopee
+                    </h4>
+                    <p className="text-xs text-muted-foreground">
+                      Resultado do processamento da planilha / colagem no sistema.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleFechar(false)}
+                  className="font-bold text-xs"
+                >
+                  Concluir e Fechar
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-3 text-center">
+                  <span className="text-xs font-semibold text-emerald-800 uppercase block">
+                    Criados
+                  </span>
+                  <span className="text-2xl font-black text-emerald-700">
+                    {relatorioPosImportacao.criados}
+                  </span>
+                  <p className="text-[10px] text-emerald-600 mt-0.5">Novos pedidos cadastrados</p>
+                </div>
+                <div className="rounded-xl border border-blue-300 bg-blue-50/70 p-3 text-center">
+                  <span className="text-xs font-semibold text-blue-800 uppercase block">
+                    Atualizados
+                  </span>
+                  <span className="text-2xl font-black text-blue-700">
+                    {relatorioPosImportacao.atualizados}
+                  </span>
+                  <p className="text-[10px] text-blue-600 mt-0.5">Deduplicados por order_sn</p>
+                </div>
+                <div className="rounded-xl border border-amber-300 bg-amber-50/70 p-3 text-center">
+                  <span className="text-xs font-semibold text-amber-800 uppercase block">
+                    Com Problema
+                  </span>
+                  <span className="text-2xl font-black text-amber-700">
+                    {relatorioPosImportacao.problemas}
+                  </span>
+                  <p className="text-[10px] text-amber-600 mt-0.5">Ilegíveis ou recusados</p>
+                </div>
+              </div>
+
+              {relatorioPosImportacao.detalhesProblemas.length > 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 space-y-1.5 text-xs">
+                  <span className="font-bold text-amber-900 block">
+                    Detalhe dos pedidos com problema:
+                  </span>
+                  <ul className="list-disc pl-4 space-y-1 text-amber-800">
+                    {relatorioPosImportacao.detalhesProblemas.map((d, i) => (
+                      <li key={i}>
+                        <strong>{d.orderSn}</strong>: {d.motivo}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* AJUSTE MANUAL DE COLUNAS (EXPANSÍVEL QUANDO É PLANILHA) */}
           {resultadoParse && colunasDetectadas.length > 0 && (
@@ -652,6 +821,50 @@ export function ImportarPedidosShopeeModal({
                       </SelectContent>
                     </Select>
                   </div>
+
+                  {/* PRODUCT INFO (LISTA DE EMPACOTAMENTO) */}
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label className="text-[11px] font-bold">
+                      Product Info (Lista de Empacotamento / Formato Shopee):
+                    </Label>
+                    <Select
+                      value={mapeamentoCustom.productInfo || '__vazio__'}
+                      onValueChange={(v) => handleAtualizarMapeamento('productInfo', v)}
+                    >
+                      <SelectTrigger className="h-8 text-xs font-medium">
+                        <SelectValue placeholder="Selecione a coluna..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__vazio__">(Não mapeado)</SelectItem>
+                        {colunasDetectadas.map((col) => (
+                          <SelectItem key={col} value={col}>
+                            {col}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* SELLER NOTE */}
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-bold">Nota do Vendedor (seller_note):</Label>
+                    <Select
+                      value={mapeamentoCustom.sellerNote || '__vazio__'}
+                      onValueChange={(v) => handleAtualizarMapeamento('sellerNote', v)}
+                    >
+                      <SelectTrigger className="h-8 text-xs font-medium">
+                        <SelectValue placeholder="Selecione a coluna..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__vazio__">(Não mapeado)</SelectItem>
+                        {colunasDetectadas.map((col) => (
+                          <SelectItem key={col} value={col}>
+                            {col}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
             </div>
@@ -665,6 +878,11 @@ export function ImportarPedidosShopeeModal({
                   <span className="text-xs font-black uppercase text-foreground">
                     Itens Identificados ({resultadoParse.totalLinhas})
                   </span>
+                  {resultadoParse.formatoDetectado === 'lista_empacotamento_product_info' && (
+                    <Badge className="bg-blue-600 text-white text-[10px] font-bold">
+                      📦 Lista de Empacotamento Shopee
+                    </Badge>
+                  )}
                   <Badge
                     variant="outline"
                     className="border-emerald-500 bg-emerald-50 text-emerald-800 text-[10px] font-bold"
@@ -682,6 +900,11 @@ export function ImportarPedidosShopeeModal({
                   {resultadoParse.pedidosEspeciaisCount > 0 && (
                     <Badge className="bg-primary text-white text-[10px] font-black uppercase">
                       ★ {resultadoParse.pedidosEspeciaisCount} pedido especial
+                    </Badge>
+                  )}
+                  {resultadoParse.problemasCount > 0 && (
+                    <Badge variant="destructive" className="text-[10px] font-black uppercase">
+                      ✕ {resultadoParse.problemasCount} com problema
                     </Badge>
                   )}
                 </div>
@@ -707,6 +930,11 @@ export function ImportarPedidosShopeeModal({
                         </span>
                         {item.sku && (
                           <span className="text-[11px] text-muted-foreground">({item.sku})</span>
+                        )}
+                        {item.precoUnitario !== undefined && item.precoUnitario > 0 && (
+                          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                            R$ {item.precoUnitario.toFixed(2)} un
+                          </span>
                         )}
                       </div>
                       <div className="flex items-center gap-1.5">
@@ -779,6 +1007,31 @@ export function ImportarPedidosShopeeModal({
                     {item.temPedidoEspecial && (
                       <div className="mt-1 rounded bg-amber-100/70 p-2 text-xs font-bold text-amber-950 border border-amber-300">
                         ★ Pedido Especial do Cliente: {item.pedidoEspecial}
+                      </div>
+                    )}
+
+                    {item.problema && (
+                      <div className="mt-1 rounded bg-red-100/80 p-2 text-xs font-bold text-red-900 border border-red-300">
+                        ⚠ Problema: {item.problema}
+                      </div>
+                    )}
+
+                    {item.itensEmpacotados && item.itensEmpacotados.length > 1 && (
+                      <div className="mt-1 pl-2 border-l-2 border-primary/40 space-y-0.5 text-[11px] text-muted-foreground">
+                        <span className="font-semibold text-foreground">
+                          Subitens empacotados ({item.itensEmpacotados.length}):
+                        </span>
+                        {item.itensEmpacotados.map((sub, sIdx) => (
+                          <div key={sIdx} className="flex items-center justify-between gap-2">
+                            <span>
+                              • {sub.quantidade}x {sub.nome} {sub.sku ? `(SKU: ${sub.sku})` : ''}{' '}
+                              {sub.variacao ? `[${sub.variacao}]` : ''}
+                            </span>
+                            {sub.precoUnitario ? (
+                              <span>R$ {sub.precoUnitario.toFixed(2)}</span>
+                            ) : null}
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>

@@ -118,6 +118,23 @@ export const separacaoKitsService = {
     })
   },
 
+  async getPedidoByOrderSnOuNumero(orderSn: string): Promise<KitPedido | null> {
+    const clean = orderSn.trim()
+    if (!clean) return null
+
+    try {
+      // Busca exata prioritária por shopee_order_id ou numero_pedido
+      const existente = await pb
+        .collection('kit_pedidos')
+        .getFirstListItem<KitPedido>(`shopee_order_id = "${clean}" || numero_pedido = "${clean}"`, {
+          expand: 'tema,produto_referencia,separador_atual,marketplace',
+        })
+      return existente
+    } catch (_) {
+      return null
+    }
+  },
+
   async getPedidoByNumeroOuSku(termo: string): Promise<KitPedido | null> {
     const clean = termo.trim()
     if (!clean) return null

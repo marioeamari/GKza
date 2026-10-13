@@ -12,6 +12,8 @@ import {
   processarLinhaMapeada,
   parseShopeeColagem,
   parseShopeePlanilha,
+  desmontarProductInfo,
+  casarSkuComTemaEModelo,
   SINONIMOS_COLUNAS_SHOPEE,
 } from './expedicaoShopeeParser'
 import type { PrecProdutoRecord } from '@/types/precificacao'
@@ -63,6 +65,12 @@ describe('expedicaoShopeeParser', () => {
     { id: 'tema-monica', nome: 'Turma da Mônica', ativo: true, ordem: 1 },
     { id: 'tema-mickey', nome: 'Mickey & Minnie', ativo: true, ordem: 2 },
     { id: 'tema-sonic', nome: 'Sonic', ativo: true, ordem: 3 },
+    { id: 'tema-vincular', nome: 'A Vincular', ativo: true, ordem: 999 },
+  ]
+
+  const modelosMock = [
+    { id: 'mod-m01', codigo: 'M01', nome: 'Mônica Tradicional', tema: 'tema-monica' },
+    { id: 'mod-mic01', codigo: 'MIC01', nome: 'Mickey Clássico', tema: 'tema-mickey' },
   ]
 
   it('normaliza texto removendo acentos, pontuação e espaços múltiplos', () => {
@@ -384,6 +392,123 @@ describe('expedicaoShopeeParser', () => {
       expect(item1.isKitOuCombo).toBe(true)
       expect(item1.temPedidoEspecial).toBe(true)
       expect(item1.pedidoEspecial).toContain('Cliente pediu modelo 01 e 03 no chat')
+    })
+  })
+
+  describe('Formato "Apenas a Lista de Empacotamento - Entrega Padrão" da Shopee (Amostra Estrutural)', () => {
+    it('desmontarProductInfo extrai múltiplos itens corretamente', () => {
+      const productInfoStr =
+        '[1] Product Name: Toalha de Rosto Personalizada Monica; Variation Name: Vermelha; Price: R$ 19,90; Quantity: 2; SKU Reference No.: M01-VERM; Parent SKU Reference No.: KIT-MONICA; ' +
+        '[2] Product Name: Toalha Escolar Mickey; Variation Name: Azul; Price: R$ 15,50; Quantity: 3; SKU Reference No.: MIC01-AZ; Parent SKU Reference No.: KIT-MICKEY;'
+
+      const desmontados = desmontarProductInfo(productInfoStr)
+      expect(desmontados.length).toBe(2)
+
+      expect(desmontados[0].index).toBe(1)
+      expect(desmontados[0].productName).toBe('Toalha de Rosto Personalizada Monica')
+      expect(desmontados[0].variationName).toBe('Vermelha')
+      expect(desmontados[0].price).toBe(19.9)
+      expect(desmontados[0].quantity).toBe(2)
+      expect(desmontados[0].sku).toBe('M01-VERM')
+      expect(desmontados[0].parentSku).toBe('KIT-MONICA')
+
+      expect(desmontados[1].index).toBe(2)
+      expect(desmontados[1].productName).toBe('Toalha Escolar Mickey')
+      expect(desmontados[1].variationName).toBe('Azul')
+      expect(desmontados[1].price).toBe(15.5)
+      expect(desmontados[1].quantity).toBe(3)
+      expect(desmontados[1].sku).toBe('MIC01-AZ')
+      expect(desmontados[1].parentSku).toBe('KIT-MICKEY')
+    })
+
+    it('casarSkuComTemaEModelo casa SKU com tema e modelo existente ou cai no tema "A Vincular"', () => {
+      // 1. Casa por código de modelo M01 -> tema-monica
+      const match1 = casarSkuComTemaEModelo('M01-VERM', 'Toalha', temasMock, modelosMock)
+      expect(match1.temaMatched).toBe(true)
+      expect(match1.temaId).toBe('tema-monica')
+      expect(match1.modeloId).toBe('mod-m01')
+
+      // 2. Casa por texto do tema 'Mickey' -> tema-mickey
+      const match2 = casarSkuComTemaEModelo(
+        'XYZ-99',
+        'Toalha do Mickey Safari',
+        temasMock,
+        modelosMock,
+      )
+      expect(match2.temaMatched).toBe(true)
+      expect(match2.temaId).toBe('tema-mickey')
+
+      // 3. Sem match nenhum -> Tema 'A Vincular' com temaMatched = false
+      const match3 = casarSkuComTemaEModelo(
+        'SKU-ALEATORIO-123',
+        'Produto Desconhecido',
+        temasMock,
+        modelosMock,
+      )
+      expect(match3.temaMatched).toBe(false)
+      expect(match3.temaId).toBe('tema-vincular')
+    })
+
+    it('parseShopeePlanilha reconhece a aba "orders" com as colunas estruturais da Lista de Empacotamento Shopee', () => {
+      // Amostra estrutural: tracking_number, order_sn, product_info, remark_from_buyer, seller_note
+      const dadosPlanilha = [
+        ['tracking_number', 'order_sn', 'product_info', 'remark_from_buyer', 'seller_note'],
+        [
+          'BR24987654321',
+          '241020SHP001',
+          '[1] Product Name: Toalha Mônica Bordada; Variation Name: Padrão; Price: R$ 25,00; Quantity: 5; SKU Reference No.: M01; Parent SKU Reference No.: PARENT-M01;',
+          'Por favor embalar para presente',
+          'Enviar com urgência',
+        ],
+        [
+          'BR24987654322',
+          '241020SHP002',
+          '[1] Product Name: Produto Não Cadastrado; Variation Name: Única; Price: R$ 10,00; Quantity: 1; SKU Reference No.: SKU-INEXISTENTE; Parent SKU Reference No.: ;',
+          '',
+          '',
+        ],
+        ['BR24987654323', '241020SHP003', 'STRING ILEGIVEL SEM FORMATO', '', ''],
+      ]
+
+      const ws = XLSX.utils.aoa_to_sheet(dadosPlanilha)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'orders')
+      const buffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
+
+      const resultado = parseShopeePlanilha(buffer, catalogoMock, temasMock, {
+        nomeArquivo: 'Apenas_a_Lista_de_Empacotamento_Entrega_Padrao.xlsx',
+        modelos: modelosMock,
+      })
+
+      expect(resultado.origem).toBe('planilha_xlsx')
+      expect(resultado.formatoDetectado).toBe('lista_empacotamento_product_info')
+      expect(resultado.totalLinhas).toBe(3)
+      expect(resultado.problemasCount).toBe(1) // Item 3 ilegível
+
+      // Item 1: Mapeamento completo
+      const item1 = resultado.itens[0]
+      expect(item1.numeroPedido).toBe('241020SHP001')
+      expect(item1.shopeeOrderId).toBe('241020SHP001')
+      expect(item1.codigoRastreio).toBe('BR24987654321')
+      expect(item1.produtoNome).toBe('Toalha Mônica Bordada')
+      expect(item1.quantidade).toBe(5)
+      expect(item1.precoUnitario).toBe(25)
+      expect(item1.sku).toBe('M01')
+      expect(item1.observacaoComprador).toContain('Por favor embalar para presente')
+      expect(item1.observacaoComprador).toContain('Nota do vendedor: Enviar com urgência')
+      expect(item1.temaMatched).toBe(true)
+      expect(item1.temaId).toBe('tema-monica')
+
+      // Item 2: Sem match de SKU -> Tema "A Vincular"
+      const item2 = resultado.itens[1]
+      expect(item2.numeroPedido).toBe('241020SHP002')
+      expect(item2.temaMatched).toBe(false)
+      expect(item2.temaId).toBe('tema-vincular')
+
+      // Item 3: product_info ilegível detectado com problema
+      const item3 = resultado.itens[2]
+      expect(item3.numeroPedido).toBe('241020SHP003')
+      expect(item3.problema).toBe('product_info ilegível ou vazio')
     })
   })
 })

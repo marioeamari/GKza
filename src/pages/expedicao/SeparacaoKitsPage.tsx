@@ -801,6 +801,7 @@ export default function SeparacaoKitsPage() {
         onOpenChange={setModalImportarOpen}
         catalogoProdutos={catalogoProdutos}
         temas={temas}
+        modelos={modelos}
         onImportadoSucesso={() => {
           loadData()
           toast({

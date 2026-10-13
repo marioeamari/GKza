@@ -5,9 +5,11 @@ import type { KitTema, TriagemPedidoEspecial } from '@/types/separacaoKits'
 export interface ItemLinhaImportada {
   linhaOriginal: string
   numeroPedido: string
+  shopeeOrderId?: string
   sku: string
   produtoNome: string
   quantidade: number
+  precoUnitario?: number
   variacao?: string
   clienteNome?: string
   pedidoEspecial?: string
@@ -25,9 +27,23 @@ export interface ItemLinhaImportada {
   // Matching de produto e kit
   produtoEncontrado?: PrecProdutoRecord | null
   temaId?: string
+  temaMatched?: boolean
   reconhecido: boolean
   isKitOuCombo: boolean
   motivoNaoReconhecido?: string
+
+  // Subitens empacotados (quando originário de product_info)
+  itensEmpacotados?: Array<{
+    nome: string
+    variacao?: string
+    precoUnitario?: number
+    quantidade: number
+    sku?: string
+    parentSku?: string
+  }>
+
+  // Erro estrutural ou ilegibilidade
+  problema?: string
 
   // Metadados opcionais trazidos da planilha da Shopee
   statusEnvio?: string
@@ -45,6 +61,8 @@ export interface MapeamentoColunasShopee {
   pedidoEspecial?: string
   statusEnvio?: string
   codigoRastreio?: string
+  productInfo?: string
+  sellerNote?: string
 }
 
 export interface DetalheMapeamentoColunas {
@@ -64,7 +82,9 @@ export interface ResultadoParseShopee {
   reconhecidosCount: number
   genericosCount: number
   pedidosEspeciaisCount: number
+  problemasCount: number
   origem: 'colagem' | 'planilha_xlsx'
+  formatoDetectado?: 'padrao_colunas' | 'lista_empacotamento_product_info'
   detalheMapeamento?: DetalheMapeamentoColunas
   nomeArquivo?: string
 }
@@ -184,6 +204,9 @@ export function inferirTemaKit(produtoNome: string, sku: string, temas: KitTema[
 // ============================================================================
 export const SINONIMOS_COLUNAS_SHOPEE = {
   numeroPedido: [
+    'order sn',
+    'ordersn',
+    'order_sn',
     'id do pedido',
     'id de pedido',
     'no do pedido',
@@ -191,11 +214,26 @@ export const SINONIMOS_COLUNAS_SHOPEE = {
     'numero do pedido',
     'pedido',
     'order id',
-    'order sn',
-    'ordersn',
     'order no',
     'order number',
     'id',
+  ],
+  productInfo: [
+    'product info',
+    'product_info',
+    'informacoes do produto',
+    'informacao do produto',
+    'info do produto',
+    'dados do produto',
+    'product information',
+  ],
+  sellerNote: [
+    'seller note',
+    'seller_note',
+    'nota do vendedor',
+    'observacao do vendedor',
+    'seller remark',
+    'seller comment',
   ],
   sku: [
     'numero de referencia do sku',
@@ -258,6 +296,8 @@ export const SINONIMOS_COLUNAS_SHOPEE = {
     'recipient name',
   ],
   pedidoEspecial: [
+    'remark from buyer',
+    'remark_from_buyer',
     'observacao do comprador',
     'nota do comprador',
     'mensagem do comprador',
@@ -280,6 +320,12 @@ export const SINONIMOS_COLUNAS_SHOPEE = {
     'tracking status',
   ],
   codigoRastreio: [
+    'tracking number',
+    'tracking_number',
+    'tracking no',
+    'tracking code',
+    'tracking #',
+    'tracking',
     'codigo de rastreamento',
     'codigo de rastreio',
     'numero de rastreamento',
@@ -289,11 +335,6 @@ export const SINONIMOS_COLUNAS_SHOPEE = {
     'rastreamento',
     'rastreio',
     'cod rastreio',
-    'tracking number',
-    'tracking no',
-    'tracking code',
-    'tracking #',
-    'tracking',
     'waybill no',
     'waybill number',
     'awb',
@@ -343,16 +384,20 @@ export function inferirMapeamentoColunas(cabecalhos: string[]): DetalheMapeament
     pedidoEspecial: detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.pedidoEspecial),
     statusEnvio: detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.statusEnvio),
     codigoRastreio: detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.codigoRastreio),
+    productInfo: detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.productInfo),
+    sellerNote: detectarColuna(cabecalhos, SINONIMOS_COLUNAS_SHOPEE.sellerNote),
   }
+
+  const isPackingList = Boolean(mapeamento.productInfo)
 
   return {
     colunasDetectadas: cabecalhos,
     mapeamento,
     confianca: {
       numeroPedido: Boolean(mapeamento.numeroPedido),
-      sku: Boolean(mapeamento.sku),
-      produtoNome: Boolean(mapeamento.produtoNome),
-      quantidade: Boolean(mapeamento.quantidade),
+      sku: Boolean(mapeamento.sku || isPackingList),
+      produtoNome: Boolean(mapeamento.produtoNome || isPackingList),
+      quantidade: Boolean(mapeamento.quantidade || isPackingList),
     },
   }
 }
@@ -465,8 +510,192 @@ export function deduzirQuantidadeKit(
   return { quantidade: 0, origem: null }
 }
 
+export interface ItemProductInfoDesmontado {
+  index?: number
+  productName: string
+  variationName: string
+  price: number
+  quantity: number
+  sku: string
+  parentSku: string
+  rawBlock: string
+}
+
 /**
- * Transforma uma linha de dados (objeto ou array) em um ItemLinhaImportada com as regras de kit
+ * Desmonta e extrai itens da string empacotada product_info da Shopee:
+ * Padrão: "[N] Product Name: ...; Variation Name: ...; Price: R$ ...; Quantity: N; SKU Reference No.: ...; Parent SKU Reference No.: ...;"
+ * Suporta múltiplos itens [1], [2] em sequência.
+ */
+export function desmontarProductInfo(productInfoStr: string): ItemProductInfoDesmontado[] {
+  const texto = (productInfoStr || '').trim()
+  if (!texto) return []
+
+  // Divide o texto pelos marcadores de bloco [1], [2], [3], etc.
+  // Regex procura por `\[\d+\]` ou divide em blocos
+  const blocos: string[] = []
+  const blockRegex = /\[\d+\][\s\S]*?(?=(?:\[\d+\]|$))/g
+  let match: RegExpExecArray | null
+
+  while ((match = blockRegex.exec(texto)) !== null) {
+    if (match[0].trim()) {
+      blocos.push(match[0].trim())
+    }
+  }
+
+  // Fallback caso a string não tenha o marcador [1], [2] explícito
+  if (blocos.length === 0 && texto.includes('Product Name:')) {
+    blocos.push(texto)
+  }
+
+  const itens: ItemProductInfoDesmontado[] = []
+
+  for (const bloco of blocos) {
+    // Extrai o índice do item se houver [1]
+    const indexMatch = bloco.match(/^\[(\d+)\]/)
+    const index = indexMatch ? parseInt(indexMatch[1], 10) : undefined
+
+    // Helper para extrair campo por chave
+    // Chaves padrão: Product Name, Variation Name, Price, Quantity, SKU Reference No., Parent SKU Reference No.
+    const extrairCampo = (campo: string): string => {
+      // Regex que busca "NomeDoCampo:\s*(.*?)(?:;\s*[A-Z][a-zA-Z\s#\.]+:|$|;)"
+      // O padrão da Shopee usa ponto-e-vírgula ";" como separador
+      const regex = new RegExp(`${campo}\\s*:\\s*([^;]+)(?:;|$)`, 'i')
+      const m = bloco.match(regex)
+      return m && m[1] ? m[1].trim() : ''
+    }
+
+    const productName = extrairCampo('Product Name')
+    const variationName = extrairCampo('Variation Name')
+    const rawPrice = extrairCampo('Price')
+    const rawQty = extrairCampo('Quantity')
+    const sku = extrairCampo('SKU Reference No\\.') || extrairCampo('SKU Reference No')
+    const parentSku =
+      extrairCampo('Parent SKU Reference No\\.') || extrairCampo('Parent SKU Reference No')
+
+    // Converte Price: "R$ 29,90" ou "29.90" para float
+    let price = 0
+    if (rawPrice) {
+      const numPriceStr = rawPrice.replace(/[^\d.,]/g, '').replace(',', '.')
+      const p = parseFloat(numPriceStr)
+      if (!isNaN(p)) price = p
+    }
+
+    // Converte Quantity
+    const q = parseInt(rawQty, 10)
+    const quantity = !isNaN(q) && q > 0 ? q : 1
+
+    if (productName || sku || parentSku) {
+      itens.push({
+        index,
+        productName,
+        variationName,
+        price,
+        quantity,
+        sku,
+        parentSku,
+        rawBlock: bloco,
+      })
+    }
+  }
+
+  return itens
+}
+
+/**
+ * Casa o SKU (ou parentSku/produtoNome) com kit_temas e kit_modelos existentes.
+ * Retorna o temaId encontrado e flag de matching.
+ * Se não houver match, tenta retornar o tema 'A Vincular' (ou primeiro tema com match=false).
+ */
+export function casarSkuComTemaEModelo(
+  sku: string,
+  produtoNome: string,
+  temas: KitTema[],
+  modelos: Array<{ id: string; codigo?: string; nome?: string; tema?: string }> = [],
+): { temaId: string; temaMatched: boolean; modeloId?: string } {
+  const skuNorm = normalizarTexto(sku)
+  const skuLimpo = (sku || '').trim().toLowerCase()
+
+  // 1. Tentar casar exatamente com o código ou nome de um modelo em kit_modelos
+  if (skuLimpo && modelos.length > 0) {
+    // 1a. Match por código do modelo (ex: M01, R18, S01, P01)
+    const modPorCodigo = modelos.find((m) => {
+      const c = (m.codigo || '').trim().toLowerCase()
+      if (!c) return false
+      return skuLimpo === c || skuLimpo.startsWith(`${c}-`) || skuLimpo.includes(c)
+    })
+    if (modPorCodigo && modPorCodigo.tema) {
+      const temaExistente = temas.find((t) => t.id === modPorCodigo.tema)
+      if (temaExistente) {
+        return { temaId: temaExistente.id, temaMatched: true, modeloId: modPorCodigo.id }
+      }
+    }
+
+    // 1b. Match por nome do modelo (ex: 'Mônica', 'Pikachu', 'Mickey Safari')
+    const modPorNome = modelos.find((m) => {
+      const n = normalizarTexto(m.nome || '')
+      if (n.length < 3) return false
+      return skuNorm.includes(n) || n.includes(skuNorm)
+    })
+    if (modPorNome && modPorNome.tema) {
+      const temaExistente = temas.find((t) => t.id === modPorNome.tema)
+      if (temaExistente) {
+        return { temaId: temaExistente.id, temaMatched: true, modeloId: modPorNome.id }
+      }
+    }
+  }
+
+  // 2. Tentar casar com os nomes dos temas (excluindo o tema de fallback 'A Vincular')
+  const temasReais = temas.filter((t) => normalizarTexto(t.nome) !== 'a vincular')
+  const textoParaMatch = normalizarTexto(`${sku} ${produtoNome}`)
+
+  for (const tema of temasReais) {
+    const tNome = normalizarTexto(tema.nome)
+    if (tNome.length >= 3 && textoParaMatch.includes(tNome)) {
+      return { temaId: tema.id, temaMatched: true }
+    }
+    // Palavras-chave dos temas clássicos
+    if (
+      tNome.includes('monica') &&
+      (textoParaMatch.includes('monica') ||
+        textoParaMatch.includes('cebolinha') ||
+        textoParaMatch.includes('cascao') ||
+        textoParaMatch.includes('magali'))
+    ) {
+      return { temaId: tema.id, temaMatched: true }
+    }
+    if (
+      tNome.includes('mickey') &&
+      (textoParaMatch.includes('mickey') ||
+        textoParaMatch.includes('minnie') ||
+        textoParaMatch.includes('disney'))
+    ) {
+      return { temaId: tema.id, temaMatched: true }
+    }
+    if (tNome.includes('sonic') && textoParaMatch.includes('sonic')) {
+      return { temaId: tema.id, temaMatched: true }
+    }
+    if (
+      tNome.includes('pokemon') &&
+      (textoParaMatch.includes('pokemon') || textoParaMatch.includes('pikachu'))
+    ) {
+      return { temaId: tema.id, temaMatched: true }
+    }
+  }
+
+  // 3. SEM MATCH: vincular ao tema 'A Vincular'
+  const temaAVincular = temas.find((t) => normalizarTexto(t.nome) === 'a vincular')
+  if (temaAVincular) {
+    return { temaId: temaAVincular.id, temaMatched: false }
+  }
+
+  // Fallback se 'A Vincular' não existir no banco por qualquer motivo
+  const ativo = temas.find((t) => t.ativo)
+  return { temaId: ativo?.id || temas[0]?.id || '', temaMatched: false }
+}
+
+/**
+ * Transforma uma linha de dados (objeto ou array) em um ItemLinhaImportada com as regras de kit.
+ * Suporta o formato empacotado `product_info` da Lista de Empacotamento Shopee e o formato clássico.
  */
 export function processarLinhaMapeada(
   linhaData: Record<string, any>,
@@ -474,6 +703,7 @@ export function processarLinhaMapeada(
   catalogoProdutos: PrecProdutoRecord[],
   temas: KitTema[],
   indexOuOrigem: string | number,
+  modelos: Array<{ id: string; codigo?: string; nome?: string; tema?: string }> = [],
 ): ItemLinhaImportada | null {
   const getVal = (col?: string): string => {
     if (!col) return ''
@@ -483,21 +713,83 @@ export function processarLinhaMapeada(
   }
 
   let numeroPedido = getVal(mapeamento.numeroPedido)
-  const sku = getVal(mapeamento.sku)
+  let sku = getVal(mapeamento.sku)
   let produtoNome = getVal(mapeamento.produtoNome)
-  const variacao = getVal(mapeamento.variacao)
+  let variacao = getVal(mapeamento.variacao)
   const clienteNome = getVal(mapeamento.clienteNome)
   let pedidoEspecial = getVal(mapeamento.pedidoEspecial)
   const statusEnvio = getVal(mapeamento.statusEnvio)
   const codigoRastreio = getVal(mapeamento.codigoRastreio)
+  const productInfo = getVal(mapeamento.productInfo)
+  const sellerNote = getVal(mapeamento.sellerNote)
 
-  const rawQtd = getVal(mapeamento.quantidade)
-  const quantidadePlanilha = parseInt(rawQtd, 10)
-  const quantidadeLinhaValida =
-    !isNaN(quantidadePlanilha) && quantidadePlanilha > 0 ? quantidadePlanilha : 1
+  // Combina remark_from_buyer e seller_note para observações gerais
+  const observacoesLista: string[] = []
+  if (pedidoEspecial) observacoesLista.push(`Observação do comprador: ${pedidoEspecial}`)
+  if (sellerNote) observacoesLista.push(`Nota do vendedor: ${sellerNote}`)
+  const observacoesCombinadas = observacoesLista.join(' | ')
+
+  let quantidadeLinhaValida = 1
+  let precoUnitario: number | undefined = undefined
+  let itensEmpacotados: ItemLinhaImportada['itensEmpacotados'] = undefined
+  let problemaLinha: string | undefined = undefined
+
+  // SE FOR O FORMATO PRODUCT_INFO (Lista de Empacotamento - Entrega Padrão da Shopee)
+  if (productInfo) {
+    const desmontados = desmontarProductInfo(productInfo)
+    if (desmontados.length === 0) {
+      problemaLinha = 'product_info ilegível ou vazio'
+      produtoNome = produtoNome || 'Item Shopee (product_info ilegível)'
+    } else {
+      // Extrai os dados dos blocos
+      itensEmpacotados = desmontados.map((d) => ({
+        nome: d.productName,
+        variacao: d.variationName,
+        precoUnitario: d.price,
+        quantidade: d.quantity,
+        sku: d.sku,
+        parentSku: d.parentSku,
+      }))
+
+      // Quantidade total soma as quantidades de todos os blocos do pedido
+      quantidadeLinhaValida = desmontados.reduce((acc, d) => acc + (d.quantity || 1), 0)
+
+      // Primeiro bloco define o nome, sku e preço do pedido principal
+      const primeiro = desmontados[0]
+      if (!produtoNome) {
+        if (desmontados.length === 1) {
+          produtoNome = primeiro.productName || 'Item Shopee'
+        } else {
+          produtoNome = `${primeiro.productName} (+ ${desmontados.length - 1} item/itens)`
+        }
+      }
+      if (!sku) {
+        sku = primeiro.sku || primeiro.parentSku || ''
+      }
+      if (!variacao && primeiro.variationName) {
+        variacao = primeiro.variationName
+      }
+      if (primeiro.price > 0) {
+        precoUnitario = primeiro.price
+      }
+    }
+  } else {
+    const rawQtd = getVal(mapeamento.quantidade)
+    const quantidadePlanilha = parseInt(rawQtd, 10)
+    quantidadeLinhaValida =
+      !isNaN(quantidadePlanilha) && quantidadePlanilha > 0 ? quantidadePlanilha : 1
+  }
 
   // Se a linha estiver totalmente em branco, ignora
-  if (!numeroPedido && !sku && !produtoNome && !clienteNome && !codigoRastreio) {
+  if (
+    !numeroPedido &&
+    !sku &&
+    !produtoNome &&
+    !clienteNome &&
+    !codigoRastreio &&
+    !productInfo &&
+    !sellerNote
+  ) {
     return null
   }
 
@@ -556,12 +848,15 @@ export function processarLinhaMapeada(
     ? produtoEncontrado.tipo === 'kit' || produtoEncontrado.tipo === 'combo'
     : /kit|combo|conjunto|pacote|jogo/i.test(produtoNome) || quantidadeFinal > 1
 
-  // Inferência de tema de kit
-  const temaId = inferirTemaKit(
-    produtoEncontrado?.nome || produtoNome,
+  // Inferência / Casamento de tema e modelo com suporte a 'A Vincular'
+  const matchResultado = casarSkuComTemaEModelo(
     produtoEncontrado?.sku || sku,
+    produtoEncontrado?.nome || produtoNome,
     temas,
+    modelos,
   )
+  const temaId = matchResultado.temaId
+  const temaMatched = matchResultado.temaMatched
 
   const linhaOriginal =
     typeof indexOuOrigem === 'string'
@@ -571,6 +866,7 @@ export function processarLinhaMapeada(
   return {
     linhaOriginal,
     numeroPedido: numeroPedido.trim(),
+    shopeeOrderId: numeroPedido.trim(),
     sku: (produtoEncontrado?.sku || sku).trim(),
     produtoNome: (produtoEncontrado?.nome || produtoNome).trim(),
     quantidade: quantidadeFinal > 0 ? quantidadeFinal : 1,
@@ -578,6 +874,7 @@ export function processarLinhaMapeada(
     quantidadeDeduzidaPorKit,
     origemDeducaoQuantidade: origemDeducao,
     codigoRastreio: codigoRastreio ? codigoRastreio.trim() : undefined,
+    precoUnitario,
     variacao: variacao.trim(),
     clienteNome: clienteNome.trim(),
     pedidoEspecial: pedidoEspecial.trim(),
@@ -585,10 +882,14 @@ export function processarLinhaMapeada(
     triagemPedidoEspecial,
     produtoEncontrado,
     temaId,
+    temaMatched,
     reconhecido,
     isKitOuCombo,
+    itensEmpacotados,
+    problema: problemaLinha,
     statusEnvio: statusEnvio || undefined,
-    observacaoComprador: pedidoEspecial || undefined,
+    observacaoComprador: observacoesCombinadas || pedidoEspecial || undefined,
+    notaVendedor: sellerNote || undefined,
     motivoNaoReconhecido: reconhecido
       ? undefined
       : 'SKU e nome não constam no catálogo unificado prec_produtos (entrará como genérico).',
@@ -607,6 +908,7 @@ export function parseShopeePlanilha(
   opcoes?: {
     nomeArquivo?: string
     mapeamentoCustomizado?: MapeamentoColunasShopee
+    modelos?: Array<{ id: string; codigo?: string; nome?: string; tema?: string }>
   },
 ): ResultadoParseShopee {
   const workbook = XLSX.read(dadosBinarios, { type: 'array' })
@@ -615,9 +917,10 @@ export function parseShopeePlanilha(
     throw new Error('A planilha fornecida está vazia ou não contém abas válidas.')
   }
 
-  // Usa a primeira aba (padrão de export do Seller Centre da Shopee: "orders" ou nome padrão)
-  const primeiraAbaNome = workbook.SheetNames[0]
-  const worksheet = workbook.Sheets[primeiraAbaNome]
+  // Procura por aba com nome 'orders' (case-insensitive) ou usa a primeira
+  const abaOrders = workbook.SheetNames.find((n) => n.trim().toLowerCase() === 'orders')
+  const abaNomeParaUsar = abaOrders || workbook.SheetNames[0]
+  const worksheet = workbook.Sheets[abaNomeParaUsar]
 
   // Converte para matriz de objetos (onde as chaves são os nomes das colunas da 1ª linha com dados)
   // Alguns exports trazem linhas introdutórias ou títulos: localizamos a linha que contém o cabeçalho
@@ -688,6 +991,7 @@ export function parseShopeePlanilha(
       catalogoProdutos,
       temas,
       r,
+      opcoes?.modelos,
     )
 
     if (itemProcessado) {
@@ -698,6 +1002,10 @@ export function parseShopeePlanilha(
   const reconhecidosCount = itens.filter((i) => i.reconhecido).length
   const genericosCount = itens.length - reconhecidosCount
   const pedidosEspeciaisCount = itens.filter((i) => i.temPedidoEspecial).length
+  const problemasCount = itens.filter((i) => Boolean(i.problema)).length
+  const formatoDetectado = mapeamentoFinal.productInfo
+    ? 'lista_empacotamento_product_info'
+    : 'padrao_colunas'
 
   return {
     itens,
@@ -705,7 +1013,9 @@ export function parseShopeePlanilha(
     reconhecidosCount,
     genericosCount,
     pedidosEspeciaisCount,
+    problemasCount,
     origem: 'planilha_xlsx',
+    formatoDetectado,
     detalheMapeamento: detalheMap,
     nomeArquivo: opcoes?.nomeArquivo,
   }
@@ -719,6 +1029,7 @@ export function parseShopeeColagem(
   texto: string,
   catalogoProdutos: PrecProdutoRecord[],
   temas: KitTema[],
+  modelos: Array<{ id: string; codigo?: string; nome?: string; tema?: string }> = [],
 ): ResultadoParseShopee {
   const linhas = (texto || '')
     .split(/\r?\n/)
@@ -732,6 +1043,7 @@ export function parseShopeeColagem(
       reconhecidosCount: 0,
       genericosCount: 0,
       pedidosEspeciaisCount: 0,
+      problemasCount: 0,
       origem: 'colagem',
     }
   }
@@ -776,6 +1088,7 @@ export function parseShopeeColagem(
         catalogoProdutos,
         temas,
         i,
+        modelos,
       )
       if (processado) {
         itens.push(processado)
@@ -903,15 +1216,17 @@ export function parseShopeeColagem(
       ? produtoEncontrado.tipo === 'kit' || produtoEncontrado.tipo === 'combo'
       : /kit|combo|conjunto|pacote|jogo/i.test(produtoNome) || quantidadeFinal > 1
 
-    const temaId = inferirTemaKit(
-      produtoEncontrado?.nome || produtoNome,
+    const matchResultado = casarSkuComTemaEModelo(
       produtoEncontrado?.sku || sku,
+      produtoEncontrado?.nome || produtoNome,
       temas,
+      modelos,
     )
 
     itens.push({
       linhaOriginal: linha,
       numeroPedido: numeroPedido.trim(),
+      shopeeOrderId: numeroPedido.trim(),
       sku: (produtoEncontrado?.sku || sku).trim(),
       produtoNome: (produtoEncontrado?.nome || produtoNome).trim(),
       quantidade: quantidadeFinal > 0 ? quantidadeFinal : 1,
@@ -925,7 +1240,8 @@ export function parseShopeeColagem(
       temPedidoEspecial,
       triagemPedidoEspecial,
       produtoEncontrado,
-      temaId,
+      temaId: matchResultado.temaId,
+      temaMatched: matchResultado.temaMatched,
       reconhecido,
       isKitOuCombo,
       motivoNaoReconhecido: reconhecido
@@ -937,6 +1253,7 @@ export function parseShopeeColagem(
   const reconhecidosCount = itens.filter((i) => i.reconhecido).length
   const genericosCount = itens.length - reconhecidosCount
   const pedidosEspeciaisCount = itens.filter((i) => i.temPedidoEspecial).length
+  const problemasCount = itens.filter((i) => Boolean(i.problema)).length
 
   return {
     itens,
@@ -944,6 +1261,7 @@ export function parseShopeeColagem(
     reconhecidosCount,
     genericosCount,
     pedidosEspeciaisCount,
+    problemasCount,
     origem: 'colagem',
     detalheMapeamento: mapeamentoCustom,
   }
