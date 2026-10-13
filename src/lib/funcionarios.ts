@@ -47,6 +47,8 @@
  *    - Quando não quitado integralmente, esse saldo vira o Saldo Negativo da folha seguinte!
  */
 
+import { getLocalDateStr, dateOnly } from './format'
+
 export interface PausaPonto {
   inicio: string // 'HH:mm'
   fim?: string // 'HH:mm'

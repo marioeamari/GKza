@@ -8,6 +8,8 @@ import {
   normalizarDataPonto,
   buildFiltroPontoData,
   validarPodeRegistrarEntrada,
+  validarTokenDiarioEstacao,
+  gerarTokenDiarioCriptografico,
 } from './funcionarios'
 
 describe('Regras do Módulo de Funcionários (Aritmética Exata da Planilha)', () => {
@@ -251,5 +253,99 @@ describe('Regras do Módulo de Funcionários (Aritmética Exata da Planilha)', (
       '2026-10-10',
     )
     expect(check4.pode).toBe(true)
+  })
+
+  describe('6. Regra de Rotatividade Diária de Token da Estação de Ponto', () => {
+    const hoje = '2026-10-14'
+    const ontem = '2026-10-13'
+
+    it('aceita token_diario válido emitido na data de hoje', () => {
+      const estacao = {
+        ativa: true,
+        token: 'est_fixo_abc',
+        token_diario: 'ponto_hoje_12345',
+        token_diario_validade: `${hoje} 03:00:00.000Z`,
+      }
+
+      const res = validarTokenDiarioEstacao(estacao, 'ponto_hoje_12345', hoje)
+      expect(res.valido).toBe(true)
+      expect(res.motivo).toBeUndefined()
+    })
+
+    it('rejeita estritamente token_diario de ontem / expirado', () => {
+      const estacao = {
+        ativa: true,
+        token: 'est_fixo_abc',
+        token_diario: 'ponto_ontem_99999',
+        token_diario_validade: `${ontem} 03:00:00.000Z`,
+      }
+
+      // Mesmo que o token coincida com o salvo, a validade expirou
+      const res = validarTokenDiarioEstacao(estacao, 'ponto_ontem_99999', hoje)
+      expect(res.valido).toBe(false)
+      expect(res.motivo).toContain('expirado')
+    })
+
+    it('rejeita estação inativa mesmo com token diário válido', () => {
+      const estacao = {
+        ativa: false,
+        token: 'est_fixo_abc',
+        token_diario: 'ponto_hoje_12345',
+        token_diario_validade: `${hoje} 03:00:00.000Z`,
+      }
+
+      const res = validarTokenDiarioEstacao(estacao, 'ponto_hoje_12345', hoje)
+      expect(res.valido).toBe(false)
+      expect(res.motivo).toBe('Estação inativa')
+    })
+
+    it('rejeita token que não confere com a estação', () => {
+      const estacao = {
+        ativa: true,
+        token: 'est_fixo_abc',
+        token_diario: 'ponto_hoje_12345',
+        token_diario_validade: `${hoje} 03:00:00.000Z`,
+      }
+
+      const res = validarTokenDiarioEstacao(estacao, 'token_estranho', hoje)
+      expect(res.valido).toBe(false)
+      expect(res.motivo).toBe('Token não confere com esta estação')
+    })
+
+    it('fallback de compatibilidade: aceita token fixo antigo se ainda NÃO possui token_diario', () => {
+      const estacaoSemDiario = {
+        ativa: true,
+        token: 'est_fixo_antigo',
+        token_diario: '',
+        token_diario_validade: '',
+      }
+
+      const res = validarTokenDiarioEstacao(estacaoSemDiario, 'est_fixo_antigo', hoje)
+      expect(res.valido).toBe(true)
+      expect(res.motivo).toContain('primeira leitura')
+    })
+
+    it('rejeita token fixo antigo se a estação já opera com token rotativo diário', () => {
+      const estacaoComDiario = {
+        ativa: true,
+        token: 'est_fixo_antigo',
+        token_diario: 'ponto_hoje_12345',
+        token_diario_validade: `${hoje} 03:00:00.000Z`,
+      }
+
+      // Tentativa de bater ponto pelo token fixo salvo nos favoritos
+      const res = validarTokenDiarioEstacao(estacaoComDiario, 'est_fixo_antigo', hoje)
+      expect(res.valido).toBe(false)
+      expect(res.motivo).toContain('já opera com link rotativo')
+    })
+
+    it('gerador criptográfico seguro produz tokens únicos com prefixo ponto_', () => {
+      const t1 = gerarTokenDiarioCriptografico()
+      const t2 = gerarTokenDiarioCriptografico()
+
+      expect(t1).toMatch(/^ponto_[0-9a-f]{32}$/)
+      expect(t2).toMatch(/^ponto_[0-9a-f]{32}$/)
+      expect(t1).not.toBe(t2)
+    })
   })
 })

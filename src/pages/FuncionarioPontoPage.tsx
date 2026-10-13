@@ -16,7 +16,9 @@ import {
   ShieldCheck,
   MapPin,
   RefreshCw,
+  QrCode,
 } from 'lucide-react'
+import { LocalQRCode } from '@/components/LocalQRCode'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -68,6 +70,7 @@ export default function FuncionarioPontoPage() {
   const [dividas, setDividas] = useState<FuncionarioDividaRecord[]>([])
   const [horaAtual, setHoraAtual] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
+  const [mostrarQREstacao, setMostrarQREstacao] = useState(false)
 
   // Relógio em tempo real
   useEffect(() => {
@@ -82,49 +85,7 @@ export default function FuncionarioPontoPage() {
     return () => clearInterval(timer)
   }, [])
 
-  // 1. Carregar validação da estação pelo token da URL
-  useEffect(() => {
-    async function validarEstacao() {
-      setLoading(true)
-      try {
-        if (token) {
-          const est = await funcionariosService.buscarEstacaoPorToken(token)
-          if (est) {
-            setEstacao(est)
-            setEstacaoValida(true)
-          } else {
-            setEstacaoValida(false)
-          }
-        } else {
-          setEstacaoValida(false)
-        }
-
-        // Buscar lista de funcionários para seleção
-        const funcs = await funcionariosService.listarFuncionarios(true)
-        setFuncionarios(funcs)
-
-        // Verificar se já existe vínculo salvo localmente neste celular
-        const savedToken = localStorage.getItem(SESSION_STORAGE_KEY)
-        if (savedToken) {
-          const funcVinculado =
-            await funcionariosService.buscarFuncionarioPorTokenSessao(savedToken)
-          if (funcVinculado && funcVinculado.ativo) {
-            setFuncionarioAtual(funcVinculado)
-            setSelectedFuncionarioId(funcVinculado.id)
-          }
-        }
-      } catch (err) {
-        console.error('Erro ao validar ponto:', err)
-        setEstacaoValida(false)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    validarEstacao()
-  }, [token])
-
-  // 2. Carregar ponto de hoje e resumo do colaborador ativo
+  // 1. Carregar ponto de hoje e resumo do colaborador ativo
   const carregarDadosDoColaborador = useCallback(async (func: FuncionarioRecord) => {
     try {
       const hojeStr = getLocalDateStr() // Data atual no fuso America/Sao_Paulo
@@ -155,6 +116,112 @@ export default function FuncionarioPontoPage() {
       console.error('Erro ao carregar dados do colaborador:', err)
     }
   }, [])
+
+  // 2. Carregar validação da estação pelo token da URL
+  const validarEstacaoAtual = useCallback(async () => {
+    try {
+      if (token) {
+        const est = await funcionariosService.buscarEstacaoPorToken(token)
+        if (est) {
+          setEstacao(est)
+          setEstacaoValida(true)
+        } else {
+          setEstacao(null)
+          setEstacaoValida(false)
+        }
+      } else {
+        setEstacao(null)
+        setEstacaoValida(false)
+      }
+    } catch (err) {
+      console.error('Erro ao validar ponto:', err)
+      setEstacao(null)
+      setEstacaoValida(false)
+    }
+  }, [token])
+
+  useEffect(() => {
+    async function inicializarPonto() {
+      setLoading(true)
+      try {
+        await validarEstacaoAtual()
+
+        // Buscar lista de funcionários para seleção
+        const funcs = await funcionariosService.listarFuncionarios(true)
+        setFuncionarios(funcs)
+
+        // Verificar se já existe vínculo salvo localmente neste celular
+        const savedToken = localStorage.getItem(SESSION_STORAGE_KEY)
+        if (savedToken) {
+          const funcVinculado =
+            await funcionariosService.buscarFuncionarioPorTokenSessao(savedToken)
+          if (funcVinculado && funcVinculado.ativo) {
+            setFuncionarioAtual(funcVinculado)
+            setSelectedFuncionarioId(funcVinculado.id)
+          }
+        }
+      } catch (err) {
+        console.error('Erro ao inicializar página do ponto:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    inicializarPonto()
+  }, [validarEstacaoAtual])
+
+  // Agendador de virada de dia (revalidação e atualização de estação à meia-noite America/Sao_Paulo sem recarregar a página)
+  useEffect(() => {
+    let timerId: NodeJS.Timeout | null = null
+
+    const agendarProximaMeiaNoite = () => {
+      const agora = new Date()
+      let h = 0
+      let m = 0
+      let s = 0
+
+      try {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Sao_Paulo',
+          hour: 'numeric',
+          minute: 'numeric',
+          second: 'numeric',
+          hour12: false,
+        }).formatToParts(agora)
+        h = parseInt(parts.find((p) => p.type === 'hour')?.value || '0', 10)
+        m = parseInt(parts.find((p) => p.type === 'minute')?.value || '0', 10)
+        s = parseInt(parts.find((p) => p.type === 'second')?.value || '0', 10)
+      } catch {
+        h = agora.getHours()
+        m = agora.getMinutes()
+        s = agora.getSeconds()
+      }
+
+      const segundosPassadosHoje = h * 3600 + m * 60 + s
+      const segundosAteMeiaNoite = 86400 - segundosPassadosHoje + 2 // +2s de margem de virada
+      const msAteMeiaNoite = Math.max(1000, segundosAteMeiaNoite * 1000)
+
+      timerId = setTimeout(async () => {
+        try {
+          // Revalida a estação com a data do novo dia
+          await validarEstacaoAtual()
+          // Recarrega os dados do colaborador para o novo dia (limpando o ponto de ontem)
+          if (funcionarioAtual) {
+            await carregarDadosDoColaborador(funcionarioAtual)
+          }
+        } catch (err) {
+          console.warn('Erro ao atualizar estação/ponto na virada de dia:', err)
+        }
+        agendarProximaMeiaNoite()
+      }, msAteMeiaNoite)
+    }
+
+    agendarProximaMeiaNoite()
+
+    return () => {
+      if (timerId) clearTimeout(timerId)
+    }
+  }, [validarEstacaoAtual, funcionarioAtual, carregarDadosDoColaborador])
 
   useEffect(() => {
     if (funcionarioAtual) {
@@ -445,7 +512,7 @@ export default function FuncionarioPontoPage() {
             </div>
           </div>
 
-          <div className="text-right">
+          <div className="text-right flex items-center gap-2">
             {estacaoValida ? (
               <Badge
                 variant="outline"
@@ -463,11 +530,50 @@ export default function FuncionarioPontoPage() {
                 Fora da estação
               </Badge>
             )}
+            {estacao && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                title="Exibir QR Code da estação"
+                onClick={() => setMostrarQREstacao((prev) => !prev)}
+              >
+                <QrCode className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-xl p-4 space-y-4">
+        {/* QR CODE DA ESTAÇÃO (SE SOLICITADO OU ATIVO NA TELA) */}
+        {estacao && mostrarQREstacao && (
+          <Card className="border border-border/80 bg-white shadow-sm text-center">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-bold flex items-center justify-center gap-1.5 text-gray-900">
+                <QrCode className="h-4 w-4 text-[#DF5830]" />
+                QR Code de Hoje — Estação {estacao.nome}
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Link rotativo diário auto-renovável à meia-noite
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col items-center justify-center pb-4 pt-1">
+              <div className="p-3 bg-gray-50 rounded-xl border border-gray-200">
+                <LocalQRCode
+                  value={`${window.location.origin}/funcionarios/ponto/${estacao.token_diario || estacao.token}`}
+                  size={160}
+                  alt={`QR Code Estação ${estacao.nome}`}
+                  className="h-40 w-40 rounded-lg bg-white p-2 shadow-xs"
+                />
+              </div>
+              <span className="text-[11px] text-muted-foreground mt-2">
+                Outro colaborador pode escanear esta tela para registrar o ponto
+              </span>
+            </CardContent>
+          </Card>
+        )}
+
         {/* RELÓGIO PRINCIPAL */}
         <Card className="border border-border/80 bg-white shadow-sm text-center">
           <CardContent className="pt-6 pb-6">

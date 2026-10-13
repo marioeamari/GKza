@@ -5,7 +5,7 @@ import {
   buildFiltroPontoData,
   validarPodeRegistrarEntrada,
 } from '@/lib/funcionarios'
-import { getLocalDateStr, toPocketBaseDate } from '@/lib/format'
+import { getLocalDateStr, dateOnly, toPocketBaseDate } from '@/lib/format'
 
 export interface FuncionarioRecord {
   id: string
