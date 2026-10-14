@@ -214,18 +214,26 @@ export function encontrarProdutoPorApelido(
   const canalIdNorm = canalId ? normalizarCodigoSku(canalId) : ''
   const canalNomeNorm = canalNome ? normalizarCodigoSku(canalNome) : ''
 
+  // Função auxiliar para verificar se algum dos códigos contidos em sku_externo bate com codNorm
+  // Compatibilidade com dados antigos que possam ter gravado vírgula/ponto-e-vírgula em uma string única
+  const itemCasaCodigo = (skuExternoRaw: string | undefined): boolean => {
+    if (!skuExternoRaw) return false
+    const codigos = extrairCodigosIndividuais(skuExternoRaw)
+    return codigos.some((c) => normalizarCodigoSku(c) === codNorm)
+  }
+
   // (1) Prioridade: Apelido no canal específico
   if (canalIdNorm || canalNomeNorm) {
     for (const prod of catalogoProdutos) {
       if (Array.isArray(prod.sku_por_canal)) {
         const achouNoCanal = prod.sku_por_canal.some((sc) => {
-          if (!sc || !sc.sku_externo) return false
-          const scExtNorm = normalizarCodigoSku(sc.sku_externo)
-          if (scExtNorm !== codNorm) return false
+          if (!sc || !itemCasaCodigo(sc.sku_externo)) return false
 
           const scCanalNorm = normalizarCodigoSku(sc.canal)
           return (
             !scCanalNorm ||
+            scCanalNorm === 'todos' ||
+            scCanalNorm === 'global' ||
             (canalIdNorm && scCanalNorm === canalIdNorm) ||
             (canalNomeNorm && scCanalNorm === canalNomeNorm)
           )
@@ -241,8 +249,7 @@ export function encontrarProdutoPorApelido(
   for (const prod of catalogoProdutos) {
     if (Array.isArray(prod.sku_por_canal)) {
       const achouEmQualquer = prod.sku_por_canal.some((sc) => {
-        if (!sc || !sc.sku_externo) return false
-        return normalizarCodigoSku(sc.sku_externo) === codNorm
+        return sc && itemCasaCodigo(sc.sku_externo)
       })
       if (achouEmQualquer) {
         return { produto: prod, origem: 'sku_por_canal' }
@@ -466,27 +473,49 @@ export function processarRelatorioBling(
  * Adiciona um apelido de SKU por canal à lista existente de um produto
  * Evita duplicatas do mesmo apelido no mesmo canal
  */
+/**
+ * Quebra uma string de apelidos (que pode conter vírgula, ponto-e-vírgula ou múltiplos códigos)
+ * em códigos individuais normalizados por trim.
+ */
+export function extrairCodigosIndividuais(texto: string | number | null | undefined): string[] {
+  if (texto === null || texto === undefined) return []
+  return String(texto)
+    .split(/[,;]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+/**
+ * Adiciona um ou mais apelidos de SKU por canal à lista existente de um produto.
+ * Se skuExterno contiver múltiplos códigos separados por vírgula ou ponto-e-vírgula,
+ * separa em códigos individuais e grava uma entrada por código.
+ * Impede duplicatas do mesmo apelido no mesmo canal com base em normalizarCodigoSku.
+ */
 export function adicionarApelidoCanal(
   listaAtual: PrecProdutoRecord['sku_por_canal'],
   canalId: string,
   skuExterno: string,
 ): Array<{ canal: string; sku_externo: string }> {
-  const limpoCanal = canalId.trim()
-  const limpoSku = skuExterno.trim()
-  if (!limpoSku) return Array.isArray(listaAtual) ? [...listaAtual] : []
+  const limpoCanal = (canalId || '').trim() || 'todos'
+  const partes = extrairCodigosIndividuais(skuExterno)
+  if (partes.length === 0) return Array.isArray(listaAtual) ? [...listaAtual] : []
 
   const lista = Array.isArray(listaAtual) ? [...listaAtual] : []
-  const skuNorm = normalizarCodigoSku(limpoSku)
   const canalNorm = normalizarCodigoSku(limpoCanal)
 
-  const jaExiste = lista.some(
-    (item) =>
-      normalizarCodigoSku(item.sku_externo) === skuNorm &&
-      normalizarCodigoSku(item.canal) === canalNorm,
-  )
+  for (const parte of partes) {
+    const skuNorm = normalizarCodigoSku(parte)
+    if (!skuNorm) continue
 
-  if (!jaExiste) {
-    lista.push({ canal: limpoCanal, sku_externo: limpoSku })
+    const jaExiste = lista.some(
+      (item) =>
+        normalizarCodigoSku(item.sku_externo) === skuNorm &&
+        normalizarCodigoSku(item.canal) === canalNorm,
+    )
+
+    if (!jaExiste) {
+      lista.push({ canal: limpoCanal, sku_externo: parte })
+    }
   }
 
   return lista

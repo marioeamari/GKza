@@ -43,9 +43,45 @@ export const precificacaoService = {
     return pb.collection('prec_produtos').create<PrecProdutoRecord>(data)
   },
 
+  /**
+   * Determina se o payload de atualização de um produto altera campos que afetam custo,
+   * taxas ou precificação. Campos puramente de identificação e cadastro
+   * (como sku_por_canal/apelidos, nome, marca, categoria, codigo_barras, unidade, imagem)
+   * NÃO devem invalidar precificações aprovadas.
+   */
+  afetaCustoOuPrecificacao(data: FormData | Partial<PrecProdutoRecord>): boolean {
+    const camposDeCusto: Array<keyof PrecProdutoRecord> = [
+      'tipo',
+      'custo_aquisicao_unitario',
+      'composicao',
+      'perda_pct',
+      'custo_adicional_embalagem',
+      'custo_etiqueta',
+      'despesas_compra',
+      'qtd_por_kit',
+      'qtd_produzida',
+      'peso_g',
+      'dimensao_comprimento_cm',
+      'dimensao_largura_cm',
+      'dimensao_altura_cm',
+      'fornecedor',
+      'fornecedor_produto',
+    ]
+
+    if (data instanceof FormData) {
+      return camposDeCusto.some((campo) => data.has(campo))
+    }
+
+    const chavesEnviadas = Object.keys(data) as Array<keyof PrecProdutoRecord>
+    return chavesEnviadas.some(
+      (campo) => camposDeCusto.includes(campo) && data[campo] !== undefined,
+    )
+  },
+
   async updateProduto(
     id: string,
     data: FormData | Partial<PrecProdutoRecord>,
+    opcoes?: { marcarDesatualizada?: boolean },
   ): Promise<PrecProdutoRecord> {
     let payload = data
     if (!(data instanceof FormData) && typeof data.imagem === 'string') {
@@ -54,8 +90,16 @@ export const precificacaoService = {
       payload = sanitized
     }
     const updated = await pb.collection('prec_produtos').update<PrecProdutoRecord>(id, payload)
-    // Marca precificações deste produto como desatualizadas por mudança de custo/produto
-    await precificacaoService.marcarPrecificacoesComoDesatualizadas({ produtoId: id })
+
+    // Só marca precificações deste produto como desatualizadas se houver alteração
+    // em campos que afetam custo ou se for explicitamente solicitado via opcoes.marcarDesatualizada
+    const deveInvalidar =
+      opcoes?.marcarDesatualizada ?? precificacaoService.afetaCustoOuPrecificacao(data)
+
+    if (deveInvalidar) {
+      await precificacaoService.marcarPrecificacoesComoDesatualizadas({ produtoId: id })
+    }
+
     return updated
   },
 

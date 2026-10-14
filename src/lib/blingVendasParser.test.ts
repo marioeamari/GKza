@@ -251,6 +251,84 @@ describe('blingVendasParser - Agrupamento e Reimportação', () => {
     expect(lista).toHaveLength(1)
     expect(lista[0].canal).toBe('mercado_livre')
   })
+
+  it('deve separar texto com vírgula "B122, B197" em códigos individuais ao adicionar', () => {
+    let lista: Array<{ canal: string; sku_externo: string }> = []
+    lista = adicionarApelidoCanal(lista, 'shopee', 'B122, B197')
+    expect(lista).toHaveLength(2)
+    expect(lista[0]).toEqual({ canal: 'shopee', sku_externo: 'B122' })
+    expect(lista[1]).toEqual({ canal: 'shopee', sku_externo: 'B197' })
+
+    // Se tentar adicionar novamente com pontuação mista, não duplica
+    lista = adicionarApelidoCanal(lista, 'shopee', 'B197; B122')
+    expect(lista).toHaveLength(2)
+  })
+
+  it('compatibilidade retroativa: registro legado com string "B122, B197" deve casar ambos os códigos B122 e B197', () => {
+    const catalogoLegado: PrecProdutoRecord[] = [
+      {
+        id: 'lsilkiq8w2apfre',
+        sku: 'BLeve',
+        nome: 'Toalha Leve de Praia',
+        tipo: 'revenda',
+        status: 'ativo',
+        sku_por_canal: [{ canal: 'nnnk28chx9llzmm', sku_externo: 'B122, B197' }],
+        created: '',
+        updated: '',
+      },
+    ]
+
+    const matchB122 = encontrarProdutoPorApelido('B122', catalogoLegado, 'nnnk28chx9llzmm')
+    expect(matchB122).not.toBeNull()
+    expect(matchB122?.produto.id).toBe('lsilkiq8w2apfre')
+
+    const matchB197 = encontrarProdutoPorApelido('B197', catalogoLegado, 'nnnk28chx9llzmm')
+    expect(matchB197).not.toBeNull()
+    expect(matchB197?.produto.id).toBe('lsilkiq8w2apfre')
+  })
+
+  it('reimportação da planilha traz B197=166un e B122=67un classificados sem passar pela fila', () => {
+    const produtoBLeve: PrecProdutoRecord = {
+      id: 'lsilkiq8w2apfre',
+      sku: 'BLeve',
+      nome: 'Toalha Leve de Praia',
+      tipo: 'revenda',
+      status: 'ativo',
+      sku_por_canal: [
+        { canal: 'nnnk28chx9llzmm', sku_externo: 'B122' },
+        { canal: 'nnnk28chx9llzmm', sku_externo: 'B197' },
+      ],
+      created: '',
+      updated: '',
+    }
+
+    const linhas: LinhaBlingBruta[] = [
+      {
+        codigo: 'B197',
+        quantidade: 166,
+        valorTotal: 166 * 24.9,
+        linhaOriginal: {},
+      },
+      {
+        codigo: 'B122',
+        quantidade: 67,
+        valorTotal: 67 * 24.9,
+        linhaOriginal: {},
+      },
+    ]
+
+    const resultado = processarRelatorioBling(linhas, [produtoBLeve], 'nnnk28chx9llzmm')
+
+    // Deve casar todos direto sem alimentar fila 'aClassificar'
+    expect(resultado.aClassificar).toHaveLength(0)
+    expect(resultado.resumo.totalCodigosNaoClassificados).toBe(0)
+    expect(resultado.resumo.totalProdutosClassificados).toBe(1)
+    expect(resultado.resumo.totalUnidadesClassificadas).toBe(233) // 166 + 67
+    expect(resultado.agrupadosPorProduto['lsilkiq8w2apfre'].quantidadeTotal).toBe(233)
+    expect(resultado.agrupadosPorProduto['lsilkiq8w2apfre'].codigosBling).toEqual(
+      expect.arrayContaining(['B197', 'B122']),
+    )
+  })
 })
 
 describe('blingVendasParser - Leitura de Planilha Real via SheetJS', () => {

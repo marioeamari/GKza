@@ -35,28 +35,50 @@ export function SkuApelidosManager({
 
   const handleAdicionar = () => {
     setErro(null)
-    const skuLimpo = novoSkuExterno.trim()
-    if (!skuLimpo) {
+    const textoEntrada = novoSkuExterno.trim()
+    if (!textoEntrada) {
       setErro('Digite o código ou apelido do Bling / canal.')
       return
     }
 
-    // Se não selecionou canal específico, usa 'global' ou primeiro canal
+    // Se não selecionou canal específico, usa 'todos'
     const canalDestino = novoCanal.trim() || 'todos'
 
-    // Verifica se já existe o mesmo par
-    const jaExiste = apelidos.some(
-      (a) =>
-        a.sku_externo.toLowerCase() === skuLimpo.toLowerCase() &&
-        a.canal.toLowerCase() === canalDestino.toLowerCase(),
-    )
+    // Quebra por vírgula, ponto-e-vírgula ou espaço em códigos individuais
+    const codigosNovos = textoEntrada
+      .split(/[,;\s]+/)
+      .map((c) => c.trim())
+      .filter(Boolean)
 
-    if (jaExiste) {
-      setErro(`O apelido "${skuLimpo}" já está cadastrado para este canal.`)
+    if (codigosNovos.length === 0) {
+      setErro('Nenhum código válido informado.')
       return
     }
 
-    const atualizados = adicionarApelidoCanal(apelidos, canalDestino, skuLimpo)
+    // Adiciona cada código usando adicionarApelidoCanal que já evita duplicidades
+    let atualizados = Array.isArray(apelidos) ? [...apelidos] : []
+    let algumAdicionado = false
+    const jaExistentes: string[] = []
+
+    for (const cod of codigosNovos) {
+      const antesQtd = atualizados.length
+      atualizados = adicionarApelidoCanal(atualizados, canalDestino, cod)
+      if (atualizados.length > antesQtd) {
+        algumAdicionado = true
+      } else {
+        jaExistentes.push(cod)
+      }
+    }
+
+    if (!algumAdicionado) {
+      setErro(
+        jaExistentes.length === 1
+          ? `O apelido "${jaExistentes[0]}" já está cadastrado para este canal.`
+          : `Os apelidos [${jaExistentes.join(', ')}] já estão cadastrados para este canal.`,
+      )
+      return
+    }
+
     onChange(atualizados)
     setNovoSkuExterno('')
   }

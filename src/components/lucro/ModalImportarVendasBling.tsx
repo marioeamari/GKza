@@ -252,9 +252,14 @@ export function ModalImportarVendasBling({
           codigoBling,
         )
 
-        await precificacaoService.updateProduto(prod.id, {
-          sku_por_canal: novaLista,
-        })
+        // Salvar apelidos NÃO deve invalidar precificações (opcoes: marcarDesatualizada=false)
+        await precificacaoService.updateProduto(
+          prod.id,
+          {
+            sku_por_canal: novaLista,
+          },
+          { marcarDesatualizada: false },
+        )
         prod.sku_por_canal = novaLista
         salvos++
       }
