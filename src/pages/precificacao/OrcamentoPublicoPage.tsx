@@ -14,7 +14,11 @@ import {
 } from 'lucide-react'
 import { orcamentosService } from '@/services/orcamentos'
 import { OrcamentoRecord } from '@/types/orcamento'
-import { formatarMoedaBR } from '@/lib/precificacao/orcamentoCalculo'
+import {
+  formatarMoedaBR,
+  normalizarCanaisExpandidos,
+  normalizarOrcamentoRecord,
+} from '@/lib/precificacao/orcamentoCalculo'
 import { imprimirOuBaixarOrcamentoPDF } from '@/lib/precificacao/orcamentoPdf'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -111,13 +115,24 @@ export default function OrcamentoPublicoPage() {
     )
   }
 
-  const canais = orcamento.expand?.canais_comparados || []
-  const itens = orcamento.expand?.itens || []
-  const totais = orcamento.totais_por_canal || {}
+  const orcamentoNormalizado = normalizarOrcamentoRecord(orcamento)
+  const canais = normalizarCanaisExpandidos(orcamentoNormalizado.expand?.canais_comparados)
+  const itens = Array.isArray(orcamentoNormalizado.expand?.itens)
+    ? orcamentoNormalizado.expand.itens
+    : []
+  const totais =
+    orcamentoNormalizado.totais_por_canal &&
+    typeof orcamentoNormalizado.totais_por_canal === 'object' &&
+    !Array.isArray(orcamentoNormalizado.totais_por_canal)
+      ? orcamentoNormalizado.totais_por_canal
+      : {}
 
   const formatarData = (dt?: string) => {
     if (!dt) return '-'
-    const [ano, mes, dia] = dt.split('T')[0].split('-')
+    const parte = String(dt).split('T')[0]
+    if (!parte) return '-'
+    const [ano, mes, dia] = parte.split('-')
+    if (!dia || !mes || !ano) return parte
     return `${dia}/${mes}/${ano}`
   }
 
@@ -274,68 +289,87 @@ export default function OrcamentoPublicoPage() {
                   <th className="py-3 px-3 text-center">Qtd</th>
                   {canais.map((canal) => (
                     <th key={canal.id} className="py-3 px-4 text-right">
-                      {canal.nome}
+                      {canal?.nome || 'Canal'}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {itens.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="py-3 px-4">
-                      <div className="font-semibold text-slate-900">{item.modelo_nome}</div>
-                      {item.modelo_codigo && (
-                        <div className="text-xs text-muted-foreground font-mono">
-                          Cód: {item.modelo_codigo}
-                        </div>
-                      )}
+                {itens.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={2 + Math.max(1, canais.length)}
+                      className="py-6 text-center text-xs text-muted-foreground"
+                    >
+                      Nenhum item cadastrado neste orçamento.
                     </td>
-                    <td className="py-3 px-3 text-center font-bold text-slate-800">
-                      {item.quantidade}
-                    </td>
-                    {canais.map((canal) => {
-                      const precoUnit = item.precos_canais?.[canal.id]?.preco_unitario || 0
-                      const subtotal = Math.round(precoUnit * item.quantidade * 100) / 100
-                      const frete = item.fretes_canais?.[canal.id]?.valor_frete || 0
-                      return (
-                        <td key={canal.id} className="py-3 px-4 text-right">
-                          <div className="font-bold text-slate-900">
-                            {formatarMoedaBR(subtotal)}
-                          </div>
-                          <div className="text-[11px] text-muted-foreground">
-                            {formatarMoedaBR(precoUnit)} cada
-                          </div>
-                          {frete > 0 && (
-                            <div className="text-[11px] font-medium text-orange-600 mt-0.5">
-                              + Frete {formatarMoedaBR(frete)}
-                            </div>
-                          )}
-                        </td>
-                      )
-                    })}
                   </tr>
-                ))}
+                ) : (
+                  itens.map((item, idx) => (
+                    <tr key={item.id || idx} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="py-3 px-4">
+                        <div className="font-semibold text-slate-900">
+                          {item.modelo_nome || 'Item sem nome'}
+                        </div>
+                        {item.modelo_codigo && (
+                          <div className="text-xs text-muted-foreground font-mono">
+                            Cód: {item.modelo_codigo}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-center font-bold text-slate-800">
+                        {item.quantidade || 1}
+                      </td>
+                      {canais.map((canal) => {
+                        const precoUnit = item.precos_canais?.[canal.id]?.preco_unitario || 0
+                        const subtotal = Math.round(precoUnit * (item.quantidade || 1) * 100) / 100
+                        const frete = item.fretes_canais?.[canal.id]?.valor_frete || 0
+                        return (
+                          <td key={canal.id} className="py-3 px-4 text-right">
+                            <div className="font-bold text-slate-900">
+                              {formatarMoedaBR(subtotal)}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground">
+                              {formatarMoedaBR(precoUnit)} cada
+                            </div>
+                            {frete > 0 && (
+                              <div className="text-[11px] font-medium text-orange-600 mt-0.5">
+                                + Frete {formatarMoedaBR(frete)}
+                              </div>
+                            )}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))
+                )}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-slate-300 bg-slate-50 font-bold text-slate-900">
                   <td colSpan={2} className="py-4 px-4 text-sm uppercase tracking-wide">
                     Total Final por Canal
                   </td>
-                  {canais.map((canal) => {
-                    const tot = totais[canal.id]
-                    return (
-                      <td key={canal.id} className="py-4 px-4 text-right">
-                        <div className="text-lg font-black text-primary">
-                          {formatarMoedaBR(tot?.total_geral || 0)}
-                        </div>
-                        <div className="text-[11px] text-muted-foreground font-normal">
-                          Itens: {formatarMoedaBR(tot?.total_itens || 0)}
-                          {(tot?.total_fretes || 0) > 0 &&
-                            ` + Frete: ${formatarMoedaBR(tot?.total_fretes || 0)}`}
-                        </div>
-                      </td>
-                    )
-                  })}
+                  {canais.length === 0 ? (
+                    <td className="py-4 px-4 text-right text-xs text-muted-foreground">
+                      Sem canais
+                    </td>
+                  ) : (
+                    canais.map((canal) => {
+                      const tot = totais[canal.id]
+                      return (
+                        <td key={canal.id} className="py-4 px-4 text-right">
+                          <div className="text-lg font-black text-primary">
+                            {formatarMoedaBR(tot?.total_geral || 0)}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground font-normal">
+                            Itens: {formatarMoedaBR(tot?.total_itens || 0)}
+                            {(tot?.total_fretes || 0) > 0 &&
+                              ` + Frete: ${formatarMoedaBR(tot?.total_fretes || 0)}`}
+                          </div>
+                        </td>
+                      )
+                    })
+                  )}
                 </tr>
               </tfoot>
             </table>

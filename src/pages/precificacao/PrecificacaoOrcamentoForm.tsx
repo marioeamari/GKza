@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { orcamentosService } from '@/services/orcamentos'
+import { normalizarOrcamentoRecord } from '@/lib/precificacao/orcamentoCalculo'
 import { precificacaoService } from '@/services/precificacao'
 import { separacaoKitsService } from '@/services/separacaoKits'
 import { cadastrosService } from '@/services/cadastros'
@@ -155,20 +156,24 @@ export default function PrecificacaoOrcamentoForm() {
           setValidadeDias(orc.validade_dias || 7)
           setValidadeData(orc.validade_data ? orc.validade_data.split('T')[0] : '')
           setStatus(orc.status || 'rascunho')
-          setCanaisSelecionadosIds(orc.canais_comparados || [])
-          setTemaId(orc.tema || '')
-          setTemaNome(orc.tema_nome || '')
-          setCor(orc.cor || '')
-          setObservacoes(orc.observacoes || '')
+          const orcNormalizado = normalizarOrcamentoRecord(orc)
+          setCanaisSelecionadosIds(orcNormalizado.canais_comparados || [])
+          setTemaId(orcNormalizado.tema || '')
+          setTemaNome(orcNormalizado.tema_nome || '')
+          setCor(orcNormalizado.cor || '')
+          setObservacoes(orcNormalizado.observacoes || '')
 
-          if (orc.expand?.itens) {
+          const itensOrc = Array.isArray(orcNormalizado.expand?.itens)
+            ? orcNormalizado.expand.itens
+            : []
+          if (itensOrc.length > 0) {
             setItens(
-              orc.expand.itens.map((it) => ({
+              itensOrc.map((it) => ({
                 id: it.id,
                 modelo: it.modelo,
-                modelo_nome: it.modelo_nome,
+                modelo_nome: it.modelo_nome || '',
                 modelo_codigo: it.modelo_codigo,
-                quantidade: it.quantidade,
+                quantidade: it.quantidade || 1,
                 precos_canais: it.precos_canais || {},
                 fretes_canais: it.fretes_canais || {},
                 avisos_canais: {},

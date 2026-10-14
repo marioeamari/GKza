@@ -23,7 +23,11 @@ import {
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { orcamentosService } from '@/services/orcamentos'
 import { OrcamentoRecord, StatusOrcamento } from '@/types/orcamento'
-import { formatarMoedaBR } from '@/lib/precificacao/orcamentoCalculo'
+import {
+  formatarMoedaBR,
+  normalizarCanaisExpandidos,
+  normalizarOrcamentoRecord,
+} from '@/lib/precificacao/orcamentoCalculo'
 import { imprimirOuBaixarOrcamentoPDF } from '@/lib/precificacao/orcamentoPdf'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -213,8 +217,14 @@ export default function PrecificacaoOrcamentos() {
           {orcamentosFiltrados.map((orc) => {
             const stInfo = STATUS_CONFIG[orc.status] || STATUS_CONFIG.rascunho
             const StIcon = stInfo.icon
-            const canais = orc.expand?.canais_comparados || []
-            const totais = orc.totais_por_canal || {}
+            const orcNormalizado = normalizarOrcamentoRecord(orc)
+            const canais = normalizarCanaisExpandidos(orcNormalizado.expand?.canais_comparados)
+            const totais =
+              orcNormalizado.totais_por_canal &&
+              typeof orcNormalizado.totais_por_canal === 'object' &&
+              !Array.isArray(orcNormalizado.totais_por_canal)
+                ? orcNormalizado.totais_por_canal
+                : {}
 
             return (
               <Card

@@ -23,14 +23,182 @@ export function formatarMoedaBR(valor: number): string {
  * Calcula totais por canal para um conjunto de itens e canais selecionados.
  * Total do canal = Soma(quantidade * preco_unitario) + Soma(frete_item)
  */
+/**
+ * Normaliza um valor desconhecido para array de strings (IDs de canais)
+ */
+export function normalizarCanaisComparadosIds(raw: unknown): string[] {
+  if (!raw) return []
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item) => {
+        if (!item) return ''
+        if (typeof item === 'string') return item.trim()
+        if (typeof item === 'object' && 'id' in item) {
+          return String((item as { id: unknown }).id || '').trim()
+        }
+        return String(item).trim()
+      })
+      .filter((id): id is string => Boolean(id))
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+    if (!trimmed) return []
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        if (Array.isArray(parsed)) {
+          return normalizarCanaisComparadosIds(parsed)
+        }
+      } catch {
+        // Se falhar o parse de JSON, segue adiante
+      }
+    }
+    // Pode vir como id único ou separado por vírgula
+    return trimmed
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  }
+  return []
+}
+
+/**
+ * Normaliza lista de canais expandidos/resgatados para um array seguro de objetos { id, nome }
+ */
+export function normalizarCanaisExpandidos(raw: unknown): Array<{ id: string; nome: string }> {
+  if (!raw) return []
+  let lista: unknown[] = []
+  if (Array.isArray(raw)) {
+    lista = raw
+  } else if (typeof raw === 'object' && raw !== null) {
+    // Caso venha um único registro de relação em vez de array (PocketBase maxSelect: 1 ou expand de 1)
+    if ('id' in raw || 'nome' in raw) {
+      lista = [raw]
+    } else {
+      // Caso seja um Record<string, canal>
+      lista = Object.values(raw)
+    }
+  } else if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        return normalizarCanaisExpandidos(parsed)
+      } catch {
+        return []
+      }
+    }
+  }
+
+  return lista
+    .filter((c): c is NonNullable<typeof c> => c !== null && typeof c === 'object')
+    .map((c: any) => ({
+      id: String(c.id || ''),
+      nome: String(c.nome || c.canal_nome || c.id || 'Canal'),
+    }))
+    .filter((c) => Boolean(c.id))
+}
+
+/**
+ * Normaliza um registro de Orçamento completo vindo da API/banco,
+ * garantindo que canais_comparados, expand.canais_comparados, expand.itens e totais_por_canal
+ * sejam SEMPRE arrays/objetos válidos.
+ */
+export function normalizarOrcamentoRecord(raw: any): OrcamentoRecord {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      id: '',
+      codigo: '',
+      cliente_nome: '',
+      data_orcamento: '',
+      status: 'rascunho',
+      canais_comparados: [],
+      totais_por_canal: {},
+      expand: {
+        canais_comparados: [],
+        itens: [],
+      },
+    }
+  }
+
+  const canaisIds = normalizarCanaisComparadosIds(raw.canais_comparados)
+
+  // Expand de canais_comparados
+  const rawExpandCanais = raw.expand?.canais_comparados
+  let canaisExpandidos: PrecCanalRecord[] = []
+  if (Array.isArray(rawExpandCanais)) {
+    canaisExpandidos = rawExpandCanais.filter((c) => c && typeof c === 'object')
+  } else if (rawExpandCanais && typeof rawExpandCanais === 'object') {
+    canaisExpandidos = [rawExpandCanais]
+  }
+
+  // Se não veio no expand mas temos IDs, podemos ter stubs ou aguardar busca
+  // Expand de itens
+  const rawExpandItens = raw.expand?.itens
+  let itensExpandidos: OrcamentoItemRecord[] = []
+  if (Array.isArray(rawExpandItens)) {
+    itensExpandidos = rawExpandItens
+      .filter((it) => it && typeof it === 'object')
+      .map((it: any) => ({
+        ...it,
+        precos_canais:
+          it.precos_canais &&
+          typeof it.precos_canais === 'object' &&
+          !Array.isArray(it.precos_canais)
+            ? it.precos_canais
+            : {},
+        fretes_canais:
+          it.fretes_canais &&
+          typeof it.fretes_canais === 'object' &&
+          !Array.isArray(it.fretes_canais)
+            ? it.fretes_canais
+            : {},
+      }))
+  }
+
+  let totais = raw.totais_por_canal
+  if (typeof totais === 'string') {
+    try {
+      totais = JSON.parse(totais)
+    } catch {
+      totais = {}
+    }
+  }
+  if (!totais || typeof totais !== 'object' || Array.isArray(totais)) {
+    totais = {}
+  }
+
+  return {
+    ...raw,
+    id: String(raw.id || ''),
+    codigo: String(raw.codigo || ''),
+    cliente_nome: String(raw.cliente_nome || ''),
+    data_orcamento: String(raw.data_orcamento || ''),
+    status: raw.status || 'rascunho',
+    canais_comparados: canaisIds,
+    totais_por_canal: totais,
+    expand: {
+      ...raw.expand,
+      canais_comparados: canaisExpandidos,
+      itens: itensExpandidos,
+    },
+  }
+}
+
+/**
+ * Calcula totais por canal para um conjunto de itens e canais selecionados.
+ * Total do canal = Soma(quantidade * preco_unitario) + Soma(frete_item)
+ */
 export function calcularTotaisPorCanal(
-  canais: Array<{ id: string; nome: string }>,
-  itens: Array<{
+  canaisInput: Array<{ id: string; nome: string }>,
+  itensInput: Array<{
     quantidade: number
     precos_canais?: Record<string, OrcamentoPrecoCanalItem>
     fretes_canais?: Record<string, OrcamentoFreteCanalItem>
   }>,
 ): Record<string, OrcamentoTotalCanal> {
+  const canais = Array.isArray(canaisInput) ? canaisInput : []
+  const itens = Array.isArray(itensInput) ? itensInput : []
   const totais: Record<string, OrcamentoTotalCanal> = {}
 
   for (const canal of canais) {
@@ -86,8 +254,8 @@ export function gerarTextoWhatsappOrcamento(params: {
   titulo?: string
   tema_nome?: string
   cor?: string
-  canais: Array<{ id: string; nome: string }>
-  itens: Array<{
+  canais?: Array<{ id: string; nome: string }>
+  itens?: Array<{
     modelo_nome: string
     quantidade: number
     precos_canais?: Record<string, OrcamentoPrecoCanalItem>
@@ -96,7 +264,18 @@ export function gerarTextoWhatsappOrcamento(params: {
   totaisPorCanal?: Record<string, OrcamentoTotalCanal>
   validade_data?: string
 }): string {
-  const { titulo, tema_nome, cor, canais, itens, totaisPorCanal, validade_data } = params
+  const {
+    titulo,
+    tema_nome,
+    cor,
+    canais: canaisRaw,
+    itens: itensRaw,
+    totaisPorCanal,
+    validade_data,
+  } = params
+
+  const canais = Array.isArray(canaisRaw) ? canaisRaw : []
+  const itens = Array.isArray(itensRaw) ? itensRaw : []
 
   const linhas: string[] = []
 
@@ -105,9 +284,9 @@ export function gerarTextoWhatsappOrcamento(params: {
   if (titulo && titulo.trim()) {
     cabecalho = titulo.trim()
   } else {
-    const qtdTotal = itens.reduce((acc, i) => acc + (Number(i.quantidade) || 0), 0)
+    const qtdTotal = itens.reduce((acc, i) => acc + (Number(i?.quantidade) || 0), 0)
     const modelosNomes = itens
-      .map((i) => i.modelo_nome)
+      .map((i) => i?.modelo_nome)
       .filter(Boolean)
       .join(' e ')
     cabecalho = `Combo ${qtdTotal} unidades ${modelosNomes || 'Itens'}`
@@ -121,14 +300,19 @@ export function gerarTextoWhatsappOrcamento(params: {
 
   linhas.push(cabecalho)
 
-  const totaisCalculados = totaisPorCanal || calcularTotaisPorCanal(canais, itens)
+  const totaisCalculados =
+    totaisPorCanal && typeof totaisPorCanal === 'object' && !Array.isArray(totaisPorCanal)
+      ? totaisPorCanal
+      : calcularTotaisPorCanal(canais, itens)
 
   for (const canal of canais) {
+    if (!canal || !canal.id) continue
     linhas.push('')
     // Cabeçalho da seção: ex '#Shopee:'
     linhas.push(`#${canal.nome}:`)
 
     for (const item of itens) {
+      if (!item) continue
       const qtd = Number(item.quantidade) || 0
       const precoUnit = item.precos_canais?.[canal.id]?.preco_unitario || 0
       const subtotalItem = Math.round(qtd * precoUnit * 100) / 100

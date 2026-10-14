@@ -19,7 +19,11 @@ import {
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { orcamentosService } from '@/services/orcamentos'
 import { OrcamentoRecord, StatusOrcamento } from '@/types/orcamento'
-import { formatarMoedaBR } from '@/lib/precificacao/orcamentoCalculo'
+import {
+  formatarMoedaBR,
+  normalizarCanaisExpandidos,
+  normalizarOrcamentoRecord,
+} from '@/lib/precificacao/orcamentoCalculo'
 import { imprimirOuBaixarOrcamentoPDF } from '@/lib/precificacao/orcamentoPdf'
 import { OrcamentoSaidasPanel } from '@/components/precificacao/OrcamentoSaidasPanel'
 import { Button } from '@/components/ui/button'
@@ -104,14 +108,25 @@ export default function PrecificacaoOrcamentoDetalhes() {
     )
   }
 
-  const canais = orcamento.expand?.canais_comparados || []
-  const itens = orcamento.expand?.itens || []
-  const totais = orcamento.totais_por_canal || {}
-  const stInfo = STATUS_CONFIG[orcamento.status] || STATUS_CONFIG.rascunho
+  const orcamentoNormalizado = normalizarOrcamentoRecord(orcamento)
+  const canais = normalizarCanaisExpandidos(orcamentoNormalizado.expand?.canais_comparados)
+  const itens = Array.isArray(orcamentoNormalizado.expand?.itens)
+    ? orcamentoNormalizado.expand.itens
+    : []
+  const totais =
+    orcamentoNormalizado.totais_por_canal &&
+    typeof orcamentoNormalizado.totais_por_canal === 'object' &&
+    !Array.isArray(orcamentoNormalizado.totais_por_canal)
+      ? orcamentoNormalizado.totais_por_canal
+      : {}
+  const stInfo = STATUS_CONFIG[orcamentoNormalizado.status] || STATUS_CONFIG.rascunho
 
   const formatarData = (dt?: string) => {
     if (!dt) return '-'
-    const [ano, mes, dia] = dt.split('T')[0].split('-')
+    const parte = String(dt).split('T')[0]
+    if (!parte) return '-'
+    const [ano, mes, dia] = parte.split('-')
+    if (!dia || !mes || !ano) return parte
     return `${dia}/${mes}/${ano}`
   }
 
@@ -220,11 +235,16 @@ export default function PrecificacaoOrcamentoDetalhes() {
               Canais Analisados
             </CardDescription>
             <CardTitle className="text-sm font-bold text-foreground">
-              {canais.length} canais comparados
+              {canais.length} {canais.length === 1 ? 'canal comparado' : 'canais comparados'}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground pt-0">
-            {canais.map((c) => c.nome).join(', ')}
+            {canais.length > 0
+              ? canais
+                  .map((c) => c?.nome || c?.id || 'Canal')
+                  .filter(Boolean)
+                  .join(', ')
+              : 'Nenhum canal selecionado'}
           </CardContent>
         </Card>
       </div>
@@ -245,64 +265,83 @@ export default function PrecificacaoOrcamentoDetalhes() {
                 <th className="py-3 px-3 text-center">Qtd</th>
                 {canais.map((canal) => (
                   <th key={canal.id} className="py-3 px-4 text-right">
-                    {canal.nome}
+                    {canal?.nome || 'Canal'}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
-              {itens.map((item) => (
-                <tr key={item.id} className="hover:bg-muted/10">
-                  <td className="py-3 px-4">
-                    <span className="font-bold text-foreground">{item.modelo_nome}</span>
-                    {item.modelo_codigo && (
-                      <span className="text-xs text-muted-foreground ml-2 font-mono">
-                        ({item.modelo_codigo})
-                      </span>
-                    )}
+              {itens.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={2 + Math.max(1, canais.length)}
+                    className="py-6 text-center text-xs text-muted-foreground"
+                  >
+                    Nenhum item cadastrado neste orçamento.
                   </td>
-                  <td className="py-3 px-3 text-center font-bold">{item.quantidade}</td>
-                  {canais.map((canal) => {
-                    const precoUnit = item.precos_canais?.[canal.id]?.preco_unitario || 0
-                    const subtotal = Math.round(precoUnit * item.quantidade * 100) / 100
-                    const frete = item.fretes_canais?.[canal.id]?.valor_frete || 0
-                    return (
-                      <td key={canal.id} className="py-3 px-4 text-right">
-                        <div className="font-bold text-foreground">{formatarMoedaBR(subtotal)}</div>
-                        <div className="text-[11px] text-muted-foreground">
-                          {formatarMoedaBR(precoUnit)}/un
-                        </div>
-                        {frete > 0 && (
-                          <div className="text-[11px] font-semibold text-orange-600 mt-0.5">
-                            + Frete: {formatarMoedaBR(frete)}
-                          </div>
-                        )}
-                      </td>
-                    )
-                  })}
                 </tr>
-              ))}
+              ) : (
+                itens.map((item, idx) => (
+                  <tr key={item.id || idx} className="hover:bg-muted/10">
+                    <td className="py-3 px-4">
+                      <span className="font-bold text-foreground">
+                        {item.modelo_nome || 'Item sem nome'}
+                      </span>
+                      {item.modelo_codigo && (
+                        <span className="text-xs text-muted-foreground ml-2 font-mono">
+                          ({item.modelo_codigo})
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 text-center font-bold">{item.quantidade || 1}</td>
+                    {canais.map((canal) => {
+                      const precoUnit = item.precos_canais?.[canal.id]?.preco_unitario || 0
+                      const subtotal = Math.round(precoUnit * (item.quantidade || 1) * 100) / 100
+                      const frete = item.fretes_canais?.[canal.id]?.valor_frete || 0
+                      return (
+                        <td key={canal.id} className="py-3 px-4 text-right">
+                          <div className="font-bold text-foreground">
+                            {formatarMoedaBR(subtotal)}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">
+                            {formatarMoedaBR(precoUnit)}/un
+                          </div>
+                          {frete > 0 && (
+                            <div className="text-[11px] font-semibold text-orange-600 mt-0.5">
+                              + Frete: {formatarMoedaBR(frete)}
+                            </div>
+                          )}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))
+              )}
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-border bg-muted/30 font-bold">
                 <td colSpan={2} className="py-4 px-4 text-xs uppercase tracking-wide">
                   Total Final por Canal
                 </td>
-                {canais.map((canal) => {
-                  const tot = totais[canal.id]
-                  return (
-                    <td key={canal.id} className="py-4 px-4 text-right">
-                      <div className="text-base sm:text-lg font-black text-primary">
-                        {formatarMoedaBR(tot?.total_geral || 0)}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground font-normal">
-                        Itens: {formatarMoedaBR(tot?.total_itens || 0)}
-                        {(tot?.total_fretes || 0) > 0 &&
-                          ` + Frete: ${formatarMoedaBR(tot?.total_fretes || 0)}`}
-                      </div>
-                    </td>
-                  )
-                })}
+                {canais.length === 0 ? (
+                  <td className="py-4 px-4 text-right text-xs text-muted-foreground">Sem canais</td>
+                ) : (
+                  canais.map((canal) => {
+                    const tot = totais[canal.id]
+                    return (
+                      <td key={canal.id} className="py-4 px-4 text-right">
+                        <div className="text-base sm:text-lg font-black text-primary">
+                          {formatarMoedaBR(tot?.total_geral || 0)}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground font-normal">
+                          Itens: {formatarMoedaBR(tot?.total_itens || 0)}
+                          {(tot?.total_fretes || 0) > 0 &&
+                            ` + Frete: ${formatarMoedaBR(tot?.total_fretes || 0)}`}
+                        </div>
+                      </td>
+                    )
+                  })
+                )}
               </tr>
             </tfoot>
           </table>

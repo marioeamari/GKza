@@ -1,6 +1,11 @@
 import pb from '@/lib/pocketbase/client'
 import { OrcamentoRecord, OrcamentoItemRecord, CreateOrcamentoInput } from '@/types/orcamento'
-import { calcularTotaisPorCanal } from '@/lib/precificacao/orcamentoCalculo'
+import { PrecCanalRecord } from '@/types/precificacao'
+import {
+  calcularTotaisPorCanal,
+  normalizarOrcamentoRecord,
+  normalizarCanaisComparadosIds,
+} from '@/lib/precificacao/orcamentoCalculo'
 
 function gerarTokenAleatorio(tamanho = 32): string {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
@@ -24,34 +29,59 @@ export const orcamentosService = {
    * Lista orçamentos autenticado com ordenação recente
    */
   async listOrcamentos(filtro?: string): Promise<OrcamentoRecord[]> {
-    return pb.collection('orcamentos').getFullList<OrcamentoRecord>({
+    const rawList = await pb.collection('orcamentos').getFullList<OrcamentoRecord>({
       filter: filtro || '',
       sort: '-created',
       expand: 'cliente_pessoa,canais_comparados,tema',
     })
+
+    return (rawList || []).map((orc) => normalizarOrcamentoRecord(orc))
   },
 
   /**
    * Busca um orçamento pelo ID (autenticado) com itens expandidos
    */
   async getOrcamento(id: string): Promise<OrcamentoRecord> {
-    const orc = await pb.collection('orcamentos').getOne<OrcamentoRecord>(id, {
+    const orcRaw = await pb.collection('orcamentos').getOne<OrcamentoRecord>(id, {
       expand: 'cliente_pessoa,canais_comparados,tema',
     })
 
-    const itens = await pb.collection('orcamento_itens').getFullList<OrcamentoItemRecord>({
+    const itensRaw = await pb.collection('orcamento_itens').getFullList<OrcamentoItemRecord>({
       filter: `orcamento="${id}"`,
       sort: 'ordem,created',
       expand: 'modelo',
     })
 
-    return {
-      ...orc,
+    const orcNormalizado = normalizarOrcamentoRecord({
+      ...orcRaw,
       expand: {
-        ...orc.expand,
-        itens,
+        ...orcRaw?.expand,
+        itens: itensRaw || [],
       },
+    })
+
+    // Se expand.canais_comparados estiver vazio ou incompleto mas canais_comparados tiver IDs,
+    // busca os canais na coleção prec_canais para garantir que a lista de canais venha preenchida
+    const canaisExpandidos = orcNormalizado.expand?.canais_comparados || []
+    const canaisIds = orcNormalizado.canais_comparados || []
+    if (canaisIds.length > 0 && canaisExpandidos.length < canaisIds.length) {
+      try {
+        const canaisFiltro = canaisIds.map((cId) => `id="${cId}"`).join(' || ')
+        const canaisDb = await pb.collection('prec_canais').getFullList<PrecCanalRecord>({
+          filter: canaisFiltro,
+        })
+        if (canaisDb && canaisDb.length > 0) {
+          orcNormalizado.expand = {
+            ...orcNormalizado.expand,
+            canais_comparados: canaisDb,
+          }
+        }
+      } catch (err) {
+        console.warn('Não foi possível complementar canais de orçamento:', err)
+      }
     }
+
+    return orcNormalizado
   },
 
   /**
@@ -84,13 +114,34 @@ export const orcamentosService = {
       expand: 'modelo',
     })
 
-    return {
+    const orcNormalizado = normalizarOrcamentoRecord({
       ...orc,
       expand: {
-        ...orc.expand,
-        itens,
+        ...orc?.expand,
+        itens: itens || [],
       },
+    })
+
+    // Caso a relação pública não tenha expandido os canais, tenta carregar canais públicos
+    const canaisExpandidos = orcNormalizado.expand?.canais_comparados || []
+    const canaisIds = orcNormalizado.canais_comparados || []
+    if (canaisIds.length > 0 && canaisExpandidos.length < canaisIds.length) {
+      try {
+        const canaisDb = await pb.collection('prec_canais').getFullList<PrecCanalRecord>({
+          filter: canaisIds.map((cId) => `id="${cId}"`).join(' || '),
+        })
+        if (canaisDb && canaisDb.length > 0) {
+          orcNormalizado.expand = {
+            ...orcNormalizado.expand,
+            canais_comparados: canaisDb,
+          }
+        }
+      } catch {
+        // Se a regra da prec_canais restringir leitura anônima, os IDs já estão normalizados
+      }
     }
+
+    return orcNormalizado
   },
 
   /**
@@ -100,11 +151,13 @@ export const orcamentosService = {
     const publicToken = gerarTokenAleatorio(32)
     const codigo = input.codigo || gerarCodigoOrcamento()
 
+    const canaisComparadosIds = normalizarCanaisComparadosIds(input.canais_comparados)
+
     // Resgata os canais para calcular os totais
     let canaisParaTotais: Array<{ id: string; nome: string }> = []
-    if (input.canais_comparados && input.canais_comparados.length > 0) {
+    if (canaisComparadosIds.length > 0) {
       const canaisDb = await pb.collection('prec_canais').getFullList({
-        filter: input.canais_comparados.map((c) => `id="${c}"`).join(' || '),
+        filter: canaisComparadosIds.map((c) => `id="${c}"`).join(' || '),
       })
       canaisParaTotais = canaisDb.map((c) => ({ id: c.id, nome: c.nome }))
     }
@@ -121,7 +174,7 @@ export const orcamentosService = {
       validade_dias: input.validade_dias || 7,
       validade_data: input.validade_data || null,
       status: input.status || 'rascunho',
-      canais_comparados: input.canais_comparados || [],
+      canais_comparados: canaisComparadosIds,
       tema: input.tema || null,
       tema_nome: input.tema_nome || '',
       cor: input.cor || '',
@@ -166,9 +219,14 @@ export const orcamentosService = {
     input: Partial<CreateOrcamentoInput>,
   ): Promise<OrcamentoRecord> {
     let canaisParaTotais: Array<{ id: string; nome: string }> = []
-    if (input.canais_comparados && input.canais_comparados.length > 0) {
+    const canaisComparadosIds =
+      input.canais_comparados !== undefined
+        ? normalizarCanaisComparadosIds(input.canais_comparados)
+        : undefined
+
+    if (canaisComparadosIds && canaisComparadosIds.length > 0) {
       const canaisDb = await pb.collection('prec_canais').getFullList({
-        filter: input.canais_comparados.map((c) => `id="${c}"`).join(' || '),
+        filter: canaisComparadosIds.map((c) => `id="${c}"`).join(' || '),
       })
       canaisParaTotais = canaisDb.map((c) => ({ id: c.id, nome: c.nome }))
     }
@@ -184,8 +242,7 @@ export const orcamentosService = {
     if (input.validade_dias !== undefined) updateData.validade_dias = input.validade_dias
     if (input.validade_data !== undefined) updateData.validade_data = input.validade_data || null
     if (input.status !== undefined) updateData.status = input.status
-    if (input.canais_comparados !== undefined)
-      updateData.canais_comparados = input.canais_comparados
+    if (canaisComparadosIds !== undefined) updateData.canais_comparados = canaisComparadosIds
     if (input.tema !== undefined) updateData.tema = input.tema || null
     if (input.tema_nome !== undefined) updateData.tema_nome = input.tema_nome
     if (input.cor !== undefined) updateData.cor = input.cor

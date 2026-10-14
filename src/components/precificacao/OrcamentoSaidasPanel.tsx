@@ -16,6 +16,8 @@ import {
   gerarTextoWhatsappOrcamento,
   criarLinkWhatsapp,
   formatarMoedaBR,
+  normalizarCanaisExpandidos,
+  normalizarOrcamentoRecord,
 } from '@/lib/precificacao/orcamentoCalculo'
 import { imprimirOuBaixarOrcamentoPDF } from '@/lib/precificacao/orcamentoPdf'
 import { orcamentosService } from '@/services/orcamentos'
@@ -36,21 +38,25 @@ export function OrcamentoSaidasPanel({ orcamento, onAtualizar }: OrcamentoSaidas
   const [regenerandoToken, setRegenerandoToken] = useState(false)
   const [alternandoStatusLink, setAlternandoStatusLink] = useState(false)
 
+  const orcamentoNormalizado = useMemo(() => {
+    return normalizarOrcamentoRecord(orcamento)
+  }, [orcamento])
+
   const canais = useMemo(() => {
-    return (orcamento.expand?.canais_comparados || []).map((c) => ({
-      id: c.id,
-      nome: c.nome,
-    }))
-  }, [orcamento.expand?.canais_comparados])
+    return normalizarCanaisExpandidos(orcamentoNormalizado.expand?.canais_comparados)
+  }, [orcamentoNormalizado.expand?.canais_comparados])
 
   const itens = useMemo(() => {
-    return (orcamento.expand?.itens || []).map((it) => ({
-      modelo_nome: it.modelo_nome,
-      quantidade: it.quantidade,
-      precos_canais: it.precos_canais,
-      fretes_canais: it.fretes_canais,
+    const rawItens = Array.isArray(orcamentoNormalizado.expand?.itens)
+      ? orcamentoNormalizado.expand.itens
+      : []
+    return rawItens.map((it) => ({
+      modelo_nome: it?.modelo_nome || 'Item',
+      quantidade: it?.quantidade || 1,
+      precos_canais: it?.precos_canais,
+      fretes_canais: it?.fretes_canais,
     }))
-  }, [orcamento.expand?.itens])
+  }, [orcamentoNormalizado.expand?.itens])
 
   const textoWhatsapp = useMemo(() => {
     return gerarTextoWhatsappOrcamento({
@@ -62,11 +68,11 @@ export function OrcamentoSaidasPanel({ orcamento, onAtualizar }: OrcamentoSaidas
       totaisPorCanal: orcamento.totais_por_canal,
       validade_data: orcamento.validade_data,
     })
-  }, [orcamento, canais, itens])
+  }, [orcamentoNormalizado, canais, itens])
 
   const linkPublico = useMemo(() => {
-    const origin = window.location.origin
-    return `${origin}/orcamento/p/${orcamento.public_token}`
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    return `${origin}/orcamento/p/${orcamento.public_token || ''}`
   }, [orcamento.public_token])
 
   const linkWhatsappWaMe = useMemo(() => {

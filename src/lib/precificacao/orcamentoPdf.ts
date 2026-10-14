@@ -1,10 +1,20 @@
 import { OrcamentoRecord } from '@/types/orcamento'
-import { formatarMoedaBR } from '@/lib/precificacao/orcamentoCalculo'
+import {
+  formatarMoedaBR,
+  normalizarCanaisExpandidos,
+  normalizarOrcamentoRecord,
+} from '@/lib/precificacao/orcamentoCalculo'
 
-export function gerarHTMLParaImpressaoPDF(orcamento: OrcamentoRecord): string {
-  const canais = orcamento.expand?.canais_comparados || []
-  const itens = orcamento.expand?.itens || []
-  const totais = orcamento.totais_por_canal || {}
+export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string {
+  const orcamento = normalizarOrcamentoRecord(orcamentoRaw)
+  const canais = normalizarCanaisExpandidos(orcamento.expand?.canais_comparados)
+  const itens = Array.isArray(orcamento.expand?.itens) ? orcamento.expand.itens : []
+  const totais =
+    orcamento.totais_por_canal &&
+    typeof orcamento.totais_por_canal === 'object' &&
+    !Array.isArray(orcamento.totais_por_canal)
+      ? orcamento.totais_por_canal
+      : {}
 
   const formatarData = (dt?: string) => {
     if (!dt) return '-'
