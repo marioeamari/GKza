@@ -41,7 +41,8 @@ import {
 import { precificacaoService } from '@/services/precificacao'
 import { cadastrosService } from '@/services/cadastros'
 import { fornecedoresService } from '@/services/fornecedores'
-import { PrecKitRecord, PrecProdutoRecord } from '@/types/precificacao'
+import { PrecCanalRecord, PrecKitRecord, PrecProdutoRecord } from '@/types/precificacao'
+import { SkuApelidosManager } from '@/components/precificacao/SkuApelidosManager'
 import { Empresa, Fornecedor, FornecedorProduto } from '@/types/domain'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EmpresaDialog } from '@/components/cadastros/EmpresaDialog'
@@ -64,6 +65,7 @@ export default function PrecificacaoProdutos() {
   const [loading, setLoading] = useState(true)
   const [produtos, setProdutos] = useState<PrecProdutoRecord[]>([])
   const [kitsMap, setKitsMap] = useState<Record<string, PrecKitRecord>>({})
+  const [canais, setCanais] = useState<PrecCanalRecord[]>([])
   const [empresas, setEmpresas] = useState<Empresa[]>([])
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([])
   const [fornecedoresProdutos, setFornecedoresProdutos] = useState<FornecedorProduto[]>([])
@@ -108,16 +110,18 @@ export default function PrecificacaoProdutos() {
   async function carregar() {
     try {
       setLoading(true)
-      const [prods, emps, forns, fornsProds] = await Promise.all([
+      const [prods, emps, forns, fornsProds, canaisList] = await Promise.all([
         precificacaoService.listProdutos(),
         cadastrosService.listEmpresas(),
         fornecedoresService.listFornecedores(),
         fornecedoresService.listTodosProdutos().catch(() => [] as FornecedorProduto[]),
+        precificacaoService.listCanais().catch(() => [] as PrecCanalRecord[]),
       ])
       setProdutos(prods)
       setEmpresas(emps)
       setFornecedores(forns)
       setFornecedoresProdutos(fornsProds)
+      setCanais(canaisList)
 
       // Carregar prec_kits vinculados para kits e combos
       const kitsOuCombos = prods.filter((p) => p.tipo === 'kit' || p.tipo === 'combo')
@@ -1118,19 +1122,7 @@ export default function PrecificacaoProdutos() {
 
                 {/* Identificação Geral */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold">SKU Único *</Label>
-                    <Input
-                      required
-                      value={produtoEditando.sku}
-                      onChange={(e) =>
-                        setProdutoEditando({ ...produtoEditando, sku: e.target.value })
-                      }
-                      className={formErrors.sku ? 'border-destructive' : ''}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
+                  <div className="space-y-1 sm:col-span-2">
                     <Label className="text-xs font-semibold">Nome do Produto *</Label>
                     <Input
                       required
@@ -1140,6 +1132,21 @@ export default function PrecificacaoProdutos() {
                       }
                     />
                   </div>
+                </div>
+
+                {/* Dicionário de Apelidos SKU por Canal */}
+                <div className="pt-2">
+                  <SkuApelidosManager
+                    skuPrincipal={produtoEditando.sku}
+                    apelidos={produtoEditando.sku_por_canal || []}
+                    canaisDisponiveis={canais}
+                    onChange={(novosApelidos) =>
+                      setProdutoEditando({
+                        ...produtoEditando,
+                        sku_por_canal: novosApelidos,
+                      })
+                    }
+                  />
                 </div>
 
                 {/* Marca, Categoria e Unidade */}

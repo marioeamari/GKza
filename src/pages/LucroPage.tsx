@@ -26,6 +26,12 @@ import { TabLucroLiquido } from '@/components/lucro/TabLucroLiquido'
 import { TabBalanco } from '@/components/lucro/TabBalanco'
 import { TabSaidasUnitarias } from '@/components/lucro/TabSaidasUnitarias'
 import { ModalAdicionarProduto } from '@/components/lucro/ModalAdicionarProduto'
+import {
+  ModalImportarVendasBling,
+  PreenchimentoGradeItem,
+} from '@/components/lucro/ModalImportarVendasBling'
+import type { PrecProdutoRecord } from '@/types/precificacao'
+import { precificacaoService } from '@/services/precificacao'
 import type {
   ProdutoLucro,
   CanalLojaLucro,
@@ -175,6 +181,10 @@ export default function LucroPage() {
 
   // Estado do Modal 'Adicionar Produto'
   const [modalAdicionarAberto, setModalAdicionarAberto] = useState(false)
+  // Estado do Modal 'Importar Vendas Bling'
+  const [modalImportarBlingAberto, setModalImportarBlingAberto] = useState(false)
+  // Catálogo completo de PrecProdutoRecord (com sku_por_canal) para o importador Bling
+  const [precProdutosCompleto, setPrecProdutosCompleto] = useState<PrecProdutoRecord[]>([])
 
   // Filtro de Empresa da Aba 3 (Saídas Unitárias), padrão 'todas'
   const [empresaFiltroSaidas, setEmpresaFiltroSaidas] = useState<string>('todas')
@@ -221,18 +231,21 @@ export default function LucroPage() {
   const carregarDados = useCallback(async () => {
     setLoading(true)
     try {
-      const [canaisPB, precsAprovadasPB, prodsPB, rendasPB, despesasPB] = await Promise.all([
-        lucroService.listarCanais(),
-        lucroService.listarPrecificacoesAprovadasDetalhado(),
-        lucroService.listarProdutos(),
-        lucroService.carregarRendasLiquidasAprovadas(),
-        lucroService.carregarDespesasMes(competencia),
-      ])
+      const [canaisPB, precsAprovadasPB, prodsPB, rendasPB, despesasPB, precProdsPB] =
+        await Promise.all([
+          lucroService.listarCanais(),
+          lucroService.listarPrecificacoesAprovadasDetalhado(),
+          lucroService.listarProdutos(),
+          lucroService.carregarRendasLiquidasAprovadas(),
+          lucroService.carregarDespesasMes(competencia),
+          precificacaoService.listProdutos().catch(() => [] as PrecProdutoRecord[]),
+        ])
 
       // Ajusta canais reais cadastrados
       const lojasParaUso: CanalLojaLucro[] = canaisPB.length > 0 ? canaisPB : LOJAS_PADRAO
       setLojas(lojasParaUso)
       setCatalogoProdutos(prodsPB)
+      setPrecProdutosCompleto(precProdsPB)
       setPrecificacoesAprovadas(precsAprovadasPB)
       setRendasLiquidas(rendasPB)
       setDespesasGrupos(despesasPB)
@@ -437,6 +450,51 @@ export default function LucroPage() {
     }
   }
 
+  // Aplicação da importação do Bling na grade
+  const handleAplicarImportacaoBling = (
+    canalId: string,
+    itens: PreenchimentoGradeItem[],
+    modo: 'mesclar' | 'substituir',
+  ) => {
+    // 1. Garante que todos os produtos importados estejam incluídos na lista da grade
+    const novosIds = itens.map((it) => it.produtoId)
+    setProdutosGradePorMes((prev) => {
+      const listaAtual = prev[competencia] || []
+      const unicos = Array.from(new Set([...listaAtual, ...novosIds]))
+      return {
+        ...prev,
+        [competencia]: unicos,
+      }
+    })
+
+    // 2. Atualiza os valores na semana ativa para o canal selecionado
+    // Se o usuário reimportar o mesmo período/canal, 'substituir' atualiza os valores sem duplicar
+    setQuantidadesPorSemana((prev) => {
+      const mesAtual = { ...(prev[competencia] || {}) }
+      const semanaAtual = { ...(mesAtual[semanaSelecionada] || {}) }
+
+      for (const item of itens) {
+        const prodAtual = { ...(semanaAtual[item.produtoId] || {}) }
+        const valorExistente = prodAtual[canalId] || 0
+
+        if (modo === 'mesclar') {
+          prodAtual[canalId] = valorExistente + item.quantidade
+        } else {
+          // Substituir/Atualizar em vez de duplicar
+          prodAtual[canalId] = item.quantidade
+        }
+
+        semanaAtual[item.produtoId] = prodAtual
+      }
+
+      mesAtual[semanaSelecionada] = semanaAtual
+      return {
+        ...prev,
+        [competencia]: mesAtual,
+      }
+    })
+  }
+
   // Remove produto da grade do período atual
   const handleRemoverProduto = (produtoId: string) => {
     setProdutosGradePorMes((prev) => {
@@ -551,6 +609,17 @@ export default function LucroPage() {
   const semanaAtivaInfo = useMemo(() => {
     return semanasDoMes.find((s) => s.numero === semanaSelecionada) || semanasDoMes[0]
   }, [semanasDoMes, semanaSelecionada])
+
+  // Valores acumulados atuais da grade para detecção de conflitos no importador Bling
+  const valoresAtuaisGradeCanalMap = useMemo(() => {
+    const porProduto: Record<string, number> = {}
+    for (const [prodId, canais] of Object.entries(quantidadesSemanaAtual)) {
+      for (const [, qtd] of Object.entries(canais)) {
+        porProduto[prodId] = (porProduto[prodId] || 0) + (Number(qtd) || 0)
+      }
+    }
+    return porProduto
+  }, [quantidadesSemanaAtual])
 
   return (
     <div className="min-h-screen bg-neutral-50/50 pb-20">
@@ -676,6 +745,7 @@ export default function LucroPage() {
                 quantidades={quantidadesSemanaAtual}
                 onChangeQuantidade={handleChangeQuantidade}
                 onRemoverProduto={handleRemoverProduto}
+                onAbrirModalImportarBling={() => setModalImportarBlingAberto(true)}
                 onAbrirModalAdicionar={() => setModalAdicionarAberto(true)}
                 resumoGrade={resumoGradeLucroSemana}
                 nomePeriodo={semanaAtivaInfo ? semanaAtivaInfo.rotuloCurto : rotuloCompetenciaAtual}
@@ -711,6 +781,19 @@ export default function LucroPage() {
               precificacoesAprovadas={precificacoesAprovadas}
               produtosJaAdicionadosIds={idsProdutosGradeAtual}
               onAdicionar={handleAdicionarProduto}
+            />
+
+            {/* MODAL IMPORTADOR DE VENDAS DO BLING */}
+            <ModalImportarVendasBling
+              open={modalImportarBlingAberto}
+              onOpenChange={setModalImportarBlingAberto}
+              canaisDisponiveis={lojas}
+              catalogoProdutos={precProdutosCompleto}
+              competenciaAtual={rotuloCompetenciaAtual}
+              semanaAtivaRotulo={semanaAtivaInfo?.rotuloCurto}
+              valoresAtuaisGradeCanal={valoresAtuaisGradeCanalMap}
+              onAplicarGrade={handleAplicarImportacaoBling}
+              onCatalogoAtualizado={carregarDados}
             />
           </div>
         )}

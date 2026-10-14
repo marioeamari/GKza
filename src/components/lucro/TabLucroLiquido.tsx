@@ -38,7 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { CalendarDays } from 'lucide-react'
+import { CalendarDays, FileSpreadsheet } from 'lucide-react'
 import type { SemanaMesInfo } from '@/lib/lucro'
 
 export interface TabLucroLiquidoProps {
@@ -48,6 +48,7 @@ export interface TabLucroLiquidoProps {
   onChangeQuantidade: (produtoId: string, canalId: string, valorStr: string) => void
   onRemoverProduto?: (produtoId: string) => void
   onAbrirModalAdicionar?: () => void
+  onAbrirModalImportarBling?: () => void
   resumoGrade: ResumoGradeLucroMes
   nomePeriodo: string
   // Fechamento Semanal de Domingo a Sábado
@@ -63,6 +64,7 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
   onChangeQuantidade,
   onRemoverProduto,
   onAbrirModalAdicionar,
+  onAbrirModalImportarBling,
   resumoGrade,
   nomePeriodo,
   semanas,
@@ -118,6 +120,17 @@ export const TabLucroLiquido: React.FC<TabLucroLiquidoProps> = ({
             <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md text-xs">
               {produtos.length} produto(s)
             </span>
+            {onAbrirModalImportarBling && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onAbrirModalImportarBling}
+                className="h-8 gap-1.5 text-xs font-bold border-purple-200 text-purple-800 hover:bg-purple-50 shadow-2xs"
+              >
+                <FileSpreadsheet className="h-4 w-4 text-purple-600" />
+                <span>Importar Vendas Bling (.xls)</span>
+              </Button>
+            )}
             {onAbrirModalAdicionar && (
               <Button
                 size="sm"
