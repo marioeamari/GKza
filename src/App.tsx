@@ -26,6 +26,10 @@ import PrecificacaoComparar from '@/pages/precificacao/PrecificacaoComparar'
 import PrecificacaoCanais from '@/pages/precificacao/PrecificacaoCanais'
 import PrecificacaoProdutos from '@/pages/precificacao/PrecificacaoProdutos'
 import PrecificacaoAprovados from '@/pages/precificacao/PrecificacaoAprovados'
+import PrecificacaoOrcamentos from '@/pages/precificacao/PrecificacaoOrcamentos'
+import PrecificacaoOrcamentoForm from '@/pages/precificacao/PrecificacaoOrcamentoForm'
+import PrecificacaoOrcamentoDetalhes from '@/pages/precificacao/PrecificacaoOrcamentoDetalhes'
+import OrcamentoPublicoPage from '@/pages/precificacao/OrcamentoPublicoPage'
 import SeparacaoKitsPage from '@/pages/expedicao/SeparacaoKitsPage'
 import TemasModelosPage from '@/pages/expedicao/TemasModelosPage'
 import RegrasComposicaoPage from '@/pages/expedicao/RegrasComposicaoPage'
@@ -63,6 +67,8 @@ export default function App() {
       </Route>
       <Route path="/verificar-email" element={<TokenAction type="verification" />} />
       <Route path="/confirmar-email" element={<ConfirmEmail />} />
+      {/* Página Pública do Orçamento via Token (sem login exigido) */}
+      <Route path="/orcamento/p/:token" element={<OrcamentoPublicoPage />} />
       {/* Ponto Eletrônico do Empregado via QR da Estação (sem login exigido) */}
       <Route path="/funcionarios/ponto/:token" element={<FuncionarioPontoPage />} />
       <Route path="/funcionarios/ponto" element={<FuncionarioPontoPage />} />
@@ -104,6 +110,13 @@ export default function App() {
           <Route path="/precificacao/aprovados" element={<PrecificacaoAprovados />} />
           <Route path="/precificacao/canais" element={<PrecificacaoCanais />} />
           <Route path="/precificacao/produtos" element={<PrecificacaoProdutos />} />
+          <Route path="/precificacao/orcamentos" element={<PrecificacaoOrcamentos />} />
+          <Route path="/precificacao/orcamentos/novo" element={<PrecificacaoOrcamentoForm />} />
+          <Route path="/precificacao/orcamentos/:id" element={<PrecificacaoOrcamentoDetalhes />} />
+          <Route
+            path="/precificacao/orcamentos/:id/editar"
+            element={<PrecificacaoOrcamentoForm />}
+          />
           <Route path="/expedicao" element={<Navigate to="/expedicao/separacao" replace />} />
           <Route path="/expedicao/separacao" element={<SeparacaoKitsPage />} />
           <Route path="/expedicao/temas-modelos" element={<TemasModelosPage />} />

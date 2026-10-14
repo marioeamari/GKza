@@ -14,6 +14,7 @@ import {
   Clock,
   Building2,
   Tag,
+  FileSpreadsheet,
 } from 'lucide-react'
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { Button } from '@/components/ui/button'
@@ -55,6 +56,12 @@ const SUBPAGINAS_PRECIFICACAO: MobileSubpageItem[] = [
     label: 'Canais & Taxas',
     description: 'Comissões, fretes e faixas de marketplace',
     icon: Store,
+  },
+  {
+    to: '/precificacao/orcamentos',
+    label: 'Orçamentos & Cotações',
+    description: 'Gerador de propostas com WhatsApp, PDF e Link público',
+    icon: FileSpreadsheet,
   },
 ]
 

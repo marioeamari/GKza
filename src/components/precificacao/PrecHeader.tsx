@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Truck,
   BookmarkCheck,
+  FileSpreadsheet,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -28,6 +29,7 @@ export function PrecHeader({ titulo, subtitulo, acoes }: PrecHeaderProps) {
     { to: '/precificacao/dashboard', label: 'Dashboard de Margens', icon: LayoutDashboard },
     { to: '/precificacao/produtos', label: 'Produtos & Kits', icon: PackageCheck },
     { to: '/precificacao/canais', label: 'Canais & Taxas', icon: Store },
+    { to: '/precificacao/orcamentos', label: 'Orçamentos', icon: FileSpreadsheet },
     { to: '/fornecedores', label: 'Fornecedores & Insumos', icon: Truck },
   ]
 

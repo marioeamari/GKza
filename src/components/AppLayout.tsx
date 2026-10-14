@@ -193,6 +193,7 @@ export function AppLayout() {
     { to: '/precificacao/dashboard', label: 'Dashboard de Margens', icon: LayoutDashboard },
     { to: '/precificacao/produtos', label: 'Produtos & Kits', icon: PackageCheck },
     { to: '/precificacao/canais', label: 'Canais & Taxas', icon: Store },
+    { to: '/precificacao/orcamentos', label: 'Orçamentos', icon: FileSpreadsheet },
   ]
 
   const expedicaoChildren: SubItem[] = [

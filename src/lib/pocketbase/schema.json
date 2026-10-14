@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-14T01:09:39.324Z",
+  "generatedAt": "2026-10-14T14:21:21.904Z",
   "collections": [
     {
       "name": "users",
@@ -5807,6 +5807,226 @@
         "CREATE INDEX idx_ffolha_func ON funcionarios_folhas (funcionario)",
         "CREATE INDEX idx_ffolha_periodo ON funcionarios_folhas (periodo_inicio, periodo_fim)",
         "CREATE INDEX idx_ffolha_quitada ON funcionarios_folhas (quitada)"
+      ]
+    },
+    {
+      "name": "orcamentos",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != '' || (public_token != '' && link_publico_ativo = true && @request.query.token = public_token)",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.id != ''"
+      },
+      "fields": [
+        {
+          "name": "codigo",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "titulo",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "cliente_pessoa",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "pessoas"
+        },
+        {
+          "name": "cliente_nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "cliente_whatsapp",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "data_orcamento",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "validade_dias",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "validade_data",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["rascunho", "enviado", "aceito", "recusado"]
+        },
+        {
+          "name": "canais_comparados",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "prec_canais"
+        },
+        {
+          "name": "tema",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "kit_temas"
+        },
+        {
+          "name": "tema_nome",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "cor",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "public_token",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "link_publico_ativo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "totais_por_canal",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_orcamentos_codigo ON orcamentos (codigo)",
+        "CREATE INDEX idx_orcamentos_public_token ON orcamentos (public_token)",
+        "CREATE INDEX idx_orcamentos_status ON orcamentos (status)",
+        "CREATE INDEX idx_orcamentos_data ON orcamentos (data_orcamento)"
+      ]
+    },
+    {
+      "name": "orcamento_itens",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != '' || (orcamento.public_token != '' && orcamento.link_publico_ativo = true && @request.query.token = orcamento.public_token)",
+        "view": "@request.auth.id != '' || (orcamento.public_token != '' && orcamento.link_publico_ativo = true && @request.query.token = orcamento.public_token)",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.id != ''"
+      },
+      "fields": [
+        {
+          "name": "orcamento",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "orcamentos"
+        },
+        {
+          "name": "modelo",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "kit_modelos"
+        },
+        {
+          "name": "modelo_nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "modelo_codigo",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "quantidade",
+          "type": "number",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "precos_canais",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "fretes_canais",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ordem",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_orc_itens_orcamento ON orcamento_itens (orcamento)",
+        "CREATE INDEX idx_orc_itens_ordem ON orcamento_itens (ordem)"
       ]
     }
   ]
