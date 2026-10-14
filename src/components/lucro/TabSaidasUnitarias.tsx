@@ -230,7 +230,7 @@ export const TabSaidasUnitarias: React.FC<TabSaidasUnitariasProps> = ({
                                   </Badge>
                                 )}
                               </div>
-                            </td>{' '}
+                            </td>
                             <td className="py-2 px-2 text-center font-mono text-muted-foreground">
                               {it.qtd_por_kit} un/kit
                             </td>
