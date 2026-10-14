@@ -109,16 +109,16 @@ export default function PrecificacaoOrcamentoDetalhes() {
   }
 
   const orcamentoNormalizado = normalizarOrcamentoRecord(orcamento)
-  const canais = normalizarCanaisExpandidos(orcamentoNormalizado.expand?.canais_comparados)
-  const itens = Array.isArray(orcamentoNormalizado.expand?.itens)
-    ? orcamentoNormalizado.expand.itens
-    : []
   const totais =
     orcamentoNormalizado.totais_por_canal &&
     typeof orcamentoNormalizado.totais_por_canal === 'object' &&
     !Array.isArray(orcamentoNormalizado.totais_por_canal)
       ? orcamentoNormalizado.totais_por_canal
       : {}
+  const canais = normalizarCanaisExpandidos(orcamentoNormalizado.expand?.canais_comparados, totais)
+  const itens = Array.isArray(orcamentoNormalizado.expand?.itens)
+    ? orcamentoNormalizado.expand.itens
+    : []
   const stInfo = STATUS_CONFIG[orcamentoNormalizado.status] || STATUS_CONFIG.rascunho
 
   const formatarData = (dt?: string) => {

@@ -30,6 +30,7 @@ export function PrecHeader({ titulo, subtitulo, acoes }: PrecHeaderProps) {
     { to: '/precificacao/produtos', label: 'Produtos & Kits', icon: PackageCheck },
     { to: '/precificacao/canais', label: 'Canais & Taxas', icon: Store },
     { to: '/precificacao/orcamentos', label: 'Orçamentos', icon: FileSpreadsheet },
+    { to: '/precificacao/clientes', label: 'Clientes', icon: FileSpreadsheet },
     { to: '/fornecedores', label: 'Fornecedores & Insumos', icon: Truck },
   ]
 

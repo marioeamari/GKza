@@ -116,16 +116,17 @@ export default function OrcamentoPublicoPage() {
   }
 
   const orcamentoNormalizado = normalizarOrcamentoRecord(orcamento)
-  const canais = normalizarCanaisExpandidos(orcamentoNormalizado.expand?.canais_comparados)
-  const itens = Array.isArray(orcamentoNormalizado.expand?.itens)
-    ? orcamentoNormalizado.expand.itens
-    : []
   const totais =
     orcamentoNormalizado.totais_por_canal &&
     typeof orcamentoNormalizado.totais_por_canal === 'object' &&
     !Array.isArray(orcamentoNormalizado.totais_por_canal)
       ? orcamentoNormalizado.totais_por_canal
       : {}
+  // Usa normalizarCanaisExpandidos passando totais para resgatar nomes mesmo se expand vier vazio
+  const canais = normalizarCanaisExpandidos(orcamentoNormalizado.expand?.canais_comparados, totais)
+  const itens = Array.isArray(orcamentoNormalizado.expand?.itens)
+    ? orcamentoNormalizado.expand.itens
+    : []
 
   const formatarData = (dt?: string) => {
     if (!dt) return '-'

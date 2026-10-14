@@ -65,8 +65,10 @@ export function normalizarCanaisComparadosIds(raw: unknown): string[] {
 /**
  * Normaliza lista de canais expandidos/resgatados para um array seguro de objetos { id, nome }
  */
-export function normalizarCanaisExpandidos(raw: unknown): Array<{ id: string; nome: string }> {
-  if (!raw) return []
+export function normalizarCanaisExpandidos(
+  raw: unknown,
+  totaisSalvos?: Record<string, OrcamentoTotalCanal> | null,
+): Array<{ id: string; nome: string }> {
   let lista: unknown[] = []
   if (Array.isArray(raw)) {
     lista = raw
@@ -83,20 +85,63 @@ export function normalizarCanaisExpandidos(raw: unknown): Array<{ id: string; no
     if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
       try {
         const parsed = JSON.parse(trimmed)
-        return normalizarCanaisExpandidos(parsed)
+        return normalizarCanaisExpandidos(parsed, totaisSalvos)
       } catch {
-        return []
+        lista = []
       }
     }
   }
 
-  return lista
+  const canaisMapeados = lista
     .filter((c): c is NonNullable<typeof c> => c !== null && typeof c === 'object')
     .map((c: any) => ({
       id: String(c.id || ''),
       nome: String(c.nome || c.canal_nome || c.id || 'Canal'),
     }))
     .filter((c) => Boolean(c.id))
+
+  // Se canais vieram do expand, verifica se totaisSalvos tem nomes mais específicos ou complementares
+  if (canaisMapeados.length > 0) {
+    return canaisMapeados.map((c) => {
+      const totNome = totaisSalvos?.[c.id]?.canal_nome
+      return {
+        id: c.id,
+        nome: totNome && totNome !== c.id ? totNome : c.nome,
+      }
+    })
+  }
+
+  // Se o expand veio vazio (ex: página pública deslogada sem acesso a prec_canais),
+  // resgata os canais e seus nomes a partir de totais_por_canal (canal_id / canal_nome)
+  if (totaisSalvos && typeof totaisSalvos === 'object' && !Array.isArray(totaisSalvos)) {
+    return Object.entries(totaisSalvos)
+      .map(([chaveId, tot]) => ({
+        id: String(tot?.canal_id || chaveId),
+        nome: String(tot?.canal_nome || chaveId || 'Canal'),
+      }))
+      .filter((c) => Boolean(c.id))
+  }
+
+  return []
+}
+
+/**
+ * Converte Preço Unitário para Preço Cheio em tempo real
+ */
+export function converterUnitarioParaCheio(precoUnitario: number, quantidade: number): number {
+  const qtd = Number(quantidade) || 0
+  const unit = Number(precoUnitario) || 0
+  return Math.round(unit * qtd * 100) / 100
+}
+
+/**
+ * Converte Preço Cheio para Preço Unitário em tempo real
+ */
+export function converterCheioParaUnitario(precoCheio: number, quantidade: number): number {
+  const qtd = Number(quantidade) || 0
+  const cheio = Number(precoCheio) || 0
+  if (qtd <= 0) return 0
+  return Math.round((cheio / qtd) * 100) / 100
 }
 
 /**

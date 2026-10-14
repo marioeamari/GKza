@@ -22,17 +22,26 @@ import { normalizarOrcamentoRecord } from '@/lib/precificacao/orcamentoCalculo'
 import { precificacaoService } from '@/services/precificacao'
 import { separacaoKitsService } from '@/services/separacaoKits'
 import { cadastrosService } from '@/services/cadastros'
+import { clientesOrcamentoService } from '@/services/clientesOrcamento'
+import { ClienteDialog } from '@/components/precificacao/ClienteDialog'
 import {
   OrcamentoRecord,
   CreateOrcamentoInput,
   OrcamentoPrecoCanalItem,
   OrcamentoFreteCanalItem,
+  OrcamentoProdutoVinculadoCanal,
+  ClienteOrcamentoRecord,
   StatusOrcamento,
 } from '@/types/orcamento'
 import { PrecCanalRecord } from '@/types/precificacao'
 import { KitTema, KitModelo } from '@/types/separacaoKits'
 import { Pessoa } from '@/types/domain'
-import { calcularTotaisPorCanal, formatarMoedaBR } from '@/lib/precificacao/orcamentoCalculo'
+import {
+  calcularTotaisPorCanal,
+  converterCheioParaUnitario,
+  converterUnitarioParaCheio,
+  formatarMoedaBR,
+} from '@/lib/precificacao/orcamentoCalculo'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -57,7 +66,7 @@ interface FormItemLinha {
   quantidade: number
   precos_canais: Record<string, OrcamentoPrecoCanalItem>
   fretes_canais: Record<string, OrcamentoFreteCanalItem>
-  avisos_canais: Record<string, boolean>
+  produtos_canais: Record<string, OrcamentoProdutoVinculadoCanal>
 }
 
 export default function PrecificacaoOrcamentoForm() {
@@ -73,9 +82,26 @@ export default function PrecificacaoOrcamentoForm() {
   const [temasDisponiveis, setTemasDisponiveis] = useState<KitTema[]>([])
   const [modelosDisponiveis, setModelosDisponiveis] = useState<KitModelo[]>([])
   const [pessoasDisponiveis, setPessoasDisponiveis] = useState<Pessoa[]>([])
+  const [clientesDisponiveis, setClientesDisponiveis] = useState<ClienteOrcamentoRecord[]>([])
+  const [produtosAprovadosPorCanal, setProdutosAprovadosPorCanal] = useState<
+    Record<
+      string,
+      Array<{
+        precificacao_id: string
+        produto_id: string
+        produto_nome: string
+        produto_sku?: string
+        preco_aprovado: number
+      }>
+    >
+  >({})
+
+  // Modal inline de criação rápida de cliente
+  const [modalClienteAberto, setModalClienteAberto] = useState(false)
 
   // Estado do formulário
   const [titulo, setTitulo] = useState('')
+  const [clienteId, setClienteId] = useState<string>('')
   const [clientePessoaId, setClientePessoaId] = useState<string>('')
   const [clienteNome, setClienteNome] = useState('')
   const [clienteWhatsapp, setClienteWhatsapp] = useState('')
@@ -108,11 +134,12 @@ export default function PrecificacaoOrcamentoForm() {
     async function carregarDadosIniciais() {
       try {
         setCarregando(true)
-        const [canais, temas, modelos, pessoas] = await Promise.all([
+        const [canais, temas, modelos, pessoas, clientes] = await Promise.all([
           precificacaoService.listCanais(),
           separacaoKitsService.getTemas(),
           separacaoKitsService.getModelos(),
           cadastrosService.listPessoas().catch(() => []),
+          clientesOrcamentoService.listClientes().catch(() => []),
         ])
 
         if (!active) return
@@ -122,6 +149,18 @@ export default function PrecificacaoOrcamentoForm() {
         setTemasDisponiveis(temas || [])
         setModelosDisponiveis(modelos || [])
         setPessoasDisponiveis(pessoas || [])
+        setClientesDisponiveis(clientes || [])
+
+        // Carrega produtos aprovados de cada canal
+        const mapaAprovados: Record<string, any[]> = {}
+        await Promise.all(
+          canaisAtivos.map(async (c) => {
+            const prods = await orcamentosService.listarProdutosAprovadosPorCanal(c.id)
+            mapaAprovados[c.id] = prods
+          }),
+        )
+        if (!active) return
+        setProdutosAprovadosPorCanal(mapaAprovados)
 
         // Se for novo, pré-seleciona os canais mais comuns (Shopee e Site ou os 2 primeiros)
         if (!isEdicao) {
@@ -135,20 +174,21 @@ export default function PrecificacaoOrcamentoForm() {
               quantidade: 25,
               precos_canais: {},
               fretes_canais: {},
-              avisos_canais: {},
+              produtos_canais: {},
             },
             {
               modelo_nome: 'Rosto',
               quantidade: 25,
               precos_canais: {},
               fretes_canais: {},
-              avisos_canais: {},
+              produtos_canais: {},
             },
           ])
         } else if (id) {
           // Carrega registro existente
           const orc = await orcamentosService.getOrcamento(id)
           setTitulo(orc.titulo || '')
+          setClienteId(orc.cliente || '')
           setClientePessoaId(orc.cliente_pessoa || '')
           setClienteNome(orc.cliente_nome || '')
           setClienteWhatsapp(orc.cliente_whatsapp || '')
@@ -176,7 +216,7 @@ export default function PrecificacaoOrcamentoForm() {
                 quantidade: it.quantidade || 1,
                 precos_canais: it.precos_canais || {},
                 fretes_canais: it.fretes_canais || {},
-                avisos_canais: {},
+                produtos_canais: it.produtos_canais || {},
               })),
             )
           }
@@ -206,15 +246,31 @@ export default function PrecificacaoOrcamentoForm() {
     return modelosDisponiveis.filter((m) => m.tema === temaId)
   }, [temaId, modelosDisponiveis])
 
-  // Ao selecionar uma pessoa cadastrada, preenche nome e whatsapp
-  const handleSelecionarPessoa = (pessoaId: string) => {
-    setClientePessoaId(pessoaId)
-    if (pessoaId) {
-      const p = pessoasDisponiveis.find((x) => x.id === pessoaId)
-      if (p) {
-        setClienteNome(p.nome)
-        if (p.telefone) setClienteWhatsapp(p.telefone)
+  // Ao selecionar um cliente cadastrado da coleção 'clientes'
+  const handleSelecionarCliente = (cId: string) => {
+    if (cId === 'novo') {
+      setModalClienteAberto(true)
+      return
+    }
+    setClienteId(cId === 'none' ? '' : cId)
+    if (cId && cId !== 'none') {
+      const cl = clientesDisponiveis.find((x) => x.id === cId)
+      if (cl) {
+        setClienteNome(cl.nome)
+        if (cl.whatsapp || cl.telefone) {
+          setClienteWhatsapp(cl.whatsapp || cl.telefone || '')
+        }
       }
+    }
+  }
+
+  // Callback de sucesso ao salvar cliente no modal inline
+  const handleClienteCriadoInline = (novoCliente: ClienteOrcamentoRecord) => {
+    setClientesDisponiveis((prev) => [novoCliente, ...prev])
+    setClienteId(novoCliente.id)
+    setClienteNome(novoCliente.nome)
+    if (novoCliente.whatsapp || novoCliente.telefone) {
+      setClienteWhatsapp(novoCliente.whatsapp || novoCliente.telefone || '')
     }
   }
 
@@ -241,7 +297,7 @@ export default function PrecificacaoOrcamentoForm() {
         quantidade: 1,
         precos_canais: {},
         fretes_canais: {},
-        avisos_canais: {},
+        produtos_canais: {},
       },
     ])
   }
@@ -260,67 +316,113 @@ export default function PrecificacaoOrcamentoForm() {
     })
   }
 
-  // Ao selecionar modelo pré-cadastrado no item
-  const handleSelecionarModeloNoItem = async (index: number, modeloId: string) => {
+  // Ao selecionar modelo pré-cadastrado no item (expedição - puro, sem preço e sem alerta)
+  const handleSelecionarModeloNoItem = (index: number, modeloId: string) => {
     const mod = modelosDisponiveis.find((m) => m.id === modeloId)
-    if (!mod) return
+    if (!mod) {
+      setItens((prev) => {
+        const copy = [...prev]
+        copy[index] = {
+          ...copy[index],
+          modelo: undefined,
+          modelo_codigo: undefined,
+        }
+        return copy
+      })
+      return
+    }
 
     setItens((prev) => {
       const copy = [...prev]
       copy[index] = {
         ...copy[index],
         modelo: mod.id,
-        modelo_nome: mod.nome,
+        modelo_nome: copy[index].modelo_nome || mod.nome,
         modelo_codigo: mod.codigo,
       }
       return copy
     })
-
-    // Busca preços oficiais em cada canal selecionado
-    for (const cId of canaisSelecionadosIds) {
-      const canalObj = canaisDisponiveis.find((c) => c.id === cId)
-      if (!canalObj) continue
-
-      const res = await orcamentosService.buscarPrecoOficialModelo({
-        modeloId: mod.id,
-        modeloNome: mod.nome,
-        modeloCodigo: mod.codigo,
-        canalId: cId,
-      })
-
-      setItens((prev) => {
-        const copy = [...prev]
-        const it = copy[index]
-        if (!it) return prev
-
-        const precosCanais = { ...it.precos_canais }
-        const avisosCanais = { ...it.avisos_canais }
-
-        if (res.preco !== null && res.preco > 0) {
-          precosCanais[cId] = {
-            canal_id: cId,
-            canal_nome: canalObj.nome,
-            preco_unitario: res.preco,
-            preco_sugerido_oficial: res.preco,
-            tem_precificacao_oficial: true,
-          }
-          avisosCanais[cId] = false
-        } else {
-          avisosCanais[cId] = true
-        }
-
-        copy[index] = {
-          ...it,
-          precos_canais: precosCanais,
-          avisos_canais: avisosCanais,
-        }
-        return copy
-      })
-    }
   }
 
-  // Atualiza preço digitado manualmente no canal (desconto pontual)
-  const handleAlterarPrecoCanal = (index: number, canalId: string, valor: number) => {
+  // Ao selecionar um Produto Vinculado aprovado para um canal específico no item
+  const handleSelecionarProdutoVinculadoNoCanal = (
+    index: number,
+    canalId: string,
+    produtoId: string,
+  ) => {
+    const canalObj = canaisDisponiveis.find((c) => c.id === canalId)
+    if (!canalObj) return
+
+    setItens((prev) => {
+      const copy = [...prev]
+      const it = copy[index]
+      if (!it) return prev
+
+      const prodsCanal = produtosAprovadosPorCanal[canalId] || []
+      const prodAprovado = prodsCanal.find((p) => p.produto_id === produtoId)
+
+      const precos = { ...it.precos_canais }
+      const produtosCanais = { ...it.produtos_canais }
+      const qtd = Number(it.quantidade) || 1
+
+      if (!prodAprovado || produtoId === 'none') {
+        // Remove vínculo desse canal
+        delete produtosCanais[canalId]
+        if (precos[canalId]) {
+          precos[canalId] = {
+            ...precos[canalId],
+            produto_vinculado_id: undefined,
+            produto_vinculado_nome: undefined,
+            produto_vinculado_sku: undefined,
+            precificacao_id: undefined,
+            tem_precificacao_oficial: false,
+          }
+        }
+      } else {
+        // Vincula produto aprovado do canal e puxa preço unitário aprovado
+        const precoAprovado = prodAprovado.preco_aprovado
+        const precoCheio = Math.round(precoAprovado * qtd * 100) / 100
+
+        produtosCanais[canalId] = {
+          canal_id: canalId,
+          canal_nome: canalObj.nome,
+          produto_id: prodAprovado.produto_id,
+          produto_nome: prodAprovado.produto_nome,
+          produto_sku: prodAprovado.produto_sku,
+          preco_aprovado: precoAprovado,
+          precificacao_id: prodAprovado.precificacao_id,
+        }
+
+        precos[canalId] = {
+          canal_id: canalId,
+          canal_nome: canalObj.nome,
+          preco_unitario: precoAprovado,
+          preco_cheio: precoCheio,
+          preco_sugerido_oficial: precoAprovado,
+          tem_precificacao_oficial: true,
+          desconto_aplicado: false,
+          produto_vinculado_id: prodAprovado.produto_id,
+          produto_vinculado_nome: prodAprovado.produto_nome,
+          produto_vinculado_sku: prodAprovado.produto_sku,
+          precificacao_id: prodAprovado.precificacao_id,
+        }
+      }
+
+      copy[index] = {
+        ...it,
+        precos_canais: precos,
+        produtos_canais: produtosCanais,
+      }
+      return copy
+    })
+  }
+
+  // Preço unitário digitado manualmente => calcula Preço Cheio em tempo real (unitário × quantidade)
+  const handleAlterarPrecoUnitarioCanal = (
+    index: number,
+    canalId: string,
+    valorUnitario: number,
+  ) => {
     const canalObj = canaisDisponiveis.find((c) => c.id === canalId)
     if (!canalObj) return
 
@@ -329,17 +431,79 @@ export default function PrecificacaoOrcamentoForm() {
       const it = copy[index]
       const precos = { ...it.precos_canais }
       const oficial = precos[canalId]?.preco_sugerido_oficial
+      const qtd = Number(it.quantidade) || 1
+      const precoCheioCalculado = converterUnitarioParaCheio(valorUnitario, qtd)
 
       precos[canalId] = {
         canal_id: canalId,
         canal_nome: canalObj.nome,
-        preco_unitario: valor,
+        preco_unitario: valorUnitario,
+        preco_cheio: precoCheioCalculado,
         preco_sugerido_oficial: oficial,
         tem_precificacao_oficial: precos[canalId]?.tem_precificacao_oficial ?? false,
-        desconto_aplicado: oficial ? valor < oficial : false,
+        desconto_aplicado: oficial ? valorUnitario < oficial : false,
+        produto_vinculado_id: precos[canalId]?.produto_vinculado_id,
+        produto_vinculado_nome: precos[canalId]?.produto_vinculado_nome,
+        produto_vinculado_sku: precos[canalId]?.produto_vinculado_sku,
+        precificacao_id: precos[canalId]?.precificacao_id,
       }
 
       copy[index] = { ...it, precos_canais: precos }
+      return copy
+    })
+  }
+
+  // Preço cheio digitado manualmente => calcula Preço Unitário em tempo real (cheio ÷ quantidade)
+  const handleAlterarPrecoCheioCanal = (index: number, canalId: string, valorCheio: number) => {
+    const canalObj = canaisDisponiveis.find((c) => c.id === canalId)
+    if (!canalObj) return
+
+    setItens((prev) => {
+      const copy = [...prev]
+      const it = copy[index]
+      const precos = { ...it.precos_canais }
+      const oficial = precos[canalId]?.preco_sugerido_oficial
+      const qtd = Number(it.quantidade) || 1
+      const precoUnitarioCalculado = converterCheioParaUnitario(valorCheio, qtd)
+
+      precos[canalId] = {
+        canal_id: canalId,
+        canal_nome: canalObj.nome,
+        preco_unitario: precoUnitarioCalculado,
+        preco_cheio: valorCheio,
+        preco_sugerido_oficial: oficial,
+        tem_precificacao_oficial: precos[canalId]?.tem_precificacao_oficial ?? false,
+        desconto_aplicado: oficial ? precoUnitarioCalculado < oficial : false,
+        produto_vinculado_id: precos[canalId]?.produto_vinculado_id,
+        produto_vinculado_nome: precos[canalId]?.produto_vinculado_nome,
+        produto_vinculado_sku: precos[canalId]?.produto_vinculado_sku,
+        precificacao_id: precos[canalId]?.precificacao_id,
+      }
+
+      copy[index] = { ...it, precos_canais: precos }
+      return copy
+    })
+  }
+
+  // Quando altera quantidade de um item, recalcula precos cheios com base nos unitários existentes
+  const handleAlterarQuantidadeItem = (index: number, novaQtd: number) => {
+    setItens((prev) => {
+      const copy = [...prev]
+      const it = copy[index]
+      if (!it) return prev
+      const precos = { ...it.precos_canais }
+      for (const cId of Object.keys(precos)) {
+        const u = precos[cId]?.preco_unitario || 0
+        precos[cId] = {
+          ...precos[cId],
+          preco_cheio: Math.round(u * novaQtd * 100) / 100,
+        }
+      }
+      copy[index] = {
+        ...it,
+        quantidade: novaQtd,
+        precos_canais: precos,
+      }
       return copy
     })
   }
@@ -382,8 +546,8 @@ export default function PrecificacaoOrcamentoForm() {
   const handleSalvar = async () => {
     if (!clienteNome.trim()) {
       toast({
-        title: 'Nome do cliente obrigatório',
-        description: 'Informe o nome do cliente ou selecione uma pessoa cadastrada.',
+        title: 'Cliente obrigatório',
+        description: 'Selecione ou informe o nome do cliente.',
         variant: 'destructive',
       })
       return
@@ -425,7 +589,8 @@ export default function PrecificacaoOrcamentoForm() {
 
       const payload: CreateOrcamentoInput = {
         titulo: tituloFinal,
-        cliente_pessoa: clientePessoaId || undefined,
+        cliente: clienteId || undefined,
+        cliente_pessoa: clientePessoaId || undefined, // snapshot/legado
         cliente_nome: clienteNome,
         cliente_whatsapp: clienteWhatsapp || undefined,
         data_orcamento: dataOrcamento,
@@ -445,6 +610,7 @@ export default function PrecificacaoOrcamentoForm() {
           quantidade: Number(it.quantidade) || 1,
           precos_canais: it.precos_canais,
           fretes_canais: it.fretes_canais,
+          produtos_canais: it.produtos_canais,
           ordem: idx,
         })),
       }
@@ -540,16 +706,29 @@ export default function PrecificacaoOrcamentoForm() {
         </CardHeader>
         <CardContent className="pt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">Cliente Cadastrado</Label>
-            <Select value={clientePessoaId} onValueChange={handleSelecionarPessoa}>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold">Cliente (Módulo Orçamentos)</Label>
+              <button
+                type="button"
+                onClick={() => setModalClienteAberto(true)}
+                className="text-[11px] font-bold text-primary hover:underline flex items-center gap-0.5"
+              >
+                <Plus className="w-3 h-3" /> Novo
+              </button>
+            </div>
+            <Select value={clienteId || 'none'} onValueChange={handleSelecionarCliente}>
               <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder="Buscar em Pessoas (opcional)..." />
+                <SelectValue placeholder="Selecione um cliente (PF / PJ)..." />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">-- Digitação Livre --</SelectItem>
-                {pessoasDisponiveis.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.nome} {p.telefone ? `(${p.telefone})` : ''}
+                <SelectItem value="none">-- Digitação Livre / Sem Vínculo --</SelectItem>
+                <SelectItem value="novo" className="text-primary font-bold">
+                  + Cadastrar Novo Cliente Agora...
+                </SelectItem>
+                {clientesDisponiveis.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.nome} {c.tipo === 'pessoa_juridica' ? '(PJ)' : '(PF)'}{' '}
+                    {c.whatsapp ? `• ${c.whatsapp}` : ''}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -564,7 +743,7 @@ export default function PrecificacaoOrcamentoForm() {
               placeholder="Ex: Maria Eduarda"
               value={clienteNome}
               onChange={(e) => setClienteNome(e.target.value)}
-              className="h-9 text-xs"
+              className="h-9 text-xs font-semibold"
               required
             />
           </div>
@@ -771,16 +950,17 @@ export default function PrecificacaoOrcamentoForm() {
                     {index + 1}
                   </span>
 
-                  {/* Seletor rápido de modelo existente */}
-                  <div className="w-48">
+                  {/* Seletor rápido de modelo existente (apenas para indicar modelo da expedição) */}
+                  <div className="w-52">
                     <Select
-                      value={item.modelo || ''}
+                      value={item.modelo || 'none'}
                       onValueChange={(val) => handleSelecionarModeloNoItem(index, val)}
                     >
                       <SelectTrigger className="h-8 text-xs">
-                        <SelectValue placeholder="Vincular Modelo..." />
+                        <SelectValue placeholder="Modelo Expedição (opcional)..." />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="none">-- Modelo Livre --</SelectItem>
                         {modelosDoTema.map((m) => (
                           <SelectItem key={m.id} value={m.id}>
                             {m.codigo} - {m.nome}
@@ -808,7 +988,7 @@ export default function PrecificacaoOrcamentoForm() {
                       min="1"
                       value={item.quantidade}
                       onChange={(e) =>
-                        handleAtualizarItem(index, 'quantidade', Number(e.target.value) || 1)
+                        handleAlterarQuantidadeItem(index, Math.max(1, Number(e.target.value) || 1))
                       }
                       className="h-8 w-20 text-xs font-bold text-center"
                     />
@@ -826,39 +1006,69 @@ export default function PrecificacaoOrcamentoForm() {
                 </Button>
               </div>
 
-              {/* Linha 2 do item: Colunas de canais com Preço Unitário e Frete */}
+              {/* Linha 2 do item: Colunas de canais com Produto Vinculado aprovado, Preço Unit., Preço Cheio e Frete */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {canaisSelecionados.map((canal) => {
                   const precoObj = item.precos_canais[canal.id]
                   const freteObj = item.fretes_canais[canal.id]
-                  const semPrecificacao = item.avisos_canais[canal.id]
+                  const produtoVinculadoObj = item.produtos_canais?.[canal.id]
 
                   const precoUnit = precoObj?.preco_unitario || 0
-                  const subtotal = Math.round(precoUnit * item.quantidade * 100) / 100
+                  const precoCheio =
+                    precoObj?.preco_cheio !== undefined
+                      ? precoObj.preco_cheio
+                      : Math.round(precoUnit * item.quantidade * 100) / 100
                   const frete = freteObj?.valor_frete || 0
+
+                  const prodsAprovadosDesteCanal = produtosAprovadosPorCanal[canal.id] || []
 
                   return (
                     <div
                       key={canal.id}
-                      className="p-3 rounded-lg border border-border/60 bg-muted/30 space-y-2 text-xs"
+                      className="p-3 rounded-lg border border-border/70 bg-muted/20 space-y-2.5 text-xs"
                     >
                       <div className="flex items-center justify-between font-bold text-foreground">
-                        <span>{canal.nome}</span>
+                        <span className="text-xs font-black">{canal.nome}</span>
                         <span className="text-primary font-black">
-                          Subtotal: {formatarMoedaBR(subtotal)}
+                          Subtotal: {formatarMoedaBR(precoCheio)}
                         </span>
                       </div>
 
-                      {semPrecificacao && (
-                        <div className="flex items-center gap-1 text-[10px] text-amber-600 bg-amber-50 p-1 rounded">
-                          <AlertTriangle className="w-3 h-3 shrink-0" />
-                          <span>Sem precificação oficial aprovada. Digite manualmente.</span>
-                        </div>
-                      )}
+                      {/* Campo Produto Vinculado filtrado por este canal */}
+                      <div className="space-y-1 bg-white p-2 rounded-md border border-border/60">
+                        <Label className="text-[10px] font-bold text-muted-foreground flex items-center justify-between">
+                          <span>Produto Vinculado ({canal.nome})</span>
+                          {produtoVinculadoObj?.preco_aprovado && (
+                            <span className="text-emerald-700 font-mono">
+                              Aprovado: {formatarMoedaBR(produtoVinculadoObj.preco_aprovado)}
+                            </span>
+                          )}
+                        </Label>
+                        <Select
+                          value={produtoVinculadoObj?.produto_id || 'none'}
+                          onValueChange={(val) =>
+                            handleSelecionarProdutoVinculadoNoCanal(index, canal.id, val)
+                          }
+                        >
+                          <SelectTrigger className="h-7 text-[11px]">
+                            <SelectValue placeholder="Vincular produto aprovado..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">-- Modelo puro (Sem vínculo) --</SelectItem>
+                            {prodsAprovadosDesteCanal.map((p) => (
+                              <SelectItem key={p.produto_id} value={p.produto_id}>
+                                {p.produto_nome} {p.produto_sku ? `(${p.produto_sku})` : ''} -{' '}
+                                {formatarMoedaBR(p.preco_aprovado)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
 
+                      {/* Conversão em Tempo Real: Preço Unitário <-> Preço Cheio */}
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <Label className="text-[10px] text-muted-foreground block">
+                          <Label className="text-[10px] text-muted-foreground block font-medium">
                             Preço Unit. (R$)
                           </Label>
                           <Input
@@ -867,7 +1077,7 @@ export default function PrecificacaoOrcamentoForm() {
                             placeholder="0,00"
                             value={precoUnit || ''}
                             onChange={(e) =>
-                              handleAlterarPrecoCanal(
+                              handleAlterarPrecoUnitarioCanal(
                                 index,
                                 canal.id,
                                 parseFloat(e.target.value) || 0,
@@ -878,24 +1088,44 @@ export default function PrecificacaoOrcamentoForm() {
                         </div>
 
                         <div>
-                          <Label className="text-[10px] text-muted-foreground block">
-                            Frete Item (R$)
+                          <Label className="text-[10px] text-muted-foreground block font-medium">
+                            Preço Cheio (R$)
                           </Label>
                           <Input
                             type="number"
                             step="0.01"
                             placeholder="0,00"
-                            value={frete || ''}
+                            value={precoCheio || ''}
                             onChange={(e) =>
-                              handleAlterarFreteCanal(
+                              handleAlterarPrecoCheioCanal(
                                 index,
                                 canal.id,
                                 parseFloat(e.target.value) || 0,
                               )
                             }
-                            className="h-7 text-xs"
+                            className="h-7 text-xs font-semibold text-primary"
                           />
                         </div>
+                      </div>
+
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground block font-medium">
+                          Frete do Item (R$)
+                        </Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="0,00"
+                          value={frete || ''}
+                          onChange={(e) =>
+                            handleAlterarFreteCanal(
+                              index,
+                              canal.id,
+                              parseFloat(e.target.value) || 0,
+                            )
+                          }
+                          className="h-7 text-xs"
+                        />
                       </div>
                     </div>
                   )
@@ -993,6 +1223,15 @@ export default function PrecificacaoOrcamentoForm() {
           {salvando ? 'Salvando...' : 'Salvar & Gerar Opções (WhatsApp, PDF e Link)'}
         </Button>
       </div>
+
+      {/* Modal Inline para cadastro rápido de cliente */}
+      <ClienteDialog
+        open={modalClienteAberto}
+        onOpenChange={setModalClienteAberto}
+        initialNome={clienteNome}
+        initialWhatsapp={clienteWhatsapp}
+        onSaved={handleClienteCriadoInline}
+      />
     </div>
   )
 }

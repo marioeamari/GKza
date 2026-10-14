@@ -32,7 +32,7 @@ export const orcamentosService = {
     const rawList = await pb.collection('orcamentos').getFullList<OrcamentoRecord>({
       filter: filtro || '',
       sort: '-created',
-      expand: 'cliente_pessoa,canais_comparados,tema',
+      expand: 'cliente,cliente_pessoa,canais_comparados,tema',
     })
 
     return (rawList || []).map((orc) => normalizarOrcamentoRecord(orc))
@@ -43,7 +43,7 @@ export const orcamentosService = {
    */
   async getOrcamento(id: string): Promise<OrcamentoRecord> {
     const orcRaw = await pb.collection('orcamentos').getOne<OrcamentoRecord>(id, {
-      expand: 'cliente_pessoa,canais_comparados,tema',
+      expand: 'cliente,cliente_pessoa,canais_comparados,tema',
     })
 
     const itensRaw = await pb.collection('orcamento_itens').getFullList<OrcamentoItemRecord>({
@@ -122,22 +122,25 @@ export const orcamentosService = {
       },
     })
 
-    // Caso a relação pública não tenha expandido os canais, tenta carregar canais públicos
+    // Para a página pública, se os canais não vieram expandidos por restrição de prec_canais,
+    // usamos os nomes já salvos em totais_por_canal (canal_id/canal_nome) sem requisição extra
     const canaisExpandidos = orcNormalizado.expand?.canais_comparados || []
     const canaisIds = orcNormalizado.canais_comparados || []
-    if (canaisIds.length > 0 && canaisExpandidos.length < canaisIds.length) {
-      try {
-        const canaisDb = await pb.collection('prec_canais').getFullList<PrecCanalRecord>({
-          filter: canaisIds.map((cId) => `id="${cId}"`).join(' || '),
-        })
-        if (canaisDb && canaisDb.length > 0) {
-          orcNormalizado.expand = {
-            ...orcNormalizado.expand,
-            canais_comparados: canaisDb,
-          }
-        }
-      } catch {
-        // Se a regra da prec_canais restringir leitura anônima, os IDs já estão normalizados
+    if (canaisIds.length > 0 && canaisExpandidos.length === 0 && orcNormalizado.totais_por_canal) {
+      const canaisDosTotais: PrecCanalRecord[] = Object.entries(
+        orcNormalizado.totais_por_canal,
+      ).map(
+        ([cId, tot]) =>
+          ({
+            id: tot.canal_id || cId,
+            nome: tot.canal_nome || 'Canal',
+            tipo: 'marketplace',
+            ativo: true,
+          }) as PrecCanalRecord,
+      )
+      orcNormalizado.expand = {
+        ...orcNormalizado.expand,
+        canais_comparados: canaisDosTotais,
       }
     }
 
@@ -167,6 +170,7 @@ export const orcamentosService = {
     const orcData = {
       codigo,
       titulo: input.titulo || '',
+      cliente: input.cliente || null,
       cliente_pessoa: input.cliente_pessoa || null,
       cliente_nome: input.cliente_nome,
       cliente_whatsapp: input.cliente_whatsapp || '',
@@ -198,6 +202,7 @@ export const orcamentosService = {
         quantidade: it.quantidade,
         precos_canais: it.precos_canais || {},
         fretes_canais: it.fretes_canais || {},
+        produtos_canais: it.produtos_canais || {},
         ordem: it.ordem ?? i,
       })
       itensCriados.push(itemRecord)
@@ -235,6 +240,7 @@ export const orcamentosService = {
 
     const updateData: Record<string, unknown> = {}
     if (input.titulo !== undefined) updateData.titulo = input.titulo
+    if (input.cliente !== undefined) updateData.cliente = input.cliente || null
     if (input.cliente_pessoa !== undefined) updateData.cliente_pessoa = input.cliente_pessoa || null
     if (input.cliente_nome !== undefined) updateData.cliente_nome = input.cliente_nome
     if (input.cliente_whatsapp !== undefined) updateData.cliente_whatsapp = input.cliente_whatsapp
@@ -278,6 +284,7 @@ export const orcamentosService = {
             quantidade: it.quantidade,
             precos_canais: it.precos_canais || {},
             fretes_canais: it.fretes_canais || {},
+            produtos_canais: it.produtos_canais || {},
             ordem: it.ordem ?? i,
           })
         } else {
@@ -289,6 +296,7 @@ export const orcamentosService = {
             quantidade: it.quantidade,
             precos_canais: it.precos_canais || {},
             fretes_canais: it.fretes_canais || {},
+            produtos_canais: it.produtos_canais || {},
             ordem: it.ordem ?? i,
           })
         }
@@ -328,90 +336,90 @@ export const orcamentosService = {
   },
 
   /**
-   * Busca o preço unitário oficial de um modelo em um canal específico
-   * Procura na coleção prec_precificacoes (status='aprovada') onde:
-   * 1. O produto da precificação tem o nome parecido com o modelo
-   * 2. Ou busca primeiro se há produto com SKU/nome correspondente
+   * Busca todas as precificações APROVADAS de um canal específico (/precificacao/aprovados),
+   * retornando os produtos disponíveis com seu preço unitário aprovado naquele canal.
    */
-  async buscarPrecoOficialModelo(params: {
-    modeloId?: string
-    modeloNome: string
-    modeloCodigo?: string
-    canalId: string
-  }): Promise<{ preco: number | null; precificacaoId?: string; produtoNome?: string }> {
+  async listarProdutosAprovadosPorCanal(canalId: string): Promise<
+    Array<{
+      precificacao_id: string
+      produto_id: string
+      produto_nome: string
+      produto_sku?: string
+      preco_aprovado: number
+      modalidade_nome?: string
+    }>
+  > {
+    if (!canalId) return []
     try {
-      const { modeloNome, canalId, modeloCodigo } = params
-      if (!canalId) return { preco: null }
-
-      // 1. Tenta buscar nas precificações aprovadas desse canal
-      // Trazemos precificações aprovadas com expand do produto
-      const precsAprovadas = await pb.collection('prec_precificacoes').getFullList({
+      const records = await pb.collection('prec_precificacoes').getFullList({
         filter: `canal="${canalId}" && status="aprovada"`,
+        sort: '-aprovado_em,-created',
+        expand: 'produto,modalidade',
+      })
+
+      const mapPorProduto = new Map<
+        string,
+        {
+          precificacao_id: string
+          produto_id: string
+          produto_nome: string
+          produto_sku?: string
+          preco_aprovado: number
+          modalidade_nome?: string
+        }
+      >()
+
+      for (const r of records) {
+        const prod = (r as any).expand?.produto
+        if (!prod || !prod.id) continue
+        if (!mapPorProduto.has(prod.id)) {
+          mapPorProduto.set(prod.id, {
+            precificacao_id: r.id,
+            produto_id: prod.id,
+            produto_nome: prod.nome || prod.sku || 'Produto Sem Nome',
+            produto_sku: prod.sku,
+            preco_aprovado: Number(r.preco_aprovado) || 0,
+            modalidade_nome: (r as any).expand?.modalidade?.nome,
+          })
+        }
+      }
+
+      return Array.from(mapPorProduto.values())
+    } catch (err) {
+      console.warn('Erro ao listar produtos aprovados do canal:', err)
+      return []
+    }
+  },
+
+  /**
+   * Busca o preço de um produto aprovado específico em um canal
+   */
+  async getPrecoProdutoAprovadoCanal(
+    produtoId: string,
+    canalId: string,
+  ): Promise<{
+    preco: number | null
+    precificacaoId?: string
+    produtoNome?: string
+    produtoSku?: string
+  }> {
+    try {
+      if (!produtoId || !canalId) return { preco: null }
+      const precs = await pb.collection('prec_precificacoes').getFullList({
+        filter: `produto="${produtoId}" && canal="${canalId}" && status="aprovada"`,
         sort: '-aprovado_em,-created',
         expand: 'produto',
       })
-
-      if (precsAprovadas.length === 0) {
-        return { preco: null }
+      if (!precs || precs.length === 0) return { preco: null }
+      const p = precs[0]
+      const prod = (p as any).expand?.produto
+      return {
+        preco: Number(p.preco_aprovado) || 0,
+        precificacaoId: p.id,
+        produtoNome: prod?.nome,
+        produtoSku: prod?.sku,
       }
-
-      // Normaliza termos para comparação
-      const norm = (str?: string) =>
-        (str || '')
-          .toLowerCase()
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .trim()
-
-      const termoNome = norm(modeloNome)
-      const termoCodigo = norm(modeloCodigo)
-
-      // Tentativa 1: match exato de SKU ou nome de produto
-      for (const prec of precsAprovadas) {
-        const prod = (prec as any).expand?.produto
-        if (!prod) continue
-
-        const prodNomeNorm = norm(prod.nome)
-        const prodSkuNorm = norm(prod.sku)
-
-        if (
-          (termoCodigo && prodSkuNorm === termoCodigo) ||
-          (termoNome && prodNomeNorm === termoNome) ||
-          (termoNome && prodNomeNorm.includes(termoNome)) ||
-          (termoNome && termoNome.includes(prodNomeNorm))
-        ) {
-          return {
-            preco: prec.preco_aprovado,
-            precificacaoId: prec.id,
-            produtoNome: prod.nome,
-          }
-        }
-      }
-
-      // Tentativa 2: correspondência por palavras-chave comuns (ex: Banho, Rosto)
-      const palavrasChave = ['banho', 'rosto', 'praia', 'jogo', 'combo']
-      for (const palavra of palavrasChave) {
-        if (termoNome.includes(palavra)) {
-          const matchPalavra = precsAprovadas.find((p) => {
-            const prod = (p as any).expand?.produto
-            if (!prod) return false
-            const n = norm(prod.nome)
-            return n.includes(palavra)
-          })
-
-          if (matchPalavra) {
-            return {
-              preco: matchPalavra.preco_aprovado,
-              precificacaoId: matchPalavra.id,
-              produtoNome: (matchPalavra as any).expand?.produto?.nome,
-            }
-          }
-        }
-      }
-
-      return { preco: null }
-    } catch (err) {
-      console.warn('Erro ao buscar preço oficial do modelo:', err)
+    } catch {
       return { preco: null }
     }
   },

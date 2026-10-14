@@ -27,6 +27,7 @@ import PrecificacaoCanais from '@/pages/precificacao/PrecificacaoCanais'
 import PrecificacaoProdutos from '@/pages/precificacao/PrecificacaoProdutos'
 import PrecificacaoAprovados from '@/pages/precificacao/PrecificacaoAprovados'
 import PrecificacaoOrcamentos from '@/pages/precificacao/PrecificacaoOrcamentos'
+import PrecificacaoClientes from '@/pages/precificacao/PrecificacaoClientes'
 import PrecificacaoOrcamentoForm from '@/pages/precificacao/PrecificacaoOrcamentoForm'
 import PrecificacaoOrcamentoDetalhes from '@/pages/precificacao/PrecificacaoOrcamentoDetalhes'
 import OrcamentoPublicoPage from '@/pages/precificacao/OrcamentoPublicoPage'
@@ -111,6 +112,7 @@ export default function App() {
           <Route path="/precificacao/canais" element={<PrecificacaoCanais />} />
           <Route path="/precificacao/produtos" element={<PrecificacaoProdutos />} />
           <Route path="/precificacao/orcamentos" element={<PrecificacaoOrcamentos />} />
+          <Route path="/precificacao/clientes" element={<PrecificacaoClientes />} />
           <Route path="/precificacao/orcamentos/novo" element={<PrecificacaoOrcamentoForm />} />
           <Route path="/precificacao/orcamentos/:id" element={<PrecificacaoOrcamentoDetalhes />} />
           <Route

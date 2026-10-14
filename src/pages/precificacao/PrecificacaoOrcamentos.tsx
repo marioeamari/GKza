@@ -218,13 +218,16 @@ export default function PrecificacaoOrcamentos() {
             const stInfo = STATUS_CONFIG[orc.status] || STATUS_CONFIG.rascunho
             const StIcon = stInfo.icon
             const orcNormalizado = normalizarOrcamentoRecord(orc)
-            const canais = normalizarCanaisExpandidos(orcNormalizado.expand?.canais_comparados)
             const totais =
               orcNormalizado.totais_por_canal &&
               typeof orcNormalizado.totais_por_canal === 'object' &&
               !Array.isArray(orcNormalizado.totais_por_canal)
                 ? orcNormalizado.totais_por_canal
                 : {}
+            const canais = normalizarCanaisExpandidos(
+              orcNormalizado.expand?.canais_comparados,
+              totais,
+            )
 
             return (
               <Card

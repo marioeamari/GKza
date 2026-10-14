@@ -7,6 +7,8 @@ import {
   normalizarCanaisComparadosIds,
   normalizarCanaisExpandidos,
   normalizarOrcamentoRecord,
+  converterUnitarioParaCheio,
+  converterCheioParaUnitario,
 } from './orcamentoCalculo'
 
 describe('Módulo de Orçamentos - Regras de Cálculo e Formatação', () => {
@@ -212,6 +214,60 @@ describe('Módulo de Orçamentos - Regras de Cálculo e Formatação', () => {
 
     const linkSemNumero = criarLinkWhatsapp('', texto)
     expect(linkSemNumero).toBe('https://wa.me/?text=Ol%C3%A1%2C%20segue%20cota%C3%A7%C3%A3o')
+  })
+
+  describe('Regra (D): Conversão Preço Unitário <-> Preço Cheio em tempo real', () => {
+    it('calcula Preço Cheio a partir de Preço Unitário e Quantidade', () => {
+      // Exemplo: 25 unidades a R$ 24,90 unitário = R$ 622,50
+      expect(converterUnitarioParaCheio(24.9, 25)).toBe(622.5)
+      // 25 unidades a R$ 3,596 = R$ 89,90
+      expect(converterUnitarioParaCheio(3.596, 25)).toBe(89.9)
+      // 1 unidade a R$ 150 = R$ 150
+      expect(converterUnitarioParaCheio(150, 1)).toBe(150)
+      // Quantidade zero ou unitário zero
+      expect(converterUnitarioParaCheio(0, 25)).toBe(0)
+      expect(converterUnitarioParaCheio(24.9, 0)).toBe(0)
+    })
+
+    it('calcula Preço Unitário a partir de Preço Cheio e Quantidade', () => {
+      // Exemplo inverso: R$ 622,50 para 25 unidades = R$ 24,90 unitário
+      expect(converterCheioParaUnitario(622.5, 25)).toBe(24.9)
+      // R$ 89,90 para 25 unidades = R$ 3,60 unitário
+      expect(converterCheioParaUnitario(89.9, 25)).toBe(3.6)
+      // R$ 100 para 3 unidades = R$ 33,33 unitário
+      expect(converterCheioParaUnitario(100, 3)).toBe(33.33)
+      // Trata quantidade zero sem crash (NaN/Infinity)
+      expect(converterCheioParaUnitario(622.5, 0)).toBe(0)
+    })
+  })
+
+  describe('Regra (A): Resgate de nomes de canais via totais_por_canal quando expand vier vazio', () => {
+    it('usa os nomes de canal salvos em totais_por_canal se prec_canais não puder ser expandido (anônimo)', () => {
+      const totaisSalvos = {
+        canal_shopee_id: {
+          canal_id: 'canal_shopee_id',
+          canal_nome: 'Shopee Oficial',
+          total_itens: 622.5,
+          total_fretes: 23.87,
+          total_geral: 646.37,
+        },
+        canal_site_id: {
+          canal_id: 'canal_site_id',
+          canal_nome: 'Loja GKza Virtual',
+          total_itens: 497.5,
+          total_fretes: 33.91,
+          total_geral: 531.41,
+        },
+      }
+
+      // Expand vazio (cenário de usuário anônimo / link público sem permissão em prec_canais)
+      const canaisSemExpand = normalizarCanaisExpandidos([], totaisSalvos)
+      expect(canaisSemExpand).toHaveLength(2)
+      expect(canaisSemExpand).toEqual([
+        { id: 'canal_shopee_id', nome: 'Shopee Oficial' },
+        { id: 'canal_site_id', nome: 'Loja GKza Virtual' },
+      ])
+    })
   })
 
   describe('Normalização de canais e orçamentos (blindagem contra TypeError: canais.map is not a function)', () => {
