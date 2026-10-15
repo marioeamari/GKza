@@ -41,6 +41,8 @@ export interface OrcamentoProdutoVinculadoCanal {
   produto_sku?: string
   preco_aprovado?: number
   precificacao_id?: string
+  status_precificacao?: 'aprovada' | 'desatualizada' | string
+  desatualizada?: boolean
 }
 
 export type ModoFreteOrcamento = 'pago_pelo_cliente' | 'frete_gratis'

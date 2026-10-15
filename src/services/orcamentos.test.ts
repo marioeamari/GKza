@@ -173,7 +173,7 @@ describe('Ajustes no Módulo de Orçamentos - Regras e Integração de Serviços
   })
 
   describe('(C) Produto Vinculado com precificação aprovada por canal', () => {
-    it('lista produtos com precificação aprovada filtrados pelo canal fornecido', async () => {
+    it('retorna filtro correto buscando status aprovada OU desatualizada com preco_aprovado > 0', async () => {
       const mockPrecificacoes = [
         {
           id: 'prec_aprov_1',
@@ -198,12 +198,161 @@ describe('Ajustes no Módulo de Orçamentos - Regras e Integração de Serviços
 
       expect(spyGetFullList).toHaveBeenCalledWith(
         expect.objectContaining({
-          filter: 'canal="canal_shopee" && status="aprovada"',
+          filter:
+            'canal="canal_shopee" && preco_aprovado > 0 && (status="aprovada" || status="desatualizada")',
+          sort: '-aprovado_em,-updated,-created',
         }),
       )
       expect(produtosCanal).toHaveLength(1)
       expect(produtosCanal[0].produto_id).toBe('prod_1')
       expect(produtosCanal[0].produto_nome).toBe('Toalha de Banho Döhler Azul')
+      expect(produtosCanal[0].preco_aprovado).toBe(29.9)
+      expect(produtosCanal[0].desatualizada).toBe(false)
+      expect(produtosCanal[0].status_precificacao).toBe('aprovada')
+
+      spyGetFullList.mockRestore()
+    })
+
+    it('(1) produto apenas com cenário "desatualizada" aparece no seletor, com flag desatualizada', async () => {
+      const mockPrecificacoes = [
+        {
+          id: 'prec_desat_1',
+          canal: 'canal_site',
+          preco_aprovado: 49.9,
+          status: 'desatualizada',
+          aprovado_em: '2026-10-01T10:00:00Z',
+          expand: {
+            produto: {
+              id: 'prod_desat',
+              nome: 'Kit Fraldas Ursinho',
+              sku: 'KIT-FRALDAS-URS',
+            },
+          },
+        },
+      ]
+
+      const spyGetFullList = vi
+        .spyOn(pb.collection('prec_precificacoes'), 'getFullList')
+        .mockResolvedValueOnce(mockPrecificacoes as any)
+
+      const produtosCanal = await orcamentosService.listarProdutosAprovadosPorCanal('canal_site')
+
+      expect(produtosCanal).toHaveLength(1)
+      expect(produtosCanal[0].produto_id).toBe('prod_desat')
+      expect(produtosCanal[0].preco_aprovado).toBe(49.9)
+      expect(produtosCanal[0].desatualizada).toBe(true)
+      expect(produtosCanal[0].status_precificacao).toBe('desatualizada')
+
+      spyGetFullList.mockRestore()
+    })
+
+    it('(2) produto com cenário "aprovada" aparece sem aviso e tem prioridade quando tem os dois status', async () => {
+      const mockPrecificacoes = [
+        {
+          id: 'prec_desat',
+          canal: 'canal_shopee',
+          preco_aprovado: 35.0,
+          status: 'desatualizada',
+          aprovado_em: '2026-10-14T10:00:00Z',
+          updated: '2026-10-15T10:00:00Z',
+          expand: {
+            produto: {
+              id: 'prod_misto',
+              nome: 'Manta Microfibra',
+              sku: 'MANTA-MIC-01',
+            },
+          },
+        },
+        {
+          id: 'prec_aprov',
+          canal: 'canal_shopee',
+          preco_aprovado: 39.9,
+          status: 'aprovada',
+          aprovado_em: '2026-10-10T10:00:00Z',
+          updated: '2026-10-10T10:00:00Z',
+          expand: {
+            produto: {
+              id: 'prod_misto',
+              nome: 'Manta Microfibra',
+              sku: 'MANTA-MIC-01',
+            },
+          },
+        },
+      ]
+
+      const spyGetFullList = vi
+        .spyOn(pb.collection('prec_precificacoes'), 'getFullList')
+        .mockResolvedValueOnce(mockPrecificacoes as any)
+
+      const produtosCanal = await orcamentosService.listarProdutosAprovadosPorCanal('canal_shopee')
+
+      expect(produtosCanal).toHaveLength(1)
+      expect(produtosCanal[0].produto_id).toBe('prod_misto')
+      expect(produtosCanal[0].precificacao_id).toBe('prec_aprov')
+      expect(produtosCanal[0].preco_aprovado).toBe(39.9)
+      expect(produtosCanal[0].desatualizada).toBe(false)
+      expect(produtosCanal[0].status_precificacao).toBe('aprovada')
+
+      spyGetFullList.mockRestore()
+    })
+
+    it('(3) canal sem nenhum cenário com preco_aprovado > 0 continua sem retornar produtos', async () => {
+      const spyGetFullList = vi
+        .spyOn(pb.collection('prec_precificacoes'), 'getFullList')
+        .mockResolvedValueOnce([] as any)
+
+      const produtosCanal = await orcamentosService.listarProdutosAprovadosPorCanal('canal_vazio')
+
+      expect(produtosCanal).toEqual([])
+
+      spyGetFullList.mockRestore()
+    })
+
+    it('(4) o preço usado é o do cenário mais recente conforme ordenação quando há múltiplos no mesmo status', async () => {
+      const mockPrecificacoes = [
+        {
+          id: 'prec_antiga',
+          canal: 'canal_site',
+          preco_aprovado: 25.0,
+          status: 'desatualizada',
+          aprovado_em: '2026-09-01T10:00:00Z',
+          updated: '2026-09-01T10:00:00Z',
+          created: '2026-09-01T10:00:00Z',
+          expand: {
+            produto: {
+              id: 'prod_multi',
+              nome: 'Babador Impermeável',
+              sku: 'BAB-IMP',
+            },
+          },
+        },
+        {
+          id: 'prec_recente',
+          canal: 'canal_site',
+          preco_aprovado: 29.9,
+          status: 'desatualizada',
+          aprovado_em: '2026-10-12T10:00:00Z',
+          updated: '2026-10-14T10:00:00Z',
+          created: '2026-10-12T10:00:00Z',
+          expand: {
+            produto: {
+              id: 'prod_multi',
+              nome: 'Babador Impermeável',
+              sku: 'BAB-IMP',
+            },
+          },
+        },
+      ]
+
+      const spyGetFullList = vi
+        .spyOn(pb.collection('prec_precificacoes'), 'getFullList')
+        .mockResolvedValueOnce(mockPrecificacoes as any)
+
+      const produtosCanal = await orcamentosService.listarProdutosAprovadosPorCanal('canal_site')
+
+      expect(produtosCanal).toHaveLength(1)
+      expect(produtosCanal[0].produto_id).toBe('prod_multi')
+      expect(produtosCanal[0].precificacao_id).toBe('prec_recente')
       expect(produtosCanal[0].preco_aprovado).toBe(29.9)
 
       spyGetFullList.mockRestore()

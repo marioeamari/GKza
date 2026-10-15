@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react'
-import { HelpCircle } from 'lucide-react'
+import { HelpCircle, AlertTriangle } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { formatCurrency } from '@/lib/format'
 import {
   calcularDemonstrativo,
@@ -84,6 +85,11 @@ export function DecisaoAprovacaoItemPanel({
     const temTaxasLista = Array.isArray(taxasCanal) && taxasCanal.length > 0
     let totalTaxasRetidasItem = 0
 
+    const isDesatualizada =
+      rec.status === 'desatualizada' ||
+      produtoVinculado?.desatualizada === true ||
+      produtoVinculado?.status_precificacao === 'desatualizada'
+
     if (temTaxasLista) {
       // Monta input para calcularDemonstrativo no volume do item
       const cenarioInput: any = {
@@ -129,6 +135,7 @@ export function DecisaoAprovacaoItemPanel({
 
       return {
         temProdutoVinculado: Boolean(precificacaoAprovadaRecord || produtoVinculado),
+        isDesatualizada,
         precoPagoClienteVolume,
         precoUnitCliente,
         valorReceberCanal: dem.valor_receber_canal,
@@ -189,6 +196,7 @@ export function DecisaoAprovacaoItemPanel({
 
       return {
         temProdutoVinculado: Boolean(precificacaoAprovadaRecord || produtoVinculado),
+        isDesatualizada,
         precoPagoClienteVolume,
         precoUnitCliente,
         valorReceberCanal,
@@ -249,6 +257,24 @@ export function DecisaoAprovacaoItemPanel({
           </Badge>
         </div>
       </div>
+
+      {/* Aviso visível se o cenário estiver com precificação desatualizada */}
+      {analise.isDesatualizada && (
+        <div className="flex items-center gap-1.5 p-2 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 text-[11px] leading-tight">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+          <span>
+            Precificação desatualizada — confira em{' '}
+            <Link
+              to="/precificacao"
+              target="_blank"
+              rel="noreferrer"
+              className="underline font-bold text-amber-950 hover:text-amber-800"
+            >
+              /precificacao
+            </Link>
+          </span>
+        </div>
+      )}
 
       {/* Linhas de Fechamento da Venda - Idênticas à Tela de Decisão */}
       <div className="space-y-1 text-[11px]">

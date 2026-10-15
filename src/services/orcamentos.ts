@@ -419,8 +419,10 @@ export const orcamentosService = {
   },
 
   /**
-   * Busca todas as precificações APROVADAS de um canal específico (/precificacao/aprovados),
-   * retornando os produtos disponíveis com seu preço unitário aprovado naquele canal.
+   * Busca produtos com cenários precificados do canal alinhado com /precificacao/aprovados.
+   * Considera cenários com preco_aprovado > 0 e status in ('aprovada', 'desatualizada').
+   * Prioriza o cenário com status='aprovada' e, em empate ou condição igual, o mais recente
+   * (-aprovado_em, -updated, -created).
    */
   async listarProdutosAprovadosPorCanal(canalId: string): Promise<
     Array<{
@@ -431,14 +433,31 @@ export const orcamentosService = {
       preco_aprovado: number
       modalidade_nome?: string
       precificacao_record?: any
+      status_precificacao?: 'aprovada' | 'desatualizada' | string
+      desatualizada?: boolean
     }>
   > {
     if (!canalId) return []
     try {
       const records = await pb.collection('prec_precificacoes').getFullList({
-        filter: `canal="${canalId}" && status="aprovada"`,
-        sort: '-aprovado_em,-created',
+        filter: `canal="${canalId}" && preco_aprovado > 0 && (status="aprovada" || status="desatualizada")`,
+        sort: '-aprovado_em,-updated,-created',
         expand: 'produto,modalidade',
+      })
+
+      // Ordenação rigorosa em memória para garantir prioridade de status='aprovada'
+      // e data mais recente (aprovado_em/updated/created)
+      const parseTime = (val?: string) => (val ? new Date(val).getTime() : 0)
+
+      const ordenados = [...records].sort((a: any, b: any) => {
+        const aAprovada = a.status === 'aprovada' ? 1 : 0
+        const bAprovada = b.status === 'aprovada' ? 1 : 0
+        if (aAprovada !== bAprovada) {
+          return bAprovada - aAprovada // 1 (aprovada) vem antes de 0 (desatualizada)
+        }
+        const timeA = Math.max(parseTime(a.aprovado_em), parseTime(a.updated), parseTime(a.created))
+        const timeB = Math.max(parseTime(b.aprovado_em), parseTime(b.updated), parseTime(b.created))
+        return timeB - timeA
       })
 
       const mapPorProduto = new Map<
@@ -451,21 +470,30 @@ export const orcamentosService = {
           preco_aprovado: number
           modalidade_nome?: string
           precificacao_record?: any
+          status_precificacao?: 'aprovada' | 'desatualizada' | string
+          desatualizada?: boolean
         }
       >()
 
-      for (const r of records) {
+      for (const r of ordenados) {
         const prod = (r as any).expand?.produto
         if (!prod || !prod.id) continue
+        const preco = Number((r as any).preco_aprovado) || 0
+        if (preco <= 0) continue
+
         if (!mapPorProduto.has(prod.id)) {
+          const statusPrec = (r as any).status || 'aprovada'
+          const isDesatualizada = statusPrec === 'desatualizada'
           mapPorProduto.set(prod.id, {
-            precificacao_id: r.id,
+            precificacao_id: (r as any).id,
             produto_id: prod.id,
             produto_nome: prod.nome || prod.sku || 'Produto Sem Nome',
             produto_sku: prod.sku,
-            preco_aprovado: Number(r.preco_aprovado) || 0,
+            preco_aprovado: preco,
             modalidade_nome: (r as any).expand?.modalidade?.nome,
             precificacao_record: r,
+            status_precificacao: statusPrec,
+            desatualizada: isDesatualizada,
           })
         }
       }
@@ -493,11 +521,30 @@ export const orcamentosService = {
       }
       if (produtoId && canalId) {
         const precs = await pb.collection('prec_precificacoes').getFullList({
-          filter: `produto="${produtoId}" && canal="${canalId}" && status="aprovada"`,
-          sort: '-aprovado_em,-created',
+          filter: `produto="${produtoId}" && canal="${canalId}" && preco_aprovado > 0 && (status="aprovada" || status="desatualizada")`,
+          sort: '-aprovado_em,-updated,-created',
           expand: 'produto,canal,modalidade',
         })
-        return precs[0] || null
+        if (!precs || precs.length === 0) return null
+
+        const parseTime = (val?: string) => (val ? new Date(val).getTime() : 0)
+        const ordenados = [...precs].sort((a: any, b: any) => {
+          const aAprovada = a.status === 'aprovada' ? 1 : 0
+          const bAprovada = b.status === 'aprovada' ? 1 : 0
+          if (aAprovada !== bAprovada) return bAprovada - aAprovada
+          const timeA = Math.max(
+            parseTime(a.aprovado_em),
+            parseTime(a.updated),
+            parseTime(a.created),
+          )
+          const timeB = Math.max(
+            parseTime(b.aprovado_em),
+            parseTime(b.updated),
+            parseTime(b.created),
+          )
+          return timeB - timeA
+        })
+        return ordenados[0] || null
       }
       return null
     } catch {
@@ -516,22 +563,37 @@ export const orcamentosService = {
     precificacaoId?: string
     produtoNome?: string
     produtoSku?: string
+    status_precificacao?: string
+    desatualizada?: boolean
   }> {
     try {
       if (!produtoId || !canalId) return { preco: null }
       const precs = await pb.collection('prec_precificacoes').getFullList({
-        filter: `produto="${produtoId}" && canal="${canalId}" && status="aprovada"`,
-        sort: '-aprovado_em,-created',
+        filter: `produto="${produtoId}" && canal="${canalId}" && preco_aprovado > 0 && (status="aprovada" || status="desatualizada")`,
+        sort: '-aprovado_em,-updated,-created',
         expand: 'produto',
       })
       if (!precs || precs.length === 0) return { preco: null }
-      const p = precs[0]
+
+      const parseTime = (val?: string) => (val ? new Date(val).getTime() : 0)
+      const ordenados = [...precs].sort((a: any, b: any) => {
+        const aAprovada = a.status === 'aprovada' ? 1 : 0
+        const bAprovada = b.status === 'aprovada' ? 1 : 0
+        if (aAprovada !== bAprovada) return bAprovada - aAprovada
+        const timeA = Math.max(parseTime(a.aprovado_em), parseTime(a.updated), parseTime(a.created))
+        const timeB = Math.max(parseTime(b.aprovado_em), parseTime(b.updated), parseTime(b.created))
+        return timeB - timeA
+      })
+
+      const p = ordenados[0]
       const prod = (p as any).expand?.produto
       return {
         preco: Number(p.preco_aprovado) || 0,
         precificacaoId: p.id,
         produtoNome: prod?.nome,
         produtoSku: prod?.sku,
+        status_precificacao: p.status,
+        desatualizada: p.status === 'desatualizada',
       }
     } catch {
       return { preco: null }

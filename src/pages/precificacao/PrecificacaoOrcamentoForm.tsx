@@ -113,6 +113,8 @@ export default function PrecificacaoOrcamentoForm() {
         produto_sku?: string
         preco_aprovado: number
         precificacao_record?: any
+        status_precificacao?: string
+        desatualizada?: boolean
       }>
     >
   >({})
@@ -683,6 +685,8 @@ export default function PrecificacaoOrcamentoForm() {
           produto_sku: prodAprovado.produto_sku,
           preco_aprovado: precoAprovado,
           precificacao_id: prodAprovado.precificacao_id,
+          status_precificacao: prodAprovado.status_precificacao,
+          desatualizada: prodAprovado.desatualizada,
         }
 
         precos[canalId] = {
@@ -1641,7 +1645,11 @@ export default function PrecificacaoOrcamentoForm() {
                             <span>Produto Vinculado ({canal.nome})</span>
                             {produtoVinculadoObj?.preco_aprovado && (
                               <span className="text-emerald-700 font-mono">
-                                Aprovado: {formatarMoedaBR(produtoVinculadoObj.preco_aprovado)}
+                                {produtoVinculadoObj.desatualizada ||
+                                produtoVinculadoObj.status_precificacao === 'desatualizada'
+                                  ? 'Base: '
+                                  : 'Aprovado: '}
+                                {formatarMoedaBR(produtoVinculadoObj.preco_aprovado)}
                               </span>
                             )}
                           </Label>
@@ -1656,14 +1664,46 @@ export default function PrecificacaoOrcamentoForm() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">-- Preço Livre (Sem Vínculo) --</SelectItem>
-                              {prodsAprovadosDesteCanal.map((p) => (
-                                <SelectItem key={p.produto_id} value={p.produto_id}>
-                                  {p.produto_nome} {p.produto_sku ? `(${p.produto_sku})` : ''} -{' '}
-                                  {formatarMoedaBR(p.preco_aprovado)}
-                                </SelectItem>
-                              ))}
+                              {prodsAprovadosDesteCanal.map((p) => {
+                                const isDesat =
+                                  p.desatualizada || p.status_precificacao === 'desatualizada'
+                                return (
+                                  <SelectItem key={p.produto_id} value={p.produto_id}>
+                                    <span className="inline-flex items-center gap-1.5 flex-wrap">
+                                      <span>
+                                        {p.produto_nome} {p.produto_sku ? `(${p.produto_sku})` : ''}{' '}
+                                        - {formatarMoedaBR(p.preco_aprovado)}
+                                      </span>
+                                      {isDesat && (
+                                        <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                          desatualizada
+                                        </span>
+                                      )}
+                                    </span>
+                                  </SelectItem>
+                                )
+                              })}
                             </SelectContent>
                           </Select>
+
+                          {/* Aviso visível quando o produto selecionado está com precificação desatualizada */}
+                          {(produtoVinculadoObj?.desatualizada ||
+                            produtoVinculadoObj?.status_precificacao === 'desatualizada') && (
+                            <div className="mt-1 flex items-start gap-1 p-1.5 rounded bg-amber-50 border border-amber-300 text-[10px] text-amber-900 leading-tight">
+                              <span className="font-bold shrink-0">⚠️</span>
+                              <span>
+                                Precificação desatualizada — confira em{' '}
+                                <Link
+                                  to="/precificacao"
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="underline font-bold text-amber-950 hover:text-amber-800"
+                                >
+                                  /precificacao
+                                </Link>
+                              </span>
+                            </div>
+                          )}
                         </div>
 
                         {/* Conversão em Tempo Real: Preço Unitário <-> Preço Cheio */}
