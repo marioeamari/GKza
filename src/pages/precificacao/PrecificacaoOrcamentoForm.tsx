@@ -893,7 +893,8 @@ export default function PrecificacaoOrcamentoForm() {
               <CardTitle className="text-base font-bold">3. Itens & Quantidades</CardTitle>
             </div>
             <CardDescription className="text-xs mt-0.5">
-              Cada item carrega seu próprio tema, cor e modelo. Preços pré-carregados das precificações oficiais.
+              Cada item carrega seu próprio tema, cor e modelo. Preços pré-carregados das
+              precificações oficiais.
             </CardDescription>
           </div>
           <Button
@@ -1002,7 +1003,10 @@ export default function PrecificacaoOrcamentoForm() {
                         min="1"
                         value={item.quantidade}
                         onChange={(e) =>
-                          handleAlterarQuantidadeItem(index, Math.max(1, Number(e.target.value) || 1))
+                          handleAlterarQuantidadeItem(
+                            index,
+                            Math.max(1, Number(e.target.value) || 1),
+                          )
                         }
                         className="h-8 w-16 text-xs font-bold text-center"
                       />
@@ -1022,128 +1026,128 @@ export default function PrecificacaoOrcamentoForm() {
 
                 {/* Linha 2 do item: Colunas de canais com Produto Vinculado aprovado, Preço Unit., Preço Cheio e Frete */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {canaisSelecionados.map((canal) => {
-                  const precoObj = item.precos_canais[canal.id]
-                  const freteObj = item.fretes_canais[canal.id]
-                  const produtoVinculadoObj = item.produtos_canais?.[canal.id]
+                  {canaisSelecionados.map((canal) => {
+                    const precoObj = item.precos_canais[canal.id]
+                    const freteObj = item.fretes_canais[canal.id]
+                    const produtoVinculadoObj = item.produtos_canais?.[canal.id]
 
-                  const precoUnit = precoObj?.preco_unitario || 0
-                  const precoCheio =
-                    precoObj?.preco_cheio !== undefined
-                      ? precoObj.preco_cheio
-                      : Math.round(precoUnit * item.quantidade * 100) / 100
-                  const frete = freteObj?.valor_frete || 0
+                    const precoUnit = precoObj?.preco_unitario || 0
+                    const precoCheio =
+                      precoObj?.preco_cheio !== undefined
+                        ? precoObj.preco_cheio
+                        : Math.round(precoUnit * item.quantidade * 100) / 100
+                    const frete = freteObj?.valor_frete || 0
 
-                  const prodsAprovadosDesteCanal = produtosAprovadosPorCanal[canal.id] || []
+                    const prodsAprovadosDesteCanal = produtosAprovadosPorCanal[canal.id] || []
 
-                  return (
-                    <div
-                      key={canal.id}
-                      className="p-3 rounded-lg border border-border/70 bg-muted/20 space-y-2.5 text-xs"
-                    >
-                      <div className="flex items-center justify-between font-bold text-foreground">
-                        <span className="text-xs font-black">{canal.nome}</span>
-                        <span className="text-primary font-black">
-                          Subtotal: {formatarMoedaBR(precoCheio)}
-                        </span>
-                      </div>
+                    return (
+                      <div
+                        key={canal.id}
+                        className="p-3 rounded-lg border border-border/70 bg-muted/20 space-y-2.5 text-xs"
+                      >
+                        <div className="flex items-center justify-between font-bold text-foreground">
+                          <span className="text-xs font-black">{canal.nome}</span>
+                          <span className="text-primary font-black">
+                            Subtotal: {formatarMoedaBR(precoCheio)}
+                          </span>
+                        </div>
 
-                      {/* Campo Produto Vinculado filtrado por este canal */}
-                      <div className="space-y-1 bg-white p-2 rounded-md border border-border/60">
-                        <Label className="text-[10px] font-bold text-muted-foreground flex items-center justify-between">
-                          <span>Produto Vinculado ({canal.nome})</span>
-                          {produtoVinculadoObj?.preco_aprovado && (
-                            <span className="text-emerald-700 font-mono">
-                              Aprovado: {formatarMoedaBR(produtoVinculadoObj.preco_aprovado)}
-                            </span>
-                          )}
-                        </Label>
-                        <Select
-                          value={produtoVinculadoObj?.produto_id || 'none'}
-                          onValueChange={(val) =>
-                            handleSelecionarProdutoVinculadoNoCanal(index, canal.id, val)
-                          }
-                        >
-                          <SelectTrigger className="h-7 text-[11px]">
-                            <SelectValue placeholder="Vincular produto aprovado..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">-- Modelo puro (Sem vínculo) --</SelectItem>
-                            {prodsAprovadosDesteCanal.map((p) => (
-                              <SelectItem key={p.produto_id} value={p.produto_id}>
-                                {p.produto_nome} {p.produto_sku ? `(${p.produto_sku})` : ''} -{' '}
-                                {formatarMoedaBR(p.preco_aprovado)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                        {/* Campo Produto Vinculado filtrado por este canal */}
+                        <div className="space-y-1 bg-white p-2 rounded-md border border-border/60">
+                          <Label className="text-[10px] font-bold text-muted-foreground flex items-center justify-between">
+                            <span>Produto Vinculado ({canal.nome})</span>
+                            {produtoVinculadoObj?.preco_aprovado && (
+                              <span className="text-emerald-700 font-mono">
+                                Aprovado: {formatarMoedaBR(produtoVinculadoObj.preco_aprovado)}
+                              </span>
+                            )}
+                          </Label>
+                          <Select
+                            value={produtoVinculadoObj?.produto_id || 'none'}
+                            onValueChange={(val) =>
+                              handleSelecionarProdutoVinculadoNoCanal(index, canal.id, val)
+                            }
+                          >
+                            <SelectTrigger className="h-7 text-[11px]">
+                              <SelectValue placeholder="Vincular produto aprovado..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">-- Modelo puro (Sem vínculo) --</SelectItem>
+                              {prodsAprovadosDesteCanal.map((p) => (
+                                <SelectItem key={p.produto_id} value={p.produto_id}>
+                                  {p.produto_nome} {p.produto_sku ? `(${p.produto_sku})` : ''} -{' '}
+                                  {formatarMoedaBR(p.preco_aprovado)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
 
-                      {/* Conversão em Tempo Real: Preço Unitário <-> Preço Cheio */}
-                      <div className="grid grid-cols-2 gap-2">
+                        {/* Conversão em Tempo Real: Preço Unitário <-> Preço Cheio */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-[10px] text-muted-foreground block font-medium">
+                              Preço Unit. (R$)
+                            </Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              placeholder="0,00"
+                              value={precoUnit || ''}
+                              onChange={(e) =>
+                                handleAlterarPrecoUnitarioCanal(
+                                  index,
+                                  canal.id,
+                                  parseFloat(e.target.value) || 0,
+                                )
+                              }
+                              className="h-7 text-xs font-semibold"
+                            />
+                          </div>
+
+                          <div>
+                            <Label className="text-[10px] text-muted-foreground block font-medium">
+                              Preço Cheio (R$)
+                            </Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              placeholder="0,00"
+                              value={precoCheio || ''}
+                              onChange={(e) =>
+                                handleAlterarPrecoCheioCanal(
+                                  index,
+                                  canal.id,
+                                  parseFloat(e.target.value) || 0,
+                                )
+                              }
+                              className="h-7 text-xs font-semibold text-primary"
+                            />
+                          </div>
+                        </div>
+
                         <div>
                           <Label className="text-[10px] text-muted-foreground block font-medium">
-                            Preço Unit. (R$)
+                            Frete do Item (R$)
                           </Label>
                           <Input
                             type="number"
                             step="0.01"
                             placeholder="0,00"
-                            value={precoUnit || ''}
+                            value={frete || ''}
                             onChange={(e) =>
-                              handleAlterarPrecoUnitarioCanal(
+                              handleAlterarFreteCanal(
                                 index,
                                 canal.id,
                                 parseFloat(e.target.value) || 0,
                               )
                             }
-                            className="h-7 text-xs font-semibold"
-                          />
-                        </div>
-
-                        <div>
-                          <Label className="text-[10px] text-muted-foreground block font-medium">
-                            Preço Cheio (R$)
-                          </Label>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            placeholder="0,00"
-                            value={precoCheio || ''}
-                            onChange={(e) =>
-                              handleAlterarPrecoCheioCanal(
-                                index,
-                                canal.id,
-                                parseFloat(e.target.value) || 0,
-                              )
-                            }
-                            className="h-7 text-xs font-semibold text-primary"
+                            className="h-7 text-xs"
                           />
                         </div>
                       </div>
-
-                      <div>
-                        <Label className="text-[10px] text-muted-foreground block font-medium">
-                          Frete do Item (R$)
-                        </Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          placeholder="0,00"
-                          value={frete || ''}
-                          onChange={(e) =>
-                            handleAlterarFreteCanal(
-                              index,
-                              canal.id,
-                              parseFloat(e.target.value) || 0,
-                            )
-                          }
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
                 </div>
               </div>
             )

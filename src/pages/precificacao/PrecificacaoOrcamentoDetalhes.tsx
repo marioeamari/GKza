@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -616,19 +616,20 @@ export default function PrecificacaoOrcamentoDetalhes() {
               </div>
             ) : (
               <DecisaoAprovacaoItemPanel
-                precificacaoOriginal={precificacaoAprovadaCarregada}
-                precoUnitarioAtual={
+                canalNome={canalAtual.nome}
+                quantidadeItem={simQuantidade ?? (itemAtual.quantidade || 1)}
+                precoUnitarioEditado={
                   simPrecoUnitario ??
                   (itemAtual.precos_canais?.[canalAtual.id]?.preco_unitario || 0)
                 }
-                precoCheioAtual={simPrecoCheio}
-                quantidadeAtual={simQuantidade ?? (itemAtual.quantidade || 1)}
-                freteAtual={
+                precoCheioEditado={
+                  simPrecoCheio ?? (itemAtual.precos_canais?.[canalAtual.id]?.preco_cheio || 0)
+                }
+                freteItemEditado={
                   simFrete ?? (itemAtual.fretes_canais?.[canalAtual.id]?.valor_frete || 0)
                 }
-                canalNome={canalAtual.nome}
-                modeloNome={itemAtual.modelo_nome}
-                permiteEditar={false}
+                precificacaoAprovadaRecord={precificacaoAprovadaCarregada}
+                produtoVinculado={itemAtual.produtos_canais?.[canalAtual.id]}
               />
             )}
           </CardContent>

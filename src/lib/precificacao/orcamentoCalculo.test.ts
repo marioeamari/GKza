@@ -9,6 +9,7 @@ import {
   normalizarOrcamentoRecord,
   converterUnitarioParaCheio,
   converterCheioParaUnitario,
+  formatarDataBR,
 } from './orcamentoCalculo'
 
 describe('Módulo de Orçamentos - Regras de Cálculo e Formatação', () => {
@@ -267,6 +268,18 @@ describe('Módulo de Orçamentos - Regras de Cálculo e Formatação', () => {
         { id: 'canal_shopee_id', nome: 'Shopee Oficial' },
         { id: 'canal_site_id', nome: 'Loja GKza Virtual' },
       ])
+    })
+  })
+
+  describe('Formatação de data para o padrão brasileiro (dd/mm/aaaa)', () => {
+    it('formata strings ISO e objetos Date com segurança', () => {
+      expect(formatarDataBR('2026-10-14')).toBe('14/10/2026')
+      expect(formatarDataBR('2026-10-14T00:00:00.000Z')).toBe('14/10/2026')
+      expect(formatarDataBR('2026-10-14 12:00:00.000Z')).toBe('14/10/2026')
+      expect(formatarDataBR('14/10/2026')).toBe('14/10/2026')
+      expect(formatarDataBR(undefined)).toBe('-')
+      expect(formatarDataBR(null)).toBe('-')
+      expect(formatarDataBR('')).toBe('-')
     })
   })
 
