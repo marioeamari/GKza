@@ -234,21 +234,35 @@ export function normalizarOrcamentoRecord(raw: any): OrcamentoRecord {
   if (Array.isArray(rawExpandItens)) {
     itensExpandidos = rawExpandItens
       .filter((it) => it && typeof it === 'object')
-      .map((it: any) => ({
-        ...it,
-        precos_canais:
-          it.precos_canais &&
-          typeof it.precos_canais === 'object' &&
-          !Array.isArray(it.precos_canais)
-            ? it.precos_canais
-            : {},
-        fretes_canais:
-          it.fretes_canais &&
-          typeof it.fretes_canais === 'object' &&
-          !Array.isArray(it.fretes_canais)
-            ? it.fretes_canais
-            : {},
-      }))
+      .map((it: any) => {
+        let composicaoArray: any[] = []
+        if (Array.isArray(it.composicao)) {
+          composicaoArray = it.composicao
+        } else if (typeof it.composicao === 'string' && it.composicao.trim()) {
+          try {
+            const parsed = JSON.parse(it.composicao)
+            if (Array.isArray(parsed)) composicaoArray = parsed
+          } catch {
+            composicaoArray = []
+          }
+        }
+        return {
+          ...it,
+          precos_canais:
+            it.precos_canais &&
+            typeof it.precos_canais === 'object' &&
+            !Array.isArray(it.precos_canais)
+              ? it.precos_canais
+              : {},
+          fretes_canais:
+            it.fretes_canais &&
+            typeof it.fretes_canais === 'object' &&
+            !Array.isArray(it.fretes_canais)
+              ? it.fretes_canais
+              : {},
+          composicao: composicaoArray,
+        }
+      })
   }
 
   return {
@@ -490,6 +504,13 @@ export function gerarTextoWhatsappOrcamento(params: {
     tema_nome?: string
     cor?: string
     quantidade: number
+    composicao?: Array<{
+      tipo?: string
+      tema_nome?: string
+      modelo_nome?: string
+      descricao?: string
+      quantidade: number
+    }>
     precos_canais?: Record<string, OrcamentoPrecoCanalItem>
     fretes_canais?: Record<string, OrcamentoFreteCanalItem>
   }>
@@ -563,6 +584,15 @@ export function gerarTextoWhatsappOrcamento(params: {
         linhaItem += ` (${item.descricao})`
       }
       linhas.push(linhaItem)
+
+      // Sub-lista de composição para expedição/detalhe do kit se houver
+      if (Array.isArray(item.composicao) && item.composicao.length > 0) {
+        for (const comp of item.composicao) {
+          const compNome = comp.modelo_nome || comp.tema_nome || comp.descricao || 'Item'
+          const compTema = comp.tema_nome ? ` [${comp.tema_nome}]` : ''
+          linhas.push(`  - ${comp.quantidade}x ${compNome}${compTema}`)
+        }
+      }
 
       // Linha de frete:
       // Se modo for 'frete_gratis', exibe '* Frete: Grátis'

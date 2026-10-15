@@ -54,6 +54,24 @@ export interface OrcamentoFreteCanalItem {
 
 export type TipoItemOrcamento = 'cadastrado' | 'personalizado'
 
+export type TipoComposicaoItem = 'cadastrado' | 'personalizado'
+
+export interface ItemComposicaoOrcamento {
+  id: string
+  tipo: TipoComposicaoItem
+  tema?: string
+  tema_nome?: string
+  modelo?: string
+  modelo_nome?: string
+  modelo_codigo?: string
+  foto_url?: string
+  descricao?: string
+  imagem_anexo?: string
+  preview_imagem?: string
+  cor?: string
+  quantidade: number
+}
+
 export interface OrcamentoItemRecord {
   id: string
   orcamento: string
@@ -71,6 +89,7 @@ export interface OrcamentoItemRecord {
   precos_canais: Record<string, OrcamentoPrecoCanalItem>
   fretes_canais: Record<string, OrcamentoFreteCanalItem>
   produtos_canais?: Record<string, OrcamentoProdutoVinculadoCanal>
+  composicao?: ItemComposicaoOrcamento[]
   ordem?: number
   created?: string
   updated?: string
@@ -151,6 +170,7 @@ export interface CreateOrcamentoInput {
     precos_canais: Record<string, OrcamentoPrecoCanalItem>
     fretes_canais: Record<string, OrcamentoFreteCanalItem>
     produtos_canais?: Record<string, OrcamentoProdutoVinculadoCanal>
+    composicao?: ItemComposicaoOrcamento[]
     ordem?: number
   }>
 }

@@ -39,6 +39,8 @@ import {
   ClienteOrcamentoRecord,
   StatusOrcamento,
   TipoItemOrcamento,
+  ItemComposicaoOrcamento,
+  TipoComposicaoItem,
 } from '@/types/orcamento'
 import { PrecCanalRecord } from '@/types/precificacao'
 import { KitTema, KitModelo } from '@/types/separacaoKits'
@@ -65,7 +67,7 @@ import {
 } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Upload, Image as ImageIcon, FileText, CheckCircle2 } from 'lucide-react'
+import { Upload, Image as ImageIcon, FileText, CheckCircle2, Package, ListTree } from 'lucide-react'
 
 interface FormItemLinha {
   id?: string
@@ -81,6 +83,7 @@ interface FormItemLinha {
   tema_nome?: string
   cor?: string
   quantidade: number
+  composicao: ItemComposicaoOrcamento[]
   precos_canais: Record<string, OrcamentoPrecoCanalItem>
   fretes_canais: Record<string, OrcamentoFreteCanalItem>
   produtos_canais: Record<string, OrcamentoProdutoVinculadoCanal>
@@ -186,22 +189,25 @@ export default function PrecificacaoOrcamentoForm() {
           setItens([
             {
               tipo_item: 'cadastrado',
-              modelo_nome: 'Banho',
+              modelo_nome: 'Kit Toalhas',
               tema: undefined,
               tema_nome: '',
               cor: '',
-              quantidade: 25,
-              precos_canais: {},
-              fretes_canais: {},
-              produtos_canais: {},
-            },
-            {
-              tipo_item: 'cadastrado',
-              modelo_nome: 'Rosto',
-              tema: undefined,
-              tema_nome: '',
-              cor: '',
-              quantidade: 25,
+              quantidade: 30,
+              composicao: [
+                {
+                  id: 'comp_' + Math.random().toString(36).substring(2, 9),
+                  tipo: 'cadastrado',
+                  modelo_nome: 'Banho',
+                  quantidade: 15,
+                },
+                {
+                  id: 'comp_' + Math.random().toString(36).substring(2, 9),
+                  tipo: 'cadastrado',
+                  modelo_nome: 'Rosto',
+                  quantidade: 15,
+                },
+              ],
               precos_canais: {},
               fretes_canais: {},
               produtos_canais: {},
@@ -228,24 +234,56 @@ export default function PrecificacaoOrcamentoForm() {
             : []
           if (itensOrc.length > 0) {
             setItens(
-              itensOrc.map((it) => ({
-                id: it.id,
-                tipo_item: it.tipo_item || (it.modelo || it.tema ? 'cadastrado' : 'personalizado'),
-                modelo: it.modelo,
-                modelo_nome: it.modelo_nome || '',
-                modelo_codigo: it.modelo_codigo,
-                descricao: it.descricao || '',
-                imagem_anexo: it.imagem_anexo,
-                preview_imagem: it.imagem_anexo ? getFileUrl(it, it.imagem_anexo) : undefined,
-                foto_url: it.foto_url,
-                tema: it.tema || orcNormalizado.tema || undefined,
-                tema_nome: it.tema_nome || orcNormalizado.tema_nome || '',
-                cor: it.cor || orcNormalizado.cor || '',
-                quantidade: it.quantidade || 1,
-                precos_canais: it.precos_canais || {},
-                fretes_canais: it.fretes_canais || {},
-                produtos_canais: it.produtos_canais || {},
-              })),
+              itensOrc.map((it) => {
+                let compList: ItemComposicaoOrcamento[] = []
+                if (Array.isArray(it.composicao) && it.composicao.length > 0) {
+                  compList = it.composicao.map((c) => ({
+                    ...c,
+                    preview_imagem: c.imagem_anexo ? getFileUrl(it, c.imagem_anexo) : c.foto_url,
+                  }))
+                } else {
+                  // Fallback para itens antigos sem composição: cria 1 entrada a partir do próprio item
+                  compList = [
+                    {
+                      id: 'comp_' + Math.random().toString(36).substring(2, 9),
+                      tipo: it.tipo_item === 'personalizado' ? 'personalizado' : 'cadastrado',
+                      tema: it.tema,
+                      tema_nome: it.tema_nome,
+                      modelo: it.modelo,
+                      modelo_nome: it.modelo_nome,
+                      modelo_codigo: it.modelo_codigo,
+                      descricao: it.descricao,
+                      foto_url: it.foto_url,
+                      imagem_anexo: it.imagem_anexo,
+                      preview_imagem: it.imagem_anexo
+                        ? getFileUrl(it, it.imagem_anexo)
+                        : it.foto_url,
+                      cor: it.cor,
+                      quantidade: it.quantidade || 1,
+                    },
+                  ]
+                }
+                return {
+                  id: it.id,
+                  tipo_item:
+                    it.tipo_item || (it.modelo || it.tema ? 'cadastrado' : 'personalizado'),
+                  modelo: it.modelo,
+                  modelo_nome: it.modelo_nome || '',
+                  modelo_codigo: it.modelo_codigo,
+                  descricao: it.descricao || '',
+                  imagem_anexo: it.imagem_anexo,
+                  preview_imagem: it.imagem_anexo ? getFileUrl(it, it.imagem_anexo) : undefined,
+                  foto_url: it.foto_url,
+                  tema: it.tema || orcNormalizado.tema || undefined,
+                  tema_nome: it.tema_nome || orcNormalizado.tema_nome || '',
+                  cor: it.cor || orcNormalizado.cor || '',
+                  quantidade: it.quantidade || 1,
+                  composicao: compList,
+                  precos_canais: it.precos_canais || {},
+                  fretes_canais: it.fretes_canais || {},
+                  produtos_canais: it.produtos_canais || {},
+                }
+              }),
             )
           }
         }
@@ -353,25 +391,207 @@ export default function PrecificacaoOrcamentoForm() {
     )
   }
 
-  // Adicionar item cadastrado ou personalizado
+  // Adicionar item (produto que o cliente compra)
   const handleAdicionarItem = (tipo: TipoItemOrcamento = 'cadastrado') => {
     setItens((prev) => [
       ...prev,
       {
         tipo_item: tipo,
-        modelo_nome: tipo === 'cadastrado' ? '' : 'Item Personalizado',
+        modelo_nome: tipo === 'cadastrado' ? 'Produto' : 'Item Personalizado',
         modelo: undefined,
         modelo_codigo: undefined,
         descricao: '',
         tema: undefined,
         tema_nome: '',
         cor: '',
-        quantidade: 1,
+        quantidade: 10,
+        composicao: [
+          {
+            id: 'comp_' + Math.random().toString(36).substring(2, 9),
+            tipo: 'cadastrado',
+            modelo_nome: '',
+            quantidade: 10,
+          },
+        ],
         precos_canais: {},
         fretes_canais: {},
         produtos_canais: {},
       },
     ])
+  }
+
+  // --- Handlers de Composição Interna do Item ---
+  const handleAdicionarEntradaComposicao = (
+    itemIndex: number,
+    tipo: TipoComposicaoItem = 'cadastrado',
+  ) => {
+    setItens((prev) => {
+      const copy = [...prev]
+      const it = copy[itemIndex]
+      if (!it) return prev
+      const compAtual = it.composicao || []
+      const novaEntrada: ItemComposicaoOrcamento = {
+        id: 'comp_' + Math.random().toString(36).substring(2, 9),
+        tipo,
+        modelo_nome: tipo === 'cadastrado' ? '' : 'Personalizado',
+        descricao: '',
+        quantidade: 1,
+      }
+      copy[itemIndex] = {
+        ...it,
+        composicao: [...compAtual, novaEntrada],
+      }
+      return copy
+    })
+  }
+
+  const handleRemoverEntradaComposicao = (itemIndex: number, compIndex: number) => {
+    setItens((prev) => {
+      const copy = [...prev]
+      const it = copy[itemIndex]
+      if (!it) return prev
+      copy[itemIndex] = {
+        ...it,
+        composicao: (it.composicao || []).filter((_, idx) => idx !== compIndex),
+      }
+      return copy
+    })
+  }
+
+  const handleAtualizarEntradaComposicao = (
+    itemIndex: number,
+    compIndex: number,
+    campo: keyof ItemComposicaoOrcamento,
+    valor: any,
+  ) => {
+    setItens((prev) => {
+      const copy = [...prev]
+      const it = copy[itemIndex]
+      if (!it) return prev
+      const compAtual = [...(it.composicao || [])]
+      if (!compAtual[compIndex]) return prev
+      compAtual[compIndex] = {
+        ...compAtual[compIndex],
+        [campo]: valor,
+      }
+      copy[itemIndex] = {
+        ...it,
+        composicao: compAtual,
+      }
+      return copy
+    })
+  }
+
+  const handleSelecionarTemaNaComposicao = (
+    itemIndex: number,
+    compIndex: number,
+    temaId: string,
+  ) => {
+    const t = temasDisponiveis.find((x) => x.id === temaId)
+    const temaValidoId = temaId === 'none' ? undefined : temaId
+    const temaNome = t?.nome || ''
+
+    // Busca modelos deste tema
+    const modelosDesteTema = temaValidoId
+      ? modelosDisponiveis.filter((m) => m.tema === temaValidoId)
+      : []
+    const modeloPadrao = modelosDesteTema.length > 0 ? modelosDesteTema[0] : undefined
+
+    let fotoUrl: string | undefined = undefined
+    if (modeloPadrao?.foto) {
+      fotoUrl = getFileUrl(modeloPadrao, modeloPadrao.foto)
+    }
+
+    setItens((prev) => {
+      const copy = [...prev]
+      const it = copy[itemIndex]
+      if (!it) return prev
+      const compAtual = [...(it.composicao || [])]
+      const ent = compAtual[compIndex]
+      if (!ent) return prev
+
+      compAtual[compIndex] = {
+        ...ent,
+        tema: temaValidoId,
+        tema_nome: temaNome,
+        modelo: modeloPadrao?.id,
+        modelo_nome: modeloPadrao?.nome || ent.modelo_nome,
+        modelo_codigo: modeloPadrao?.codigo || ent.modelo_codigo,
+        foto_url: fotoUrl,
+        preview_imagem: fotoUrl,
+      }
+
+      copy[itemIndex] = {
+        ...it,
+        composicao: compAtual,
+      }
+      return copy
+    })
+  }
+
+  const handleSelecionarModeloNaComposicao = (
+    itemIndex: number,
+    compIndex: number,
+    modeloId: string,
+  ) => {
+    const mod = modelosDisponiveis.find((m) => m.id === modeloId)
+    let fotoUrl: string | undefined = undefined
+    if (mod?.foto) {
+      fotoUrl = getFileUrl(mod, mod.foto)
+    }
+
+    setItens((prev) => {
+      const copy = [...prev]
+      const it = copy[itemIndex]
+      if (!it) return prev
+      const compAtual = [...(it.composicao || [])]
+      const ent = compAtual[compIndex]
+      if (!ent) return prev
+
+      compAtual[compIndex] = {
+        ...ent,
+        modelo: mod?.id,
+        modelo_nome: mod?.nome || ent.modelo_nome,
+        modelo_codigo: mod?.codigo,
+        foto_url: fotoUrl || ent.foto_url,
+        preview_imagem: fotoUrl || ent.preview_imagem,
+      }
+
+      copy[itemIndex] = {
+        ...it,
+        composicao: compAtual,
+      }
+      return copy
+    })
+  }
+
+  const handleUploadImagemComposicao = (
+    itemIndex: number,
+    compIndex: number,
+    file: File | null,
+  ) => {
+    if (!file) return
+    const previewUrl = URL.createObjectURL(file)
+    setItens((prev) => {
+      const copy = [...prev]
+      const it = copy[itemIndex]
+      if (!it) return prev
+      const compAtual = [...(it.composicao || [])]
+      const ent = compAtual[compIndex]
+      if (!ent) return prev
+
+      compAtual[compIndex] = {
+        ...ent,
+        imagem_anexo: file as any,
+        preview_imagem: previewUrl,
+      }
+
+      copy[itemIndex] = {
+        ...it,
+        composicao: compAtual,
+      }
+      return copy
+    })
   }
 
   // Remover item
@@ -480,8 +700,16 @@ export default function PrecificacaoOrcamentoForm() {
         }
       }
 
+      // Se o item ainda não tem um modelo_nome definido ou tem o placeholder padrão, atualiza com o nome do produto
+      const novoModeloNome =
+        (!it.modelo_nome || it.modelo_nome === 'Produto' || it.modelo_nome === 'Item') &&
+        prodAprovado
+          ? prodAprovado.produto_nome
+          : it.modelo_nome
+
       copy[index] = {
         ...it,
+        modelo_nome: novoModeloNome,
         precos_canais: precos,
         produtos_canais: produtosCanais,
       }
@@ -746,7 +974,7 @@ export default function PrecificacaoOrcamentoForm() {
           id: it.id,
           tipo_item: it.tipo_item,
           modelo: it.modelo,
-          modelo_nome: it.modelo_nome || 'Item sem nome',
+          modelo_nome: it.modelo_nome || 'Produto sem nome',
           modelo_codigo: it.modelo_codigo,
           descricao: it.descricao || undefined,
           imagem_anexo: it.imagem_anexo,
@@ -755,6 +983,7 @@ export default function PrecificacaoOrcamentoForm() {
           tema_nome: it.tema_nome || undefined,
           cor: it.cor || undefined,
           quantidade: Number(it.quantidade) || 1,
+          composicao: it.composicao || [],
           precos_canais: it.precos_canais,
           fretes_canais: it.fretes_canais,
           produtos_canais: it.produtos_canais,
@@ -1017,17 +1246,20 @@ export default function PrecificacaoOrcamentoForm() {
         qtdModelos={itens.length}
       />
 
-      {/* BLOCO 3: ITENS & QUANTIDADES (DOIS TIPOS: CADASTRADO E PERSONALIZADO) */}
+      {/* BLOCO 3: ITENS & QUANTIDADES (O ITEM É O PRODUTO QUE O CLIENTE COMPRA; COM COMPOSIÇÃO INTERNA PARA EXPEDIÇÃO) */}
       <Card className="shadow-xs border-border/80">
         <CardHeader className="pb-3 border-b border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-primary" />
-              <CardTitle className="text-base font-bold">3. Itens & Quantidades</CardTitle>
+              <Package className="w-4 h-4 text-primary" />
+              <CardTitle className="text-base font-bold">
+                3. Itens & Quantidades (Produtos Vendidos)
+              </CardTitle>
             </div>
             <CardDescription className="text-xs mt-0.5">
-              Adicione quantos itens quiser: <strong>Cadastrados</strong> (com tema/modelo da
-              expedição) ou <strong>Personalizados</strong> (texto livre + upload de imagem).
+              Cada item é o <strong>Produto que o cliente compra</strong> (com preço por canal e
+              quantidade total). Dentro dele, monte a <strong>Composição Interna</strong> para
+              expedição (temas cadastrados ou personalizados sem preço).
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -1036,263 +1268,94 @@ export default function PrecificacaoOrcamentoForm() {
               type="button"
               onClick={() => handleAdicionarItem('cadastrado')}
               variant="outline"
-              className="text-xs font-bold border-emerald-300 text-emerald-700 bg-emerald-50/60 hover:bg-emerald-100/70"
+              className="text-xs font-bold border-primary/40 text-primary bg-primary/5 hover:bg-primary/10"
             >
-              <Plus className="w-3.5 h-3.5 mr-1" />+ Item Cadastrado
-            </Button>
-            <Button
-              size="sm"
-              type="button"
-              onClick={() => handleAdicionarItem('personalizado')}
-              variant="outline"
-              className="text-xs font-bold border-violet-300 text-violet-700 bg-violet-50/60 hover:bg-violet-100/70"
-            >
-              <Sparkles className="w-3.5 h-3.5 mr-1" />+ Item Personalizado
+              <Plus className="w-3.5 h-3.5 mr-1" />+ Novo Item (Produto)
             </Button>
           </div>
         </CardHeader>
         <CardContent className="pt-4 space-y-6">
           {itens.map((item, index) => {
-            const isPersonalizado = item.tipo_item === 'personalizado'
-            const modelosDoItem = item.tema
-              ? modelosDisponiveis.filter((m) => m.tema === item.tema)
-              : modelosDisponiveis
-            const modeloRecord = modelosDisponiveis.find((m) => m.id === item.modelo)
-            const fotoModelo = modeloRecord?.foto ? getFileUrl(modeloRecord, modeloRecord.foto) : ''
-            const imagemExibir = item.preview_imagem || item.foto_url || fotoModelo
+            const composicao = item.composicao || []
+            const somaComposicao = composicao.reduce(
+              (acc, c) => acc + (Number(c.quantidade) || 0),
+              0,
+            )
+            const quantidadeItem = Number(item.quantidade) || 0
+            const composicaoFecha = composicao.length === 0 || somaComposicao === quantidadeItem
 
             return (
               <div
                 key={index}
-                className={`p-4 rounded-xl border-2 transition-all space-y-4 ${
-                  isPersonalizado
-                    ? 'border-violet-200/90 bg-violet-50/15'
-                    : 'border-emerald-200/90 bg-emerald-50/10'
-                }`}
+                className="p-4 rounded-xl border-2 border-border/90 bg-card/60 shadow-xs space-y-4"
               >
-                {/* Linha 1 do item: Cabeçalho com Tipo, Foto/Upload, Campos de identificação e Botão Remover */}
-                <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-border/50 pb-3">
+                {/* Linha 1 do item: Produto que o cliente compra + Quantidade + Botão Remover */}
+                <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-border/60 pb-3">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
-                    <span
-                      className={`h-7 w-7 rounded-full font-bold text-xs flex items-center justify-center shrink-0 ${
-                        isPersonalizado
-                          ? 'bg-violet-100 text-violet-800'
-                          : 'bg-emerald-100 text-emerald-800'
-                      }`}
-                    >
+                    <span className="h-7 w-7 rounded-full font-bold text-xs flex items-center justify-center shrink-0 bg-primary/15 text-primary">
                       {index + 1}
                     </span>
 
-                    {/* Preview / Upload da Imagem */}
-                    <div className="shrink-0 flex flex-col items-center gap-1.5">
-                      <div className="h-16 w-16 rounded-lg border-2 border-dashed border-border/80 bg-background flex items-center justify-center overflow-hidden relative shadow-xs">
-                        {imagemExibir ? (
-                          <img
-                            src={imagemExibir}
-                            alt={item.modelo_nome || 'Item'}
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <ImageIcon className="w-6 h-6 text-muted-foreground/40" />
-                        )}
-                      </div>
-
-                      {isPersonalizado && (
-                        <label className="cursor-pointer text-[10px] font-bold text-violet-700 hover:text-violet-900 flex items-center gap-1 bg-violet-100/70 hover:bg-violet-200 px-2 py-0.5 rounded transition-colors">
-                          <Upload className="w-3 h-3" />
-                          <span>Anexar</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0] || null
-                              handleUploadImagemPersonalizado(index, file)
-                            }}
-                          />
-                        </label>
-                      )}
-                    </div>
-
-                    {/* Bloco de Campos do Item de acordo com o Tipo */}
-                    <div className="flex-1 space-y-2 min-w-0">
+                    <div className="flex-1 space-y-3 min-w-0">
                       <div className="flex items-center gap-2">
                         <Badge
                           variant="outline"
-                          className={`text-[10px] font-bold uppercase tracking-wider ${
-                            isPersonalizado
-                              ? 'bg-violet-100/80 text-violet-900 border-violet-300'
-                              : 'bg-emerald-100/80 text-emerald-900 border-emerald-300'
-                          }`}
+                          className="text-[10px] font-bold uppercase tracking-wider bg-primary/10 text-primary border-primary/30"
                         >
-                          {isPersonalizado ? 'Personalizado' : 'Cadastrado (Expedição)'}
+                          Item {index + 1} • Produto Comercial
                         </Badge>
                         <span className="text-xs text-muted-foreground">
-                          {isPersonalizado
-                            ? 'Item livre com descrição e upload'
-                            : 'Tema e modelo vinculados aos cadastros'}
+                          Item com precificação para o cliente
                         </span>
                       </div>
 
-                      {isPersonalizado ? (
-                        /* CAMPOS DE ITEM PERSONALIZADO */
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
-                          <div className="sm:col-span-2">
-                            <Label className="text-[10px] font-semibold text-muted-foreground">
-                              Nome / Título do Personalizado *
-                            </Label>
-                            <Input
-                              placeholder="Ex: Toalha com Brasão e Nome Bordado"
-                              value={item.modelo_nome}
-                              onChange={(e) =>
-                                handleAtualizarItem(index, 'modelo_nome', e.target.value)
-                              }
-                              className="h-8 text-xs font-semibold"
-                            />
-                          </div>
-
-                          <div className="sm:col-span-2">
-                            <Label className="text-[10px] font-semibold text-muted-foreground">
-                              Detalhes / Descrição Livre
-                            </Label>
-                            <Input
-                              placeholder="Ex: Linha dourada, toalha branca, monograma central"
-                              value={item.descricao || ''}
-                              onChange={(e) =>
-                                handleAtualizarItem(index, 'descricao', e.target.value)
-                              }
-                              className="h-8 text-xs font-medium"
-                            />
-                          </div>
-
-                          <div>
-                            <Label className="text-[10px] font-semibold text-muted-foreground">
-                              Cor (opcional)
-                            </Label>
-                            <Input
-                              placeholder="Ex: BRANCA"
-                              value={item.cor || ''}
-                              onChange={(e) => handleAtualizarItem(index, 'cor', e.target.value)}
-                              className="h-8 text-xs font-medium uppercase"
-                            />
-                          </div>
-
-                          <div>
-                            <Label className="text-[10px] font-semibold text-muted-foreground">
-                              Quantidade
-                            </Label>
-                            <Input
-                              type="number"
-                              min="1"
-                              value={item.quantidade}
-                              onChange={(e) =>
-                                handleAlterarQuantidadeItem(
-                                  index,
-                                  Math.max(1, Number(e.target.value) || 1),
-                                )
-                              }
-                              className="h-8 text-xs font-bold text-center"
-                            />
-                          </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="sm:col-span-2">
+                          <Label className="text-[10px] font-semibold text-muted-foreground">
+                            Nome do Produto Comercial *
+                          </Label>
+                          <Input
+                            placeholder="Ex: Kit 30 Toalhas Bordadas"
+                            value={item.modelo_nome}
+                            onChange={(e) =>
+                              handleAtualizarItem(index, 'modelo_nome', e.target.value)
+                            }
+                            className="h-8 text-xs font-semibold"
+                          />
                         </div>
-                      ) : (
-                        /* CAMPOS DE ITEM CADASTRADO (BUSCA TEMA E MODELO DA EXPEDIÇÃO) */
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5">
-                          {/* 1. Tema do Kit / Expedição */}
-                          <div>
-                            <Label className="text-[10px] font-semibold text-muted-foreground">
-                              Tema da Expedição *
-                            </Label>
-                            <Select
-                              value={item.tema || 'none'}
-                              onValueChange={(val) => handleSelecionarTemaNoItem(index, val)}
-                            >
-                              <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder="Selecione o tema..." />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">-- Sem Tema Cadastrado --</SelectItem>
-                                {temasDisponiveis.map((t) => (
-                                  <SelectItem key={t.id} value={t.id}>
-                                    {t.nome}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
 
-                          {/* 2. Modelo da Expedição */}
-                          <div>
-                            <Label className="text-[10px] font-semibold text-muted-foreground">
-                              Modelo Expedição *
-                            </Label>
-                            <Select
-                              value={item.modelo || 'none'}
-                              onValueChange={(val) => handleSelecionarModeloNoItem(index, val)}
-                            >
-                              <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder="Selecione o modelo..." />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">-- Modelo Livre --</SelectItem>
-                                {modelosDoItem.map((m) => (
-                                  <SelectItem key={m.id} value={m.id}>
-                                    {m.codigo ? `${m.codigo} - ` : ''}
-                                    {m.nome}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          {/* 3. Nome do Modelo / Descritivo */}
-                          <div>
-                            <Label className="text-[10px] font-semibold text-muted-foreground">
-                              Nome do Modelo
-                            </Label>
-                            <Input
-                              placeholder="Banho, Rosto..."
-                              value={item.modelo_nome}
-                              onChange={(e) =>
-                                handleAtualizarItem(index, 'modelo_nome', e.target.value)
-                              }
-                              className="h-8 text-xs font-semibold"
-                            />
-                          </div>
-
-                          {/* 4. Cor */}
-                          <div>
-                            <Label className="text-[10px] font-semibold text-muted-foreground">
-                              Cor
-                            </Label>
-                            <Input
-                              placeholder="Ex: AZUL"
-                              value={item.cor || ''}
-                              onChange={(e) => handleAtualizarItem(index, 'cor', e.target.value)}
-                              className="h-8 text-xs font-medium uppercase"
-                            />
-                          </div>
-
-                          {/* 5. Quantidade */}
-                          <div>
-                            <Label className="text-[10px] font-semibold text-muted-foreground">
-                              Quantidade
-                            </Label>
-                            <Input
-                              type="number"
-                              min="1"
-                              value={item.quantidade}
-                              onChange={(e) =>
-                                handleAlterarQuantidadeItem(
-                                  index,
-                                  Math.max(1, Number(e.target.value) || 1),
-                                )
-                              }
-                              className="h-8 text-xs font-bold text-center"
-                            />
-                          </div>
+                        <div>
+                          <Label className="text-[10px] font-semibold text-muted-foreground">
+                            Quantidade do Item *
+                          </Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            value={item.quantidade}
+                            onChange={(e) =>
+                              handleAlterarQuantidadeItem(
+                                index,
+                                Math.max(1, Number(e.target.value) || 1),
+                              )
+                            }
+                            className="h-8 text-xs font-bold text-center"
+                          />
                         </div>
-                      )}
+
+                        <div>
+                          <Label className="text-[10px] font-semibold text-muted-foreground">
+                            Observação / Detalhe (opcional)
+                          </Label>
+                          <Input
+                            placeholder="Ex: Embalagem individual"
+                            value={item.descricao || ''}
+                            onChange={(e) =>
+                              handleAtualizarItem(index, 'descricao', e.target.value)
+                            }
+                            className="h-8 text-xs font-medium"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -1308,8 +1371,244 @@ export default function PrecificacaoOrcamentoForm() {
                   </Button>
                 </div>
 
-                {/* Linha 2 do item: Canais de Venda e Preços */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {/* Linha 2 do item: SUB-LISTA DE COMPOSIÇÃO INTERNA (PARA EXPEDIÇÃO, SEM PREÇO) */}
+                <div className="p-3.5 rounded-lg border border-dashed border-border/90 bg-muted/20 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <ListTree className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-xs font-bold text-foreground">
+                        Composição Interna deste Item (Expedição / Temas)
+                      </span>
+                      <Badge variant="secondary" className="text-[10px] font-mono">
+                        Soma: {somaComposicao} / {quantidadeItem} un
+                      </Badge>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        type="button"
+                        onClick={() => handleAdicionarEntradaComposicao(index, 'cadastrado')}
+                        variant="outline"
+                        className="h-7 text-[11px] font-bold border-emerald-300 text-emerald-800 bg-emerald-50/70 hover:bg-emerald-100"
+                      >
+                        <Plus className="w-3 h-3 mr-1" />+ Tema Cadastrado
+                      </Button>
+                      <Button
+                        size="sm"
+                        type="button"
+                        onClick={() => handleAdicionarEntradaComposicao(index, 'personalizado')}
+                        variant="outline"
+                        className="h-7 text-[11px] font-bold border-violet-300 text-violet-800 bg-violet-50/70 hover:bg-violet-100"
+                      >
+                        <Sparkles className="w-3 h-3 mr-1" />+ Personalizado
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Alerta Visível se a soma da composição não fechar com a quantidade do item */}
+                  {!composicaoFecha && (
+                    <div className="flex items-center gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-900 text-xs font-semibold">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>
+                        Aviso: A soma das quantidades da composição ({somaComposicao}) não fecha com
+                        a quantidade do item ({quantidadeItem}). O orçamento pode ser salvo
+                        normalmente, mas confira a distribuição para a expedição.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Lista de entradas da composição */}
+                  <div className="space-y-2.5">
+                    {composicao.map((comp, compIdx) => {
+                      const isCompPersonalizado = comp.tipo === 'personalizado'
+                      const modelosDoTema = comp.tema
+                        ? modelosDisponiveis.filter((m) => m.tema === comp.tema)
+                        : modelosDisponiveis
+                      const imagemPreview = comp.preview_imagem || comp.foto_url
+
+                      return (
+                        <div
+                          key={comp.id || compIdx}
+                          className={`p-2.5 rounded-lg border text-xs flex flex-col md:flex-row md:items-center justify-between gap-3 ${
+                            isCompPersonalizado
+                              ? 'border-violet-200 bg-violet-50/20'
+                              : 'border-emerald-200 bg-emerald-50/20'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                            {/* Miniatura da Imagem */}
+                            <div className="h-12 w-12 rounded-md border border-border/80 bg-background flex items-center justify-center overflow-hidden shrink-0 relative">
+                              {imagemPreview ? (
+                                <img
+                                  src={imagemPreview}
+                                  alt={comp.modelo_nome || comp.tema_nome || 'Composição'}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <ImageIcon className="w-4 h-4 text-muted-foreground/40" />
+                              )}
+                            </div>
+
+                            {/* Campos da Entrada */}
+                            <div className="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 items-center">
+                              {isCompPersonalizado ? (
+                                <>
+                                  <div className="sm:col-span-2">
+                                    <Label className="text-[9px] font-semibold text-muted-foreground">
+                                      Descrição / Nome do Personalizado
+                                    </Label>
+                                    <Input
+                                      placeholder="Ex: Brasão Família Silva (Linha Dourada)"
+                                      value={comp.modelo_nome || ''}
+                                      onChange={(e) =>
+                                        handleAtualizarEntradaComposicao(
+                                          index,
+                                          compIdx,
+                                          'modelo_nome',
+                                          e.target.value,
+                                        )
+                                      }
+                                      className="h-7 text-xs font-semibold"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-[9px] font-semibold text-muted-foreground">
+                                      Upload de Imagem
+                                    </Label>
+                                    <label className="cursor-pointer text-[10px] font-bold text-violet-700 hover:text-violet-900 flex items-center justify-center gap-1 bg-violet-100/70 hover:bg-violet-200 px-2 py-1 rounded transition-colors border border-violet-300">
+                                      <Upload className="w-3 h-3" />
+                                      <span>{comp.imagem_anexo ? 'Trocar' : 'Anexar'}</span>
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={(e) => {
+                                          const file = e.target.files?.[0] || null
+                                          handleUploadImagemComposicao(index, compIdx, file)
+                                        }}
+                                      />
+                                    </label>
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div>
+                                    <Label className="text-[9px] font-semibold text-muted-foreground">
+                                      Tema da Expedição *
+                                    </Label>
+                                    <Select
+                                      value={comp.tema || 'none'}
+                                      onValueChange={(val) =>
+                                        handleSelecionarTemaNaComposicao(index, compIdx, val)
+                                      }
+                                    >
+                                      <SelectTrigger className="h-7 text-xs">
+                                        <SelectValue placeholder="Selecione o tema..." />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="none">-- Escolher Tema --</SelectItem>
+                                        {temasDisponiveis.map((t) => (
+                                          <SelectItem key={t.id} value={t.id}>
+                                            {t.nome}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+
+                                  <div>
+                                    <Label className="text-[9px] font-semibold text-muted-foreground">
+                                      Modelo do Tema
+                                    </Label>
+                                    <Select
+                                      value={comp.modelo || 'none'}
+                                      onValueChange={(val) =>
+                                        handleSelecionarModeloNaComposicao(index, compIdx, val)
+                                      }
+                                    >
+                                      <SelectTrigger className="h-7 text-xs">
+                                        <SelectValue placeholder="Modelo..." />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="none">-- Modelo Livre --</SelectItem>
+                                        {modelosDoTema.map((m) => (
+                                          <SelectItem key={m.id} value={m.id}>
+                                            {m.codigo ? `${m.codigo} - ` : ''}
+                                            {m.nome}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+
+                                  <div>
+                                    <Label className="text-[9px] font-semibold text-muted-foreground">
+                                      Nome / Variação
+                                    </Label>
+                                    <Input
+                                      placeholder="Ex: Banho, Rosto..."
+                                      value={comp.modelo_nome || ''}
+                                      onChange={(e) =>
+                                        handleAtualizarEntradaComposicao(
+                                          index,
+                                          compIdx,
+                                          'modelo_nome',
+                                          e.target.value,
+                                        )
+                                      }
+                                      className="h-7 text-xs font-semibold"
+                                    />
+                                  </div>
+                                </>
+                              )}
+
+                              <div>
+                                <Label className="text-[9px] font-semibold text-muted-foreground">
+                                  Qtd na Expedição
+                                </Label>
+                                <Input
+                                  type="number"
+                                  min="1"
+                                  value={comp.quantidade}
+                                  onChange={(e) =>
+                                    handleAtualizarEntradaComposicao(
+                                      index,
+                                      compIdx,
+                                      'quantidade',
+                                      Math.max(1, Number(e.target.value) || 1),
+                                    )
+                                  }
+                                  className="h-7 text-xs font-bold text-center"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleRemoverEntradaComposicao(index, compIdx)}
+                            className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 shrink-0 self-end md:self-center"
+                            title="Remover Entrada da Composição"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      )
+                    })}
+
+                    {composicao.length === 0 && (
+                      <p className="text-[11px] text-muted-foreground italic text-center py-2">
+                        Nenhuma composição cadastrada. Adicione os temas ou modelos que compõem este
+                        kit para a expedição.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Linha 3 do item: Canais de Venda e Preços (PREÇO VEM DO PRODUTO VINCULADO E NÃO DO TEMA) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
                   {canaisSelecionados.map((canal) => {
                     const precoObj = item.precos_canais[canal.id]
                     const freteObj = item.fretes_canais[canal.id]
@@ -1336,40 +1635,36 @@ export default function PrecificacaoOrcamentoForm() {
                           </span>
                         </div>
 
-                        {/* Produto Vinculado (apenas para itens cadastrados ou se desejar vincular) */}
-                        {!isPersonalizado && (
-                          <div className="space-y-1 bg-muted/20 p-2 rounded-md border border-border/60">
-                            <Label className="text-[10px] font-bold text-muted-foreground flex items-center justify-between">
-                              <span>Produto Vinculado ({canal.nome})</span>
-                              {produtoVinculadoObj?.preco_aprovado && (
-                                <span className="text-emerald-700 font-mono">
-                                  Aprovado: {formatarMoedaBR(produtoVinculadoObj.preco_aprovado)}
-                                </span>
-                              )}
-                            </Label>
-                            <Select
-                              value={produtoVinculadoObj?.produto_id || 'none'}
-                              onValueChange={(val) =>
-                                handleSelecionarProdutoVinculadoNoCanal(index, canal.id, val)
-                              }
-                            >
-                              <SelectTrigger className="h-7 text-[11px]">
-                                <SelectValue placeholder="Vincular produto aprovado..." />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">
-                                  -- Modelo puro (Sem vínculo) --
+                        {/* Produto Vinculado do Repositório /precificacao/aprovados para este canal */}
+                        <div className="space-y-1 bg-muted/20 p-2 rounded-md border border-border/60">
+                          <Label className="text-[10px] font-bold text-muted-foreground flex items-center justify-between">
+                            <span>Produto Vinculado ({canal.nome})</span>
+                            {produtoVinculadoObj?.preco_aprovado && (
+                              <span className="text-emerald-700 font-mono">
+                                Aprovado: {formatarMoedaBR(produtoVinculadoObj.preco_aprovado)}
+                              </span>
+                            )}
+                          </Label>
+                          <Select
+                            value={produtoVinculadoObj?.produto_id || 'none'}
+                            onValueChange={(val) =>
+                              handleSelecionarProdutoVinculadoNoCanal(index, canal.id, val)
+                            }
+                          >
+                            <SelectTrigger className="h-7 text-[11px]">
+                              <SelectValue placeholder="Vincular produto aprovado..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">-- Preço Livre (Sem Vínculo) --</SelectItem>
+                              {prodsAprovadosDesteCanal.map((p) => (
+                                <SelectItem key={p.produto_id} value={p.produto_id}>
+                                  {p.produto_nome} {p.produto_sku ? `(${p.produto_sku})` : ''} -{' '}
+                                  {formatarMoedaBR(p.preco_aprovado)}
                                 </SelectItem>
-                                {prodsAprovadosDesteCanal.map((p) => (
-                                  <SelectItem key={p.produto_id} value={p.produto_id}>
-                                    {p.produto_nome} {p.produto_sku ? `(${p.produto_sku})` : ''} -{' '}
-                                    {formatarMoedaBR(p.preco_aprovado)}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        )}
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
 
                         {/* Conversão em Tempo Real: Preço Unitário <-> Preço Cheio */}
                         <div className="grid grid-cols-2 gap-2">
@@ -1415,7 +1710,7 @@ export default function PrecificacaoOrcamentoForm() {
                         </div>
 
                         <div>
-                          {/* Dois botões/modos de frete: 'Frete pago pelo Cliente' e 'Frete Grátis' */}
+                          {/* Modos de frete: 'Frete pago pelo Cliente' e 'Frete Grátis' */}
                           <div className="flex items-center justify-between mb-1">
                             <Label className="text-[10px] text-muted-foreground block font-medium">
                               Frete do Item (R$)
@@ -1481,7 +1776,7 @@ export default function PrecificacaoOrcamentoForm() {
                   })}
                 </div>
 
-                {/* Linha 3 do item: PAINEL DA DECISÃO DE APROVAÇÃO POR ITEM (Dinâmico para cada canal) */}
+                {/* Linha 4 do item: PAINEL DA DECISÃO DE APROVAÇÃO POR ITEM (Dinâmico para cada canal) */}
                 <div className="pt-2 border-t border-border/50 space-y-3">
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">

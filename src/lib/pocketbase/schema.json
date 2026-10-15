@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-15T10:43:37.114Z",
+  "generatedAt": "2026-10-15T15:17:10.902Z",
   "collections": [
     {
       "name": "users",
@@ -6077,6 +6077,12 @@
         {
           "name": "foto_url",
           "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "composicao",
+          "type": "json",
           "required": false,
           "system": false
         }

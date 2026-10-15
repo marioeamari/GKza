@@ -693,5 +693,69 @@ describe('Módulo de Orçamentos - Regras de Cálculo e Formatação', () => {
         }),
       ).toBe('Combo 0 unidades Itens')
     })
+
+    it('item Kit-30 com composição 10+10+10 fecha com quantidade do item e formata sub-lista no WhatsApp', () => {
+      const canais = [{ id: 'c1', nome: 'Site KzaMari' }]
+      const itemKit = {
+        modelo_nome: 'Kit-30-BLeve',
+        quantidade: 30,
+        composicao: [
+          {
+            id: '1',
+            tipo: 'cadastrado',
+            tema_nome: 'Mônica',
+            modelo_nome: 'Banho',
+            quantidade: 10,
+          },
+          {
+            id: '2',
+            tipo: 'cadastrado',
+            tema_nome: 'Cebolinha',
+            modelo_nome: 'Rosto',
+            quantidade: 10,
+          },
+          { id: '3', tipo: 'personalizado', descricao: 'Bordado Nome Alice', quantidade: 10 },
+        ],
+        precos_canais: {
+          c1: { canal_id: 'c1', canal_nome: 'Site KzaMari', preco_unitario: 15, preco_cheio: 450 },
+        },
+      }
+
+      // Soma da composição
+      const soma = itemKit.composicao.reduce((acc, c) => acc + c.quantidade, 0)
+      expect(soma).toBe(30)
+      expect(soma).toBe(itemKit.quantidade)
+
+      const textoZap = gerarTextoWhatsappOrcamento({
+        titulo: 'Cotação Kit 30',
+        canais,
+        itens: [itemKit as any],
+      })
+
+      // O produto comprado continua em destaque com preço
+      expect(textoZap).toContain('* 30 unidades Kit-30-BLeve R$ 450,00')
+      // A composição interna aparece como detalhe para expedição sem preço
+      expect(textoZap).toContain('- 10x Banho [Mônica]')
+      expect(textoZap).toContain('- 10x Rosto [Cebolinha]')
+      expect(textoZap).toContain('- 10x Bordado Nome Alice')
+    })
+
+    it('personalizado aceita texto e imagem na composição sem alertar preço', () => {
+      const itemPersonalizado = {
+        modelo_nome: 'Kit Toalha Casamento',
+        quantidade: 2,
+        composicao: [
+          {
+            id: 'c1',
+            tipo: 'personalizado' as const,
+            descricao: 'Brasão Dourado',
+            imagem_anexo: 'foto_brasao.png',
+            quantidade: 2,
+          },
+        ],
+      }
+      expect(itemPersonalizado.composicao[0].imagem_anexo).toBe('foto_brasao.png')
+      expect(itemPersonalizado.composicao[0].descricao).toBe('Brasão Dourado')
+    })
   })
 })

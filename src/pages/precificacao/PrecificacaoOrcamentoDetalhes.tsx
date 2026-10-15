@@ -494,6 +494,32 @@ export default function PrecificacaoOrcamentoDetalhes() {
                                 {item.cor && <span>Cor: {item.cor}</span>}
                               </div>
                             )}
+
+                            {/* Composição Interna do Kit (para expedição) */}
+                            {Array.isArray(item.composicao) && item.composicao.length > 0 && (
+                              <div className="mt-1.5 pt-1.5 border-t border-border/40 space-y-1">
+                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
+                                  Composição Interna (
+                                  {item.composicao.reduce(
+                                    (a, c) => a + (Number(c.quantidade) || 0),
+                                    0,
+                                  )}{' '}
+                                  un):
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {item.composicao.map((comp, cIdx) => (
+                                    <span
+                                      key={comp.id || cIdx}
+                                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-muted/60 border border-border/70 text-foreground"
+                                    >
+                                      <strong>{comp.quantidade}x</strong>{' '}
+                                      {comp.modelo_nome || comp.descricao || 'Item'}
+                                      {comp.tema_nome ? ` (${comp.tema_nome})` : ''}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>

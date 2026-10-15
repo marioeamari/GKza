@@ -52,14 +52,31 @@ export const orcamentosService = {
       expand: 'modelo,tema',
     })
 
+    const itensComposicao = (itensRaw || []).map((it: any) => {
+      let composicaoArray: any[] = []
+      if (Array.isArray(it.composicao)) {
+        composicaoArray = it.composicao
+      } else if (typeof it.composicao === 'string' && it.composicao.trim()) {
+        try {
+          const parsed = JSON.parse(it.composicao)
+          if (Array.isArray(parsed)) composicaoArray = parsed
+        } catch {
+          composicaoArray = []
+        }
+      }
+      return {
+        ...it,
+        composicao: composicaoArray,
+      }
+    })
+
     const orcNormalizado = normalizarOrcamentoRecord({
       ...orcRaw,
       expand: {
         ...orcRaw?.expand,
-        itens: itensRaw || [],
+        itens: itensComposicao,
       },
     })
-
     // Se expand.canais_comparados estiver vazio ou incompleto mas canais_comparados ou totais_por_canal tiver IDs,
     // busca os canais na coleção prec_canais para garantir que a lista de canais venha preenchida
     const canaisExpandidos = orcNormalizado.expand?.canais_comparados || []
@@ -122,14 +139,31 @@ export const orcamentosService = {
       expand: 'modelo,tema',
     })
 
+    const itensComposicao = (itens || []).map((it: any) => {
+      let composicaoArray: any[] = []
+      if (Array.isArray(it.composicao)) {
+        composicaoArray = it.composicao
+      } else if (typeof it.composicao === 'string' && it.composicao.trim()) {
+        try {
+          const parsed = JSON.parse(it.composicao)
+          if (Array.isArray(parsed)) composicaoArray = parsed
+        } catch {
+          composicaoArray = []
+        }
+      }
+      return {
+        ...it,
+        composicao: composicaoArray,
+      }
+    })
+
     const orcNormalizado = normalizarOrcamentoRecord({
       ...orc,
       expand: {
         ...orc?.expand,
-        itens: itens || [],
+        itens: itensComposicao,
       },
     })
-
     // Para a página pública, se os canais não vieram expandidos por restrição de prec_canais,
     // usamos os nomes já salvos em totais_por_canal (canal_id/canal_nome) sem requisição extra
     const canaisExpandidos = orcNormalizado.expand?.canais_comparados || []
@@ -226,6 +260,7 @@ export const orcamentosService = {
       formData.append('precos_canais', JSON.stringify(it.precos_canais || {}))
       formData.append('fretes_canais', JSON.stringify(it.fretes_canais || {}))
       formData.append('produtos_canais', JSON.stringify(it.produtos_canais || {}))
+      formData.append('composicao', JSON.stringify(it.composicao || []))
 
       if (it.modelo) formData.append('modelo', it.modelo)
       if (it.tema) formData.append('tema', it.tema)
@@ -325,6 +360,7 @@ export const orcamentosService = {
         formData.append('precos_canais', JSON.stringify(it.precos_canais || {}))
         formData.append('fretes_canais', JSON.stringify(it.fretes_canais || {}))
         formData.append('produtos_canais', JSON.stringify(it.produtos_canais || {}))
+        formData.append('composicao', JSON.stringify(it.composicao || []))
 
         if (it.modelo) formData.append('modelo', it.modelo)
         else formData.append('modelo', '')

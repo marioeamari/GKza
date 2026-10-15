@@ -209,4 +209,65 @@ describe('Ajustes no Módulo de Orçamentos - Regras e Integração de Serviços
       spyGetFullList.mockRestore()
     })
   })
+
+  describe('(D) Itens do Orçamento com Composição Interna (Expedição)', () => {
+    it('cria orçamento salvando composicao serializada em JSON para os itens', async () => {
+      const spyCreateOrc = vi
+        .spyOn(pb.collection('orcamentos'), 'create')
+        .mockResolvedValueOnce({ id: 'orc_novo_1', codigo: 'ORC-2026-001' } as any)
+
+      let formDataSalvo: FormData | null = null
+      const spyCreateItem = vi
+        .spyOn(pb.collection('orcamento_itens'), 'create')
+        .mockImplementationOnce(async (data: any) => {
+          formDataSalvo = data
+          return { id: 'it_criado_1' } as any
+        })
+
+      await orcamentosService.createOrcamento({
+        cliente_nome: 'Cliente Kit 30',
+        data_orcamento: '2026-10-15',
+        itens: [
+          {
+            modelo_nome: 'Kit 30 Toalhas',
+            quantidade: 30,
+            precos_canais: {
+              c1: { canal_id: 'c1', canal_nome: 'Site', preco_unitario: 10, preco_cheio: 300 },
+            },
+            fretes_canais: {},
+            composicao: [
+              {
+                id: 'comp_1',
+                tipo: 'cadastrado',
+                tema_nome: 'Mickey',
+                modelo_nome: 'Banho',
+                quantidade: 15,
+              },
+              {
+                id: 'comp_2',
+                tipo: 'cadastrado',
+                tema_nome: 'Minnie',
+                modelo_nome: 'Rosto',
+                quantidade: 15,
+              },
+            ],
+          },
+        ],
+      })
+
+      expect(spyCreateOrc).toHaveBeenCalled()
+      expect(spyCreateItem).toHaveBeenCalled()
+      expect(formDataSalvo).not.toBeNull()
+
+      const composicaoStr = (formDataSalvo as any).get('composicao')
+      expect(composicaoStr).toBeTruthy()
+      const parsed = JSON.parse(composicaoStr)
+      expect(parsed).toHaveLength(2)
+      expect(parsed[0].tema_nome).toBe('Mickey')
+      expect(parsed[1].tema_nome).toBe('Minnie')
+
+      spyCreateOrc.mockRestore()
+      spyCreateItem.mockRestore()
+    })
+  })
 })

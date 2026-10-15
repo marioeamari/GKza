@@ -89,6 +89,23 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
                       </div>`
                     : ''
                 }
+                ${
+                  Array.isArray(item.composicao) && item.composicao.length > 0
+                    ? `<div style="font-size: 11px; color: #4b5563; margin-top: 4px; padding-top: 3px; border-top: 1px dashed #e5e7eb;">
+                        <span style="font-weight: 600; color: #6b7280; font-size: 10px; text-transform: uppercase;">Composição do Kit:</span>
+                        <div style="margin-top: 2px;">
+                          ${item.composicao
+                            .map(
+                              (c) =>
+                                `<span style="display: inline-block; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 3px; padding: 1px 5px; font-size: 10px; margin-right: 4px; margin-bottom: 2px;">
+                                  <strong>${c.quantidade}x</strong> ${c.modelo_nome || c.descricao || 'Item'}${c.tema_nome ? ` (${c.tema_nome})` : ''}
+                                </span>`,
+                            )
+                            .join('')}
+                        </div>
+                      </div>`
+                    : ''
+                }
               </div>
             </div>
           </td>

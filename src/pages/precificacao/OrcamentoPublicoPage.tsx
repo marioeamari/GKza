@@ -340,6 +340,32 @@ export default function OrcamentoPublicoPage() {
                                   {item.cor && <span>Cor: {item.cor}</span>}
                                 </div>
                               )}
+
+                              {/* Composição Interna do Kit / Expedição */}
+                              {Array.isArray(item.composicao) && item.composicao.length > 0 && (
+                                <div className="mt-1.5 pt-1.5 border-t border-slate-100 space-y-1">
+                                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                                    Composição do Kit (
+                                    {item.composicao.reduce(
+                                      (a, c) => a + (Number(c.quantidade) || 0),
+                                      0,
+                                    )}{' '}
+                                    un):
+                                  </span>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {item.composicao.map((comp, cIdx) => (
+                                      <span
+                                        key={comp.id || cIdx}
+                                        className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 font-medium"
+                                      >
+                                        <strong>{comp.quantidade}x</strong>{' '}
+                                        {comp.modelo_nome || comp.descricao || 'Item'}
+                                        {comp.tema_nome ? ` (${comp.tema_nome})` : ''}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </td>
