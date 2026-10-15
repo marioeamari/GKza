@@ -8,6 +8,7 @@ import {
   formatarResumoCondicao,
   normalizarTextoCategoria,
   resolverPrecoParaMeta,
+  resolverTributosModalidade,
   round2,
   verificarCorrespondenciaCategoria,
 } from './calculo'
@@ -690,6 +691,189 @@ describe('Motor de Cálculo de Precificação - ERP GKza', () => {
 
       const precoUnit = calcularPrecoUnitarioCliente(dem.preco_pago_cliente, unidades)
       expect(precoUnit).toBe(19.92)
+    })
+  })
+
+  describe('Tributação por Modalidade do Canal', () => {
+    it('modalidade MEI calcula com as alíquotas da própria modalidade (DAS 0% + ICMS 0% + rateio fixo)', () => {
+      const modalidadeMei = {
+        id: 'mod_mei',
+        nome: 'MEI',
+        tributos_config: {
+          habilitado: true,
+          regime_tributario: 'mei' as const,
+          aliquota_das_pct: 0,
+          aliquota_icms_pct: 0,
+          das_imposto_total_mes: 76.5,
+          pedidos_estimados_mes: 3000,
+        },
+      }
+      const canal = { id: 'c_shopee', nome: 'Shopee' }
+
+      const resolvido = resolverTributosModalidade({
+        modalidade: modalidadeMei,
+        canal,
+      })
+
+      expect(resolvido.usandoFallbackGlobal).toBe(false)
+      expect(resolvido.fonteDescricao).toBe('MEI — Shopee')
+      expect(resolvido.tributos.aliquota_das_pct).toBe(0)
+      expect(resolvido.tributos.aliquota_icms_pct).toBe(0)
+
+      const dem = calcularDemonstrativo({
+        preco_anunciado: 24.9,
+        produto: {
+          sku: 'SKU-MEI',
+          nome: 'Produto MEI',
+          tipo: 'revenda' as const,
+          custo_aquisicao_unitario: 10,
+        },
+        taxas: [],
+        tributos: resolvido.tributos,
+      })
+
+      expect(dem.imposto_das).toBe(0)
+      expect(dem.imposto_icms).toBe(0)
+      expect(dem.rateio_fixo_imposto_mes).toBe(0.03) // 76.5 / 3000 = 0.0255 -> 0.03
+      expect(dem.total_tributos).toBe(0.03)
+      expect(dem.fonte_tributos).toBe('MEI — Shopee')
+      expect(dem.usando_global_fallback).toBe(false)
+    })
+
+    it('modalidade Full / Simples Nacional calcula com alíquotas próprias (DAS 6.95% + ICMS 2.23%)', () => {
+      const modalidadeSimples = {
+        id: 'mod_full',
+        nome: 'Full',
+        tributos_config: {
+          habilitado: true,
+          regime_tributario: 'simples_nacional' as const,
+          aliquota_das_pct: 6.95,
+          aliquota_icms_pct: 2.23,
+          das_imposto_total_mes: 0,
+          pedidos_estimados_mes: 1000,
+        },
+      }
+      const canal = { id: 'c_ml', nome: 'Mercado Livre' }
+
+      const resolvido = resolverTributosModalidade({
+        modalidade: modalidadeSimples,
+        canal,
+      })
+
+      expect(resolvido.usandoFallbackGlobal).toBe(false)
+      expect(resolvido.fonteDescricao).toBe('Simples Nacional — Mercado Livre')
+      expect(resolvido.tributos.aliquota_das_pct).toBe(6.95)
+      expect(resolvido.tributos.aliquota_icms_pct).toBe(2.23)
+
+      const dem = calcularDemonstrativo({
+        preco_anunciado: 24.9,
+        produto: {
+          sku: 'SKU-FULL',
+          nome: 'Produto Full',
+          tipo: 'revenda' as const,
+          custo_aquisicao_unitario: 10,
+        },
+        taxas: [],
+        tributos: resolvido.tributos,
+      })
+
+      expect(dem.imposto_das).toBe(1.73) // 24.90 * 6.95% = 1.73055
+      expect(dem.imposto_icms).toBe(0.56) // 24.90 * 2.23% = 0.55527
+      expect(dem.total_tributos).toBe(2.29) // 1.73055 + 0.55527 = 2.28582 -> 2.29
+      expect(dem.fonte_tributos).toBe('Simples Nacional — Mercado Livre')
+      expect(dem.usando_global_fallback).toBe(false)
+    })
+
+    it('alternar modalidade recalcula tributos, custo e margem líquida de forma independente', () => {
+      const canal = { id: 'c_shopee', nome: 'Shopee' }
+      const modMei = {
+        id: 'mod_mei',
+        nome: 'MEI',
+        tributos_config: {
+          habilitado: true,
+          regime_tributario: 'mei' as const,
+          aliquota_das_pct: 0,
+          aliquota_icms_pct: 0,
+          das_imposto_total_mes: 76.5,
+          pedidos_estimados_mes: 3000,
+        },
+      }
+      const modSimples = {
+        id: 'mod_simples',
+        nome: 'Simples Nacional',
+        tributos_config: {
+          habilitado: true,
+          regime_tributario: 'simples_nacional' as const,
+          aliquota_das_pct: 6.95,
+          aliquota_icms_pct: 2.23,
+          das_imposto_total_mes: 0,
+        },
+      }
+
+      const tributosMei = resolverTributosModalidade({ modalidade: modMei, canal }).tributos
+      const tributosSimples = resolverTributosModalidade({ modalidade: modSimples, canal }).tributos
+
+      const demMei = calcularDemonstrativo({
+        preco_anunciado: 100,
+        produto: { sku: 'P1', nome: 'P1', tipo: 'revenda' as const, custo_aquisicao_unitario: 50 },
+        taxas: [],
+        tributos: tributosMei,
+      })
+
+      const demSimples = calcularDemonstrativo({
+        preco_anunciado: 100,
+        produto: { sku: 'P1', nome: 'P1', tipo: 'revenda' as const, custo_aquisicao_unitario: 50 },
+        taxas: [],
+        tributos: tributosSimples,
+      })
+
+      // No MEI: tributos = rateio R$ 0.03
+      expect(demMei.total_tributos).toBe(0.03)
+      // No Simples: 6.95 + 2.23 = 9.18
+      expect(demSimples.total_tributos).toBe(9.18)
+
+      // Margem no MEI deve ser consideravelmente maior devido à isenção percentual
+      expect(demMei.lucro_liquido).toBeGreaterThan(demSimples.lucro_liquido)
+      expect(demMei.margem_liquida_pct).toBeGreaterThan(demSimples.margem_liquida_pct)
+    })
+
+    it('modalidade sem configuração cai no fallback global com sinalizador de aviso', () => {
+      const modalidadeSemConfig = {
+        id: 'mod_antiga',
+        nome: 'Sem Config',
+        tributos_config: null,
+      }
+      const canal = { id: 'c_site', nome: 'Site' }
+
+      const resolvido = resolverTributosModalidade({
+        modalidade: modalidadeSemConfig,
+        canal,
+        globalFallback: {
+          aliquotaDas: 6.95,
+          aliquotaIcms: 2.23,
+          fonteNome: 'Global',
+        },
+      })
+
+      expect(resolvido.usandoFallbackGlobal).toBe(true)
+      expect(resolvido.fonteDescricao).toBe('Global')
+      expect(resolvido.tributos.usando_global_fallback).toBe(true)
+
+      const dem = calcularDemonstrativo({
+        preco_anunciado: 50,
+        produto: {
+          sku: 'P_FALLBACK',
+          nome: 'Produto',
+          tipo: 'revenda' as const,
+          custo_aquisicao_unitario: 20,
+        },
+        taxas: [],
+        tributos: resolvido.tributos,
+      })
+
+      expect(dem.usando_global_fallback).toBe(true)
+      expect(dem.fonte_tributos).toBe('Global')
+      expect(dem.imposto_das).toBeCloseTo(3.48, 1) // 50 * 6.95% = 3.475 -> 3.48
     })
   })
 })

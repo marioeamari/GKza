@@ -102,6 +102,7 @@ import {
   calcularTotalUnidadesProduto,
   DemonstrativoResultado,
   resolverPrecoParaMeta,
+  resolverTributosModalidade,
   round2,
 } from '@/lib/precificacao/calculo'
 import { formatCurrency } from '@/lib/format'
@@ -1031,12 +1032,26 @@ export default function PrecificacaoComparar() {
           financiado_por: t.financiado_por,
           status_conferencia: t.status_conferencia,
         })),
-        tributos: {
-          aliquota_das_pct: aliquotaDas,
-          aliquota_icms_pct: aliquotaIcms,
-          das_imposto_total_mes: dasImpostoMes,
-          pedidos_estimados_mes: pedidosMes,
-        },
+        tributos: (() => {
+          // Se for cenário salvo e tiver alíquotas fixas gravadas nas premissas sem tributos_config
+          const tribResolvido = resolverTributosModalidade({
+            modalidade: col.modalidade,
+            canal,
+            globalFallback: {
+              aliquotaDas,
+              aliquotaIcms,
+              dasImpostoMes,
+              pedidosMes,
+              fonteNome:
+                fonteTributos === 'perfil'
+                  ? 'Perfil'
+                  : fonteTributos === 'sobrescrito'
+                    ? 'Sobrescrito'
+                    : 'Global',
+            },
+          })
+          return tribResolvido.tributos
+        })(),
         prazo_recebimento_dias: col.modalidade.prazo_recebimento_dias || 0,
       }
 
@@ -1163,8 +1178,8 @@ export default function PrecificacaoComparar() {
         premissas: {
           preco_venda: dem.preco_anunciado,
           descontos: descontosSalvamento,
-          aliquota_das_pct: aliquotaDas,
-          aliquota_icms_pct: aliquotaIcms,
+          aliquota_das_pct: dem.aliquota_das_pct ?? aliquotaDas,
+          aliquota_icms_pct: dem.aliquota_icms_pct ?? aliquotaIcms,
         },
         resultado: dem as unknown as Record<string, unknown>,
         status: aprovar ? 'aprovada' : 'rascunho',
@@ -3023,20 +3038,17 @@ export default function PrecificacaoComparar() {
                                   <span>Detalhamento dos Tributos</span>
                                   <Badge
                                     variant="outline"
-                                    className={`text-[9px] h-4 px-1 font-bold ${
-                                      fonteTributos === 'perfil'
-                                        ? 'bg-blue-950 text-blue-300 border-blue-800'
-                                        : fonteTributos === 'sobrescrito'
-                                          ? 'bg-amber-950 text-amber-300 border-amber-800'
-                                          : 'bg-slate-800 text-slate-300 border-slate-700'
+                                    className={`text-[9px] h-4 px-1.5 font-bold ${
+                                      dem.usando_global_fallback
+                                        ? 'bg-slate-800 text-slate-300 border-slate-700'
+                                        : 'bg-emerald-950 text-emerald-300 border-emerald-800'
                                     }`}
                                   >
                                     Fonte:{' '}
-                                    {fonteTributos === 'perfil'
-                                      ? 'Perfil'
-                                      : fonteTributos === 'sobrescrito'
-                                        ? 'Sobrescrito'
-                                        : 'Global'}
+                                    {dem.fonte_tributos ||
+                                      (dem.usando_global_fallback
+                                        ? 'Global'
+                                        : `${col.modalidade.nome} — ${col.canal.nome}`)}
                                   </Badge>
                                 </div>
 
@@ -3057,13 +3069,13 @@ export default function PrecificacaoComparar() {
 
                                 <div className="space-y-1 text-[11px] border-t border-slate-800/80 pt-1.5">
                                   <div className="flex justify-between text-slate-400">
-                                    <span>DAS ({aliquotaDas}%):</span>
+                                    <span>DAS ({dem.aliquota_das_pct ?? aliquotaDas}%):</span>
                                     <span className="font-mono text-slate-200">
                                       {formatCurrency(dem.imposto_das)}
                                     </span>
                                   </div>
                                   <div className="flex justify-between text-slate-400">
-                                    <span>ICMS ({aliquotaIcms}%):</span>
+                                    <span>ICMS ({dem.aliquota_icms_pct ?? aliquotaIcms}%):</span>
                                     <span className="font-mono text-slate-200">
                                       {formatCurrency(dem.imposto_icms)}
                                     </span>
@@ -3079,7 +3091,7 @@ export default function PrecificacaoComparar() {
                                   {dem.rateio_fixo_imposto_mes > 0 && (
                                     <div className="flex justify-between text-amber-300 pt-0.5 border-t border-slate-800/60">
                                       <span
-                                        title={`R$ ${dasImpostoMes.toFixed(2)} / ${pedidosMes} pedidos`}
+                                        title={`R$ ${(dem.das_imposto_total_mes ?? dasImpostoMes).toFixed(2)} / ${dem.pedidos_estimados_mes ?? pedidosMes} pedidos`}
                                       >
                                         Rateio imposto fixo mensal:
                                       </span>
@@ -3089,6 +3101,12 @@ export default function PrecificacaoComparar() {
                                     </div>
                                   )}
                                 </div>
+
+                                {dem.usando_global_fallback && (
+                                  <div className="p-1.5 rounded bg-amber-950/60 border border-amber-800/70 text-[10px] text-amber-300 leading-tight">
+                                    Modalidade sem régua de tributos — usando global
+                                  </div>
+                                )}
 
                                 <div className="flex justify-between border-t border-slate-800 pt-1.5 font-bold text-slate-100">
                                   <span>Total de tributos (venda):</span>

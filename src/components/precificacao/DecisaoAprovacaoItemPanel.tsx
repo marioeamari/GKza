@@ -69,15 +69,29 @@ export function DecisaoAprovacaoItemPanel({
     const custoBase = Math.round(custoUnitarioOficial * qtd * 100) / 100
     const custoTotalItem = Math.round((custoBase + freteGratisCusto) * 100) / 100
 
-    // 2. Alíquotas e Tributos (se não informado, padrão DAS = 4% Simples Nacional)
+    // 2. Alíquotas e Tributos
+    // Verifica se a modalidade vinculada ao cenário traz tributos_config
+    const modalidadeExpand = (rec.expand as any)?.modalidade
+    const modConfig = modalidadeExpand?.tributos_config
+
     const aliqDasCalc =
-      typeof aliquotaDas === 'number' && aliquotaDas > 0
+      typeof aliquotaDas === 'number'
         ? aliquotaDas
-        : Number(premissas.aliquota_das_pct) ||
-          Number(resultadoGravado.aliquota_imposto_efetiva_pct) ||
-          4
+        : modConfig && modConfig.habilitado !== false && modConfig.aliquota_das_pct !== undefined
+          ? Number(modConfig.aliquota_das_pct)
+          : premissas.aliquota_das_pct !== undefined
+            ? Number(premissas.aliquota_das_pct)
+            : Number(resultadoGravado.aliquota_imposto_efetiva_pct) || 4
+
     const aliqIcmsCalc =
-      typeof aliquotaIcms === 'number' ? aliquotaIcms : Number(premissas.aliquota_icms_pct) || 0
+      typeof aliquotaIcms === 'number'
+        ? aliquotaIcms
+        : modConfig && modConfig.habilitado !== false && modConfig.aliquota_icms_pct !== undefined
+          ? Number(modConfig.aliquota_icms_pct)
+          : premissas.aliquota_icms_pct !== undefined
+            ? Number(premissas.aliquota_icms_pct)
+            : 0
+
     const aliqEfetiva = aliqDasCalc + aliqIcmsCalc
 
     // 3. Taxas
@@ -141,6 +155,8 @@ export function DecisaoAprovacaoItemPanel({
         valorReceberCanal: dem.valor_receber_canal,
         tributosTotal: dem.total_tributos,
         aliquotaEfetiva: dem.aliquota_imposto_efetiva_pct,
+        aliquotaDasCalc: aliqDasCalc,
+        aliquotaIcmsCalc: aliqIcmsCalc,
         impostoDas: dem.imposto_das,
         impostoIcms: dem.imposto_icms,
         custoProduto: dem.custo_total_produto,
@@ -202,6 +218,8 @@ export function DecisaoAprovacaoItemPanel({
         valorReceberCanal,
         tributosTotal,
         aliquotaEfetiva: aliqEfetiva,
+        aliquotaDasCalc: aliqDasCalc,
+        aliquotaIcmsCalc: aliqIcmsCalc,
         impostoDas,
         impostoIcms,
         custoProduto: custoTotalItem,
@@ -319,15 +337,25 @@ export function DecisaoAprovacaoItemPanel({
               side="top"
               className="p-2.5 text-xs max-w-xs space-y-1.5 bg-slate-900 text-slate-100 border-slate-800 shadow-xl"
             >
-              <div className="font-bold border-b border-slate-800 pb-1">
-                Tributos Estimados ({analise.aliquotaEfetiva.toFixed(2)}%)
+              <div className="flex items-center justify-between font-bold border-b border-slate-800 pb-1 gap-1">
+                <span>Tributos Estimados</span>
+                <Badge
+                  variant="outline"
+                  className="text-[9px] h-4 px-1 bg-slate-800 text-slate-300 border-slate-700"
+                >
+                  {canalNome}
+                </Badge>
               </div>
               <div className="flex justify-between text-[11px] text-slate-300">
-                <span>DAS:</span>
+                <span>Alíquota efetiva total:</span>
+                <span className="font-mono text-white">{analise.aliquotaEfetiva.toFixed(2)}%</span>
+              </div>
+              <div className="flex justify-between text-[11px] text-slate-300 border-t border-slate-800/60 pt-1">
+                <span>DAS ({analise.aliquotaDasCalc}%):</span>
                 <span className="font-mono">{formatCurrency(analise.impostoDas)}</span>
               </div>
               <div className="flex justify-between text-[11px] text-slate-300">
-                <span>ICMS:</span>
+                <span>ICMS ({analise.aliquotaIcmsCalc}%):</span>
                 <span className="font-mono">{formatCurrency(analise.impostoIcms)}</span>
               </div>
               <div className="flex justify-between text-[11px] font-bold border-t border-slate-800 pt-1 text-white">

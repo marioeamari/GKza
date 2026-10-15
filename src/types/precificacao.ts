@@ -90,6 +90,24 @@ export interface PrecCanalRecord {
   }
 }
 
+export interface ModalidadeTributosConfig {
+  habilitado?: boolean
+  regime_tributario?:
+    | 'mei'
+    | 'simples_nacional'
+    | 'lucro_presumido'
+    | 'lucro_real'
+    | 'personalizado'
+  categoria_operacao?: string
+  aliquota_das_pct?: number
+  aliquota_icms_pct?: number
+  outros_impostos_pct?: number
+  das_imposto_total_mes?: number
+  pedidos_estimados_mes?: number
+  valor_base_nf?: number
+  observacoes?: string
+}
+
 export interface PrecCanalModalidadeRecord {
   id: string
   created: string
@@ -99,6 +117,7 @@ export interface PrecCanalModalidadeRecord {
   formas_pagamento?: unknown
   prazo_recebimento_dias?: number
   ativo?: boolean
+  tributos_config?: ModalidadeTributosConfig | null
   expand?: {
     canal?: PrecCanalRecord
   }

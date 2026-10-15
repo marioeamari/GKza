@@ -131,6 +131,119 @@ export interface PerfilTributarioInput {
   pedidos_estimados_mes?: number
   // Valor da NF base quando emitida sobre valor reduzido/parcial
   valor_base_nf?: number
+  // Metadados da régua tributária aplicada
+  regime_tributario?: string
+  categoria_operacao?: string
+  nome_fonte?: string
+  usando_global_fallback?: boolean
+}
+
+/**
+ * Normaliza e resolve as premissas tributárias com base na modalidade, canal e fallback global.
+ * Retorna as alíquotas prontas para cálculo e os metadados de auditoria ('Fonte: MEI — Shopee', fallback etc.)
+ */
+export function resolverTributosModalidade(params: {
+  modalidade?: {
+    id?: string
+    nome?: string
+    tributos_config?: {
+      habilitado?: boolean
+      regime_tributario?: string
+      categoria_operacao?: string
+      aliquota_das_pct?: number
+      aliquota_icms_pct?: number
+      outros_impostos_pct?: number
+      das_imposto_total_mes?: number
+      pedidos_estimados_mes?: number
+      valor_base_nf?: number
+    } | null
+  } | null
+  canal?: {
+    id?: string
+    nome?: string
+  } | null
+  globalFallback?: {
+    aliquotaDas?: number
+    aliquotaIcms?: number
+    dasImpostoMes?: number
+    pedidosMes?: number
+    fonteNome?: string
+  }
+}): {
+  tributos: PerfilTributarioInput
+  fonteDescricao: string
+  usandoFallbackGlobal: boolean
+  regimeTributario?: string
+} {
+  const { modalidade, canal, globalFallback } = params
+  const config = modalidade?.tributos_config
+  const canalNome = canal?.nome || 'Canal'
+  const modNome = modalidade?.nome || 'Modalidade'
+
+  // Modalidade possui configuração própria ativa se habilitado !== false e houver alíquotas/dados definidos
+  const temConfigPropria = Boolean(
+    config &&
+    config.habilitado !== false &&
+    (config.aliquota_das_pct !== undefined ||
+      config.aliquota_icms_pct !== undefined ||
+      config.das_imposto_total_mes !== undefined ||
+      config.regime_tributario !== undefined),
+  )
+
+  if (temConfigPropria && config) {
+    const regimeFormatado =
+      config.regime_tributario === 'mei'
+        ? 'MEI'
+        : config.regime_tributario === 'simples_nacional'
+          ? 'Simples Nacional'
+          : config.regime_tributario === 'lucro_presumido'
+            ? 'Lucro Presumido'
+            : config.regime_tributario === 'lucro_real'
+              ? 'Lucro Real'
+              : config.categoria_operacao || modNome
+
+    const fonteDescricao = `${regimeFormatado} — ${canalNome}`
+
+    return {
+      tributos: {
+        aliquota_das_pct: Number(config.aliquota_das_pct) || 0,
+        aliquota_icms_pct: Number(config.aliquota_icms_pct) || 0,
+        outros_impostos_pct: Number(config.outros_impostos_pct) || 0,
+        das_imposto_total_mes: Number(config.das_imposto_total_mes) || 0,
+        pedidos_estimados_mes: Number(config.pedidos_estimados_mes) || 0,
+        valor_base_nf: config.valor_base_nf,
+        regime_tributario: config.regime_tributario,
+        categoria_operacao: config.categoria_operacao,
+        nome_fonte: fonteDescricao,
+        usando_global_fallback: false,
+      },
+      fonteDescricao,
+      usandoFallbackGlobal: false,
+      regimeTributario: config.regime_tributario,
+    }
+  }
+
+  // Fallback para o global
+  const padraoDas = globalFallback?.aliquotaDas ?? 6.95
+  const padraoIcms = globalFallback?.aliquotaIcms ?? 2.23
+  const padraoFixo = globalFallback?.dasImpostoMes ?? 76.5
+  const padraoPedidos = globalFallback?.pedidosMes ?? 3000
+  const nomeGlobal = globalFallback?.fonteNome || 'Global'
+
+  return {
+    tributos: {
+      aliquota_das_pct: padraoDas,
+      aliquota_icms_pct: padraoIcms,
+      outros_impostos_pct: 0,
+      das_imposto_total_mes: padraoFixo,
+      pedidos_estimados_mes: padraoPedidos,
+      nome_fonte: nomeGlobal,
+      usando_global_fallback: true,
+    },
+    fonteDescricao: nomeGlobal,
+    usandoFallbackGlobal: true,
+    regimeTributario: undefined,
+  }
 }
 
 export interface DescontoInput {
@@ -212,11 +325,17 @@ export interface DemonstrativoResultado {
   // 8. Tributos
   base_calculo_tributos: number
   aliquota_imposto_efetiva_pct: number
+  aliquota_das_pct: number
+  aliquota_icms_pct: number
   imposto_das: number
   imposto_icms: number
   outros_impostos: number
   total_tributos: number
   rateio_fixo_imposto_mes: number // ex: DAS total / pedidos mês
+  das_imposto_total_mes?: number
+  pedidos_estimados_mes?: number
+  fonte_tributos?: string
+  usando_global_fallback?: boolean
 
   // 9. Lucro líquido e margem
   lucro_liquido: number
@@ -809,11 +928,17 @@ export function calcularDemonstrativo(input: CalculoCenarioInput): Demonstrativo
 
     base_calculo_tributos,
     aliquota_imposto_efetiva_pct: round2(aliqEfetiva),
+    aliquota_das_pct: aliqDas,
+    aliquota_icms_pct: aliqIcms,
     imposto_das,
     imposto_icms,
     outros_impostos,
     total_tributos,
     rateio_fixo_imposto_mes: round2(rateio_fixo_imposto_mes),
+    das_imposto_total_mes: input.tributos?.das_imposto_total_mes,
+    pedidos_estimados_mes: input.tributos?.pedidos_estimados_mes,
+    fonte_tributos: input.tributos?.nome_fonte,
+    usando_global_fallback: input.tributos?.usando_global_fallback,
 
     lucro_liquido,
     margem_liquida_pct,

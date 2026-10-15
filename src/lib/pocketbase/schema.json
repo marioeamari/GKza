@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-15T19:52:40.825Z",
+  "generatedAt": "2026-10-15T20:26:05.472Z",
   "collections": [
     {
       "name": "users",
@@ -3201,6 +3201,12 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "tributos_config",
+          "type": "json",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": ["CREATE INDEX idx_prec_mod_canal ON prec_canal_modalidades (canal)"]

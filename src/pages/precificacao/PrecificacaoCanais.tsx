@@ -61,6 +61,16 @@ export default function PrecificacaoCanais() {
   // Modal de Modalidade
   const [openModDialog, setOpenModDialog] = useState(false)
   const [modEditando, setModEditando] = useState<Partial<PrecCanalModalidadeRecord> | null>(null)
+  const [regimeModalidade, setRegimeModalidade] = useState<
+    'mei' | 'simples_nacional' | 'lucro_presumido' | 'lucro_real' | 'personalizado'
+  >('simples_nacional')
+  const [aliquotaDasMod, setAliquotaDasMod] = useState<number>(6.95)
+  const [aliquotaIcmsMod, setAliquotaIcmsMod] = useState<number>(2.23)
+  const [outrosImpostosMod, setOutrosImpostosMod] = useState<number>(0)
+  const [dasImpostoMesMod, setDasImpostoMesMod] = useState<number>(76.5)
+  const [pedidosMesMod, setPedidosMesMod] = useState<number>(3000)
+  const [valorBaseNfMod, setValorBaseNfMod] = useState<number | undefined>(undefined)
+  const [temReguaPropriaMod, setTemReguaPropriaMod] = useState<boolean>(true)
 
   // Modal de Taxa
   const [openTaxaDialog, setOpenTaxaDialog] = useState(false)
@@ -240,6 +250,74 @@ export default function PrecificacaoCanais() {
     }
   }
 
+  // Abrir modal de criação/edição de modalidade com inicialização dos tributos
+  function handleAbrirCriarModalidade() {
+    setModEditando({
+      canal: canalAtivoId || '',
+      nome: '',
+      prazo_recebimento_dias: 7,
+      ativo: true,
+    })
+    setTemReguaPropriaMod(true)
+    setRegimeModalidade('simples_nacional')
+    setAliquotaDasMod(6.95)
+    setAliquotaIcmsMod(2.23)
+    setOutrosImpostosMod(0)
+    setDasImpostoMesMod(76.5)
+    setPedidosMesMod(3000)
+    setValorBaseNfMod(undefined)
+    setOpenModDialog(true)
+  }
+
+  function handleAbrirEditarModalidade(m: PrecCanalModalidadeRecord) {
+    setModEditando(m)
+    const conf = m.tributos_config
+    if (conf && conf.habilitado !== false) {
+      setTemReguaPropriaMod(true)
+      setRegimeModalidade(conf.regime_tributario || 'simples_nacional')
+      setAliquotaDasMod(conf.aliquota_das_pct ?? 6.95)
+      setAliquotaIcmsMod(conf.aliquota_icms_pct ?? 2.23)
+      setOutrosImpostosMod(conf.outros_impostos_pct ?? 0)
+      setDasImpostoMesMod(conf.das_imposto_total_mes ?? 76.5)
+      setPedidosMesMod(conf.pedidos_estimados_mes ?? 3000)
+      setValorBaseNfMod(conf.valor_base_nf)
+    } else {
+      setTemReguaPropriaMod(false)
+      const isMeiNome = m.nome?.toLowerCase().includes('mei')
+      setRegimeModalidade(isMeiNome ? 'mei' : 'simples_nacional')
+      setAliquotaDasMod(isMeiNome ? 0 : 6.95)
+      setAliquotaIcmsMod(isMeiNome ? 0 : 2.23)
+      setOutrosImpostosMod(0)
+      setDasImpostoMesMod(76.5)
+      setPedidosMesMod(3000)
+      setValorBaseNfMod(undefined)
+    }
+    setOpenModDialog(true)
+  }
+
+  function handleTrocarRegimeModalidade(
+    novoRegime: 'mei' | 'simples_nacional' | 'lucro_presumido' | 'lucro_real' | 'personalizado',
+  ) {
+    setRegimeModalidade(novoRegime)
+    if (novoRegime === 'mei') {
+      setAliquotaDasMod(0)
+      setAliquotaIcmsMod(0)
+      setOutrosImpostosMod(0)
+      setDasImpostoMesMod(76.5)
+      setPedidosMesMod(3000)
+    } else if (novoRegime === 'simples_nacional') {
+      setAliquotaDasMod(6.95)
+      setAliquotaIcmsMod(2.23)
+      setOutrosImpostosMod(0)
+      setDasImpostoMesMod(0)
+    } else if (novoRegime === 'lucro_presumido') {
+      setAliquotaDasMod(0)
+      setAliquotaIcmsMod(4.0)
+      setOutrosImpostosMod(5.65)
+      setDasImpostoMesMod(0)
+    }
+  }
+
   // Salvar Modalidade
   async function handleSalvarModalidade(e: React.FormEvent) {
     e.preventDefault()
@@ -249,11 +327,36 @@ export default function PrecificacaoCanais() {
       return
     }
 
+    const tributosConfigPayload = temReguaPropriaMod
+      ? {
+          habilitado: true,
+          regime_tributario: regimeModalidade,
+          categoria_operacao:
+            regimeModalidade === 'mei'
+              ? 'MEI'
+              : regimeModalidade === 'simples_nacional'
+                ? 'Simples Nacional'
+                : regimeModalidade === 'lucro_presumido'
+                  ? 'Lucro Presumido'
+                  : regimeModalidade === 'lucro_real'
+                    ? 'Lucro Real'
+                    : 'Personalizado',
+          aliquota_das_pct: Number(aliquotaDasMod) || 0,
+          aliquota_icms_pct: Number(aliquotaIcmsMod) || 0,
+          outros_impostos_pct: Number(outrosImpostosMod) || 0,
+          das_imposto_total_mes: Number(dasImpostoMesMod) || 0,
+          pedidos_estimados_mes: Number(pedidosMesMod) || 0,
+          valor_base_nf: valorBaseNfMod !== undefined ? Number(valorBaseNfMod) : undefined,
+        }
+      : null
+
     try {
       if (modEditando?.id) {
         await precificacaoService.updateModalidade(modEditando.id, {
           ...modEditando,
           nome: nomeMod,
+          prazo_recebimento_dias: modEditando?.prazo_recebimento_dias ?? 7,
+          tributos_config: tributosConfigPayload,
         })
         toast({ title: 'Modalidade atualizada' })
       } else {
@@ -261,7 +364,9 @@ export default function PrecificacaoCanais() {
           ...modEditando,
           nome: nomeMod,
           canal: canalAtivoId,
+          prazo_recebimento_dias: modEditando?.prazo_recebimento_dias ?? 7,
           ativo: true,
+          tributos_config: tributosConfigPayload,
         })
         toast({ title: 'Modalidade adicionada' })
       }
@@ -719,15 +824,7 @@ export default function PrecificacaoCanais() {
                     <Button
                       size="sm"
                       className="bg-primary text-white font-bold"
-                      onClick={() => {
-                        setModEditando({
-                          canal: canalSelecionado.id,
-                          nome: '',
-                          prazo_recebimento_dias: 7,
-                          ativo: true,
-                        })
-                        setOpenModDialog(true)
-                      }}
+                      onClick={handleAbrirCriarModalidade}
                     >
                       <Plus className="mr-1 h-3.5 w-3.5" />
                       Adicionar Modalidade
@@ -750,11 +847,48 @@ export default function PrecificacaoCanais() {
                         className="rounded-xl border border-border p-3 bg-secondary/20 flex flex-col justify-between"
                       >
                         <div>
-                          <span className="font-bold text-xs text-foreground block">{m.nome}</span>
-                          <span className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            Prazo: {m.prazo_recebimento_dias || 0} dias
-                          </span>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-xs text-foreground block">
+                              {m.nome}
+                            </span>
+                            {m.tributos_config && m.tributos_config.habilitado !== false ? (
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] px-1 py-0 border-emerald-300 text-emerald-700 bg-emerald-50"
+                              >
+                                {m.tributos_config.regime_tributario === 'mei'
+                                  ? 'MEI'
+                                  : m.tributos_config.regime_tributario === 'simples_nacional'
+                                    ? 'Simples'
+                                    : 'Tributos'}
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] px-1 py-0 text-muted-foreground border-border"
+                              >
+                                Global
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-1 space-y-0.5">
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              Prazo: {m.prazo_recebimento_dias || 0} dias
+                            </span>
+                            {m.tributos_config && m.tributos_config.habilitado !== false ? (
+                              <span className="text-[10px] text-emerald-700 block font-mono">
+                                DAS {m.tributos_config.aliquota_das_pct ?? 0}% + ICMS{' '}
+                                {m.tributos_config.aliquota_icms_pct ?? 0}%
+                                {(m.tributos_config.das_imposto_total_mes ?? 0) > 0 &&
+                                  ` • R$ ${m.tributos_config.das_imposto_total_mes}/mês`}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground block italic">
+                                Régua global de tributos
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <div className="flex items-center justify-end gap-1.5 mt-3 pt-2 border-t border-border/40">
                           <Button
@@ -762,10 +896,7 @@ export default function PrecificacaoCanais() {
                             variant="ghost"
                             className="h-6 w-6"
                             title="Editar modalidade"
-                            onClick={() => {
-                              setModEditando(m)
-                              setOpenModDialog(true)
-                            }}
+                            onClick={() => handleAbrirEditarModalidade(m)}
                           >
                             <Edit2 className="h-3 w-3 text-muted-foreground" />
                           </Button>
@@ -1070,41 +1201,208 @@ export default function PrecificacaoCanais() {
         </DialogContent>
       </Dialog>
 
-      {/* DIALOG DE MODALIDADE */}
+      {/* DIALOG DE MODALIDADE COM CONFIGURAÇÃO DE TRIBUTOS */}
       <Dialog open={openModDialog} onOpenChange={setOpenModDialog}>
-        <DialogContent className="sm:max-w-[420px]">
+        <DialogContent className="sm:max-w-[540px] max-h-[90vh] overflow-y-auto">
           <form onSubmit={handleSalvarModalidade}>
             <DialogHeader>
               <DialogTitle>{modEditando?.id ? 'Editar Modalidade' : 'Nova Modalidade'}</DialogTitle>
               <DialogDescription>
-                Exemplos: Shopee FULL, Clássico, Padrão 30 dias.
+                Configure as características operacionais e a régua de tributos específica desta
+                modalidade.
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-3 py-4 text-xs">
-              <div className="space-y-1">
-                <Label>Nome da Modalidade</Label>
-                <Input
-                  required
-                  placeholder="Ex: FULL, Clássico, Pix Imediato..."
-                  value={modEditando?.nome || ''}
-                  onChange={(e) => setModEditando((prev) => ({ ...prev, nome: e.target.value }))}
-                />
+            <div className="space-y-4 py-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Nome da Modalidade *</Label>
+                  <Input
+                    required
+                    placeholder="Ex: FULL, MEI, Clássico..."
+                    value={modEditando?.nome || ''}
+                    onChange={(e) => setModEditando((prev) => ({ ...prev, nome: e.target.value }))}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label>Prazo de Recebimento (dias)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={modEditando?.prazo_recebimento_dias ?? 7}
+                    onChange={(e) =>
+                      setModEditando((prev) => ({
+                        ...prev,
+                        prazo_recebimento_dias: parseInt(e.target.value) || 0,
+                      }))
+                    }
+                  />
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <Label>Prazo Previsto de Recebimento (dias)</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  value={modEditando?.prazo_recebimento_dias ?? 7}
-                  onChange={(e) =>
-                    setModEditando((prev) => ({
-                      ...prev,
-                      prazo_recebimento_dias: parseInt(e.target.value) || 0,
-                    }))
-                  }
-                />
+              {/* SEÇÃO DE TRIBUTOS ESPECÍFICOS */}
+              <div className="rounded-xl border border-border p-3.5 bg-secondary/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-xs text-foreground block">
+                      Régua de Tributos da Modalidade
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      Define a alíquota de impostos (DAS, ICMS, rateio fixo) usada nas simulações
+                      deste canal
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-semibold cursor-pointer flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={temReguaPropriaMod}
+                        onChange={(e) => setTemReguaPropriaMod(e.target.checked)}
+                        className="rounded border-border text-primary focus:ring-primary"
+                      />
+                      <span>Personalizada</span>
+                    </label>
+                  </div>
+                </div>
+
+                {!temReguaPropriaMod ? (
+                  <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-300 text-amber-800 text-[11px]">
+                    <span className="font-bold block">
+                      Modalidade sem régua de tributos — usando global
+                    </span>
+                    <span>
+                      Esta modalidade calculará com o perfil tributário global configurado no
+                      comparador.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="space-y-3 pt-2 border-t border-border/50">
+                    <div className="space-y-1">
+                      <Label>Regime / Categoria Tributária</Label>
+                      <Select
+                        value={regimeModalidade}
+                        onValueChange={(v) => handleTrocarRegimeModalidade(v as any)}
+                      >
+                        <SelectTrigger className="bg-background">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="mei">
+                            MEI (Microempreendedor Individual - Isento % / Fixo DAS)
+                          </SelectItem>
+                          <SelectItem value="simples_nacional">
+                            Simples Nacional (DAS % + ICMS %)
+                          </SelectItem>
+                          <SelectItem value="lucro_presumido">
+                            Lucro Presumido (ICMS + PIS/COFINS/CSLL)
+                          </SelectItem>
+                          <SelectItem value="lucro_real">Lucro Real</SelectItem>
+                          <SelectItem value="personalizado">
+                            Personalizado / Operação Especial (Full, etc.)
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label>Alíquota DAS (%)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={aliquotaDasMod}
+                          onChange={(e) => setAliquotaDasMod(parseFloat(e.target.value) || 0)}
+                        />
+                        <span className="text-[10px] text-muted-foreground block">
+                          {regimeModalidade === 'mei'
+                            ? 'MEI: 0% sobre a venda'
+                            : 'Ex: 6.95% no Simples'}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label>Alíquota ICMS (%)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={aliquotaIcmsMod}
+                          onChange={(e) => setAliquotaIcmsMod(parseFloat(e.target.value) || 0)}
+                        />
+                        <span className="text-[10px] text-muted-foreground block">
+                          {regimeModalidade === 'mei'
+                            ? 'MEI: 0% sobre a venda'
+                            : 'Ex: 2.23% ou ICMS próprio'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label>DAS / Imposto Fixo Mensal (R$)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={dasImpostoMesMod}
+                          onChange={(e) => setDasImpostoMesMod(parseFloat(e.target.value) || 0)}
+                        />
+                        <span className="text-[10px] text-muted-foreground block">
+                          Rateado por pedido (ex: R$ 76,50 guia MEI)
+                        </span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label>Pedidos Estimados / Mês</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          value={pedidosMesMod}
+                          onChange={(e) => setPedidosMesMod(parseInt(e.target.value) || 1)}
+                        />
+                        <span className="text-[10px] text-muted-foreground block">
+                          Base de rateio do imposto fixo
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label>Outros Impostos (%)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={outrosImpostosMod}
+                          onChange={(e) => setOutrosImpostosMod(parseFloat(e.target.value) || 0)}
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label>
+                          Base NF Reduzida (R$){' '}
+                          <span className="text-[10px] font-normal text-muted-foreground">
+                            (opcional)
+                          </span>
+                        </Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="Ex: 5.00 ou deixe vazio"
+                          value={valorBaseNfMod ?? ''}
+                          onChange={(e) =>
+                            setValorBaseNfMod(
+                              e.target.value !== '' ? parseFloat(e.target.value) : undefined,
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
