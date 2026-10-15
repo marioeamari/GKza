@@ -18,7 +18,10 @@ import {
 } from 'lucide-react'
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { orcamentosService } from '@/services/orcamentos'
-import { normalizarOrcamentoRecord } from '@/lib/precificacao/orcamentoCalculo'
+import {
+  normalizarOrcamentoRecord,
+  normalizarCanaisComparadosIds,
+} from '@/lib/precificacao/orcamentoCalculo'
 import { precificacaoService } from '@/services/precificacao'
 import { separacaoKitsService } from '@/services/separacaoKits'
 import { cadastrosService } from '@/services/cadastros'
@@ -217,7 +220,7 @@ export default function PrecificacaoOrcamentoForm() {
           setValidadeData(orc.validade_data ? orc.validade_data.split('T')[0] : '')
           setStatus(orc.status || 'rascunho')
           const orcNormalizado = normalizarOrcamentoRecord(orc)
-          setCanaisSelecionadosIds(orcNormalizado.canais_comparados || [])
+          setCanaisSelecionadosIds(normalizarCanaisComparadosIds(orcNormalizado.canais_comparados))
           setObservacoes(orcNormalizado.observacoes || '')
 
           const itensOrc = Array.isArray(orcNormalizado.expand?.itens)

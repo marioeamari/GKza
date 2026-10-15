@@ -100,7 +100,7 @@ export interface OrcamentoRecord {
   validade_dias?: number
   validade_data?: string
   status: StatusOrcamento
-  canais_comparados?: string[] | string
+  canais_comparados?: string[]
   tema?: string
   tema_nome?: string
   cor?: string

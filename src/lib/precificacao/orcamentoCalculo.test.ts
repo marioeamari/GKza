@@ -503,6 +503,125 @@ describe('Módulo de Orçamentos - Regras de Cálculo e Formatação', () => {
       expect(normalizarCanaisComparadosIds('["id1", "id2"]')).toEqual(['id1', 'id2'])
       expect(normalizarCanaisComparadosIds(['id1', 'id2'])).toEqual(['id1', 'id2'])
       expect(normalizarCanaisComparadosIds([{ id: 'id1' }, { id: 'id2' }])).toEqual(['id1', 'id2'])
+      // Múltiplos formatos mistos / espaços extras
+      expect(normalizarCanaisComparadosIds('  id_shopee ,  id_site  ')).toEqual([
+        'id_shopee',
+        'id_site',
+      ])
+      expect(normalizarCanaisComparadosIds(['  c1 ', '', null as any, 'c2  '])).toEqual([
+        'c1',
+        'c2',
+      ])
+    })
+
+    it('testa rigorosamente as regras dos modos de frete pago_pelo_cliente vs frete_gratis', () => {
+      const canais = [
+        { id: 'c_shopee', nome: 'Shopee', tipo: 'marketplace' },
+        { id: 'c_site', nome: 'Site Loja', tipo: 'site_proprio' },
+      ]
+
+      const itens = [
+        {
+          modelo_nome: 'Toalha Especial',
+          quantidade: 10,
+          precos_canais: {
+            c_shopee: {
+              canal_id: 'c_shopee',
+              canal_nome: 'Shopee',
+              preco_unitario: 20,
+              preco_cheio: 200,
+            },
+            c_site: {
+              canal_id: 'c_site',
+              canal_nome: 'Site Loja',
+              preco_unitario: 20,
+              preco_cheio: 200,
+            },
+          },
+          fretes_canais: {
+            // Shopee: frete pago pelo cliente -> soma no total do cliente (faturamento), custo de produto não é afetado
+            c_shopee: {
+              canal_id: 'c_shopee',
+              canal_nome: 'Shopee',
+              valor_frete: 35,
+              modo_frete: 'pago_pelo_cliente' as const,
+            },
+            // Site: frete grátis -> não soma no total do cliente, loja banca o frete (entra no custo do produto, reduz lucro e margem)
+            c_site: {
+              canal_id: 'c_site',
+              canal_nome: 'Site Loja',
+              valor_frete: 25,
+              modo_frete: 'frete_gratis' as const,
+            },
+          },
+          produtos_canais: {
+            c_shopee: { precificacao_id: 'p1' },
+            c_site: { precificacao_id: 'p1' },
+          },
+        },
+      ]
+
+      // 1. calcularTotaisPorCanal
+      const totais = calcularTotaisPorCanal(canais, itens)
+
+      // Shopee: pago_pelo_cliente -> total_fretes = 35, total_geral = 200 + 35 = 235
+      expect(totais.c_shopee.total_itens).toBe(200)
+      expect(totais.c_shopee.total_fretes).toBe(35)
+      expect(totais.c_shopee.total_geral).toBe(235)
+
+      // Site: frete_gratis -> total_fretes = 0 (cliente não paga), total_geral = 200
+      expect(totais.c_site.total_itens).toBe(200)
+      expect(totais.c_site.total_fretes).toBe(0)
+      expect(totais.c_site.total_geral).toBe(200)
+
+      // 2. calcularMontanteConsolidadoPorCanal
+      // Simulando precificação com custo unitário = 8 por unidade (10 un = 80 custo base)
+      const mapaPrecificacoes = {
+        p1: {
+          resultado: { custo_total_produto: 8, total_taxas_retidas_canal: 0 },
+        },
+      }
+
+      const montantes = calcularMontanteConsolidadoPorCanal({
+        canais,
+        itens,
+        mapaPrecificacoesAprovadas: mapaPrecificacoes,
+        aliquotaDas: 0,
+        aliquotaIcms: 0,
+      })
+
+      const montanteShopee = montantes.find((m) => m.canalId === 'c_shopee')!
+      const montanteSite = montantes.find((m) => m.canalId === 'c_site')!
+
+      // Shopee (pago_pelo_cliente):
+      // Faturamento inclui o frete do cliente: 200 + 35 = 235
+      expect(montanteShopee.faturamentoTotal).toBe(235)
+      // Custo do produto é puramente o custo base (10 un * 8 = 80), frete NÃO entra no custo
+      expect(montanteShopee.custoTotalProdutos).toBe(80)
+
+      // Site (frete_gratis):
+      // Faturamento NÃO inclui frete (cliente paga só os itens): 200
+      expect(montanteSite.faturamentoTotal).toBe(200)
+      // Frete grátis da loja ENTRA no custo do produto: custo base (80) + frete (25) = 105
+      expect(montanteSite.custoTotalProdutos).toBe(105)
+      // Lucro líquido do site cai exatamente pelo valor do frete: 200 - 105 = 95
+      expect(montanteSite.lucroLiquidoTotal).toBe(95)
+      // Margem consolidada = 95 / 200 = 47.5%
+      expect(montanteSite.margemConsolidadaPct).toBe(47.5)
+
+      // 3. gerarTextoWhatsappOrcamento exibe 'Grátis' para frete_gratis e o valor para pago_pelo_cliente
+      const textoZap = gerarTextoWhatsappOrcamento({
+        titulo: 'Cotação Frete',
+        canais,
+        itens,
+      })
+      expect(textoZap).toContain('#Shopee:')
+      expect(textoZap).toContain('* Frete: R$ 35,00 (pago pelo cliente)')
+      expect(textoZap).toContain('* Total: R$ 235,00')
+
+      expect(textoZap).toContain('#Site Loja:')
+      expect(textoZap).toContain('* Frete: Grátis')
+      expect(textoZap).toContain('* Total: R$ 200,00')
     })
 
     it('normaliza canais expandidos quando vem como objeto único (PocketBase maxSelect: 1), nulo ou undefined', () => {
