@@ -52,6 +52,8 @@ export function OrcamentoSaidasPanel({ orcamento, onAtualizar }: OrcamentoSaidas
       : []
     return rawItens.map((it) => ({
       modelo_nome: it?.modelo_nome || 'Item',
+      tema_nome: it?.tema_nome,
+      cor: it?.cor,
       quantidade: it?.quantidade || 1,
       precos_canais: it?.precos_canais,
       fretes_canais: it?.fretes_canais,

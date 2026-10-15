@@ -1,6 +1,7 @@
 import { OrcamentoRecord } from '@/types/orcamento'
 import {
   formatarMoedaBR,
+  formatarDataBR,
   normalizarCanaisExpandidos,
   normalizarOrcamentoRecord,
 } from '@/lib/precificacao/orcamentoCalculo'
@@ -241,8 +242,6 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
           <p>${orcamento.titulo || 'Cotação Personalizada'}</p>
           <div style="font-size: 12px; color: #4b5563;">
             ${itens.length} ${itens.length === 1 ? 'item' : 'itens'} no orçamento
-            ${orcamento.tema_nome ? ` &bull; Tema geral: <strong>${orcamento.tema_nome}</strong>` : ''}
-            ${orcamento.cor ? ` &bull; Cor: <strong>${orcamento.cor}</strong>` : ''}
           </div>
         </div>
       </div>

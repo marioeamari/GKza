@@ -27,10 +27,13 @@ import {
 } from '@/lib/precificacao/orcamentoCalculo'
 import { imprimirOuBaixarOrcamentoPDF } from '@/lib/precificacao/orcamentoPdf'
 import { OrcamentoSaidasPanel } from '@/components/precificacao/OrcamentoSaidasPanel'
+import { DecisaoAprovacaoItemPanel } from '@/components/precificacao/DecisaoAprovacaoItemPanel'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { toast } from '@/hooks/use-toast'
 
 const STATUS_CONFIG: Record<StatusOrcamento, { label: string; cor: string }> = {
@@ -45,6 +48,16 @@ export default function PrecificacaoOrcamentoDetalhes() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [orcamento, setOrcamento] = useState<OrcamentoRecord | null>(null)
+  const [canalSelecionadoId, setCanalSelecionadoId] = useState<string>('')
+  const [itemSelecionadoIdx, setItemSelecionadoIdx] = useState<number>(0)
+  const [precificacaoAprovadaCarregada, setPrecificacaoAprovadaCarregada] = useState<any | null>(
+    null,
+  )
+  const [loadingPrecificacao, setLoadingPrecificacao] = useState(false)
+  const [simPrecoUnitario, setSimPrecoUnitario] = useState<number | undefined>(undefined)
+  const [simPrecoCheio, setSimPrecoCheio] = useState<number | undefined>(undefined)
+  const [simQuantidade, setSimQuantidade] = useState<number | undefined>(undefined)
+  const [simFrete, setSimFrete] = useState<number | undefined>(undefined)
 
   const carregarOrcamento = async () => {
     if (!id) return
@@ -88,6 +101,135 @@ export default function PrecificacaoOrcamentoDetalhes() {
     }
   }
 
+  const orcamentoNormalizado = useMemo(() => {
+    return orcamento ? normalizarOrcamentoRecord(orcamento) : null
+  }, [orcamento])
+
+  const totais = useMemo(() => {
+    if (!orcamentoNormalizado?.totais_por_canal) return {}
+    return typeof orcamentoNormalizado.totais_por_canal === 'object' &&
+      !Array.isArray(orcamentoNormalizado.totais_por_canal)
+      ? orcamentoNormalizado.totais_por_canal
+      : {}
+  }, [orcamentoNormalizado])
+
+  const canais = useMemo(() => {
+    return normalizarCanaisExpandidos(orcamentoNormalizado?.expand?.canais_comparados, totais)
+  }, [orcamentoNormalizado, totais])
+
+  const itens = useMemo(() => {
+    return Array.isArray(orcamentoNormalizado?.expand?.itens)
+      ? orcamentoNormalizado.expand.itens
+      : []
+  }, [orcamentoNormalizado])
+
+  const stInfo = orcamentoNormalizado
+    ? STATUS_CONFIG[orcamentoNormalizado.status] || STATUS_CONFIG.rascunho
+    : STATUS_CONFIG.rascunho
+
+  const formatarData = (dt?: string) => {
+    return formatarDataBR(dt)
+  }
+
+  // Define canal inicial se não definido
+  useEffect(() => {
+    if (canais.length > 0 && !canalSelecionadoId) {
+      setCanalSelecionadoId(canais[0].id)
+    }
+  }, [canais, canalSelecionadoId])
+
+  // Ajusta item selecionado se índice extrapolar
+  useEffect(() => {
+    if (itens.length > 0 && itemSelecionadoIdx >= itens.length) {
+      setItemSelecionadoIdx(0)
+    }
+  }, [itens, itemSelecionadoIdx])
+
+  const itemAtual = itens[itemSelecionadoIdx] || itens[0]
+  const canalAtual = canais.find((c) => c.id === canalSelecionadoId) || canais[0]
+
+  // Carrega precificação aprovada detalhada para o item e canal selecionados
+  // e inicializa as variáveis de simulação local
+  useEffect(() => {
+    let ativo = true
+    if (!itemAtual || !canalAtual) {
+      setPrecificacaoAprovadaCarregada(null)
+      setSimPrecoUnitario(undefined)
+      setSimPrecoCheio(undefined)
+      setSimQuantidade(undefined)
+      setSimFrete(undefined)
+      return
+    }
+
+    const precoUnitItem = itemAtual.precos_canais?.[canalAtual.id]?.preco_unitario || 0
+    const precoCheioItem = itemAtual.precos_canais?.[canalAtual.id]?.preco_cheio
+    const qtdItem = itemAtual.quantidade || 1
+    const freteItem = itemAtual.fretes_canais?.[canalAtual.id]?.valor_frete || 0
+
+    setSimPrecoUnitario(precoUnitItem)
+    setSimPrecoCheio(
+      precoCheioItem !== undefined
+        ? precoCheioItem
+        : Math.round(precoUnitItem * qtdItem * 100) / 100,
+    )
+    setSimQuantidade(qtdItem)
+    setSimFrete(freteItem)
+
+    const precCanal = itemAtual.precos_canais?.[canalAtual.id]
+    const prodCanal = itemAtual.produtos_canais?.[canalAtual.id]
+    const precId = precCanal?.precificacao_id || prodCanal?.precificacao_id
+    const prodId = prodCanal?.produto_id
+
+    setLoadingPrecificacao(true)
+    const carregarPrec = async () => {
+      try {
+        const prec = await orcamentosService.getPrecificacaoAprovadaDetalhada(
+          precId,
+          prodId,
+          canalAtual.id,
+        )
+        if (ativo) {
+          setPrecificacaoAprovadaCarregada(prec)
+        }
+      } catch {
+        if (ativo) setPrecificacaoAprovadaCarregada(null)
+      } finally {
+        if (ativo) setLoadingPrecificacao(false)
+      }
+    }
+
+    carregarPrec()
+    return () => {
+      ativo = false
+    }
+  }, [itemAtual, canalAtual])
+
+  const handleSimAlterarPrecoUnitario = (novoPrecoUnit: number) => {
+    setSimPrecoUnitario(novoPrecoUnit)
+    const qtd = simQuantidade ?? itemAtual?.quantidade ?? 1
+    setSimPrecoCheio(Math.round(novoPrecoUnit * qtd * 100) / 100)
+  }
+
+  const handleSimAlterarPrecoCheio = (novoPrecoCheio: number) => {
+    setSimPrecoCheio(novoPrecoCheio)
+    const qtd = simQuantidade ?? itemAtual?.quantidade ?? 1
+    if (qtd > 0) {
+      setSimPrecoUnitario(Math.round((novoPrecoCheio / qtd) * 100) / 100)
+    }
+  }
+
+  const handleSimAlterarQuantidade = (novaQtd: number) => {
+    const qtd = Math.max(1, novaQtd)
+    setSimQuantidade(qtd)
+    const pUnit =
+      simPrecoUnitario ?? itemAtual?.precos_canais?.[canalAtual?.id || '']?.preco_unitario ?? 0
+    setSimPrecoCheio(Math.round(pUnit * qtd * 100) / 100)
+  }
+
+  const handleSimAlterarFrete = (novoFrete: number) => {
+    setSimFrete(novoFrete)
+  }
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -107,23 +249,6 @@ export default function PrecificacaoOrcamentoDetalhes() {
         </Button>
       </div>
     )
-  }
-
-  const orcamentoNormalizado = normalizarOrcamentoRecord(orcamento)
-  const totais =
-    orcamentoNormalizado.totais_por_canal &&
-    typeof orcamentoNormalizado.totais_por_canal === 'object' &&
-    !Array.isArray(orcamentoNormalizado.totais_por_canal)
-      ? orcamentoNormalizado.totais_por_canal
-      : {}
-  const canais = normalizarCanaisExpandidos(orcamentoNormalizado.expand?.canais_comparados, totais)
-  const itens = Array.isArray(orcamentoNormalizado.expand?.itens)
-    ? orcamentoNormalizado.expand.itens
-    : []
-  const stInfo = STATUS_CONFIG[orcamentoNormalizado.status] || STATUS_CONFIG.rascunho
-
-  const formatarData = (dt?: string) => {
-    return formatarDataBR(dt)
   }
 
   return (
@@ -213,14 +338,14 @@ export default function PrecificacaoOrcamentoDetalhes() {
           <CardHeader className="pb-2">
             <CardDescription className="text-xs flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-primary" />
-              Especificação do Pedido
+              Especificação por Item
             </CardDescription>
             <CardTitle className="text-sm font-bold text-foreground">
-              Tema: {orcamento.tema_nome || 'Livre / Múltiplos'}
+              {itens.length} {itens.length === 1 ? 'modelo configurado' : 'modelos configurados'}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground pt-0">
-            {orcamento.cor ? `Cor: ${orcamento.cor.toUpperCase()}` : 'Cores variadas'}
+            Temas e variações configurados individualmente por item abaixo
           </CardContent>
         </Card>
 
@@ -352,6 +477,163 @@ export default function PrecificacaoOrcamentoDetalhes() {
           </table>
         </CardContent>
       </Card>
+
+      {/* PAINEL DE DECISÃO DE APROVAÇÃO (ITEM POR CANAL) */}
+      {itens.length > 0 && canais.length > 0 && itemAtual && canalAtual && (
+        <Card className="shadow-xs border-border/80">
+          <CardHeader className="pb-3 border-b border-border/60">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base font-bold text-foreground">
+                  Decisão de Aprovação & Rentabilidade (Simulador por Item e Canal)
+                </CardTitle>
+                <CardDescription className="text-xs mt-0.5">
+                  Analise o Lucro Líquido, Margem Real, Ponto de Equilíbrio e Preço Meta ajustando
+                  preços e quantidades em tempo real.
+                </CardDescription>
+              </div>
+
+              {/* Seletores de Item e Canal */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-muted-foreground">Item:</span>
+                  <select
+                    className="h-8 rounded-md border border-input bg-background px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    value={itemSelecionadoIdx}
+                    onChange={(e) => setItemSelecionadoIdx(Number(e.target.value))}
+                  >
+                    {itens.map((it, idx) => (
+                      <option key={it.id || idx} value={idx}>
+                        #{idx + 1} - {it.modelo_nome || 'Item sem nome'} (qtd: {it.quantidade || 1})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-muted-foreground">Canal:</span>
+                  <select
+                    className="h-8 rounded-md border border-input bg-background px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    value={canalSelecionadoId}
+                    onChange={(e) => setCanalSelecionadoId(e.target.value)}
+                  >
+                    {canais.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nome || c.id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-4 space-y-4">
+            {/* Controles de edição e recálculo em tempo real */}
+            <div className="p-3.5 rounded-xl border border-border/70 bg-muted/20 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/40 pb-2">
+                <span className="text-xs font-bold text-foreground">
+                  Simulador de Valores (Item: {itemAtual.modelo_nome || 'Item'} &bull; Canal:{' '}
+                  {canalAtual.nome})
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  Altere os campos abaixo para ver o recálculo em tempo real no painel de decisão
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-muted-foreground">
+                    Preço Unit. (R$)
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={
+                      simPrecoUnitario ??
+                      (itemAtual.precos_canais?.[canalAtual.id]?.preco_unitario || 0)
+                    }
+                    onChange={(e) => handleSimAlterarPrecoUnitario(parseFloat(e.target.value) || 0)}
+                    className="h-8 text-xs font-semibold"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-muted-foreground">
+                    Preço Cheio (R$)
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={
+                      simPrecoCheio ??
+                      itemAtual.precos_canais?.[canalAtual.id]?.preco_cheio ??
+                      Math.round(
+                        (itemAtual.precos_canais?.[canalAtual.id]?.preco_unitario || 0) *
+                          (itemAtual.quantidade || 1) *
+                          100,
+                      ) / 100
+                    }
+                    onChange={(e) => handleSimAlterarPrecoCheio(parseFloat(e.target.value) || 0)}
+                    className="h-8 text-xs font-semibold text-primary"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-muted-foreground">
+                    Quantidade (un)
+                  </Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={simQuantidade ?? (itemAtual.quantidade || 1)}
+                    onChange={(e) => handleSimAlterarQuantidade(parseInt(e.target.value, 10) || 1)}
+                    className="h-8 text-xs font-semibold"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-muted-foreground">
+                    Frete do Item (R$)
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={simFrete ?? (itemAtual.fretes_canais?.[canalAtual.id]?.valor_frete || 0)}
+                    onChange={(e) => handleSimAlterarFrete(parseFloat(e.target.value) || 0)}
+                    className="h-8 text-xs font-semibold text-orange-600"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {loadingPrecificacao ? (
+              <div className="py-8 space-y-3">
+                <Skeleton className="h-6 w-48" />
+                <Skeleton className="h-28 w-full" />
+              </div>
+            ) : (
+              <DecisaoAprovacaoItemPanel
+                precificacaoOriginal={precificacaoAprovadaCarregada}
+                precoUnitarioAtual={
+                  simPrecoUnitario ??
+                  (itemAtual.precos_canais?.[canalAtual.id]?.preco_unitario || 0)
+                }
+                precoCheioAtual={simPrecoCheio}
+                quantidadeAtual={simQuantidade ?? (itemAtual.quantidade || 1)}
+                freteAtual={
+                  simFrete ?? (itemAtual.fretes_canais?.[canalAtual.id]?.valor_frete || 0)
+                }
+                canalNome={canalAtual.nome}
+                modeloNome={itemAtual.modelo_nome}
+                permiteEditar={false}
+              />
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* OBSERVAÇÕES */}
       {orcamento.observacoes && (

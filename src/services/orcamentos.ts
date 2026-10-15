@@ -404,6 +404,34 @@ export const orcamentosService = {
   },
 
   /**
+   * Busca o registro detalhado de uma precificação aprovada pelo ID (ou por produto + canal)
+   */
+  async getPrecificacaoAprovadaDetalhada(
+    precificacaoId?: string,
+    produtoId?: string,
+    canalId?: string,
+  ): Promise<any | null> {
+    try {
+      if (precificacaoId) {
+        return await pb.collection('prec_precificacoes').getOne(precificacaoId, {
+          expand: 'produto,canal,modalidade',
+        })
+      }
+      if (produtoId && canalId) {
+        const precs = await pb.collection('prec_precificacoes').getFullList({
+          filter: `produto="${produtoId}" && canal="${canalId}" && status="aprovada"`,
+          sort: '-aprovado_em,-created',
+          expand: 'produto,canal,modalidade',
+        })
+        return precs[0] || null
+      }
+      return null
+    } catch {
+      return null
+    }
+  },
+
+  /**
    * Busca o preço de um produto aprovado específico em um canal
    */
   async getPrecoProdutoAprovadoCanal(

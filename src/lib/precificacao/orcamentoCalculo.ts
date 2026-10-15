@@ -333,6 +333,8 @@ export function gerarTextoWhatsappOrcamento(params: {
   canais?: Array<{ id: string; nome: string }>
   itens?: Array<{
     modelo_nome: string
+    tema_nome?: string
+    cor?: string
     quantidade: number
     precos_canais?: Record<string, OrcamentoPrecoCanalItem>
     fretes_canais?: Record<string, OrcamentoFreteCanalItem>
@@ -366,11 +368,13 @@ export function gerarTextoWhatsappOrcamento(params: {
       .filter(Boolean)
       .join(' e ')
     cabecalho = `Combo ${qtdTotal} unidades ${modelosNomes || 'Itens'}`
-    if (tema_nome) {
-      cabecalho += ` Tema ${tema_nome.toUpperCase()}`
+    const temaFinal = tema_nome || itens.find((i) => i.tema_nome)?.tema_nome
+    const corFinal = cor || itens.find((i) => i.cor)?.cor
+    if (temaFinal) {
+      cabecalho += ` Tema ${temaFinal.toUpperCase()}`
     }
-    if (cor) {
-      cabecalho += ` cor ${cor.toUpperCase()}`
+    if (corFinal) {
+      cabecalho += ` cor ${corFinal.toUpperCase()}`
     }
   }
 

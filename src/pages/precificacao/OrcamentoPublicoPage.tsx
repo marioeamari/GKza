@@ -242,32 +242,6 @@ export default function OrcamentoPublicoPage() {
           </Card>
         </div>
 
-        {/* Detalhes do Combo / Tema */}
-        {(orcamento.tema_nome || orcamento.cor) && (
-          <div className="p-4 rounded-xl bg-orange-50 border border-orange-200/80 flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-orange-100 text-primary">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wider font-bold text-primary">
-                Especificação do Pedido
-              </p>
-              <p className="text-sm font-semibold text-slate-800">
-                {orcamento.tema_nome && (
-                  <span>
-                    Tema: <strong>{orcamento.tema_nome}</strong>
-                  </span>
-                )}
-                {orcamento.cor && (
-                  <span className="ml-3">
-                    Cor: <strong>{orcamento.cor}</strong>
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-        )}
-
         {/* Tabela de Modelos e Comparação de Canais */}
         <Card className="shadow-xs border-slate-200/80 bg-white overflow-hidden">
           <CardHeader className="border-b border-slate-100 bg-slate-50/50">

@@ -63,6 +63,9 @@ interface FormItemLinha {
   modelo?: string
   modelo_nome: string
   modelo_codigo?: string
+  tema?: string
+  tema_nome?: string
+  cor?: string
   quantidade: number
   precos_canais: Record<string, OrcamentoPrecoCanalItem>
   fretes_canais: Record<string, OrcamentoFreteCanalItem>
@@ -92,6 +95,7 @@ export default function PrecificacaoOrcamentoForm() {
         produto_nome: string
         produto_sku?: string
         preco_aprovado: number
+        precificacao_record?: any
       }>
     >
   >({})
@@ -110,9 +114,6 @@ export default function PrecificacaoOrcamentoForm() {
   const [validadeData, setValidadeData] = useState<string>('')
   const [status, setStatus] = useState<StatusOrcamento>('rascunho')
   const [canaisSelecionadosIds, setCanaisSelecionadosIds] = useState<string[]>([])
-  const [temaId, setTemaId] = useState<string>('')
-  const [temaNome, setTemaNome] = useState<string>('')
-  const [cor, setCor] = useState<string>('')
   const [observacoes, setObservacoes] = useState<string>('')
 
   // Itens do orçamento
@@ -171,6 +172,9 @@ export default function PrecificacaoOrcamentoForm() {
           setItens([
             {
               modelo_nome: 'Banho',
+              tema: undefined,
+              tema_nome: '',
+              cor: '',
               quantidade: 25,
               precos_canais: {},
               fretes_canais: {},
@@ -178,6 +182,9 @@ export default function PrecificacaoOrcamentoForm() {
             },
             {
               modelo_nome: 'Rosto',
+              tema: undefined,
+              tema_nome: '',
+              cor: '',
               quantidade: 25,
               precos_canais: {},
               fretes_canais: {},
@@ -198,9 +205,6 @@ export default function PrecificacaoOrcamentoForm() {
           setStatus(orc.status || 'rascunho')
           const orcNormalizado = normalizarOrcamentoRecord(orc)
           setCanaisSelecionadosIds(orcNormalizado.canais_comparados || [])
-          setTemaId(orcNormalizado.tema || '')
-          setTemaNome(orcNormalizado.tema_nome || '')
-          setCor(orcNormalizado.cor || '')
           setObservacoes(orcNormalizado.observacoes || '')
 
           const itensOrc = Array.isArray(orcNormalizado.expand?.itens)
@@ -213,6 +217,9 @@ export default function PrecificacaoOrcamentoForm() {
                 modelo: it.modelo,
                 modelo_nome: it.modelo_nome || '',
                 modelo_codigo: it.modelo_codigo,
+                tema: it.tema || orcNormalizado.tema || undefined,
+                tema_nome: it.tema_nome || orcNormalizado.tema_nome || '',
+                cor: it.cor || orcNormalizado.cor || '',
                 quantidade: it.quantidade || 1,
                 precos_canais: it.precos_canais || {},
                 fretes_canais: it.fretes_canais || {},
@@ -239,12 +246,6 @@ export default function PrecificacaoOrcamentoForm() {
       active = false
     }
   }, [id, isEdicao])
-
-  // Filtra modelos do tema selecionado
-  const modelosDoTema = useMemo(() => {
-    if (!temaId) return modelosDisponiveis
-    return modelosDisponiveis.filter((m) => m.tema === temaId)
-  }, [temaId, modelosDisponiveis])
 
   // Ao selecionar um cliente cadastrado da coleção 'clientes'
   const handleSelecionarCliente = (cId: string) => {
@@ -274,11 +275,18 @@ export default function PrecificacaoOrcamentoForm() {
     }
   }
 
-  // Ao selecionar um tema
-  const handleSelecionarTema = (tId: string) => {
-    setTemaId(tId)
+  // Ao selecionar um tema DENTRO de um item
+  const handleSelecionarTemaNoItem = (index: number, tId: string) => {
     const t = temasDisponiveis.find((x) => x.id === tId)
-    setTemaNome(t?.nome || '')
+    setItens((prev) => {
+      const copy = [...prev]
+      copy[index] = {
+        ...copy[index],
+        tema: tId === 'none' ? undefined : tId,
+        tema_nome: t?.nome || copy[index].tema_nome || '',
+      }
+      return copy
+    })
   }
 
   // Alternar canal selecionado
@@ -294,6 +302,9 @@ export default function PrecificacaoOrcamentoForm() {
       ...prev,
       {
         modelo_nome: '',
+        tema: undefined,
+        tema_nome: '',
+        cor: '',
         quantidade: 1,
         precos_canais: {},
         fretes_canais: {},
@@ -583,9 +594,16 @@ export default function PrecificacaoOrcamentoForm() {
           .filter(Boolean)
           .join(' e ')
         tituloFinal = `Combo ${qtdTotal} unidades ${nomes || 'Itens'}`
-        if (temaNome) tituloFinal += ` Tema ${temaNome.toUpperCase()}`
-        if (cor) tituloFinal += ` cor ${cor.toUpperCase()}`
+        const primeiroTema = itens.find((i) => i.tema_nome)?.tema_nome
+        const primeiraCor = itens.find((i) => i.cor)?.cor
+        if (primeiroTema) tituloFinal += ` Tema ${primeiroTema.toUpperCase()}`
+        if (primeiraCor) tituloFinal += ` cor ${primeiraCor.toUpperCase()}`
       }
+
+      // Herança para o cabeçalho (compatibilidade retroativa com visualizadores legados)
+      const temaCabecalho = itens.find((i) => i.tema)?.tema
+      const temaNomeCabecalho = itens.find((i) => i.tema_nome)?.tema_nome
+      const corCabecalho = itens.find((i) => i.cor)?.cor
 
       const payload: CreateOrcamentoInput = {
         titulo: tituloFinal,
@@ -598,15 +616,18 @@ export default function PrecificacaoOrcamentoForm() {
         validade_data: validadeData,
         status,
         canais_comparados: canaisSelecionadosIds,
-        tema: temaId || undefined,
-        tema_nome: temaNome || undefined,
-        cor: cor || undefined,
+        tema: temaCabecalho || undefined,
+        tema_nome: temaNomeCabecalho || undefined,
+        cor: corCabecalho || undefined,
         observacoes: observacoes || undefined,
         itens: itens.map((it, idx) => ({
           id: it.id,
           modelo: it.modelo,
           modelo_nome: it.modelo_nome || 'Item sem nome',
           modelo_codigo: it.modelo_codigo,
+          tema: it.tema || undefined,
+          tema_nome: it.tema_nome || undefined,
+          cor: it.cor || undefined,
           quantidade: Number(it.quantidade) || 1,
           precos_canais: it.precos_canais,
           fretes_canais: it.fretes_canais,
@@ -863,68 +884,16 @@ export default function PrecificacaoOrcamentoForm() {
         </CardContent>
       </Card>
 
-      {/* BLOCO 3: ESPECIFICAÇÃO DE TEMA E COR */}
-      <Card className="shadow-xs border-border/80">
-        <CardHeader className="pb-3 border-b border-border/60">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-primary" />
-            <CardTitle className="text-base font-bold">3. Tema e Variação</CardTitle>
-          </div>
-          <CardDescription className="text-xs">
-            Escolha o tema dos kits e a cor desejada pelo cliente
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="pt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">Tema do Kit (opcional)</Label>
-            <Select value={temaId} onValueChange={handleSelecionarTema}>
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder="Selecione um tema cadastrado..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">-- Nenhum ou Digitação Livre --</SelectItem>
-                {temasDisponiveis.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.nome}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">Nome do Tema (Livre)</Label>
-            <Input
-              placeholder="Ex: BLUEY, Turma da Mônica..."
-              value={temaNome}
-              onChange={(e) => setTemaNome(e.target.value)}
-              className="h-9 text-xs"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">Cor Escolhida</Label>
-            <Input
-              placeholder="Ex: AZUL, ROSA, BRANCO..."
-              value={cor}
-              onChange={(e) => setCor(e.target.value)}
-              className="h-9 text-xs uppercase"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* BLOCO 4: ITENS DO COMBO COM PREÇOS POR CANAL */}
+      {/* BLOCO 3: ITENS & QUANTIDADES (CADA ITEM CARREGA SEU TEMA, COR E MODELO) */}
       <Card className="shadow-xs border-border/80">
         <CardHeader className="pb-3 border-b border-border/60 flex flex-row items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
               <Layers className="w-4 h-4 text-primary" />
-              <CardTitle className="text-base font-bold">4. Itens & Quantidades</CardTitle>
+              <CardTitle className="text-base font-bold">3. Itens & Quantidades</CardTitle>
             </div>
             <CardDescription className="text-xs mt-0.5">
-              Preços pré-carregados das precificações oficiais. Altere pontualmente sem afetar o
-              canal oficial.
+              Cada item carrega seu próprio tema, cor e modelo. Preços pré-carregados das precificações oficiais.
             </CardDescription>
           </div>
           <Button
@@ -938,76 +907,121 @@ export default function PrecificacaoOrcamentoForm() {
           </Button>
         </CardHeader>
         <CardContent className="pt-4 space-y-4">
-          {itens.map((item, index) => (
-            <div
-              key={index}
-              className="p-4 rounded-xl border border-border/80 bg-card shadow-xs space-y-3"
-            >
-              {/* Linha 1 do item: identificação e quantidade */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-border/40 pb-3">
-                <div className="flex flex-wrap items-center gap-3 flex-1">
-                  <span className="h-6 w-6 rounded-full bg-primary/10 text-primary font-bold text-xs flex items-center justify-center">
-                    {index + 1}
-                  </span>
+          {itens.map((item, index) => {
+            const modelosDoItem = item.tema
+              ? modelosDisponiveis.filter((m) => m.tema === item.tema)
+              : modelosDisponiveis
 
-                  {/* Seletor rápido de modelo existente (apenas para indicar modelo da expedição) */}
-                  <div className="w-52">
-                    <Select
-                      value={item.modelo || 'none'}
-                      onValueChange={(val) => handleSelecionarModeloNoItem(index, val)}
-                    >
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue placeholder="Modelo Expedição (opcional)..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">-- Modelo Livre --</SelectItem>
-                        {modelosDoTema.map((m) => (
-                          <SelectItem key={m.id} value={m.id}>
-                            {m.codigo} - {m.nome}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+            return (
+              <div
+                key={index}
+                className="p-4 rounded-xl border border-border/80 bg-card shadow-xs space-y-3"
+              >
+                {/* Linha 1 do item: identificação, Tema (select/livre), Cor e Quantidade */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-border/40 pb-3">
+                  <div className="flex flex-wrap items-center gap-2.5 flex-1">
+                    <span className="h-6 w-6 rounded-full bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0">
+                      {index + 1}
+                    </span>
+
+                    {/* Tema do Kit (opcional/kit_temas) */}
+                    <div className="w-40">
+                      <Select
+                        value={item.tema || 'none'}
+                        onValueChange={(val) => handleSelecionarTemaNoItem(index, val)}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Tema do Kit (opc.)..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">-- Tema Livre --</SelectItem>
+                          {temasDisponiveis.map((t) => (
+                            <SelectItem key={t.id} value={t.id}>
+                              {t.nome}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Nome do Tema Livre */}
+                    <div className="w-36">
+                      <Input
+                        placeholder="Nome Tema (livre)"
+                        value={item.tema_nome || ''}
+                        onChange={(e) => handleAtualizarItem(index, 'tema_nome', e.target.value)}
+                        className="h-8 text-xs font-medium"
+                      />
+                    </div>
+
+                    {/* Cor Escolhida */}
+                    <div className="w-28">
+                      <Input
+                        placeholder="Cor (ex: AZUL)"
+                        value={item.cor || ''}
+                        onChange={(e) => handleAtualizarItem(index, 'cor', e.target.value)}
+                        className="h-8 text-xs font-medium uppercase"
+                      />
+                    </div>
+
+                    {/* Seletor rápido de modelo existente */}
+                    <div className="w-44">
+                      <Select
+                        value={item.modelo || 'none'}
+                        onValueChange={(val) => handleSelecionarModeloNoItem(index, val)}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Modelo Expedição..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">-- Modelo Livre --</SelectItem>
+                          {modelosDoItem.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.codigo} - {m.nome}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Nome do Modelo (livre ou puxado) */}
+                    <div className="flex-1 min-w-[140px]">
+                      <Input
+                        placeholder="Modelo (Banho, Rosto...)"
+                        value={item.modelo_nome}
+                        onChange={(e) => handleAtualizarItem(index, 'modelo_nome', e.target.value)}
+                        className="h-8 text-xs font-semibold"
+                      />
+                    </div>
+
+                    {/* Quantidade */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Label className="text-xs text-muted-foreground">Qtd:</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={item.quantidade}
+                        onChange={(e) =>
+                          handleAlterarQuantidadeItem(index, Math.max(1, Number(e.target.value) || 1))
+                        }
+                        className="h-8 w-16 text-xs font-bold text-center"
+                      />
+                    </div>
                   </div>
 
-                  {/* Nome do Modelo (livre ou puxado) */}
-                  <div className="flex-1 min-w-[160px]">
-                    <Input
-                      placeholder="Nome do Modelo (ex: Banho, Rosto...)"
-                      value={item.modelo_nome}
-                      onChange={(e) => handleAtualizarItem(index, 'modelo_nome', e.target.value)}
-                      className="h-8 text-xs font-semibold"
-                    />
-                  </div>
-
-                  {/* Quantidade */}
-                  <div className="flex items-center gap-1.5">
-                    <Label className="text-xs text-muted-foreground">Qtd:</Label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={item.quantidade}
-                      onChange={(e) =>
-                        handleAlterarQuantidadeItem(index, Math.max(1, Number(e.target.value) || 1))
-                      }
-                      className="h-8 w-20 text-xs font-bold text-center"
-                    />
-                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => handleRemoverItem(index)}
+                    className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 shrink-0"
+                    title="Remover Item"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
                 </div>
 
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => handleRemoverItem(index)}
-                  className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                  title="Remover Item"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
-              </div>
-
-              {/* Linha 2 do item: Colunas de canais com Produto Vinculado aprovado, Preço Unit., Preço Cheio e Frete */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {/* Linha 2 do item: Colunas de canais com Produto Vinculado aprovado, Preço Unit., Preço Cheio e Frete */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {canaisSelecionados.map((canal) => {
                   const precoObj = item.precos_canais[canal.id]
                   const freteObj = item.fretes_canais[canal.id]
@@ -1130,9 +1144,10 @@ export default function PrecificacaoOrcamentoForm() {
                     </div>
                   )
                 })}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
 
           {itens.length === 0 && (
             <div className="text-center py-6 text-muted-foreground text-xs">
@@ -1142,7 +1157,7 @@ export default function PrecificacaoOrcamentoForm() {
         </CardContent>
       </Card>
 
-      {/* BLOCO 5: RESUMO DOS TOTAIS POR CANAL EM TEMPO REAL */}
+      {/* BLOCO 4: RESUMO DOS TOTAIS POR CANAL EM TEMPO REAL */}
       <Card className="border-2 border-primary/20 bg-primary/5 shadow-xs">
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-black text-primary">
@@ -1192,7 +1207,7 @@ export default function PrecificacaoOrcamentoForm() {
         </CardContent>
       </Card>
 
-      {/* BLOCO 6: OBSERVAÇÕES */}
+      {/* BLOCO 5: OBSERVAÇÕES */}
       <Card className="shadow-xs border-border/80">
         <CardHeader className="pb-2">
           <CardTitle className="text-xs font-bold text-foreground">
