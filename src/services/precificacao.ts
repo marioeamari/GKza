@@ -9,11 +9,35 @@ import {
   PrecTaxaRecord,
 } from '@/types/precificacao'
 
+/**
+ * Utilitária pura que descarta por padrão qualquer registro cujo tipo não seja
+ * exatamente 'kit' ou 'combo' (incluindo '', null, undefined e valores desconhecidos).
+ */
+export function filtrarApenasKitsECombos(
+  produtos: Array<Partial<PrecProdutoRecord> | null | undefined>,
+): PrecProdutoRecord[] {
+  if (!Array.isArray(produtos)) return []
+  return produtos.filter(
+    (p): p is PrecProdutoRecord => Boolean(p) && (p?.tipo === 'kit' || p?.tipo === 'combo'),
+  )
+}
+
 export const precificacaoService = {
   // PRODUTOS
   async listProdutos(filter?: string): Promise<PrecProdutoRecord[]> {
     return pb.collection('prec_produtos').getFullList<PrecProdutoRecord>({
       filter: filter || '',
+      sort: '-created',
+      expand: 'empresa,fornecedor,fornecedor_produto',
+    })
+  },
+
+  /**
+   * Lista apenas produtos do tipo 'kit' ou 'combo' para Gestão de Kits & Combos (/precificacao/produtos)
+   */
+  async listKitsECombos(): Promise<PrecProdutoRecord[]> {
+    return pb.collection('prec_produtos').getFullList<PrecProdutoRecord>({
+      filter: 'tipo = "kit" || tipo = "combo"',
       sort: '-created',
       expand: 'empresa,fornecedor,fornecedor_produto',
     })
