@@ -60,13 +60,18 @@ export const orcamentosService = {
       },
     })
 
-    // Se expand.canais_comparados estiver vazio ou incompleto mas canais_comparados tiver IDs,
+    // Se expand.canais_comparados estiver vazio ou incompleto mas canais_comparados ou totais_por_canal tiver IDs,
     // busca os canais na coleção prec_canais para garantir que a lista de canais venha preenchida
     const canaisExpandidos = orcNormalizado.expand?.canais_comparados || []
     const canaisIds = orcNormalizado.canais_comparados || []
-    if (canaisIds.length > 0 && canaisExpandidos.length < canaisIds.length) {
+    const chavesTotais = orcNormalizado.totais_por_canal
+      ? Object.keys(orcNormalizado.totais_por_canal)
+      : []
+    const todosIds = Array.from(new Set([...canaisIds, ...chavesTotais]))
+
+    if (todosIds.length > 0 && canaisExpandidos.length < todosIds.length) {
       try {
-        const canaisFiltro = canaisIds.map((cId) => `id="${cId}"`).join(' || ')
+        const canaisFiltro = todosIds.map((cId) => `id="${cId}"`).join(' || ')
         const canaisDb = await pb.collection('prec_canais').getFullList<PrecCanalRecord>({
           filter: canaisFiltro,
         })
@@ -74,6 +79,9 @@ export const orcamentosService = {
           orcNormalizado.expand = {
             ...orcNormalizado.expand,
             canais_comparados: canaisDb,
+          }
+          if (canaisIds.length < canaisDb.length) {
+            orcNormalizado.canais_comparados = canaisDb.map((c) => c.id)
           }
         }
       } catch (err) {
@@ -126,21 +134,33 @@ export const orcamentosService = {
     // usamos os nomes já salvos em totais_por_canal (canal_id/canal_nome) sem requisição extra
     const canaisExpandidos = orcNormalizado.expand?.canais_comparados || []
     const canaisIds = orcNormalizado.canais_comparados || []
-    if (canaisIds.length > 0 && canaisExpandidos.length === 0 && orcNormalizado.totais_por_canal) {
+    if (
+      orcNormalizado.totais_por_canal &&
+      (canaisExpandidos.length === 0 ||
+        canaisExpandidos.length < Object.keys(orcNormalizado.totais_por_canal).length)
+    ) {
       const canaisDosTotais: PrecCanalRecord[] = Object.entries(
         orcNormalizado.totais_por_canal,
       ).map(
         ([cId, tot]) =>
           ({
             id: tot.canal_id || cId,
-            nome: tot.canal_nome || 'Canal',
-            tipo: 'marketplace',
+            nome:
+              tot.canal_nome ||
+              (cId.toLowerCase().includes('site') ? 'Site Loja Integrada KzaMari' : 'Canal'),
+            tipo:
+              cId.toLowerCase().includes('site') || tot?.canal_nome?.toLowerCase().includes('site')
+                ? 'site_proprio'
+                : 'marketplace',
             ativo: true,
           }) as PrecCanalRecord,
       )
       orcNormalizado.expand = {
         ...orcNormalizado.expand,
         canais_comparados: canaisDosTotais,
+      }
+      if (canaisIds.length < canaisDosTotais.length) {
+        orcNormalizado.canais_comparados = canaisDosTotais.map((c) => c.id)
       }
     }
 

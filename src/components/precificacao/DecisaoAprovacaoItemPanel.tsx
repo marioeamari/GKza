@@ -13,8 +13,9 @@ export interface DecisaoAprovacaoItemProps {
   canalNome: string
   quantidadeItem: number
   precoUnitarioEditado: number
-  precoCheioEditado: number
+  precoCheioEditado?: number
   freteItemEditado: number
+  modoFreteItem?: 'pago_pelo_cliente' | 'frete_gratis'
   precificacaoAprovadaRecord?: any
   produtoVinculado?: any
   taxasCanal?: any[]
@@ -23,13 +24,13 @@ export interface DecisaoAprovacaoItemProps {
   dasImpostoMes?: number
   pedidosMes?: number
 }
-
 export function DecisaoAprovacaoItemPanel({
   canalNome,
   quantidadeItem,
   precoUnitarioEditado,
   precoCheioEditado,
   freteItemEditado,
+  modoFreteItem = 'pago_pelo_cliente',
   precificacaoAprovadaRecord,
   produtoVinculado,
   taxasCanal = [],
@@ -54,14 +55,18 @@ export function DecisaoAprovacaoItemPanel({
     const prod = (rec.expand as any)?.produto || produtoVinculado || {}
 
     // 1. Custo do produto unitário e no volume do item
-    // Procura custo_total_produto ou custo_total ou custo_aquisicao_unitario; fallback 0 se personalizado/livre
+    // Regra dos modos de frete:
+    // 'pago_pelo_cliente': não entra no custo (é despesa do cliente).
+    // 'frete_gratis': a loja paga -> entra no custo do produto (reduz lucro líquido, margem e markup).
+    const freteGratisCusto = modoFreteItem === 'frete_gratis' ? frete : 0
     const custoUnitarioOficial =
       Number(resultadoGravado.custo_total_produto) ||
       Number(custoSnapshot.custo_total) ||
       Number(premissas.sobrescrita_custo_total) ||
       Number(prod.custo_aquisicao_unitario) ||
       0
-    const custoTotalItem = Math.round(custoUnitarioOficial * qtd * 100) / 100
+    const custoBase = Math.round(custoUnitarioOficial * qtd * 100) / 100
+    const custoTotalItem = Math.round((custoBase + freteGratisCusto) * 100) / 100
 
     // 2. Alíquotas e Tributos (se não informado, padrão DAS = 4% Simples Nacional)
     const aliqDasCalc =
@@ -105,7 +110,7 @@ export function DecisaoAprovacaoItemPanel({
           financiado_por: t.financiado_por,
           status_conferencia: t.status_conferencia,
         })),
-        frete_vendedor: frete,
+        frete_vendedor: 0,
         tributos: {
           aliquota_das_pct: aliqDasCalc,
           aliquota_icms_pct: aliqIcmsCalc,
@@ -162,9 +167,9 @@ export function DecisaoAprovacaoItemPanel({
       // A receber do canal = Preço Cheio - Taxas do Canal
       const valorReceberCanal = Math.round((precoCheio - totalTaxasRetidasItem) * 100) / 100
 
-      // Lucro Líquido = A receber - Custo do produto - Tributos - Frete vendedor
+      // Lucro Líquido = A receber - Custo do produto (que já inclui frete se frete_gratis) - Tributos
       const lucroLiquido =
-        Math.round((valorReceberCanal - custoTotalItem - tributosTotal - frete) * 100) / 100
+        Math.round((valorReceberCanal - custoTotalItem - tributosTotal) * 100) / 100
       const margemPct = precoCheio > 0 ? Math.round((lucroLiquido / precoCheio) * 1000) / 10 : 0
       const markupPct =
         custoTotalItem > 0
@@ -174,10 +179,10 @@ export function DecisaoAprovacaoItemPanel({
       // Ponto de equilíbrio estimado (onde lucro = 0):
       const taxaPctEfetiva = precoCheio > 0 ? totalTaxasRetidasItem / precoCheio : taxaPctEstimada
       const divisor = Math.max(0.05, 1 - (taxaPctEfetiva + aliqEfetiva / 100))
-      const pontoEquilibrio = Math.round(((custoTotalItem + frete) / divisor) * 100) / 100
+      const pontoEquilibrio = Math.round((custoTotalItem / divisor) * 100) / 100
       // Preço meta com margem líquida de 20%
       const divisorMeta = Math.max(0.05, 1 - (taxaPctEfetiva + aliqEfetiva / 100 + 0.2))
-      const precoMeta = Math.round(((custoTotalItem + frete) / divisorMeta) * 100) / 100
+      const precoMeta = Math.round((custoTotalItem / divisorMeta) * 100) / 100
 
       const precoPagoClienteVolume = precoCheio
       const precoUnitCliente = calcularPrecoUnitarioCliente(precoPagoClienteVolume, qtd)
@@ -208,6 +213,7 @@ export function DecisaoAprovacaoItemPanel({
     precoUnit,
     qtd,
     frete,
+    modoFreteItem,
     aliquotaDas,
     aliquotaIcms,
     dasImpostoMes,

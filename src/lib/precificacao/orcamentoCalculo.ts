@@ -208,7 +208,26 @@ export function normalizarOrcamentoRecord(raw: any): OrcamentoRecord {
     canaisExpandidos = [rawExpandCanais]
   }
 
-  // Se não veio no expand mas temos IDs, podemos ter stubs ou aguardar busca
+  // Se canaisIds estiver vazio ou incompleto mas totais_por_canal tiver chaves,
+  // normaliza para incluir as chaves de totais_por_canal
+  let totais = raw.totais_por_canal
+  if (typeof totais === 'string') {
+    try {
+      totais = JSON.parse(totais)
+    } catch {
+      totais = {}
+    }
+  }
+  if (!totais || typeof totais !== 'object' || Array.isArray(totais)) {
+    totais = {}
+  }
+
+  const chavesTotais = Object.keys(totais)
+  let canaisIdsFinais = canaisIds
+  if (chavesTotais.length > 0 && canaisIds.length < chavesTotais.length) {
+    canaisIdsFinais = Array.from(new Set([...canaisIds, ...chavesTotais]))
+  }
+
   // Expand de itens
   const rawExpandItens = raw.expand?.itens
   let itensExpandidos: OrcamentoItemRecord[] = []
@@ -232,18 +251,6 @@ export function normalizarOrcamentoRecord(raw: any): OrcamentoRecord {
       }))
   }
 
-  let totais = raw.totais_por_canal
-  if (typeof totais === 'string') {
-    try {
-      totais = JSON.parse(totais)
-    } catch {
-      totais = {}
-    }
-  }
-  if (!totais || typeof totais !== 'object' || Array.isArray(totais)) {
-    totais = {}
-  }
-
   return {
     ...raw,
     id: String(raw.id || ''),
@@ -251,11 +258,14 @@ export function normalizarOrcamentoRecord(raw: any): OrcamentoRecord {
     cliente_nome: String(raw.cliente_nome || ''),
     data_orcamento: String(raw.data_orcamento || ''),
     status: raw.status || 'rascunho',
-    canais_comparados: canaisIds,
+    canais_comparados: canaisIdsFinais,
     totais_por_canal: totais,
     expand: {
       ...raw.expand,
-      canais_comparados: canaisExpandidos,
+      canais_comparados:
+        canaisExpandidos.length >= canaisIdsFinais.length
+          ? canaisExpandidos
+          : normalizarCanaisExpandidos(canaisExpandidos, totais),
       itens: itensExpandidos,
     },
   }
@@ -263,7 +273,9 @@ export function normalizarOrcamentoRecord(raw: any): OrcamentoRecord {
 
 /**
  * Calcula totais por canal para um conjunto de itens e canais selecionados.
- * Total do canal = Soma(quantidade * preco_unitario) + Soma(frete_item)
+ * Regra acordada:
+ * - 'pago_pelo_cliente': o frete SOMA no total pago pelo cliente (faturamento do canal)
+ * - 'frete_gratis': a loja paga, NÃO soma no total do cliente (total_geral = total_itens)
  */
 export function calcularTotaisPorCanal(
   canaisInput: Array<{ id: string; nome: string }>,
@@ -279,7 +291,7 @@ export function calcularTotaisPorCanal(
 
   for (const canal of canais) {
     let totalItens = 0
-    let totalFretes = 0
+    let totalFretesCliente = 0
 
     for (const item of itens) {
       const qtd = Number(item.quantidade) || 0
@@ -290,22 +302,26 @@ export function calcularTotaisPorCanal(
           ? Number(precoObj.preco_cheio)
           : qtd * precoUnit
 
-      const freteItem = item.fretes_canais?.[canal.id]?.valor_frete || 0
+      const freteObj = item.fretes_canais?.[canal.id]
+      const valorFrete = Number(freteObj?.valor_frete) || 0
+      const modoFrete = freteObj?.modo_frete || 'pago_pelo_cliente'
 
       totalItens += subtotalItem
-      totalFretes += freteItem
+      if (modoFrete === 'pago_pelo_cliente') {
+        totalFretesCliente += valorFrete
+      }
     }
 
     // Arredondamento para 2 casas
     totalItens = Math.round(totalItens * 100) / 100
-    totalFretes = Math.round(totalFretes * 100) / 100
-    const totalGeral = Math.round((totalItens + totalFretes) * 100) / 100
+    totalFretesCliente = Math.round(totalFretesCliente * 100) / 100
+    const totalGeral = Math.round((totalItens + totalFretesCliente) * 100) / 100
 
     totais[canal.id] = {
       canal_id: canal.id,
       canal_nome: canal.nome,
       total_itens: totalItens,
-      total_fretes: totalFretes,
+      total_fretes: totalFretesCliente,
       total_geral: totalGeral,
     }
   }
@@ -315,7 +331,10 @@ export function calcularTotaisPorCanal(
 
 /**
  * Calcula o montante financeiro consolidado por canal somando todos os itens
- * (faturamento total por canal, lucro líquido total, margem % consolidada)
+ * (faturamento total por canal, lucro líquido total, margem % consolidada).
+ * Regras acordadas:
+ * - 'pago_pelo_cliente': soma no faturamento do canal (total pago pelo cliente) e NÃO entra no custo (não afeta lucro).
+ * - 'frete_gratis': a loja paga -> entra no custo do produto (reduz lucro líquido e margem %) e NÃO soma no total do cliente.
  */
 export function calcularMontanteConsolidadoPorCanal(params: {
   canais: Array<{ id: string; nome: string; tipo?: string }>
@@ -351,7 +370,7 @@ export function calcularMontanteConsolidadoPorCanal(params: {
 
   return canais.map((canal) => {
     let totalItens = 0
-    let totalFretes = 0
+    let totalFretesCliente = 0
     let totalCustos = 0
     let totalTributos = 0
     let totalTaxas = 0
@@ -364,12 +383,17 @@ export function calcularMontanteConsolidadoPorCanal(params: {
         precoObj?.preco_cheio !== undefined && Number(precoObj.preco_cheio) > 0
           ? Number(precoObj.preco_cheio)
           : Math.round(precoUnit * qtd * 100) / 100
-      const frete = it.fretes_canais?.[canal.id]?.valor_frete || 0
+
+      const freteObj = it.fretes_canais?.[canal.id]
+      const frete = Number(freteObj?.valor_frete) || 0
+      const modoFrete = freteObj?.modo_frete || 'pago_pelo_cliente'
 
       totalItens += precoCheio
-      totalFretes += frete
+      if (modoFrete === 'pago_pelo_cliente') {
+        totalFretesCliente += frete
+      }
 
-      // Custo do produto
+      // Custo do produto: custo base dos produtos + frete grátis (quando a loja banca o frete)
       const prodVinculado = it.produtos_canais?.[canal.id]
       const precKey = prodVinculado?.precificacao_id || precoObj?.precificacao_id
       const precRec = precKey ? mapaPrecificacoesAprovadas[precKey] : null
@@ -380,8 +404,10 @@ export function calcularMontanteConsolidadoPorCanal(params: {
         Number(precRec?.premissas?.sobrescrita_custo_total) ||
         Number(precRec?.expand?.produto?.custo_aquisicao_unitario) ||
         0
-      const custoItem = Math.round(custoUnitario * qtd * 100) / 100
-      totalCustos += custoItem
+      const custoItemBase = Math.round(custoUnitario * qtd * 100) / 100
+      const freteGratisItem = modoFrete === 'frete_gratis' ? frete : 0
+      const custoItemTotal = Math.round((custoItemBase + freteGratisItem) * 100) / 100
+      totalCustos += custoItemTotal
 
       // Taxas estimadas do canal
       const taxasGravadas = Number(precRec?.resultado?.total_taxas_retidas_canal) || 0
@@ -396,7 +422,7 @@ export function calcularMontanteConsolidadoPorCanal(params: {
             : Math.round(precoCheio * 0.18 * 100) / 100
       totalTaxas += taxaItem
 
-      // Tributos (DAS + ICMS)
+      // Tributos (DAS + ICMS) sobre precoCheio
       const aliqEfetiva =
         (typeof aliquotaDas === 'number' && aliquotaDas > 0 ? aliquotaDas : 4) +
         (typeof aliquotaIcms === 'number' ? aliquotaIcms : 0)
@@ -405,16 +431,13 @@ export function calcularMontanteConsolidadoPorCanal(params: {
     }
 
     totalItens = Math.round(totalItens * 100) / 100
-    totalFretes = Math.round(totalFretes * 100) / 100
-    const faturamentoTotal = Math.round((totalItens + totalFretes) * 100) / 100
+    totalFretesCliente = Math.round(totalFretesCliente * 100) / 100
+    const faturamentoTotal = Math.round((totalItens + totalFretesCliente) * 100) / 100
     totalCustos = Math.round(totalCustos * 100) / 100
     totalTaxas = Math.round(totalTaxas * 100) / 100
     totalTributos = Math.round(totalTributos * 100) / 100
 
-    // A receber = Faturamento - Taxas da plataforma
-    // Lucro Líquido = A receber - Custo produtos - Tributos - Frete vendedor (quando frete é do vendedor)
-    // Se o cliente pagou frete no faturamento, o valor a receber tem o frete repassado ou retido.
-    // Lucro Líquido = totalItens - totalTaxas - totalCustos - totalTributos
+    // Lucro Líquido = totalItens - totalTaxas - totalCustos (que já inclui frete grátis da loja) - totalTributos
     const lucroLiquidoTotal =
       Math.round((totalItens - totalTaxas - totalCustos - totalTributos) * 100) / 100
     const margemConsolidadaPct =
@@ -425,7 +448,7 @@ export function calcularMontanteConsolidadoPorCanal(params: {
       canalNome: canal.nome,
       tipoCanal: canal.tipo,
       totalItens,
-      totalFretes,
+      totalFretes: totalFretesCliente,
       faturamentoTotal,
       custoTotalProdutos: totalCustos,
       tributosTotal: totalTributos,
@@ -541,9 +564,16 @@ export function gerarTextoWhatsappOrcamento(params: {
       }
       linhas.push(linhaItem)
 
-      // Linha de frete: * Frete: 23,87 ou * Frete: R$ 23,87 (usamos formatarMoedaBR para consistência e clareza)
-      if (frete > 0) {
-        linhas.push(`* Frete: ${formatarMoedaBR(frete)}`)
+      // Linha de frete:
+      // Se modo for 'frete_gratis', exibe '* Frete: Grátis'
+      // Se frete > 0 e 'pago_pelo_cliente', exibe '* Frete: R$ X (pago pelo cliente)'
+      const freteObj = item.fretes_canais?.[canal.id]
+      const modoFrete = freteObj?.modo_frete || 'pago_pelo_cliente'
+
+      if (modoFrete === 'frete_gratis') {
+        linhas.push('* Frete: Grátis')
+      } else if (frete > 0) {
+        linhas.push(`* Frete: ${formatarMoedaBR(frete)} (pago pelo cliente)`)
       }
     }
 

@@ -43,10 +43,13 @@ export interface OrcamentoProdutoVinculadoCanal {
   precificacao_id?: string
 }
 
+export type ModoFreteOrcamento = 'pago_pelo_cliente' | 'frete_gratis'
+
 export interface OrcamentoFreteCanalItem {
   canal_id: string
   canal_nome: string
   valor_frete: number
+  modo_frete?: ModoFreteOrcamento
 }
 
 export type TipoItemOrcamento = 'cadastrado' | 'personalizado'
@@ -97,7 +100,7 @@ export interface OrcamentoRecord {
   validade_dias?: number
   validade_data?: string
   status: StatusOrcamento
-  canais_comparados?: string[]
+  canais_comparados?: string[] | string
   tema?: string
   tema_nome?: string
   cor?: string
@@ -127,7 +130,7 @@ export interface CreateOrcamentoInput {
   validade_dias?: number
   validade_data?: string
   status?: StatusOrcamento
-  canais_comparados?: string[]
+  canais_comparados?: string[] | string
   tema?: string
   tema_nome?: string
   cor?: string

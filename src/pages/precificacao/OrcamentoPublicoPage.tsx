@@ -353,7 +353,9 @@ export default function OrcamentoPublicoPage() {
                             precoCheioGravado !== undefined && precoCheioGravado > 0
                               ? precoCheioGravado
                               : Math.round(precoUnit * (item.quantidade || 1) * 100) / 100
-                          const frete = item.fretes_canais?.[canal.id]?.valor_frete || 0
+                          const freteObj = item.fretes_canais?.[canal.id]
+                          const frete = Number(freteObj?.valor_frete) || 0
+                          const modoFrete = freteObj?.modo_frete || 'pago_pelo_cliente'
                           return (
                             <td key={canal.id} className="py-3 px-4 text-right">
                               <div className="font-bold text-slate-900">
@@ -362,11 +364,15 @@ export default function OrcamentoPublicoPage() {
                               <div className="text-[11px] text-muted-foreground">
                                 {formatarMoedaBR(precoUnit)} cada
                               </div>
-                              {frete > 0 && (
-                                <div className="text-[11px] font-medium text-orange-600 mt-0.5">
-                                  + Frete {formatarMoedaBR(frete)}
+                              {modoFrete === 'frete_gratis' ? (
+                                <div className="text-[11px] font-semibold text-emerald-600 mt-0.5">
+                                  Frete: Grátis
                                 </div>
-                              )}
+                              ) : frete > 0 ? (
+                                <div className="text-[11px] font-medium text-orange-600 mt-0.5">
+                                  + Frete {formatarMoedaBR(frete)} (pago pelo cliente)
+                                </div>
+                              ) : null}
                             </td>
                           )
                         })}
@@ -432,7 +438,9 @@ export default function OrcamentoPublicoPage() {
                   <div className="text-xs text-muted-foreground flex justify-between">
                     <span>Frete / Envio:</span>
                     <span className="font-semibold text-slate-800">
-                      {formatarMoedaBR(tot?.total_fretes || 0)}
+                      {(tot?.total_fretes || 0) > 0
+                        ? `${formatarMoedaBR(tot?.total_fretes || 0)} (pago pelo cliente)`
+                        : 'Grátis'}
                     </span>
                   </div>
                   <div className="pt-2 border-t border-slate-100 flex justify-between items-baseline">

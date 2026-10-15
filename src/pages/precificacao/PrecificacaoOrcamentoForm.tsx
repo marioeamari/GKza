@@ -586,11 +586,40 @@ export default function PrecificacaoOrcamentoForm() {
       const copy = [...prev]
       const it = copy[index]
       const fretes = { ...it.fretes_canais }
+      const freteExistente = fretes[canalId]
 
       fretes[canalId] = {
         canal_id: canalId,
         canal_nome: canalObj.nome,
         valor_frete: valor,
+        modo_frete: freteExistente?.modo_frete || 'pago_pelo_cliente',
+      }
+
+      copy[index] = { ...it, fretes_canais: fretes }
+      return copy
+    })
+  }
+
+  // Alterna o modo de frete por item/canal: 'pago_pelo_cliente' | 'frete_gratis'
+  const handleAlterarModoFreteCanal = (
+    index: number,
+    canalId: string,
+    modo: 'pago_pelo_cliente' | 'frete_gratis',
+  ) => {
+    const canalObj = canaisDisponiveis.find((c) => c.id === canalId)
+    if (!canalObj) return
+
+    setItens((prev) => {
+      const copy = [...prev]
+      const it = copy[index]
+      const fretes = { ...it.fretes_canais }
+      const freteExistente = fretes[canalId]
+
+      fretes[canalId] = {
+        canal_id: canalId,
+        canal_nome: canalObj.nome,
+        valor_frete: freteExistente?.valor_frete || 0,
+        modo_frete: modo,
       }
 
       copy[index] = { ...it, fretes_canais: fretes }
@@ -1383,9 +1412,48 @@ export default function PrecificacaoOrcamentoForm() {
                         </div>
 
                         <div>
-                          <Label className="text-[10px] text-muted-foreground block font-medium">
-                            Frete do Item (R$)
-                          </Label>
+                          {/* Dois botões/modos de frete: 'Frete pago pelo Cliente' e 'Frete Grátis' */}
+                          <div className="flex items-center justify-between mb-1">
+                            <Label className="text-[10px] text-muted-foreground block font-medium">
+                              Frete do Item (R$)
+                            </Label>
+                            <span className="text-[9px] text-muted-foreground font-mono">
+                              {freteObj?.modo_frete === 'frete_gratis'
+                                ? 'Loja paga'
+                                : 'Cliente paga'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-1 mb-1.5">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleAlterarModoFreteCanal(index, canal.id, 'pago_pelo_cliente')
+                              }
+                              className={`text-[10px] px-2 py-1 rounded font-semibold border transition-all text-center leading-tight ${
+                                (freteObj?.modo_frete || 'pago_pelo_cliente') ===
+                                'pago_pelo_cliente'
+                                  ? 'bg-amber-100 border-amber-400 text-amber-950 shadow-xs'
+                                  : 'bg-muted/30 border-border/70 text-muted-foreground hover:bg-muted/60'
+                              }`}
+                            >
+                              Frete pago pelo Cliente
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleAlterarModoFreteCanal(index, canal.id, 'frete_gratis')
+                              }
+                              className={`text-[10px] px-2 py-1 rounded font-semibold border transition-all text-center leading-tight ${
+                                freteObj?.modo_frete === 'frete_gratis'
+                                  ? 'bg-emerald-100 border-emerald-400 text-emerald-950 shadow-xs'
+                                  : 'bg-muted/30 border-border/70 text-muted-foreground hover:bg-muted/60'
+                              }`}
+                            >
+                              Frete Grátis
+                            </button>
+                          </div>
+
                           <Input
                             type="number"
                             step="0.01"
@@ -1398,7 +1466,11 @@ export default function PrecificacaoOrcamentoForm() {
                                 parseFloat(e.target.value) || 0,
                               )
                             }
-                            className="h-7 text-xs"
+                            className={`h-7 text-xs ${
+                              freteObj?.modo_frete === 'frete_gratis'
+                                ? 'border-emerald-300 font-semibold text-emerald-900 bg-emerald-50/40'
+                                : ''
+                            }`}
                           />
                         </div>
                       </div>
@@ -1438,6 +1510,7 @@ export default function PrecificacaoOrcamentoForm() {
                           precoCheioEditado={precoCheio}
                           precoUnitarioEditado={precoUnit}
                           freteItemEditado={frete}
+                          modoFreteItem={freteObj?.modo_frete || 'pago_pelo_cliente'}
                           precificacaoAprovadaRecord={precRec}
                           produtoVinculado={produtoVinculadoObj}
                         />

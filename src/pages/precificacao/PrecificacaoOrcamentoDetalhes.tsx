@@ -61,6 +61,9 @@ export default function PrecificacaoOrcamentoDetalhes() {
   const [simPrecoCheio, setSimPrecoCheio] = useState<number | undefined>(undefined)
   const [simQuantidade, setSimQuantidade] = useState<number | undefined>(undefined)
   const [simFrete, setSimFrete] = useState<number | undefined>(undefined)
+  const [simModoFrete, setSimModoFrete] = useState<
+    'pago_pelo_cliente' | 'frete_gratis' | undefined
+  >(undefined)
 
   const carregarOrcamento = async () => {
     if (!id) return
@@ -188,6 +191,7 @@ export default function PrecificacaoOrcamentoDetalhes() {
     )
     setSimQuantidade(qtdItem)
     setSimFrete(freteItem)
+    setSimModoFrete(itemAtual.fretes_canais?.[canalAtual.id]?.modo_frete || 'pago_pelo_cliente')
 
     const precCanal = itemAtual.precos_canais?.[canalAtual.id]
     const prodCanal = itemAtual.produtos_canais?.[canalAtual.id]
@@ -242,6 +246,10 @@ export default function PrecificacaoOrcamentoDetalhes() {
 
   const handleSimAlterarFrete = (novoFrete: number) => {
     setSimFrete(novoFrete)
+  }
+
+  const handleSimAlterarModoFrete = (novoModo: 'pago_pelo_cliente' | 'frete_gratis') => {
+    setSimModoFrete(novoModo)
   }
 
   if (loading) {
@@ -493,7 +501,9 @@ export default function PrecificacaoOrcamentoDetalhes() {
                       {canais.map((canal) => {
                         const precoUnit = item.precos_canais?.[canal.id]?.preco_unitario || 0
                         const subtotal = Math.round(precoUnit * (item.quantidade || 1) * 100) / 100
-                        const frete = item.fretes_canais?.[canal.id]?.valor_frete || 0
+                        const freteObj = item.fretes_canais?.[canal.id]
+                        const frete = Number(freteObj?.valor_frete) || 0
+                        const modoFrete = freteObj?.modo_frete || 'pago_pelo_cliente'
                         return (
                           <td key={canal.id} className="py-3 px-4 text-right">
                             <div className="font-bold text-foreground">
@@ -502,11 +512,15 @@ export default function PrecificacaoOrcamentoDetalhes() {
                             <div className="text-[11px] text-muted-foreground">
                               {formatarMoedaBR(precoUnit)}/un
                             </div>
-                            {frete > 0 && (
-                              <div className="text-[11px] font-semibold text-orange-600 mt-0.5">
-                                + Frete: {formatarMoedaBR(frete)}
+                            {modoFrete === 'frete_gratis' ? (
+                              <div className="text-[11px] font-semibold text-emerald-600 mt-0.5">
+                                Frete: Grátis
                               </div>
-                            )}
+                            ) : frete > 0 ? (
+                              <div className="text-[11px] font-semibold text-orange-600 mt-0.5">
+                                + Frete: {formatarMoedaBR(frete)} (pago pelo cliente)
+                              </div>
+                            ) : null}
                           </td>
                         )
                       })}
@@ -684,6 +698,34 @@ export default function PrecificacaoOrcamentoDetalhes() {
                     onChange={(e) => handleSimAlterarFrete(parseFloat(e.target.value) || 0)}
                     className="h-8 text-xs font-semibold text-orange-600"
                   />
+                  <div className="flex gap-1 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleSimAlterarModoFrete('pago_pelo_cliente')}
+                      className={`text-[10px] px-2 py-0.5 rounded font-medium border transition-colors ${
+                        (simModoFrete ??
+                          itemAtual.fretes_canais?.[canalAtual.id]?.modo_frete ??
+                          'pago_pelo_cliente') === 'pago_pelo_cliente'
+                          ? 'bg-amber-100 border-amber-300 text-amber-900 font-bold'
+                          : 'bg-muted/50 border-border text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      Pago Cliente
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSimAlterarModoFrete('frete_gratis')}
+                      className={`text-[10px] px-2 py-0.5 rounded font-medium border transition-colors ${
+                        (simModoFrete ??
+                          itemAtual.fretes_canais?.[canalAtual.id]?.modo_frete ??
+                          'pago_pelo_cliente') === 'frete_gratis'
+                          ? 'bg-emerald-100 border-emerald-300 text-emerald-900 font-bold'
+                          : 'bg-muted/50 border-border text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      Frete Grátis
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -706,6 +748,10 @@ export default function PrecificacaoOrcamentoDetalhes() {
                 }
                 freteItemEditado={
                   simFrete ?? (itemAtual.fretes_canais?.[canalAtual.id]?.valor_frete || 0)
+                }
+                modoFreteItem={
+                  simModoFrete ??
+                  (itemAtual.fretes_canais?.[canalAtual.id]?.modo_frete || 'pago_pelo_cliente')
                 }
                 precificacaoAprovadaRecord={precificacaoAprovadaCarregada}
                 produtoVinculado={itemAtual.produtos_canais?.[canalAtual.id]}

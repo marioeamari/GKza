@@ -39,12 +39,21 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
             precoCheioGravado !== undefined && precoCheioGravado > 0
               ? precoCheioGravado
               : Math.round(precoUnit * item.quantidade * 100) / 100
-          const frete = item.fretes_canais?.[canal.id]?.valor_frete || 0
+          const freteObj = item.fretes_canais?.[canal.id]
+          const frete = Number(freteObj?.valor_frete) || 0
+          const modoFrete = freteObj?.modo_frete || 'pago_pelo_cliente'
+          let freteHtml = ''
+          if (modoFrete === 'frete_gratis') {
+            freteHtml = `<div style="font-size: 11px; color: #059669; font-weight: 600;">Frete: Grátis</div>`
+          } else if (frete > 0) {
+            freteHtml = `<div style="font-size: 11px; color: #df5830;">+ Frete: ${formatarMoedaBR(frete)} (pago pelo cliente)</div>`
+          }
+
           return `
             <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right; font-size: 13px;">
               <div><strong>${formatarMoedaBR(subtotal)}</strong></div>
               <div style="font-size: 11px; color: #6b7280;">(${formatarMoedaBR(precoUnit)}/un)</div>
-              ${frete > 0 ? `<div style="font-size: 11px; color: #df5830;">+ Frete ${formatarMoedaBR(frete)}</div>` : ''}
+              ${freteHtml}
             </td>
           `
         })
@@ -95,21 +104,24 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
   const totalCols = canais
     .map((canal) => {
       const tot = totais[canal.id]
-      const frete = tot?.total_fretes || 0
+      const fretePagoCliente = tot?.total_fretes || 0
       const itensTotal = tot?.total_itens || 0
       const geral = tot?.total_geral || 0
+      const temFreteGratisNoCanal = itens.some(
+        (it) => it.fretes_canais?.[canal.id]?.modo_frete === 'frete_gratis',
+      )
       return `
-        <td style="padding: 10px; border-top: 2px solid #111827; text-align: right; font-size: 14px;">
-          <div style="font-size: 11px; color: #6b7280;">Itens: ${formatarMoedaBR(itensTotal)}</div>
-          ${frete > 0 ? `<div style="font-size: 11px; color: #6b7280;">Frete: ${formatarMoedaBR(frete)}</div>` : ''}
-          <div style="font-size: 16px; font-weight: bold; color: #df5830; margin-top: 2px;">
-            ${formatarMoedaBR(geral)}
-          </div>
-        </td>
-      `
+      <td style="padding: 10px; border-top: 2px solid #111827; text-align: right; font-size: 14px;">
+        <div style="font-size: 11px; color: #6b7280;">Itens: ${formatarMoedaBR(itensTotal)}</div>
+        ${fretePagoCliente > 0 ? `<div style="font-size: 11px; color: #df5830;">Frete: ${formatarMoedaBR(fretePagoCliente)} (pago pelo cliente)</div>` : ''}
+        ${fretePagoCliente === 0 && temFreteGratisNoCanal ? `<div style="font-size: 11px; color: #059669; font-weight: 600;">Frete: Grátis</div>` : ''}
+        <div style="font-size: 16px; font-weight: bold; color: #df5830; margin-top: 2px;">
+          ${formatarMoedaBR(geral)}
+        </div>
+      </td>
+    `
     })
     .join('')
-
   return `
     <!DOCTYPE html>
     <html lang="pt-BR">
