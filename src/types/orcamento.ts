@@ -55,6 +55,9 @@ export interface OrcamentoItemRecord {
   modelo?: string
   modelo_nome: string
   modelo_codigo?: string
+  tema?: string
+  tema_nome?: string
+  cor?: string
   quantidade: number
   precos_canais: Record<string, OrcamentoPrecoCanalItem>
   fretes_canais: Record<string, OrcamentoFreteCanalItem>
@@ -64,6 +67,7 @@ export interface OrcamentoItemRecord {
   updated?: string
   expand?: {
     modelo?: KitModelo
+    tema?: KitTema
   }
 }
 
@@ -127,6 +131,9 @@ export interface CreateOrcamentoInput {
     modelo?: string
     modelo_nome: string
     modelo_codigo?: string
+    tema?: string
+    tema_nome?: string
+    cor?: string
     quantidade: number
     precos_canais: Record<string, OrcamentoPrecoCanalItem>
     fretes_canais: Record<string, OrcamentoFreteCanalItem>

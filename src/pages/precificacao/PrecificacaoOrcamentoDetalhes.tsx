@@ -21,6 +21,7 @@ import { orcamentosService } from '@/services/orcamentos'
 import { OrcamentoRecord, StatusOrcamento } from '@/types/orcamento'
 import {
   formatarMoedaBR,
+  formatarDataBR,
   normalizarCanaisExpandidos,
   normalizarOrcamentoRecord,
 } from '@/lib/precificacao/orcamentoCalculo'
@@ -122,12 +123,7 @@ export default function PrecificacaoOrcamentoDetalhes() {
   const stInfo = STATUS_CONFIG[orcamentoNormalizado.status] || STATUS_CONFIG.rascunho
 
   const formatarData = (dt?: string) => {
-    if (!dt) return '-'
-    const parte = String(dt).split('T')[0]
-    if (!parte) return '-'
-    const [ano, mes, dia] = parte.split('-')
-    if (!dia || !mes || !ano) return parte
-    return `${dia}/${mes}/${ano}`
+    return formatarDataBR(dt)
   }
 
   return (
@@ -284,13 +280,22 @@ export default function PrecificacaoOrcamentoDetalhes() {
                 itens.map((item, idx) => (
                   <tr key={item.id || idx} className="hover:bg-muted/10">
                     <td className="py-3 px-4">
-                      <span className="font-bold text-foreground">
+                      <div className="font-bold text-foreground">
                         {item.modelo_nome || 'Item sem nome'}
-                      </span>
-                      {item.modelo_codigo && (
-                        <span className="text-xs text-muted-foreground ml-2 font-mono">
-                          ({item.modelo_codigo})
-                        </span>
+                        {item.modelo_codigo && (
+                          <span className="text-xs text-muted-foreground ml-2 font-mono">
+                            ({item.modelo_codigo})
+                          </span>
+                        )}
+                      </div>
+                      {(item.tema_nome || item.cor) && (
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {item.tema_nome && (
+                            <span className="text-primary font-medium">Tema: {item.tema_nome}</span>
+                          )}
+                          {item.tema_nome && item.cor && <span> • </span>}
+                          {item.cor && <span>Cor: {item.cor}</span>}
+                        </div>
                       )}
                     </td>
                     <td className="py-3 px-3 text-center font-bold">{item.quantidade || 1}</td>

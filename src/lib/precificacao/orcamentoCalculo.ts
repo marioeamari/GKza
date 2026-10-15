@@ -20,6 +20,37 @@ export function formatarMoedaBR(valor: number): string {
 }
 
 /**
+ * Formata com segurança qualquer data em ISO ou formato PocketBase para dd/mm/aaaa
+ * Ex: '2026-10-14 00:00:00.000Z' -> '14/10/2026'
+ * Ex: '2026-10-14T00:00:00.000Z' -> '14/10/2026'
+ * Ex: '2026-10-14' -> '14/10/2026'
+ */
+export function formatarDataBR(dataStr?: string | Date | null): string {
+  if (!dataStr) return '-'
+  if (dataStr instanceof Date) {
+    if (isNaN(dataStr.getTime())) return '-'
+    const dia = String(dataStr.getDate()).padStart(2, '0')
+    const mes = String(dataStr.getMonth() + 1).padStart(2, '0')
+    const ano = dataStr.getFullYear()
+    return `${dia}/${mes}/${ano}`
+  }
+  const str = String(dataStr).trim()
+  if (!str) return '-'
+  // Extrai apenas a parte da data YYYY-MM-DD
+  const parteData = str.split('T')[0].split(' ')[0]
+  const partes = parteData.split('-')
+  if (partes.length === 3) {
+    const [ano, mes, dia] = partes
+    if (ano.length === 4 && mes && dia) {
+      return `${dia.padStart(2, '0')}/${mes.padStart(2, '0')}/${ano}`
+    }
+  }
+  // Se já contiver barras
+  if (str.includes('/')) return str
+  return str
+}
+
+/**
  * Calcula totais por canal para um conjunto de itens e canais selecionados.
  * Total do canal = Soma(quantidade * preco_unitario) + Soma(frete_item)
  */
@@ -378,10 +409,10 @@ export function gerarTextoWhatsappOrcamento(params: {
   }
 
   if (validade_data) {
-    const [ano, mes, dia] = validade_data.split('-')
-    if (dia && mes && ano) {
+    const dataFormatada = formatarDataBR(validade_data)
+    if (dataFormatada !== '-') {
       linhas.push('')
-      linhas.push(`Proposta válida até ${dia}/${mes}/${ano}.`)
+      linhas.push(`Proposta válida até ${dataFormatada}.`)
     }
   }
 

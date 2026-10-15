@@ -61,17 +61,27 @@ export const dateOnly = (value: string | Date) => {
 export const toPocketBaseDate = (value: string) => (value ? `${value} 12:00:00.000Z` : '')
 
 export const parseDate = (value: string) => {
-  const clean = value.slice(0, 10)
+  if (!value) return new Date()
+  const clean = value.trim().split('T')[0].split(' ')[0]
   const [year, month, day] = clean.split('-').map(Number)
   return new Date(year, (month || 1) - 1, day || 1, 12)
 }
 
-export const formatDate = (value: string | Date, options?: Intl.DateTimeFormatOptions) => {
-  const date = value instanceof Date ? value : parseDate(value)
-  return new Intl.DateTimeFormat(
-    'pt-BR',
-    options ?? { day: '2-digit', month: '2-digit', year: 'numeric' },
-  ).format(date)
+export const formatDate = (
+  value: string | Date | undefined | null,
+  options?: Intl.DateTimeFormatOptions,
+) => {
+  if (!value) return '-'
+  try {
+    const date = value instanceof Date ? value : parseDate(String(value))
+    if (isNaN(date.getTime())) return '-'
+    return new Intl.DateTimeFormat(
+      'pt-BR',
+      options ?? { day: '2-digit', month: '2-digit', year: 'numeric' },
+    ).format(date)
+  } catch {
+    return '-'
+  }
 }
 
 export const formatShortDate = (value: string | Date) =>

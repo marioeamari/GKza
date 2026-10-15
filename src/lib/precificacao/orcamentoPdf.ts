@@ -17,9 +17,7 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
       : {}
 
   const formatarData = (dt?: string) => {
-    if (!dt) return '-'
-    const [ano, mes, dia] = dt.split('T')[0].split('-')
-    return `${dia}/${mes}/${ano}`
+    return formatarDataBR(dt)
   }
 
   const itensRows = itens
@@ -42,8 +40,18 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
       return `
         <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f9fafb'};">
           <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-size: 13px;">
-            <strong>${item.modelo_nome}</strong>
-            ${item.modelo_codigo ? `<span style="font-size: 11px; color: #6b7280; margin-left: 4px;">(${item.modelo_codigo})</span>` : ''}
+            <div>
+              <strong>${item.modelo_nome}</strong>
+              ${item.modelo_codigo ? `<span style="font-size: 11px; color: #6b7280; margin-left: 4px;">(${item.modelo_codigo})</span>` : ''}
+            </div>
+            ${
+              item.tema_nome || item.cor
+                ? `<div style="font-size: 11px; color: #4b5563; margin-top: 2px;">
+                    ${item.tema_nome ? `Tema: <strong>${item.tema_nome}</strong>` : ''}
+                    ${item.cor ? ` &bull; Cor: <strong>${item.cor}</strong>` : ''}
+                  </div>`
+                : ''
+            }
           </td>
           <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: center; font-size: 13px; font-weight: bold;">
             ${item.quantidade}
@@ -232,7 +240,8 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
           <h3>Detalhes do Pedido</h3>
           <p>${orcamento.titulo || 'Cotação Personalizada'}</p>
           <div style="font-size: 12px; color: #4b5563;">
-            ${orcamento.tema_nome ? `Tema: <strong>${orcamento.tema_nome}</strong>` : ''}
+            ${itens.length} ${itens.length === 1 ? 'item' : 'itens'} no orçamento
+            ${orcamento.tema_nome ? ` &bull; Tema geral: <strong>${orcamento.tema_nome}</strong>` : ''}
             ${orcamento.cor ? ` &bull; Cor: <strong>${orcamento.cor}</strong>` : ''}
           </div>
         </div>

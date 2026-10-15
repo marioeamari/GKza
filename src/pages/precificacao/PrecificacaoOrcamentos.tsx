@@ -25,6 +25,7 @@ import { orcamentosService } from '@/services/orcamentos'
 import { OrcamentoRecord, StatusOrcamento } from '@/types/orcamento'
 import {
   formatarMoedaBR,
+  formatarDataBR,
   normalizarCanaisExpandidos,
   normalizarOrcamentoRecord,
 } from '@/lib/precificacao/orcamentoCalculo'
@@ -133,9 +134,7 @@ export default function PrecificacaoOrcamentos() {
   }, [orcamentos, busca, statusFiltro])
 
   const formatarData = (dt?: string) => {
-    if (!dt) return '-'
-    const [ano, mes, dia] = dt.split('T')[0].split('-')
-    return `${dia}/${mes}/${ano}`
+    return formatarDataBR(dt)
   }
 
   return (

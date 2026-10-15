@@ -49,7 +49,7 @@ export const orcamentosService = {
     const itensRaw = await pb.collection('orcamento_itens').getFullList<OrcamentoItemRecord>({
       filter: `orcamento="${id}"`,
       sort: 'ordem,created',
-      expand: 'modelo',
+      expand: 'modelo,tema',
     })
 
     const orcNormalizado = normalizarOrcamentoRecord({
@@ -111,7 +111,7 @@ export const orcamentosService = {
       filter: `orcamento="${orc.id}"`,
       sort: 'ordem,created',
       query: { token },
-      expand: 'modelo',
+      expand: 'modelo,tema',
     })
 
     const orcNormalizado = normalizarOrcamentoRecord({
@@ -199,6 +199,9 @@ export const orcamentosService = {
         modelo: it.modelo || null,
         modelo_nome: it.modelo_nome,
         modelo_codigo: it.modelo_codigo || '',
+        tema: it.tema || null,
+        tema_nome: it.tema_nome || '',
+        cor: it.cor || '',
         quantidade: it.quantidade,
         precos_canais: it.precos_canais || {},
         fretes_canais: it.fretes_canais || {},
@@ -281,6 +284,9 @@ export const orcamentosService = {
             modelo: it.modelo || null,
             modelo_nome: it.modelo_nome,
             modelo_codigo: it.modelo_codigo || '',
+            tema: it.tema || null,
+            tema_nome: it.tema_nome || '',
+            cor: it.cor || '',
             quantidade: it.quantidade,
             precos_canais: it.precos_canais || {},
             fretes_canais: it.fretes_canais || {},
@@ -293,6 +299,9 @@ export const orcamentosService = {
             modelo: it.modelo || null,
             modelo_nome: it.modelo_nome,
             modelo_codigo: it.modelo_codigo || '',
+            tema: it.tema || null,
+            tema_nome: it.tema_nome || '',
+            cor: it.cor || '',
             quantidade: it.quantidade,
             precos_canais: it.precos_canais || {},
             fretes_canais: it.fretes_canais || {},
@@ -347,6 +356,7 @@ export const orcamentosService = {
       produto_sku?: string
       preco_aprovado: number
       modalidade_nome?: string
+      precificacao_record?: any
     }>
   > {
     if (!canalId) return []
@@ -366,6 +376,7 @@ export const orcamentosService = {
           produto_sku?: string
           preco_aprovado: number
           modalidade_nome?: string
+          precificacao_record?: any
         }
       >()
 
@@ -380,6 +391,7 @@ export const orcamentosService = {
             produto_sku: prod.sku,
             preco_aprovado: Number(r.preco_aprovado) || 0,
             modalidade_nome: (r as any).expand?.modalidade?.nome,
+            precificacao_record: r,
           })
         }
       }

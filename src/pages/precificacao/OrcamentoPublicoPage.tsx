@@ -16,6 +16,7 @@ import { orcamentosService } from '@/services/orcamentos'
 import { OrcamentoRecord } from '@/types/orcamento'
 import {
   formatarMoedaBR,
+  formatarDataBR,
   normalizarCanaisExpandidos,
   normalizarOrcamentoRecord,
 } from '@/lib/precificacao/orcamentoCalculo'
@@ -129,12 +130,7 @@ export default function OrcamentoPublicoPage() {
     : []
 
   const formatarData = (dt?: string) => {
-    if (!dt) return '-'
-    const parte = String(dt).split('T')[0]
-    if (!parte) return '-'
-    const [ano, mes, dia] = parte.split('-')
-    if (!dia || !mes || !ano) return parte
-    return `${dia}/${mes}/${ano}`
+    return formatarDataBR(dt)
   }
 
   return (
@@ -315,6 +311,17 @@ export default function OrcamentoPublicoPage() {
                         {item.modelo_codigo && (
                           <div className="text-xs text-muted-foreground font-mono">
                             Cód: {item.modelo_codigo}
+                          </div>
+                        )}
+                        {(item.tema_nome || item.cor) && (
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            {item.tema_nome && (
+                              <span className="text-primary font-medium">
+                                Tema: {item.tema_nome}
+                              </span>
+                            )}
+                            {item.tema_nome && item.cor && <span> • </span>}
+                            {item.cor && <span>Cor: {item.cor}</span>}
                           </div>
                         )}
                       </td>
