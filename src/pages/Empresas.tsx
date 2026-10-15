@@ -62,7 +62,7 @@ export default function Empresas() {
 
       const contagem: Record<string, number> = {}
       for (const prod of todosProdutos) {
-        if (prod.empresa) {
+        if (prod.empresa && prod.tipo === 'fabricacao_propria') {
           contagem[prod.empresa] = (contagem[prod.empresa] || 0) + 1
         }
       }

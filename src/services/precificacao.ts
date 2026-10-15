@@ -21,7 +21,15 @@ export const precificacaoService = {
 
   async listProdutosPorEmpresa(empresaId: string): Promise<PrecProdutoRecord[]> {
     return pb.collection('prec_produtos').getFullList<PrecProdutoRecord>({
-      filter: `empresa = "${empresaId}"`,
+      filter: `empresa = "${empresaId}" && tipo = "fabricacao_propria"`,
+      sort: '-created',
+      expand: 'empresa,fornecedor,fornecedor_produto',
+    })
+  },
+
+  async listProdutosPorFornecedor(fornecedorId: string): Promise<PrecProdutoRecord[]> {
+    return pb.collection('prec_produtos').getFullList<PrecProdutoRecord>({
+      filter: `fornecedor = "${fornecedorId}" && tipo = "revenda"`,
       sort: '-created',
       expand: 'empresa,fornecedor,fornecedor_produto',
     })

@@ -35,6 +35,7 @@ interface ComboDialogProps {
   onOpenChange: (open: boolean) => void
   comboParaEditar?: PrecProdutoRecord | null
   produtosDisponiveis: PrecProdutoRecord[]
+  kitsMap?: Record<string, PrecKitRecord>
   onSuccess: () => void
 }
 
@@ -43,6 +44,7 @@ export function ComboDialog({
   onOpenChange,
   comboParaEditar,
   produtosDisponiveis,
+  kitsMap,
   onSuccess,
 }: ComboDialogProps) {
   const { toast } = useToast()
@@ -74,9 +76,12 @@ export function ComboDialog({
   const [saving, setSaving] = useState(false)
   const [buscaText, setBuscaText] = useState('')
 
-  // Apenas produtos simples (fabricação própria ou revenda) podem compor o combo
+  // Componentes aceitam fabricação própria, revenda e kit (kit dentro de combo)
+  // Combos não podem se auto-conter para evitar ciclos
   const produtosOpcoes = produtosDisponiveis.filter(
-    (p) => p.tipo === 'fabricacao_propria' || p.tipo === 'revenda',
+    (p) =>
+      (p.tipo === 'fabricacao_propria' || p.tipo === 'revenda' || p.tipo === 'kit') &&
+      (!comboParaEditar || p.id !== comboParaEditar.id),
   )
 
   // Cálculo dos custos dos componentes em tempo real
@@ -88,19 +93,31 @@ export function ComboDialog({
 
   const itensCalculados = itens.map((item) => {
     const prod = produtosOpcoes.find((p) => p.id === item.produto_id)
-    const custoUnit = prod
-      ? calcularCustoBaseProduto({
-          sku: prod.sku,
-          nome: prod.nome,
-          tipo: prod.tipo,
-          composicao: prod.composicao,
-          perda_pct: prod.perda_pct,
-          custo_aquisicao_unitario: prod.custo_aquisicao_unitario,
-          despesas_compra: prod.despesas_compra,
-          custo_etiqueta: prod.custo_etiqueta,
-          custo_adicional_embalagem: prod.custo_adicional_embalagem,
-        }).custo_total
-      : 0
+    let custoUnit = 0
+    if (prod) {
+      // Se for kit, busca itens do kit para calcular o custo dinamicamente
+      const kitRecord = kitsMap?.[prod.id]
+      const kitItensConfig = kitRecord?.itens?.map((it) => ({
+        produto_id: it.produto_id,
+        nome: it.nome,
+        qtd_efetiva: it.qtd_efetiva,
+        custo_unitario: it.custo_unitario,
+      }))
+
+      custoUnit = calcularCustoBaseProduto({
+        sku: prod.sku,
+        nome: prod.nome,
+        tipo: prod.tipo,
+        composicao: prod.composicao,
+        perda_pct: prod.perda_pct,
+        custo_aquisicao_unitario: prod.custo_aquisicao_unitario,
+        despesas_compra: prod.despesas_compra,
+        custo_etiqueta: prod.custo_etiqueta,
+        custo_adicional_embalagem: prod.custo_adicional_embalagem,
+        kit_itens: kitItensConfig,
+        kit_custos_adicionais: kitRecord?.custos_adicionais,
+      }).custo_total
+    }
     const subtotal = custoUnit * (item.quantidade || 1)
     somaCustosComponentes += subtotal
 
@@ -297,12 +314,7 @@ export function ComboDialog({
 
     setSaving(true)
     try {
-      // Descobrir empresa dos produtos (se todos pertencerem à mesma empresa)
-      const empresasIds = itensValidos
-        .map((it) => produtosOpcoes.find((p) => p.id === it.produto_id)?.empresa)
-        .filter(Boolean)
-      const empresaFinal = empresasIds.length > 0 ? empresasIds[0] : undefined
-
+      // Combos e kits pertencem exclusivamente ao catálogo (sem empresa)
       const payload: Partial<PrecProdutoRecord> = {
         tipo: 'combo',
         status: 'ativo',
@@ -317,7 +329,7 @@ export function ComboDialog({
         dimensao_altura_cm: alturaCm,
         custo_adicional_embalagem: custoEmbalagem,
         custo_etiqueta: custoEtiqueta,
-        empresa: empresaFinal,
+        empresa: '',
       }
       delete payload.imagem
 
@@ -357,19 +369,30 @@ export function ComboDialog({
       // Persistir estrutura em prec_kits
       const kitItensFormatados: ItemKitConfig[] = itensValidos.map((it) => {
         const prod = produtosOpcoes.find((p) => p.id === it.produto_id)
-        const custoUnit = prod
-          ? calcularCustoBaseProduto({
-              sku: prod.sku,
-              nome: prod.nome,
-              tipo: prod.tipo,
-              composicao: prod.composicao,
-              perda_pct: prod.perda_pct,
-              custo_aquisicao_unitario: prod.custo_aquisicao_unitario,
-              despesas_compra: prod.despesas_compra,
-              custo_etiqueta: prod.custo_etiqueta,
-              custo_adicional_embalagem: prod.custo_adicional_embalagem,
-            }).custo_total
-          : 0
+        let custoUnit = 0
+        if (prod) {
+          const kitRecord = kitsMap?.[prod.id]
+          const kitItensConfig = kitRecord?.itens?.map((itRec) => ({
+            produto_id: itRec.produto_id,
+            nome: itRec.nome,
+            qtd_efetiva: itRec.qtd_efetiva,
+            custo_unitario: itRec.custo_unitario,
+          }))
+
+          custoUnit = calcularCustoBaseProduto({
+            sku: prod.sku,
+            nome: prod.nome,
+            tipo: prod.tipo,
+            composicao: prod.composicao,
+            perda_pct: prod.perda_pct,
+            custo_aquisicao_unitario: prod.custo_aquisicao_unitario,
+            despesas_compra: prod.despesas_compra,
+            custo_etiqueta: prod.custo_etiqueta,
+            custo_adicional_embalagem: prod.custo_adicional_embalagem,
+            kit_itens: kitItensConfig,
+            kit_custos_adicionais: kitRecord?.custos_adicionais,
+          }).custo_total
+        }
         return {
           produto_id: it.produto_id,
           nome: prod?.nome || 'Produto Componente',

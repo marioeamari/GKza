@@ -129,7 +129,7 @@ export function EmpresaDialog({
     try {
       setLoadingProdutos(true)
       const data = await precificacaoService.listProdutosPorEmpresa(empresaId)
-      setProdutos(data)
+      setProdutos(data.filter((p) => p.tipo === 'fabricacao_propria'))
     } catch {
       // Ignora erro suave
     } finally {

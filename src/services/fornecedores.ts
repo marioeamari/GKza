@@ -129,15 +129,7 @@ export const fornecedoresService = {
       }
       payload.sku = finalSku
 
-      // Se houver empresa padrão, vincula
-      try {
-        const empresas = await pb.collection('empresas').getList(1, 1, { sort: 'created' })
-        if (empresas.items.length > 0) {
-          payload.empresa = empresas.items[0].id
-        }
-      } catch {
-        /* intentionally ignored */
-      }
+      // Produtos de revenda gravam estritamente fornecedor e fornecedor_produto, sem empresa
 
       precSalvo = await pb.collection('prec_produtos').create(payload)
     }
