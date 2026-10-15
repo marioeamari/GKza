@@ -28,6 +28,9 @@ import {
 import { imprimirOuBaixarOrcamentoPDF } from '@/lib/precificacao/orcamentoPdf'
 import { OrcamentoSaidasPanel } from '@/components/precificacao/OrcamentoSaidasPanel'
 import { DecisaoAprovacaoItemPanel } from '@/components/precificacao/DecisaoAprovacaoItemPanel'
+import { MontanteOrcamentoPanel } from '@/components/precificacao/MontanteOrcamentoPanel'
+import { calcularMontanteConsolidadoPorCanal } from '@/lib/precificacao/orcamentoCalculo'
+import { getFileUrl } from '@/lib/pocketbase/files'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -122,6 +125,17 @@ export default function PrecificacaoOrcamentoDetalhes() {
       ? orcamentoNormalizado.expand.itens
       : []
   }, [orcamentoNormalizado])
+
+  const totalUnidadesGeral = useMemo(() => {
+    return itens.reduce((acc, it) => acc + (Number(it.quantidade) || 0), 0)
+  }, [itens])
+
+  const montantesPorCanal = useMemo(() => {
+    return calcularMontanteConsolidadoPorCanal({
+      canais: canais.map((c) => ({ id: c.id, nome: c.nome || c.id, tipo: (c as any).tipo })),
+      itens,
+    })
+  }, [canais, itens])
 
   const stInfo = orcamentoNormalizado
     ? STATUS_CONFIG[orcamentoNormalizado.status] || STATUS_CONFIG.rascunho
@@ -312,6 +326,13 @@ export default function PrecificacaoOrcamentoDetalhes() {
       {/* PAINEL DAS 3 SAÍDAS (WhatsApp, PDF e Link) */}
       <OrcamentoSaidasPanel orcamento={orcamento} onAtualizar={(novo) => setOrcamento(novo)} />
 
+      {/* RESUMO DO MONTANTE DO ORÇAMENTO (SOMA DE TODOS OS ITENS) */}
+      <MontanteOrcamentoPanel
+        montantesPorCanal={montantesPorCanal}
+        totalItensQtd={totalUnidadesGeral}
+        qtdModelos={itens.length}
+      />
+
       {/* METADADOS E ESPECIFICAÇÃO */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card className="shadow-xs border-border/80">
@@ -402,50 +423,96 @@ export default function PrecificacaoOrcamentoDetalhes() {
                   </td>
                 </tr>
               ) : (
-                itens.map((item, idx) => (
-                  <tr key={item.id || idx} className="hover:bg-muted/10">
-                    <td className="py-3 px-4">
-                      <div className="font-bold text-foreground">
-                        {item.modelo_nome || 'Item sem nome'}
-                        {item.modelo_codigo && (
-                          <span className="text-xs text-muted-foreground ml-2 font-mono">
-                            ({item.modelo_codigo})
-                          </span>
-                        )}
-                      </div>
-                      {(item.tema_nome || item.cor) && (
-                        <div className="text-xs text-muted-foreground mt-0.5">
-                          {item.tema_nome && (
-                            <span className="text-primary font-medium">Tema: {item.tema_nome}</span>
-                          )}
-                          {item.tema_nome && item.cor && <span> • </span>}
-                          {item.cor && <span>Cor: {item.cor}</span>}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3 px-3 text-center font-bold">{item.quantidade || 1}</td>
-                    {canais.map((canal) => {
-                      const precoUnit = item.precos_canais?.[canal.id]?.preco_unitario || 0
-                      const subtotal = Math.round(precoUnit * (item.quantidade || 1) * 100) / 100
-                      const frete = item.fretes_canais?.[canal.id]?.valor_frete || 0
-                      return (
-                        <td key={canal.id} className="py-3 px-4 text-right">
-                          <div className="font-bold text-foreground">
-                            {formatarMoedaBR(subtotal)}
-                          </div>
-                          <div className="text-[11px] text-muted-foreground">
-                            {formatarMoedaBR(precoUnit)}/un
-                          </div>
-                          {frete > 0 && (
-                            <div className="text-[11px] font-semibold text-orange-600 mt-0.5">
-                              + Frete: {formatarMoedaBR(frete)}
+                itens.map((item, idx) => {
+                  const isPersonalizado = item.tipo_item === 'personalizado'
+                  const fotoModelo = (item.expand as any)?.modelo?.foto
+                    ? getFileUrl((item.expand as any).modelo, (item.expand as any).modelo.foto)
+                    : ''
+                  const fotoAnexo = item.imagem_anexo ? getFileUrl(item, item.imagem_anexo) : ''
+                  const imagemExibir = fotoAnexo || item.foto_url || fotoModelo
+
+                  return (
+                    <tr key={item.id || idx} className="hover:bg-muted/10">
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2.5">
+                          {imagemExibir ? (
+                            <img
+                              src={imagemExibir}
+                              alt={item.modelo_nome}
+                              className="h-9 w-9 rounded-md object-cover border border-border/80 shrink-0"
+                            />
+                          ) : (
+                            <div className="h-9 w-9 rounded-md bg-muted/40 border border-dashed border-border/80 flex items-center justify-center shrink-0">
+                              <Sparkles className="w-3.5 h-3.5 text-muted-foreground/40" />
                             </div>
                           )}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                ))
+
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-foreground">
+                                {item.modelo_nome || 'Item sem nome'}
+                              </span>
+                              {item.modelo_codigo && (
+                                <span className="text-xs text-muted-foreground font-mono">
+                                  ({item.modelo_codigo})
+                                </span>
+                              )}
+                              <Badge
+                                variant="outline"
+                                className={`text-[9px] px-1 py-0 ${
+                                  isPersonalizado
+                                    ? 'bg-violet-50 text-violet-700 border-violet-200'
+                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                }`}
+                              >
+                                {isPersonalizado ? 'Personalizado' : 'Cadastrado'}
+                              </Badge>
+                            </div>
+
+                            {item.descricao && (
+                              <p className="text-xs text-muted-foreground italic mt-0.5">
+                                {item.descricao}
+                              </p>
+                            )}
+
+                            {(item.tema_nome || item.cor) && (
+                              <div className="text-xs text-muted-foreground mt-0.5">
+                                {item.tema_nome && (
+                                  <span className="text-primary font-medium">
+                                    Tema: {item.tema_nome}
+                                  </span>
+                                )}
+                                {item.tema_nome && item.cor && <span> • </span>}
+                                {item.cor && <span>Cor: {item.cor}</span>}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 text-center font-bold">{item.quantidade || 1}</td>
+                      {canais.map((canal) => {
+                        const precoUnit = item.precos_canais?.[canal.id]?.preco_unitario || 0
+                        const subtotal = Math.round(precoUnit * (item.quantidade || 1) * 100) / 100
+                        const frete = item.fretes_canais?.[canal.id]?.valor_frete || 0
+                        return (
+                          <td key={canal.id} className="py-3 px-4 text-right">
+                            <div className="font-bold text-foreground">
+                              {formatarMoedaBR(subtotal)}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground">
+                              {formatarMoedaBR(precoUnit)}/un
+                            </div>
+                            {frete > 0 && (
+                              <div className="text-[11px] font-semibold text-orange-600 mt-0.5">
+                                + Frete: {formatarMoedaBR(frete)}
+                              </div>
+                            )}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  )
+                })
               )}
             </tbody>
             <tfoot>
@@ -531,10 +598,22 @@ export default function PrecificacaoOrcamentoDetalhes() {
             {/* Controles de edição e recálculo em tempo real */}
             <div className="p-3.5 rounded-xl border border-border/70 bg-muted/20 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/40 pb-2">
-                <span className="text-xs font-bold text-foreground">
-                  Simulador de Valores (Item: {itemAtual.modelo_nome || 'Item'} &bull; Canal:{' '}
-                  {canalAtual.nome})
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-foreground">
+                    Simulador de Valores (Item: {itemAtual.modelo_nome || 'Item'} &bull; Canal:{' '}
+                    {canalAtual.nome})
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className={`text-[9px] px-1 py-0 ${
+                      itemAtual.tipo_item === 'personalizado'
+                        ? 'bg-violet-50 text-violet-700 border-violet-200'
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    }`}
+                  >
+                    {itemAtual.tipo_item === 'personalizado' ? 'Personalizado' : 'Cadastrado'}
+                  </Badge>
+                </div>
                 <span className="text-[11px] text-muted-foreground">
                   Altere os campos abaixo para ver o recálculo em tempo real no painel de decisão
                 </span>

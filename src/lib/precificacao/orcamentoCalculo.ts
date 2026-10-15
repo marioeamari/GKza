@@ -283,10 +283,16 @@ export function calcularTotaisPorCanal(
 
     for (const item of itens) {
       const qtd = Number(item.quantidade) || 0
-      const precoItem = item.precos_canais?.[canal.id]?.preco_unitario || 0
+      const precoObj = item.precos_canais?.[canal.id]
+      const precoUnit = precoObj?.preco_unitario || 0
+      const subtotalItem =
+        precoObj?.preco_cheio !== undefined && Number(precoObj.preco_cheio) > 0
+          ? Number(precoObj.preco_cheio)
+          : qtd * precoUnit
+
       const freteItem = item.fretes_canais?.[canal.id]?.valor_frete || 0
 
-      totalItens += qtd * precoItem
+      totalItens += subtotalItem
       totalFretes += freteItem
     }
 
@@ -305,6 +311,129 @@ export function calcularTotaisPorCanal(
   }
 
   return totais
+}
+
+/**
+ * Calcula o montante financeiro consolidado por canal somando todos os itens
+ * (faturamento total por canal, lucro líquido total, margem % consolidada)
+ */
+export function calcularMontanteConsolidadoPorCanal(params: {
+  canais: Array<{ id: string; nome: string; tipo?: string }>
+  itens: Array<{
+    quantidade: number
+    precos_canais?: Record<string, OrcamentoPrecoCanalItem>
+    fretes_canais?: Record<string, OrcamentoFreteCanalItem>
+    produtos_canais?: Record<string, any>
+  }>
+  mapaPrecificacoesAprovadas?: Record<string, any>
+  aliquotaDas?: number
+  aliquotaIcms?: number
+}): Array<{
+  canalId: string
+  canalNome: string
+  tipoCanal?: string
+  totalItens: number
+  totalFretes: number
+  faturamentoTotal: number
+  custoTotalProdutos: number
+  tributosTotal: number
+  taxasTotal: number
+  lucroLiquidoTotal: number
+  margemConsolidadaPct: number
+}> {
+  const {
+    canais,
+    itens,
+    mapaPrecificacoesAprovadas = {},
+    aliquotaDas = 4,
+    aliquotaIcms = 0,
+  } = params
+
+  return canais.map((canal) => {
+    let totalItens = 0
+    let totalFretes = 0
+    let totalCustos = 0
+    let totalTributos = 0
+    let totalTaxas = 0
+
+    for (const it of itens) {
+      const qtd = Number(it.quantidade) || 1
+      const precoObj = it.precos_canais?.[canal.id]
+      const precoUnit = precoObj?.preco_unitario || 0
+      const precoCheio =
+        precoObj?.preco_cheio !== undefined && Number(precoObj.preco_cheio) > 0
+          ? Number(precoObj.preco_cheio)
+          : Math.round(precoUnit * qtd * 100) / 100
+      const frete = it.fretes_canais?.[canal.id]?.valor_frete || 0
+
+      totalItens += precoCheio
+      totalFretes += frete
+
+      // Custo do produto
+      const prodVinculado = it.produtos_canais?.[canal.id]
+      const precKey = prodVinculado?.precificacao_id || precoObj?.precificacao_id
+      const precRec = precKey ? mapaPrecificacoesAprovadas[precKey] : null
+
+      const custoUnitario =
+        Number(precRec?.resultado?.custo_total_produto) ||
+        Number(precRec?.custo_snapshot?.custo_total) ||
+        Number(precRec?.premissas?.sobrescrita_custo_total) ||
+        Number(precRec?.expand?.produto?.custo_aquisicao_unitario) ||
+        0
+      const custoItem = Math.round(custoUnitario * qtd * 100) / 100
+      totalCustos += custoItem
+
+      // Taxas estimadas do canal
+      const taxasGravadas = Number(precRec?.resultado?.total_taxas_retidas_canal) || 0
+      const precoAprovadoOficial = Number(precRec?.preco_aprovado) || precoUnit
+      const proporcaoPreco = precoAprovadoOficial > 0 ? precoCheio / precoAprovadoOficial : qtd
+
+      const taxaItem =
+        taxasGravadas > 0
+          ? Math.round(taxasGravadas * proporcaoPreco * 100) / 100
+          : canal.tipo === 'site_proprio'
+            ? 0
+            : Math.round(precoCheio * 0.18 * 100) / 100
+      totalTaxas += taxaItem
+
+      // Tributos (DAS + ICMS)
+      const aliqEfetiva =
+        (typeof aliquotaDas === 'number' && aliquotaDas > 0 ? aliquotaDas : 4) +
+        (typeof aliquotaIcms === 'number' ? aliquotaIcms : 0)
+      const tributoItem = Math.round(precoCheio * (aliqEfetiva / 100) * 100) / 100
+      totalTributos += tributoItem
+    }
+
+    totalItens = Math.round(totalItens * 100) / 100
+    totalFretes = Math.round(totalFretes * 100) / 100
+    const faturamentoTotal = Math.round((totalItens + totalFretes) * 100) / 100
+    totalCustos = Math.round(totalCustos * 100) / 100
+    totalTaxas = Math.round(totalTaxas * 100) / 100
+    totalTributos = Math.round(totalTributos * 100) / 100
+
+    // A receber = Faturamento - Taxas da plataforma
+    // Lucro Líquido = A receber - Custo produtos - Tributos - Frete vendedor (quando frete é do vendedor)
+    // Se o cliente pagou frete no faturamento, o valor a receber tem o frete repassado ou retido.
+    // Lucro Líquido = totalItens - totalTaxas - totalCustos - totalTributos
+    const lucroLiquidoTotal =
+      Math.round((totalItens - totalTaxas - totalCustos - totalTributos) * 100) / 100
+    const margemConsolidadaPct =
+      totalItens > 0 ? Math.round((lucroLiquidoTotal / totalItens) * 1000) / 10 : 0
+
+    return {
+      canalId: canal.id,
+      canalNome: canal.nome,
+      tipoCanal: canal.tipo,
+      totalItens,
+      totalFretes,
+      faturamentoTotal,
+      custoTotalProdutos: totalCustos,
+      tributosTotal: totalTributos,
+      taxasTotal: totalTaxas,
+      lucroLiquidoTotal,
+      margemConsolidadaPct,
+    }
+  })
 }
 
 /**
@@ -332,7 +461,9 @@ export function gerarTextoWhatsappOrcamento(params: {
   cor?: string
   canais?: Array<{ id: string; nome: string }>
   itens?: Array<{
+    tipo_item?: string
     modelo_nome: string
+    descricao?: string
     tema_nome?: string
     cor?: string
     quantidade: number
@@ -394,12 +525,21 @@ export function gerarTextoWhatsappOrcamento(params: {
     for (const item of itens) {
       if (!item) continue
       const qtd = Number(item.quantidade) || 0
-      const precoUnit = item.precos_canais?.[canal.id]?.preco_unitario || 0
-      const subtotalItem = Math.round(qtd * precoUnit * 100) / 100
+      const precoObj = item.precos_canais?.[canal.id]
+      const precoUnit = precoObj?.preco_unitario || 0
+      const precoCheioGravado = precoObj?.preco_cheio
+      const subtotalItem =
+        precoCheioGravado !== undefined && precoCheioGravado > 0
+          ? precoCheioGravado
+          : Math.round(qtd * precoUnit * 100) / 100
       const frete = item.fretes_canais?.[canal.id]?.valor_frete || 0
 
       // Linha do item: * 25 unidades Banho R$ 622,50
-      linhas.push(`* ${qtd} unidades ${item.modelo_nome} ${formatarMoedaBR(subtotalItem)}`)
+      let linhaItem = `* ${qtd} unidades ${item.modelo_nome} ${formatarMoedaBR(subtotalItem)}`
+      if (item.descricao) {
+        linhaItem += ` (${item.descricao})`
+      }
+      linhas.push(linhaItem)
 
       // Linha de frete: * Frete: 23,87 ou * Frete: R$ 23,87 (usamos formatarMoedaBR para consistência e clareza)
       if (frete > 0) {

@@ -51,7 +51,9 @@ export function OrcamentoSaidasPanel({ orcamento, onAtualizar }: OrcamentoSaidas
       ? orcamentoNormalizado.expand.itens
       : []
     return rawItens.map((it) => ({
+      tipo_item: it?.tipo_item,
       modelo_nome: it?.modelo_nome || 'Item',
+      descricao: it?.descricao,
       tema_nome: it?.tema_nome,
       cor: it?.cor,
       quantidade: it?.quantidade || 1,

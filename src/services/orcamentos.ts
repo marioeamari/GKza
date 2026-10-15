@@ -194,20 +194,34 @@ export const orcamentosService = {
     const itensCriados: OrcamentoItemRecord[] = []
     for (let i = 0; i < input.itens.length; i++) {
       const it = input.itens[i]
-      const itemRecord = await pb.collection('orcamento_itens').create<OrcamentoItemRecord>({
-        orcamento: createdOrc.id,
-        modelo: it.modelo || null,
-        modelo_nome: it.modelo_nome,
-        modelo_codigo: it.modelo_codigo || '',
-        tema: it.tema || null,
-        tema_nome: it.tema_nome || '',
-        cor: it.cor || '',
-        quantidade: it.quantidade,
-        precos_canais: it.precos_canais || {},
-        fretes_canais: it.fretes_canais || {},
-        produtos_canais: it.produtos_canais || {},
-        ordem: it.ordem ?? i,
-      })
+      const tipoItem = it.tipo_item || (it.modelo || it.tema ? 'cadastrado' : 'personalizado')
+      const formData = new FormData()
+      formData.append('orcamento', createdOrc.id)
+      formData.append('tipo_item', tipoItem)
+      formData.append('modelo_nome', it.modelo_nome)
+      formData.append('modelo_codigo', it.modelo_codigo || '')
+      formData.append('descricao', it.descricao || '')
+      formData.append('quantidade', String(it.quantidade))
+      formData.append('ordem', String(it.ordem ?? i))
+      formData.append('precos_canais', JSON.stringify(it.precos_canais || {}))
+      formData.append('fretes_canais', JSON.stringify(it.fretes_canais || {}))
+      formData.append('produtos_canais', JSON.stringify(it.produtos_canais || {}))
+
+      if (it.modelo) formData.append('modelo', it.modelo)
+      if (it.tema) formData.append('tema', it.tema)
+      if (it.tema_nome) formData.append('tema_nome', it.tema_nome)
+      if (it.cor) formData.append('cor', it.cor)
+      if (it.foto_url) formData.append('foto_url', it.foto_url)
+
+      if (it.imagem_anexo instanceof File) {
+        formData.append('imagem_anexo', it.imagem_anexo)
+      } else if (typeof it.imagem_anexo === 'string' && it.imagem_anexo) {
+        formData.append('imagem_anexo', it.imagem_anexo)
+      }
+
+      const itemRecord = await pb
+        .collection('orcamento_itens')
+        .create<OrcamentoItemRecord>(formData)
       itensCriados.push(itemRecord)
     }
 
@@ -279,35 +293,39 @@ export const orcamentosService = {
       // Atualiza ou cria
       for (let i = 0; i < input.itens.length; i++) {
         const it = input.itens[i]
+        const tipoItem = it.tipo_item || (it.modelo || it.tema ? 'cadastrado' : 'personalizado')
+        const formData = new FormData()
+        formData.append('orcamento', id)
+        formData.append('tipo_item', tipoItem)
+        formData.append('modelo_nome', it.modelo_nome)
+        formData.append('modelo_codigo', it.modelo_codigo || '')
+        formData.append('descricao', it.descricao || '')
+        formData.append('quantidade', String(it.quantidade))
+        formData.append('ordem', String(it.ordem ?? i))
+        formData.append('precos_canais', JSON.stringify(it.precos_canais || {}))
+        formData.append('fretes_canais', JSON.stringify(it.fretes_canais || {}))
+        formData.append('produtos_canais', JSON.stringify(it.produtos_canais || {}))
+
+        if (it.modelo) formData.append('modelo', it.modelo)
+        else formData.append('modelo', '')
+
+        if (it.tema) formData.append('tema', it.tema)
+        else formData.append('tema', '')
+
+        formData.append('tema_nome', it.tema_nome || '')
+        formData.append('cor', it.cor || '')
+        formData.append('foto_url', it.foto_url || '')
+
+        if (it.imagem_anexo instanceof File) {
+          formData.append('imagem_anexo', it.imagem_anexo)
+        } else if (typeof it.imagem_anexo === 'string' && it.imagem_anexo) {
+          formData.append('imagem_anexo', it.imagem_anexo)
+        }
+
         if (it.id && itensExistentes.some((ex) => ex.id === it.id)) {
-          await pb.collection('orcamento_itens').update(it.id, {
-            modelo: it.modelo || null,
-            modelo_nome: it.modelo_nome,
-            modelo_codigo: it.modelo_codigo || '',
-            tema: it.tema || null,
-            tema_nome: it.tema_nome || '',
-            cor: it.cor || '',
-            quantidade: it.quantidade,
-            precos_canais: it.precos_canais || {},
-            fretes_canais: it.fretes_canais || {},
-            produtos_canais: it.produtos_canais || {},
-            ordem: it.ordem ?? i,
-          })
+          await pb.collection('orcamento_itens').update(it.id, formData)
         } else {
-          await pb.collection('orcamento_itens').create({
-            orcamento: id,
-            modelo: it.modelo || null,
-            modelo_nome: it.modelo_nome,
-            modelo_codigo: it.modelo_codigo || '',
-            tema: it.tema || null,
-            tema_nome: it.tema_nome || '',
-            cor: it.cor || '',
-            quantidade: it.quantidade,
-            precos_canais: it.precos_canais || {},
-            fretes_canais: it.fretes_canais || {},
-            produtos_canais: it.produtos_canais || {},
-            ordem: it.ordem ?? i,
-          })
+          await pb.collection('orcamento_itens').create(formData)
         }
       }
     }

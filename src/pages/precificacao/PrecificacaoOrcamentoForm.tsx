@@ -24,6 +24,9 @@ import { separacaoKitsService } from '@/services/separacaoKits'
 import { cadastrosService } from '@/services/cadastros'
 import { clientesOrcamentoService } from '@/services/clientesOrcamento'
 import { ClienteDialog } from '@/components/precificacao/ClienteDialog'
+import { DecisaoAprovacaoItemPanel } from '@/components/precificacao/DecisaoAprovacaoItemPanel'
+import { MontanteOrcamentoPanel } from '@/components/precificacao/MontanteOrcamentoPanel'
+import { getFileUrl } from '@/lib/pocketbase/files'
 import {
   OrcamentoRecord,
   CreateOrcamentoInput,
@@ -32,12 +35,14 @@ import {
   OrcamentoProdutoVinculadoCanal,
   ClienteOrcamentoRecord,
   StatusOrcamento,
+  TipoItemOrcamento,
 } from '@/types/orcamento'
 import { PrecCanalRecord } from '@/types/precificacao'
 import { KitTema, KitModelo } from '@/types/separacaoKits'
 import { Pessoa } from '@/types/domain'
 import {
   calcularTotaisPorCanal,
+  calcularMontanteConsolidadoPorCanal,
   converterCheioParaUnitario,
   converterUnitarioParaCheio,
   formatarMoedaBR,
@@ -57,12 +62,18 @@ import {
 } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Upload, Image as ImageIcon, FileText, CheckCircle2 } from 'lucide-react'
 
 interface FormItemLinha {
   id?: string
+  tipo_item: TipoItemOrcamento
   modelo?: string
   modelo_nome: string
   modelo_codigo?: string
+  descricao?: string
+  imagem_anexo?: string | File
+  preview_imagem?: string
+  foto_url?: string
   tema?: string
   tema_nome?: string
   cor?: string
@@ -171,6 +182,7 @@ export default function PrecificacaoOrcamentoForm() {
           // Item inicial de exemplo
           setItens([
             {
+              tipo_item: 'cadastrado',
               modelo_nome: 'Banho',
               tema: undefined,
               tema_nome: '',
@@ -181,6 +193,7 @@ export default function PrecificacaoOrcamentoForm() {
               produtos_canais: {},
             },
             {
+              tipo_item: 'cadastrado',
               modelo_nome: 'Rosto',
               tema: undefined,
               tema_nome: '',
@@ -214,9 +227,14 @@ export default function PrecificacaoOrcamentoForm() {
             setItens(
               itensOrc.map((it) => ({
                 id: it.id,
+                tipo_item: it.tipo_item || (it.modelo || it.tema ? 'cadastrado' : 'personalizado'),
                 modelo: it.modelo,
                 modelo_nome: it.modelo_nome || '',
                 modelo_codigo: it.modelo_codigo,
+                descricao: it.descricao || '',
+                imagem_anexo: it.imagem_anexo,
+                preview_imagem: it.imagem_anexo ? getFileUrl(it, it.imagem_anexo) : undefined,
+                foto_url: it.foto_url,
                 tema: it.tema || orcNormalizado.tema || undefined,
                 tema_nome: it.tema_nome || orcNormalizado.tema_nome || '',
                 cor: it.cor || orcNormalizado.cor || '',
@@ -275,15 +293,51 @@ export default function PrecificacaoOrcamentoForm() {
     }
   }
 
-  // Ao selecionar um tema DENTRO de um item
+  // Ao selecionar um tema DENTRO de um item cadastrado:
+  // Carrega o modelo associado e a imagem do modelo automaticamente!
   const handleSelecionarTemaNoItem = (index: number, tId: string) => {
     const t = temasDisponiveis.find((x) => x.id === tId)
     setItens((prev) => {
       const copy = [...prev]
+      const it = copy[index]
+      if (!it) return prev
+
+      const novoTemaId = tId === 'none' ? undefined : tId
+      const novoTemaNome = t?.nome || ''
+
+      // Modelos que pertencem a este tema
+      const modelosDesteTema = novoTemaId
+        ? modelosDisponiveis.filter((m) => m.tema === novoTemaId)
+        : []
+
+      // Se houver modelo do tema ou se já tiver selecionado um modelo válido do tema
+      let modeloEscolhido = modelosDesteTema.find((m) => m.id === it.modelo)
+      if (!modeloEscolhido && modelosDesteTema.length > 0) {
+        modeloEscolhido = modelosDesteTema[0]
+      }
+
+      copy[index] = {
+        ...it,
+        tema: novoTemaId,
+        tema_nome: novoTemaNome,
+        modelo: modeloEscolhido ? modeloEscolhido.id : it.modelo,
+        modelo_nome: modeloEscolhido ? modeloEscolhido.nome : it.modelo_nome,
+        modelo_codigo: modeloEscolhido ? modeloEscolhido.codigo : it.modelo_codigo,
+      }
+      return copy
+    })
+  }
+
+  // Upload de imagem do item personalizado
+  const handleUploadImagemPersonalizado = (index: number, file: File | null) => {
+    if (!file) return
+    const previewUrl = URL.createObjectURL(file)
+    setItens((prev) => {
+      const copy = [...prev]
       copy[index] = {
         ...copy[index],
-        tema: tId === 'none' ? undefined : tId,
-        tema_nome: t?.nome || copy[index].tema_nome || '',
+        imagem_anexo: file,
+        preview_imagem: previewUrl,
       }
       return copy
     })
@@ -296,12 +350,16 @@ export default function PrecificacaoOrcamentoForm() {
     )
   }
 
-  // Adicionar item
-  const handleAdicionarItem = () => {
+  // Adicionar item cadastrado ou personalizado
+  const handleAdicionarItem = (tipo: TipoItemOrcamento = 'cadastrado') => {
     setItens((prev) => [
       ...prev,
       {
-        modelo_nome: '',
+        tipo_item: tipo,
+        modelo_nome: tipo === 'cadastrado' ? '' : 'Item Personalizado',
+        modelo: undefined,
+        modelo_codigo: undefined,
+        descricao: '',
         tema: undefined,
         tema_nome: '',
         cor: '',
@@ -545,6 +603,25 @@ export default function PrecificacaoOrcamentoForm() {
     return canaisDisponiveis.filter((c) => canaisSelecionadosIds.includes(c.id))
   }, [canaisDisponiveis, canaisSelecionadosIds])
 
+  // Mapa de registros de precificação aprovada indexados por ID
+  const mapaPrecificacoesAprovadas = useMemo(() => {
+    const mapa: Record<string, any> = {}
+    for (const canalId of Object.keys(produtosAprovadosPorCanal)) {
+      const lista = produtosAprovadosPorCanal[canalId] || []
+      for (const item of lista) {
+        if (item.precificacao_id) {
+          mapa[item.precificacao_id] = item.precificacao_record || {
+            preco_aprovado: item.preco_aprovado,
+            resultado: {
+              preco_anunciado: item.preco_aprovado,
+            },
+          }
+        }
+      }
+    }
+    return mapa
+  }, [produtosAprovadosPorCanal])
+
   // Totais calculados em tempo real
   const totaisCalculados = useMemo(() => {
     return calcularTotaisPorCanal(
@@ -552,6 +629,19 @@ export default function PrecificacaoOrcamentoForm() {
       itens,
     )
   }, [canaisSelecionados, itens])
+
+  // Montante consolidado por canal em tempo real
+  const montantesPorCanal = useMemo(() => {
+    return calcularMontanteConsolidadoPorCanal({
+      canais: canaisSelecionados.map((c) => ({ id: c.id, nome: c.nome, tipo: c.tipo })),
+      itens,
+      mapaPrecificacoesAprovadas,
+    })
+  }, [canaisSelecionados, itens, mapaPrecificacoesAprovadas])
+
+  const totalUnidadesGeral = useMemo(() => {
+    return itens.reduce((acc, it) => acc + (Number(it.quantidade) || 0), 0)
+  }, [itens])
 
   // Salvar Orçamento
   const handleSalvar = async () => {
@@ -622,9 +712,13 @@ export default function PrecificacaoOrcamentoForm() {
         observacoes: observacoes || undefined,
         itens: itens.map((it, idx) => ({
           id: it.id,
+          tipo_item: it.tipo_item,
           modelo: it.modelo,
           modelo_nome: it.modelo_nome || 'Item sem nome',
           modelo_codigo: it.modelo_codigo,
+          descricao: it.descricao || undefined,
+          imagem_anexo: it.imagem_anexo,
+          foto_url: it.foto_url,
           tema: it.tema || undefined,
           tema_nome: it.tema_nome || undefined,
           cor: it.cor || undefined,
@@ -884,147 +978,305 @@ export default function PrecificacaoOrcamentoForm() {
         </CardContent>
       </Card>
 
-      {/* BLOCO 3: ITENS & QUANTIDADES (CADA ITEM CARREGA SEU TEMA, COR E MODELO) */}
+      {/* BLOCO: MONTANTE CONSOLIDADO DO ORÇAMENTO (TEMPO REAL) */}
+      <MontanteOrcamentoPanel
+        montantesPorCanal={montantesPorCanal}
+        totalItensQtd={totalUnidadesGeral}
+        qtdModelos={itens.length}
+      />
+
+      {/* BLOCO 3: ITENS & QUANTIDADES (DOIS TIPOS: CADASTRADO E PERSONALIZADO) */}
       <Card className="shadow-xs border-border/80">
-        <CardHeader className="pb-3 border-b border-border/60 flex flex-row items-center justify-between">
+        <CardHeader className="pb-3 border-b border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
               <Layers className="w-4 h-4 text-primary" />
               <CardTitle className="text-base font-bold">3. Itens & Quantidades</CardTitle>
             </div>
             <CardDescription className="text-xs mt-0.5">
-              Cada item carrega seu próprio tema, cor e modelo. Preços pré-carregados das
-              precificações oficiais.
+              Adicione quantos itens quiser: <strong>Cadastrados</strong> (com tema/modelo da
+              expedição) ou <strong>Personalizados</strong> (texto livre + upload de imagem).
             </CardDescription>
           </div>
-          <Button
-            size="sm"
-            onClick={handleAdicionarItem}
-            variant="outline"
-            className="text-xs font-bold border-primary/30 text-primary hover:bg-primary/5"
-          >
-            <Plus className="w-3.5 h-3.5 mr-1" />
-            Adicionar Item
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              type="button"
+              onClick={() => handleAdicionarItem('cadastrado')}
+              variant="outline"
+              className="text-xs font-bold border-emerald-300 text-emerald-700 bg-emerald-50/60 hover:bg-emerald-100/70"
+            >
+              <Plus className="w-3.5 h-3.5 mr-1" />+ Item Cadastrado
+            </Button>
+            <Button
+              size="sm"
+              type="button"
+              onClick={() => handleAdicionarItem('personalizado')}
+              variant="outline"
+              className="text-xs font-bold border-violet-300 text-violet-700 bg-violet-50/60 hover:bg-violet-100/70"
+            >
+              <Sparkles className="w-3.5 h-3.5 mr-1" />+ Item Personalizado
+            </Button>
+          </div>
         </CardHeader>
-        <CardContent className="pt-4 space-y-4">
+        <CardContent className="pt-4 space-y-6">
           {itens.map((item, index) => {
+            const isPersonalizado = item.tipo_item === 'personalizado'
             const modelosDoItem = item.tema
               ? modelosDisponiveis.filter((m) => m.tema === item.tema)
               : modelosDisponiveis
+            const modeloRecord = modelosDisponiveis.find((m) => m.id === item.modelo)
+            const fotoModelo = modeloRecord?.foto ? getFileUrl(modeloRecord, modeloRecord.foto) : ''
+            const imagemExibir = item.preview_imagem || item.foto_url || fotoModelo
 
             return (
               <div
                 key={index}
-                className="p-4 rounded-xl border border-border/80 bg-card shadow-xs space-y-3"
+                className={`p-4 rounded-xl border-2 transition-all space-y-4 ${
+                  isPersonalizado
+                    ? 'border-violet-200/90 bg-violet-50/15'
+                    : 'border-emerald-200/90 bg-emerald-50/10'
+                }`}
               >
-                {/* Linha 1 do item: identificação, Tema (select/livre), Cor e Quantidade */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-border/40 pb-3">
-                  <div className="flex flex-wrap items-center gap-2.5 flex-1">
-                    <span className="h-6 w-6 rounded-full bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0">
+                {/* Linha 1 do item: Cabeçalho com Tipo, Foto/Upload, Campos de identificação e Botão Remover */}
+                <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-border/50 pb-3">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <span
+                      className={`h-7 w-7 rounded-full font-bold text-xs flex items-center justify-center shrink-0 ${
+                        isPersonalizado
+                          ? 'bg-violet-100 text-violet-800'
+                          : 'bg-emerald-100 text-emerald-800'
+                      }`}
+                    >
                       {index + 1}
                     </span>
 
-                    {/* Tema do Kit (opcional/kit_temas) */}
-                    <div className="w-40">
-                      <Select
-                        value={item.tema || 'none'}
-                        onValueChange={(val) => handleSelecionarTemaNoItem(index, val)}
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue placeholder="Tema do Kit (opc.)..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">-- Tema Livre --</SelectItem>
-                          {temasDisponiveis.map((t) => (
-                            <SelectItem key={t.id} value={t.id}>
-                              {t.nome}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    {/* Preview / Upload da Imagem */}
+                    <div className="shrink-0 flex flex-col items-center gap-1.5">
+                      <div className="h-16 w-16 rounded-lg border-2 border-dashed border-border/80 bg-background flex items-center justify-center overflow-hidden relative shadow-xs">
+                        {imagemExibir ? (
+                          <img
+                            src={imagemExibir}
+                            alt={item.modelo_nome || 'Item'}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <ImageIcon className="w-6 h-6 text-muted-foreground/40" />
+                        )}
+                      </div>
+
+                      {isPersonalizado && (
+                        <label className="cursor-pointer text-[10px] font-bold text-violet-700 hover:text-violet-900 flex items-center gap-1 bg-violet-100/70 hover:bg-violet-200 px-2 py-0.5 rounded transition-colors">
+                          <Upload className="w-3 h-3" />
+                          <span>Anexar</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] || null
+                              handleUploadImagemPersonalizado(index, file)
+                            }}
+                          />
+                        </label>
+                      )}
                     </div>
 
-                    {/* Nome do Tema Livre */}
-                    <div className="w-36">
-                      <Input
-                        placeholder="Nome Tema (livre)"
-                        value={item.tema_nome || ''}
-                        onChange={(e) => handleAtualizarItem(index, 'tema_nome', e.target.value)}
-                        className="h-8 text-xs font-medium"
-                      />
-                    </div>
+                    {/* Bloco de Campos do Item de acordo com o Tipo */}
+                    <div className="flex-1 space-y-2 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] font-bold uppercase tracking-wider ${
+                            isPersonalizado
+                              ? 'bg-violet-100/80 text-violet-900 border-violet-300'
+                              : 'bg-emerald-100/80 text-emerald-900 border-emerald-300'
+                          }`}
+                        >
+                          {isPersonalizado ? 'Personalizado' : 'Cadastrado (Expedição)'}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">
+                          {isPersonalizado
+                            ? 'Item livre com descrição e upload'
+                            : 'Tema e modelo vinculados aos cadastros'}
+                        </span>
+                      </div>
 
-                    {/* Cor Escolhida */}
-                    <div className="w-28">
-                      <Input
-                        placeholder="Cor (ex: AZUL)"
-                        value={item.cor || ''}
-                        onChange={(e) => handleAtualizarItem(index, 'cor', e.target.value)}
-                        className="h-8 text-xs font-medium uppercase"
-                      />
-                    </div>
+                      {isPersonalizado ? (
+                        /* CAMPOS DE ITEM PERSONALIZADO */
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
+                          <div className="sm:col-span-2">
+                            <Label className="text-[10px] font-semibold text-muted-foreground">
+                              Nome / Título do Personalizado *
+                            </Label>
+                            <Input
+                              placeholder="Ex: Toalha com Brasão e Nome Bordado"
+                              value={item.modelo_nome}
+                              onChange={(e) =>
+                                handleAtualizarItem(index, 'modelo_nome', e.target.value)
+                              }
+                              className="h-8 text-xs font-semibold"
+                            />
+                          </div>
 
-                    {/* Seletor rápido de modelo existente */}
-                    <div className="w-44">
-                      <Select
-                        value={item.modelo || 'none'}
-                        onValueChange={(val) => handleSelecionarModeloNoItem(index, val)}
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue placeholder="Modelo Expedição..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">-- Modelo Livre --</SelectItem>
-                          {modelosDoItem.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.codigo} - {m.nome}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                          <div className="sm:col-span-2">
+                            <Label className="text-[10px] font-semibold text-muted-foreground">
+                              Detalhes / Descrição Livre
+                            </Label>
+                            <Input
+                              placeholder="Ex: Linha dourada, toalha branca, monograma central"
+                              value={item.descricao || ''}
+                              onChange={(e) =>
+                                handleAtualizarItem(index, 'descricao', e.target.value)
+                              }
+                              className="h-8 text-xs font-medium"
+                            />
+                          </div>
 
-                    {/* Nome do Modelo (livre ou puxado) */}
-                    <div className="flex-1 min-w-[140px]">
-                      <Input
-                        placeholder="Modelo (Banho, Rosto...)"
-                        value={item.modelo_nome}
-                        onChange={(e) => handleAtualizarItem(index, 'modelo_nome', e.target.value)}
-                        className="h-8 text-xs font-semibold"
-                      />
-                    </div>
+                          <div>
+                            <Label className="text-[10px] font-semibold text-muted-foreground">
+                              Cor (opcional)
+                            </Label>
+                            <Input
+                              placeholder="Ex: BRANCA"
+                              value={item.cor || ''}
+                              onChange={(e) => handleAtualizarItem(index, 'cor', e.target.value)}
+                              className="h-8 text-xs font-medium uppercase"
+                            />
+                          </div>
 
-                    {/* Quantidade */}
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Label className="text-xs text-muted-foreground">Qtd:</Label>
-                      <Input
-                        type="number"
-                        min="1"
-                        value={item.quantidade}
-                        onChange={(e) =>
-                          handleAlterarQuantidadeItem(
-                            index,
-                            Math.max(1, Number(e.target.value) || 1),
-                          )
-                        }
-                        className="h-8 w-16 text-xs font-bold text-center"
-                      />
+                          <div>
+                            <Label className="text-[10px] font-semibold text-muted-foreground">
+                              Quantidade
+                            </Label>
+                            <Input
+                              type="number"
+                              min="1"
+                              value={item.quantidade}
+                              onChange={(e) =>
+                                handleAlterarQuantidadeItem(
+                                  index,
+                                  Math.max(1, Number(e.target.value) || 1),
+                                )
+                              }
+                              className="h-8 text-xs font-bold text-center"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        /* CAMPOS DE ITEM CADASTRADO (BUSCA TEMA E MODELO DA EXPEDIÇÃO) */
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5">
+                          {/* 1. Tema do Kit / Expedição */}
+                          <div>
+                            <Label className="text-[10px] font-semibold text-muted-foreground">
+                              Tema da Expedição *
+                            </Label>
+                            <Select
+                              value={item.tema || 'none'}
+                              onValueChange={(val) => handleSelecionarTemaNoItem(index, val)}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="Selecione o tema..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">-- Sem Tema Cadastrado --</SelectItem>
+                                {temasDisponiveis.map((t) => (
+                                  <SelectItem key={t.id} value={t.id}>
+                                    {t.nome}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* 2. Modelo da Expedição */}
+                          <div>
+                            <Label className="text-[10px] font-semibold text-muted-foreground">
+                              Modelo Expedição *
+                            </Label>
+                            <Select
+                              value={item.modelo || 'none'}
+                              onValueChange={(val) => handleSelecionarModeloNoItem(index, val)}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="Selecione o modelo..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">-- Modelo Livre --</SelectItem>
+                                {modelosDoItem.map((m) => (
+                                  <SelectItem key={m.id} value={m.id}>
+                                    {m.codigo ? `${m.codigo} - ` : ''}
+                                    {m.nome}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* 3. Nome do Modelo / Descritivo */}
+                          <div>
+                            <Label className="text-[10px] font-semibold text-muted-foreground">
+                              Nome do Modelo
+                            </Label>
+                            <Input
+                              placeholder="Banho, Rosto..."
+                              value={item.modelo_nome}
+                              onChange={(e) =>
+                                handleAtualizarItem(index, 'modelo_nome', e.target.value)
+                              }
+                              className="h-8 text-xs font-semibold"
+                            />
+                          </div>
+
+                          {/* 4. Cor */}
+                          <div>
+                            <Label className="text-[10px] font-semibold text-muted-foreground">
+                              Cor
+                            </Label>
+                            <Input
+                              placeholder="Ex: AZUL"
+                              value={item.cor || ''}
+                              onChange={(e) => handleAtualizarItem(index, 'cor', e.target.value)}
+                              className="h-8 text-xs font-medium uppercase"
+                            />
+                          </div>
+
+                          {/* 5. Quantidade */}
+                          <div>
+                            <Label className="text-[10px] font-semibold text-muted-foreground">
+                              Quantidade
+                            </Label>
+                            <Input
+                              type="number"
+                              min="1"
+                              value={item.quantidade}
+                              onChange={(e) =>
+                                handleAlterarQuantidadeItem(
+                                  index,
+                                  Math.max(1, Number(e.target.value) || 1),
+                                )
+                              }
+                              className="h-8 text-xs font-bold text-center"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
+                  {/* Botão de Remover Item */}
                   <Button
                     size="sm"
                     variant="ghost"
                     onClick={() => handleRemoverItem(index)}
-                    className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 shrink-0"
+                    className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 shrink-0 self-start"
                     title="Remover Item"
                   >
                     <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
 
-                {/* Linha 2 do item: Colunas de canais com Produto Vinculado aprovado, Preço Unit., Preço Cheio e Frete */}
+                {/* Linha 2 do item: Canais de Venda e Preços */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {canaisSelecionados.map((canal) => {
                     const precoObj = item.precos_canais[canal.id]
@@ -1043,45 +1295,49 @@ export default function PrecificacaoOrcamentoForm() {
                     return (
                       <div
                         key={canal.id}
-                        className="p-3 rounded-lg border border-border/70 bg-muted/20 space-y-2.5 text-xs"
+                        className="p-3 rounded-lg border border-border/80 bg-background/90 shadow-xs space-y-2.5 text-xs flex flex-col justify-between"
                       >
                         <div className="flex items-center justify-between font-bold text-foreground">
                           <span className="text-xs font-black">{canal.nome}</span>
-                          <span className="text-primary font-black">
+                          <span className="text-primary font-black font-mono">
                             Subtotal: {formatarMoedaBR(precoCheio)}
                           </span>
                         </div>
 
-                        {/* Campo Produto Vinculado filtrado por este canal */}
-                        <div className="space-y-1 bg-white p-2 rounded-md border border-border/60">
-                          <Label className="text-[10px] font-bold text-muted-foreground flex items-center justify-between">
-                            <span>Produto Vinculado ({canal.nome})</span>
-                            {produtoVinculadoObj?.preco_aprovado && (
-                              <span className="text-emerald-700 font-mono">
-                                Aprovado: {formatarMoedaBR(produtoVinculadoObj.preco_aprovado)}
-                              </span>
-                            )}
-                          </Label>
-                          <Select
-                            value={produtoVinculadoObj?.produto_id || 'none'}
-                            onValueChange={(val) =>
-                              handleSelecionarProdutoVinculadoNoCanal(index, canal.id, val)
-                            }
-                          >
-                            <SelectTrigger className="h-7 text-[11px]">
-                              <SelectValue placeholder="Vincular produto aprovado..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">-- Modelo puro (Sem vínculo) --</SelectItem>
-                              {prodsAprovadosDesteCanal.map((p) => (
-                                <SelectItem key={p.produto_id} value={p.produto_id}>
-                                  {p.produto_nome} {p.produto_sku ? `(${p.produto_sku})` : ''} -{' '}
-                                  {formatarMoedaBR(p.preco_aprovado)}
+                        {/* Produto Vinculado (apenas para itens cadastrados ou se desejar vincular) */}
+                        {!isPersonalizado && (
+                          <div className="space-y-1 bg-muted/20 p-2 rounded-md border border-border/60">
+                            <Label className="text-[10px] font-bold text-muted-foreground flex items-center justify-between">
+                              <span>Produto Vinculado ({canal.nome})</span>
+                              {produtoVinculadoObj?.preco_aprovado && (
+                                <span className="text-emerald-700 font-mono">
+                                  Aprovado: {formatarMoedaBR(produtoVinculadoObj.preco_aprovado)}
+                                </span>
+                              )}
+                            </Label>
+                            <Select
+                              value={produtoVinculadoObj?.produto_id || 'none'}
+                              onValueChange={(val) =>
+                                handleSelecionarProdutoVinculadoNoCanal(index, canal.id, val)
+                              }
+                            >
+                              <SelectTrigger className="h-7 text-[11px]">
+                                <SelectValue placeholder="Vincular produto aprovado..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">
+                                  -- Modelo puro (Sem vínculo) --
                                 </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
+                                {prodsAprovadosDesteCanal.map((p) => (
+                                  <SelectItem key={p.produto_id} value={p.produto_id}>
+                                    {p.produto_nome} {p.produto_sku ? `(${p.produto_sku})` : ''} -{' '}
+                                    {formatarMoedaBR(p.preco_aprovado)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
 
                         {/* Conversão em Tempo Real: Preço Unitário <-> Preço Cheio */}
                         <div className="grid grid-cols-2 gap-2">
@@ -1121,7 +1377,7 @@ export default function PrecificacaoOrcamentoForm() {
                                   parseFloat(e.target.value) || 0,
                                 )
                               }
-                              className="h-7 text-xs font-semibold text-primary"
+                              className="h-7 text-xs font-semibold text-primary font-mono"
                             />
                           </div>
                         </div>
@@ -1149,65 +1405,77 @@ export default function PrecificacaoOrcamentoForm() {
                     )
                   })}
                 </div>
+
+                {/* Linha 3 do item: PAINEL DA DECISÃO DE APROVAÇÃO POR ITEM (Dinâmico para cada canal) */}
+                <div className="pt-2 border-t border-border/50 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
+                      Decisão de Aprovação do Item {index + 1} ({item.modelo_nome || 'Sem nome'})
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {canaisSelecionados.map((canal) => {
+                      const precoObj = item.precos_canais[canal.id]
+                      const freteObj = item.fretes_canais[canal.id]
+                      const produtoVinculadoObj = item.produtos_canais?.[canal.id]
+
+                      const precoUnit = precoObj?.preco_unitario || 0
+                      const precoCheio =
+                        precoObj?.preco_cheio !== undefined
+                          ? precoObj.preco_cheio
+                          : Math.round(precoUnit * item.quantidade * 100) / 100
+                      const frete = freteObj?.valor_frete || 0
+
+                      const precKey =
+                        produtoVinculadoObj?.precificacao_id || precoObj?.precificacao_id
+                      const precRec = precKey ? mapaPrecificacoesAprovadas[precKey] : null
+
+                      return (
+                        <DecisaoAprovacaoItemPanel
+                          key={canal.id}
+                          canalNome={canal.nome}
+                          quantidadeItem={item.quantidade}
+                          precoCheioEditado={precoCheio}
+                          precoUnitarioEditado={precoUnit}
+                          freteItemEditado={frete}
+                          precificacaoAprovadaRecord={precRec}
+                          produtoVinculado={produtoVinculadoObj}
+                        />
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
             )
           })}
 
           {itens.length === 0 && (
-            <div className="text-center py-6 text-muted-foreground text-xs">
-              Nenhum item adicionado ainda. Clique em "Adicionar Item" acima.
+            <div className="text-center py-8 text-muted-foreground text-xs space-y-2 border-2 border-dashed rounded-xl">
+              <p>Nenhum item adicionado ainda neste orçamento.</p>
+              <div className="flex items-center justify-center gap-2 pt-1">
+                <Button
+                  size="sm"
+                  type="button"
+                  onClick={() => handleAdicionarItem('cadastrado')}
+                  variant="outline"
+                  className="text-xs border-emerald-300 text-emerald-700 bg-emerald-50"
+                >
+                  <Plus className="w-3 h-3 mr-1" />
+                  Item Cadastrado
+                </Button>
+                <Button
+                  size="sm"
+                  type="button"
+                  onClick={() => handleAdicionarItem('personalizado')}
+                  variant="outline"
+                  className="text-xs border-violet-300 text-violet-700 bg-violet-50"
+                >
+                  <Sparkles className="w-3 h-3 mr-1" />
+                  Item Personalizado
+                </Button>
+              </div>
             </div>
           )}
-        </CardContent>
-      </Card>
-
-      {/* BLOCO 4: RESUMO DOS TOTAIS POR CANAL EM TEMPO REAL */}
-      <Card className="border-2 border-primary/20 bg-primary/5 shadow-xs">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base font-black text-primary">
-            Totais Comparados por Canal (Tempo Real)
-          </CardTitle>
-          <CardDescription className="text-xs">
-            Soma dos itens + Fretes conforme a fórmula: Total Canal = Subtotal dos Itens + Frete
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {canaisSelecionados.map((canal) => {
-              const tot = totaisCalculados[canal.id]
-              return (
-                <div
-                  key={canal.id}
-                  className="bg-white p-4 rounded-xl border border-primary/20 shadow-xs space-y-1.5"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-sm text-foreground">{canal.nome}</span>
-                    <Badge variant="outline" className="text-[9px] border-primary/40 text-primary">
-                      {canal.tipo === 'site_proprio' ? 'Site' : 'Marketplace'}
-                    </Badge>
-                  </div>
-                  <div className="text-xs text-muted-foreground space-y-0.5">
-                    <div className="flex justify-between">
-                      <span>Itens:</span>
-                      <span className="font-medium">{formatarMoedaBR(tot?.total_itens || 0)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Fretes:</span>
-                      <span className="font-medium">{formatarMoedaBR(tot?.total_fretes || 0)}</span>
-                    </div>
-                  </div>
-                  <div className="pt-2 border-t border-border/60 flex justify-between items-baseline">
-                    <span className="text-[11px] font-bold text-muted-foreground uppercase">
-                      Total:
-                    </span>
-                    <span className="text-lg font-black text-primary">
-                      {formatarMoedaBR(tot?.total_geral || 0)}
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
         </CardContent>
       </Card>
 

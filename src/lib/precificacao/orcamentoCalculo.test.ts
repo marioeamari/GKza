@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   calcularTotaisPorCanal,
+  calcularMontanteConsolidadoPorCanal,
   gerarTextoWhatsappOrcamento,
   formatarMoedaBR,
   criarLinkWhatsapp,
@@ -215,6 +216,120 @@ describe('Módulo de Orçamentos - Regras de Cálculo e Formatação', () => {
 
     const linkSemNumero = criarLinkWhatsapp('', texto)
     expect(linkSemNumero).toBe('https://wa.me/?text=Ol%C3%A1%2C%20segue%20cota%C3%A7%C3%A3o')
+  })
+
+  describe('Itens Cadastrados e Personalizados com Montante Consolidado', () => {
+    it('calcula o montante consolidado somando itens cadastrados e personalizados', () => {
+      const canais = [
+        { id: 'canal_shopee', nome: 'Shopee', tipo: 'marketplace' },
+        { id: 'canal_site', nome: 'Site', tipo: 'site_proprio' },
+      ]
+
+      const itens = [
+        // Item 1: Cadastrado
+        {
+          quantidade: 25,
+          precos_canais: {
+            canal_shopee: {
+              canal_id: 'canal_shopee',
+              canal_nome: 'Shopee',
+              preco_unitario: 24.9,
+              preco_cheio: 622.5,
+            },
+            canal_site: {
+              canal_id: 'canal_site',
+              canal_nome: 'Site',
+              preco_unitario: 19.9,
+              preco_cheio: 497.5,
+            },
+          },
+          fretes_canais: {
+            canal_shopee: { canal_id: 'canal_shopee', canal_nome: 'Shopee', valor_frete: 23.87 },
+            canal_site: { canal_id: 'canal_site', canal_nome: 'Site', valor_frete: 33.91 },
+          },
+        },
+        // Item 2: Personalizado
+        {
+          quantidade: 10,
+          precos_canais: {
+            canal_shopee: {
+              canal_id: 'canal_shopee',
+              canal_nome: 'Shopee',
+              preco_unitario: 35.0,
+              preco_cheio: 350.0,
+            },
+            canal_site: {
+              canal_id: 'canal_site',
+              canal_nome: 'Site',
+              preco_unitario: 30.0,
+              preco_cheio: 300.0,
+            },
+          },
+          fretes_canais: {
+            canal_shopee: { canal_id: 'canal_shopee', canal_nome: 'Shopee', valor_frete: 10.0 },
+            canal_site: { canal_id: 'canal_site', canal_nome: 'Site', valor_frete: 15.0 },
+          },
+        },
+      ]
+
+      const montantes = calcularMontanteConsolidadoPorCanal({
+        canais,
+        itens,
+      })
+
+      expect(montantes).toHaveLength(2)
+
+      const shopee = montantes.find((m) => m.canalId === 'canal_shopee')!
+      expect(shopee.totalItens).toBe(972.5)
+      expect(shopee.totalFretes).toBe(33.87)
+      expect(shopee.faturamentoTotal).toBe(1006.37)
+      expect(shopee.lucroLiquidoTotal).toBeGreaterThan(0)
+
+      const site = montantes.find((m) => m.canalId === 'canal_site')!
+      expect(site.totalItens).toBe(797.5)
+      expect(site.totalFretes).toBe(48.91)
+      expect(site.faturamentoTotal).toBe(846.41)
+    })
+
+    it('inclui descrições de itens personalizados no texto de WhatsApp', () => {
+      const texto = gerarTextoWhatsappOrcamento({
+        titulo: 'Cotação Especial',
+        canais: [{ id: 'shopee', nome: 'Shopee' }],
+        itens: [
+          {
+            modelo_nome: 'Toalha Banho',
+            quantidade: 20,
+            precos_canais: {
+              shopee: {
+                canal_id: 'shopee',
+                canal_nome: 'Shopee',
+                preco_unitario: 25.0,
+                preco_cheio: 500.0,
+              },
+            },
+          },
+          {
+            modelo_nome: 'Toalha de Batizado Bordada',
+            descricao: 'Bordado dourado personalizado',
+            quantidade: 5,
+            precos_canais: {
+              shopee: {
+                canal_id: 'shopee',
+                canal_nome: 'Shopee',
+                preco_unitario: 40.0,
+                preco_cheio: 200.0,
+              },
+            },
+          },
+        ],
+      })
+
+      expect(texto).toContain('* 20 unidades Toalha Banho R$ 500,00')
+      expect(texto).toContain(
+        '* 5 unidades Toalha de Batizado Bordada R$ 200,00 (Bordado dourado personalizado)',
+      )
+      expect(texto).toContain('* Total: R$ 700,00')
+    })
   })
 
   describe('Regra (D): Conversão Preço Unitário <-> Preço Cheio em tempo real', () => {

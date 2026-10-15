@@ -5,6 +5,7 @@ import {
   normalizarCanaisExpandidos,
   normalizarOrcamentoRecord,
 } from '@/lib/precificacao/orcamentoCalculo'
+import { getFileUrl } from '@/lib/pocketbase/files'
 
 export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string {
   const orcamento = normalizarOrcamentoRecord(orcamentoRaw)
@@ -23,10 +24,21 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
 
   const itensRows = itens
     .map((item, idx) => {
+      const isPersonalizado = item.tipo_item === 'personalizado'
+      const fotoModelo = (item.expand as any)?.modelo?.foto
+        ? getFileUrl((item.expand as any).modelo, (item.expand as any).modelo.foto)
+        : ''
+      const fotoAnexo = item.imagem_anexo ? getFileUrl(item, item.imagem_anexo) : ''
+      const imagemExibir = fotoAnexo || item.foto_url || fotoModelo
+
       const precoCells = canais
         .map((canal) => {
           const precoUnit = item.precos_canais?.[canal.id]?.preco_unitario || 0
-          const subtotal = Math.round(precoUnit * item.quantidade * 100) / 100
+          const precoCheioGravado = item.precos_canais?.[canal.id]?.preco_cheio
+          const subtotal =
+            precoCheioGravado !== undefined && precoCheioGravado > 0
+              ? precoCheioGravado
+              : Math.round(precoUnit * item.quantidade * 100) / 100
           const frete = item.fretes_canais?.[canal.id]?.valor_frete || 0
           return `
             <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right; font-size: 13px;">
@@ -41,18 +53,35 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
       return `
         <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f9fafb'};">
           <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; font-size: 13px;">
-            <div>
-              <strong>${item.modelo_nome}</strong>
-              ${item.modelo_codigo ? `<span style="font-size: 11px; color: #6b7280; margin-left: 4px;">(${item.modelo_codigo})</span>` : ''}
+            <div style="display: flex; align-items: center; gap: 8px;">
+              ${
+                imagemExibir
+                  ? `<img src="${imagemExibir}" alt="${item.modelo_nome}" style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px; border: 1px solid #e5e7eb; flex-shrink: 0;" />`
+                  : ''
+              }
+              <div>
+                <div>
+                  <strong>${item.modelo_nome}</strong>
+                  ${item.modelo_codigo ? `<span style="font-size: 11px; color: #6b7280; margin-left: 4px;">(${item.modelo_codigo})</span>` : ''}
+                  <span style="font-size: 9px; padding: 1px 4px; border-radius: 3px; margin-left: 4px; ${isPersonalizado ? 'background: #ede9fe; color: #6d28d9;' : 'background: #dcfce7; color: #15803d;'}">
+                    ${isPersonalizado ? 'Personalizado' : 'Cadastrado'}
+                  </span>
+                </div>
+                ${
+                  item.descricao
+                    ? `<div style="font-size: 11px; color: #4b5563; font-style: italic; margin-top: 1px;">${item.descricao}</div>`
+                    : ''
+                }
+                ${
+                  item.tema_nome || item.cor
+                    ? `<div style="font-size: 11px; color: #4b5563; margin-top: 2px;">
+                        ${item.tema_nome ? `Tema: <strong>${item.tema_nome}</strong>` : ''}
+                        ${item.cor ? ` &bull; Cor: <strong>${item.cor}</strong>` : ''}
+                      </div>`
+                    : ''
+                }
+              </div>
             </div>
-            ${
-              item.tema_nome || item.cor
-                ? `<div style="font-size: 11px; color: #4b5563; margin-top: 2px;">
-                    ${item.tema_nome ? `Tema: <strong>${item.tema_nome}</strong>` : ''}
-                    ${item.cor ? ` &bull; Cor: <strong>${item.cor}</strong>` : ''}
-                  </div>`
-                : ''
-            }
           </td>
           <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: center; font-size: 13px; font-weight: bold;">
             ${item.quantidade}

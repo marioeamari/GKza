@@ -47,10 +47,6 @@ export function DecisaoAprovacaoItemPanel({
   const frete = Number(freteItemEditado) || 0
 
   const analise = useMemo(() => {
-    if (!precificacaoAprovadaRecord && !produtoVinculado) {
-      return null
-    }
-
     const rec = precificacaoAprovadaRecord || {}
     const premissas = (rec.premissas as any) || {}
     const resultadoGravado = (rec.resultado as any) || {}
@@ -58,7 +54,7 @@ export function DecisaoAprovacaoItemPanel({
     const prod = (rec.expand as any)?.produto || produtoVinculado || {}
 
     // 1. Custo do produto unitário e no volume do item
-    // Procura custo_total_produto ou custo_total ou custo_aquisicao_unitario
+    // Procura custo_total_produto ou custo_total ou custo_aquisicao_unitario; fallback 0 se personalizado/livre
     const custoUnitarioOficial =
       Number(resultadoGravado.custo_total_produto) ||
       Number(custoSnapshot.custo_total) ||
@@ -67,13 +63,13 @@ export function DecisaoAprovacaoItemPanel({
       0
     const custoTotalItem = Math.round(custoUnitarioOficial * qtd * 100) / 100
 
-    // 2. Alíquotas e Tributos
+    // 2. Alíquotas e Tributos (se não informado, padrão DAS = 4% Simples Nacional)
     const aliqDasCalc =
       typeof aliquotaDas === 'number' && aliquotaDas > 0
         ? aliquotaDas
         : Number(premissas.aliquota_das_pct) ||
           Number(resultadoGravado.aliquota_imposto_efetiva_pct) ||
-          0
+          4
     const aliqIcmsCalc =
       typeof aliquotaIcms === 'number' ? aliquotaIcms : Number(premissas.aliquota_icms_pct) || 0
     const aliqEfetiva = aliqDasCalc + aliqIcmsCalc
@@ -127,6 +123,7 @@ export function DecisaoAprovacaoItemPanel({
       const precoUnitCliente = calcularPrecoUnitarioCliente(precoPagoClienteVolume, qtd)
 
       return {
+        temProdutoVinculado: Boolean(precificacaoAprovadaRecord || produtoVinculado),
         precoPagoClienteVolume,
         precoUnitCliente,
         valorReceberCanal: dem.valor_receber_canal,
@@ -143,13 +140,18 @@ export function DecisaoAprovacaoItemPanel({
       }
     } else {
       // Proporcionalização direta a partir do resultado gravado da precificação aprovada
+      // ou estimativa comercial padrão para o canal caso não haja vínculo
       const precoAprovadoOficial =
         Number(rec.preco_aprovado) || Number(resultadoGravado.preco_anunciado) || precoUnit
       const proporcaoPreco = precoAprovadoOficial > 0 ? precoCheio / precoAprovadoOficial : qtd
 
-      // Se temos resultadoGravado
       const taxasGravadas = Number(resultadoGravado.total_taxas_retidas_canal) || 0
-      totalTaxasRetidasItem = Math.round(taxasGravadas * proporcaoPreco * 100) / 100
+      // Se não há taxas gravadas nem taxasCanal, assume comissão padrão estimada do canal (18% se marketplace, 0% se site)
+      const taxaPctEstimada = canalNome.toLowerCase().includes('site') ? 0 : 0.18
+      totalTaxasRetidasItem =
+        taxasGravadas > 0
+          ? Math.round(taxasGravadas * proporcaoPreco * 100) / 100
+          : Math.round(precoCheio * taxaPctEstimada * 100) / 100
 
       // Tributos sobre precoCheio
       const baseNf = precoCheio
@@ -170,8 +172,7 @@ export function DecisaoAprovacaoItemPanel({
           : 0
 
       // Ponto de equilíbrio estimado (onde lucro = 0):
-      // p * (1 - (taxasPct + aliqEfetiva/100)) = custoTotalItem + frete
-      const taxaPctEfetiva = precoCheio > 0 ? totalTaxasRetidasItem / precoCheio : 0.15
+      const taxaPctEfetiva = precoCheio > 0 ? totalTaxasRetidasItem / precoCheio : taxaPctEstimada
       const divisor = Math.max(0.05, 1 - (taxaPctEfetiva + aliqEfetiva / 100))
       const pontoEquilibrio = Math.round(((custoTotalItem + frete) / divisor) * 100) / 100
       // Preço meta com margem líquida de 20%
@@ -182,6 +183,7 @@ export function DecisaoAprovacaoItemPanel({
       const precoUnitCliente = calcularPrecoUnitarioCliente(precoPagoClienteVolume, qtd)
 
       return {
+        temProdutoVinculado: Boolean(precificacaoAprovadaRecord || produtoVinculado),
         precoPagoClienteVolume,
         precoUnitCliente,
         valorReceberCanal,
@@ -201,6 +203,7 @@ export function DecisaoAprovacaoItemPanel({
     precificacaoAprovadaRecord,
     produtoVinculado,
     taxasCanal,
+    canalNome,
     precoCheio,
     precoUnit,
     qtd,
@@ -212,12 +215,7 @@ export function DecisaoAprovacaoItemPanel({
   ])
 
   if (!analise) {
-    return (
-      <div className="mt-3 p-2.5 rounded-lg bg-amber-50/60 border border-amber-200/60 text-[11px] text-amber-800">
-        Selecione um <strong>Produto Vinculado</strong> acima para visualizar a decisão de aprovação
-        dinâmica e indicadores de margem deste item.
-      </div>
-    )
+    return null
   }
 
   const lucroNegativo = analise.lucroLiquido < 0
@@ -228,12 +226,22 @@ export function DecisaoAprovacaoItemPanel({
         <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
           Decisão de Aprovação ({canalNome})
         </span>
-        <Badge
-          variant="outline"
-          className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-300 font-semibold"
-        >
-          Dinâmico ({qtd} {qtd === 1 ? 'un' : 'unidades'})
-        </Badge>
+        <div className="flex items-center gap-1.5">
+          {!analise.temProdutoVinculado && (
+            <Badge
+              variant="outline"
+              className="text-[9px] bg-amber-50 text-amber-700 border-amber-300 font-normal"
+            >
+              Sem produto vinculado
+            </Badge>
+          )}
+          <Badge
+            variant="outline"
+            className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-300 font-semibold"
+          >
+            Dinâmico ({qtd} {qtd === 1 ? 'un' : 'unidades'})
+          </Badge>
+        </div>
       </div>
 
       {/* Linhas de Fechamento da Venda - Idênticas à Tela de Decisão */}

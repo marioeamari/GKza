@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-15T01:10:28.247Z",
+  "generatedAt": "2026-10-15T01:36:26.692Z",
   "collections": [
     {
       "name": "users",
@@ -6051,6 +6051,31 @@
         },
         {
           "name": "cor",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "tipo_item",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["cadastrado", "personalizado"]
+        },
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "imagem_anexo",
+          "type": "file",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "foto_url",
           "type": "text",
           "required": false,
           "system": false

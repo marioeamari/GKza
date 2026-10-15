@@ -49,12 +49,18 @@ export interface OrcamentoFreteCanalItem {
   valor_frete: number
 }
 
+export type TipoItemOrcamento = 'cadastrado' | 'personalizado'
+
 export interface OrcamentoItemRecord {
   id: string
   orcamento: string
+  tipo_item?: TipoItemOrcamento
   modelo?: string
   modelo_nome: string
   modelo_codigo?: string
+  descricao?: string
+  imagem_anexo?: string
+  foto_url?: string
   tema?: string
   tema_nome?: string
   cor?: string
@@ -128,9 +134,13 @@ export interface CreateOrcamentoInput {
   observacoes?: string
   itens: Array<{
     id?: string
+    tipo_item?: TipoItemOrcamento
     modelo?: string
     modelo_nome: string
     modelo_codigo?: string
+    descricao?: string
+    imagem_anexo?: string | File
+    foto_url?: string
     tema?: string
     tema_nome?: string
     cor?: string
