@@ -254,6 +254,56 @@ describe('Regras da Matriz de Presença por Canal (Serviço & Idempotência)', (
     expect(resultado.produtos.map((p) => p.id)).toEqual(['prod_1', 'prod_2'])
   })
 
+  it('getMapaProdutosAprovadosPorCanal extrai lucro_liquido do campo resultado da precificação', async () => {
+    vi.spyOn(pb.collection('prec_produtos'), 'getFullList').mockResolvedValue([
+      { id: 'prod_alpha', sku: 'SKU-ALPHA', nome: 'Alpha' },
+    ] as any)
+
+    vi.spyOn(pb.collection('prec_canal_modalidades'), 'getFullList').mockResolvedValue([
+      { id: 'mod_1', nome: 'Half', canal: 'canal_k' },
+    ] as any)
+
+    vi.spyOn(pb.collection('prec_precificacoes'), 'getFullList').mockResolvedValue([
+      {
+        id: 'prec_alpha_1',
+        produto: 'prod_alpha',
+        canal: 'canal_k',
+        modalidade: 'mod_1',
+        status: 'aprovada',
+        preco_aprovado: 55.0,
+        resultado: {
+          lucro_liquido: 12.34,
+          margem_liquida: 22.4,
+        },
+        aprovado_em: '2026-03-01 10:00:00',
+        created: '2026-03-01 10:00:00',
+      },
+      {
+        id: 'prec_alpha_sem_lucro',
+        produto: 'prod_alpha',
+        canal: 'canal_shopee',
+        status: 'desatualizada',
+        preco_aprovado: 40.0,
+        resultado: null,
+        aprovado_em: '2026-02-01 10:00:00',
+        created: '2026-02-01 10:00:00',
+      },
+    ] as any)
+
+    const resultado = await precificacaoService.getMapaProdutosAprovadosPorCanal()
+
+    const itemComLucro = resultado.mapaPrecoPorProdCanal['prod_alpha__canal_k']
+    expect(itemComLucro).toBeDefined()
+    expect(itemComLucro.preco_aprovado).toBe(55.0)
+    expect(itemComLucro.lucro_liquido).toBe(12.34)
+    expect(itemComLucro.modalidades_disponiveis?.[0].lucro_liquido).toBe(12.34)
+
+    const itemSemLucro = resultado.mapaPrecoPorProdCanal['prod_alpha__canal_shopee']
+    expect(itemSemLucro).toBeDefined()
+    expect(itemSemLucro.preco_aprovado).toBe(40.0)
+    expect(itemSemLucro.lucro_liquido).toBeUndefined()
+  })
+
   it('setMatrizClassificacao cria novo vínculo quando não existe para o par produto+canal', async () => {
     vi.spyOn(pb.collection('prec_matriz_classificacoes'), 'getFullList').mockResolvedValue(
       [] as any,

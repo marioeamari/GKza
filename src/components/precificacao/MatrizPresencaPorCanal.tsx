@@ -28,7 +28,18 @@ import {
 } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Search, Filter, Palette, Tag, Check, X, Package, Layers, Sparkles } from 'lucide-react'
+import {
+  Search,
+  Filter,
+  Palette,
+  Tag,
+  Check,
+  X,
+  Package,
+  Layers,
+  Sparkles,
+  AlertTriangle,
+} from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
 import { PrecCanalModalidadeRecord } from '@/types/precificacao'
@@ -592,12 +603,67 @@ export function MatrizPresencaPorCanal({
 
                             // Exibição do preço com indicação discreta da modalidade (ex.: 'R$ 24,90 · MEI')
                             const modalidadeIndicador = celula.modalidadeEfetivaNome
-                            const textoExibicao =
+                            const textoLinhaPrincipal =
                               temPreco && modalidadeIndicador
                                 ? `${valorFormatado} · ${modalidadeIndicador}`
                                 : valorFormatado
 
-                            const tooltipConteudo = temClassificacao ? (
+                            const temLucroGravado =
+                              temPreco &&
+                              celula.precoInfo?.lucro_liquido !== undefined &&
+                              celula.precoInfo?.lucro_liquido !== null
+                            const lucroFormatado = temLucroGravado
+                              ? `Lucro ${formatCurrency(celula.precoInfo!.lucro_liquido!)}`
+                              : null
+
+                            const isDesatualizada = celula.precoInfo?.status === 'desatualizada'
+                            const avisoDesatualizadaTexto =
+                              'Precificação desatualizada — confira em /precificacao'
+
+                            const tooltipConteudo = isDesatualizada ? (
+                              <div className="space-y-1 text-xs">
+                                <div className="font-bold flex items-center gap-1.5 text-amber-600">
+                                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                  <span>{avisoDesatualizadaTexto}</span>
+                                </div>
+                                {temClassificacao && (
+                                  <div className="flex items-center gap-1.5 text-[11px] pt-0.5">
+                                    <span
+                                      className="h-2 w-2 rounded-full"
+                                      style={{ backgroundColor: celula.legenda?.cor }}
+                                    />
+                                    <span>{celula.legenda?.nome}</span>
+                                  </div>
+                                )}
+                                {temPreco && (
+                                  <div className="text-[11px] space-y-0.5">
+                                    <div>
+                                      Preço:{' '}
+                                      <strong className="font-mono">
+                                        {formatCurrency(celula.precoInfo!.preco_aprovado)}
+                                      </strong>
+                                    </div>
+                                    {temLucroGravado && (
+                                      <div>
+                                        Lucro Líquido:{' '}
+                                        <strong className="font-mono">
+                                          {formatCurrency(celula.precoInfo!.lucro_liquido!)}
+                                        </strong>
+                                      </div>
+                                    )}
+                                    {modalidadeIndicador && (
+                                      <div className="text-[10px] text-muted-foreground">
+                                        Modalidade: <strong>{modalidadeIndicador}</strong>
+                                        {celula.isEscolhaManual ? ' (escolha manual)' : ''}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                <div className="text-[10px] text-muted-foreground/80 pt-1">
+                                  Clique para alterar classificação ou modalidade
+                                </div>
+                              </div>
+                            ) : temClassificacao ? (
                               <div className="space-y-1 text-xs">
                                 <div className="font-bold flex items-center gap-1.5">
                                   <span
@@ -613,10 +679,15 @@ export function MatrizPresencaPorCanal({
                                       <strong className="font-mono">
                                         {formatCurrency(celula.precoInfo!.preco_aprovado)}
                                       </strong>
-                                      {celula.precoInfo?.status === 'desatualizada' && (
-                                        <span className="text-amber-300 ml-1">(desatualizado)</span>
-                                      )}
                                     </div>
+                                    {temLucroGravado && (
+                                      <div>
+                                        Lucro Líquido:{' '}
+                                        <strong className="font-mono">
+                                          {formatCurrency(celula.precoInfo!.lucro_liquido!)}
+                                        </strong>
+                                      </div>
+                                    )}
                                     {modalidadeIndicador && (
                                       <div className="text-[10px] text-muted-foreground">
                                         Modalidade: <strong>{modalidadeIndicador}</strong>
@@ -666,7 +737,7 @@ export function MatrizPresencaPorCanal({
                                                   }
                                                 : undefined
                                             }
-                                            className={`w-full min-h-[32px] py-1 rounded-md px-1.5 font-bold font-mono text-[11px] transition-all flex items-center justify-center border text-center ${
+                                            className={`w-full min-h-[34px] py-1 rounded-md px-1.5 font-bold font-mono text-[11px] transition-all flex flex-col items-center justify-center border text-center ${
                                               temClassificacao
                                                 ? 'border-black/15 shadow-2xs hover:scale-[1.02] cursor-pointer'
                                                 : 'bg-slate-50/50 hover:bg-slate-100/90 text-muted-foreground/50 border-dashed border-border/70 hover:border-border cursor-pointer'
@@ -674,9 +745,39 @@ export function MatrizPresencaPorCanal({
                                           >
                                             {isSalvando ? (
                                               <span className="h-3 w-3 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
+                                            ) : textoLinhaPrincipal ? (
+                                              <div className="w-full flex flex-col items-center justify-center leading-tight">
+                                                <div className="flex items-center justify-center gap-1 max-w-full">
+                                                  {isDesatualizada && (
+                                                    <AlertTriangle
+                                                      className="h-3 w-3 shrink-0 text-amber-400 drop-shadow-xs"
+                                                      aria-label={avisoDesatualizadaTexto}
+                                                    />
+                                                  )}
+                                                  <span className="truncate block">
+                                                    {valorFormatado}
+                                                    {modalidadeIndicador && (
+                                                      <span className="inline-flex items-center gap-0.5 ml-1 font-semibold opacity-90">
+                                                        <span>· {modalidadeIndicador}</span>
+                                                        {isDesatualizada && (
+                                                          <AlertTriangle
+                                                            className="h-2.5 w-2.5 shrink-0 text-amber-400"
+                                                            aria-label={avisoDesatualizadaTexto}
+                                                          />
+                                                        )}
+                                                      </span>
+                                                    )}
+                                                  </span>
+                                                </div>
+                                                {lucroFormatado && (
+                                                  <span className="text-[9.5px] font-medium opacity-90 truncate block tracking-tight">
+                                                    {lucroFormatado}
+                                                  </span>
+                                                )}
+                                              </div>
                                             ) : (
                                               <span className="truncate block leading-tight">
-                                                {textoExibicao || '—'}
+                                                —
                                               </span>
                                             )}
                                           </button>
@@ -773,11 +874,21 @@ export function MatrizPresencaPorCanal({
                                                       <span className="font-semibold text-[11px] truncate">
                                                         {mod.modalidade_nome}
                                                       </span>
-                                                      <span className="text-[10px] font-mono text-emerald-700 font-bold">
-                                                        {formatCurrency(mod.preco_aprovado)}
+                                                      <span className="text-[10px] font-mono text-emerald-700 font-bold flex items-center gap-1 flex-wrap">
+                                                        <span>
+                                                          {formatCurrency(mod.preco_aprovado)}
+                                                        </span>
+                                                        {mod.lucro_liquido !== undefined &&
+                                                          mod.lucro_liquido !== null && (
+                                                            <span className="text-[9px] font-medium text-muted-foreground">
+                                                              · Lucro{' '}
+                                                              {formatCurrency(mod.lucro_liquido)}
+                                                            </span>
+                                                          )}
                                                         {mod.status === 'desatualizada' && (
-                                                          <span className="text-amber-600 font-normal ml-1">
-                                                            (desatualizado)
+                                                          <span className="inline-flex items-center gap-0.5 text-amber-600 font-normal ml-0.5">
+                                                            <AlertTriangle className="h-2.5 w-2.5 shrink-0" />
+                                                            <span>(desatualizada)</span>
                                                           </span>
                                                         )}
                                                       </span>

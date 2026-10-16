@@ -529,6 +529,132 @@ describe('matrizHelpers - Regras da Matriz de Presença por Canal', () => {
       expect(celulaP2.precoInfo?.preco_aprovado).toBe(20.0)
       expect(celulaP2.modalidadeEfetivaNome).toBe('MEI')
     })
+
+    it('deve extrair lucro_liquido do cenário vigente quando gravado', () => {
+      const mapaPrecos = {
+        prod_a__canal_1: {
+          preco_aprovado: 24.9,
+          status: 'aprovada',
+          precificacao_id: 'prec_1',
+          canal_id: 'canal_1',
+          lucro_liquido: 6.1,
+          modalidade_id: 'mod_half',
+          modalidade_nome: 'Half',
+          modalidades_disponiveis: [
+            {
+              modalidade_id: 'mod_half',
+              modalidade_nome: 'Half',
+              preco_aprovado: 24.9,
+              status: 'aprovada',
+              precificacao_id: 'prec_1',
+              lucro_liquido: 6.1,
+            },
+          ],
+        },
+      }
+
+      const celula = extrairDadosCelulaMatriz({
+        produtoId: 'prod_a',
+        canalId: 'canal_1',
+        mapaClassificacoes: new Map(),
+        mapaPrecoPorProdCanal: mapaPrecos,
+        mapaLegendas: new Map(),
+      })
+
+      expect(celula.precoInfo?.preco_aprovado).toBe(24.9)
+      expect(celula.precoInfo?.lucro_liquido).toBe(6.1)
+      expect(celula.precoInfo?.status).toBe('aprovada')
+    })
+
+    it('deve manter lucro_liquido undefined quando cenário não tiver lucro gravado', () => {
+      const mapaPrecos = {
+        prod_b__canal_1: {
+          preco_aprovado: 19.9,
+          status: 'aprovada',
+          precificacao_id: 'prec_2',
+          canal_id: 'canal_1',
+          modalidade_id: 'mod_half',
+          modalidade_nome: 'Half',
+          modalidades_disponiveis: [],
+        },
+      }
+
+      const celula = extrairDadosCelulaMatriz({
+        produtoId: 'prod_b',
+        canalId: 'canal_1',
+        mapaClassificacoes: new Map(),
+        mapaPrecoPorProdCanal: mapaPrecos,
+        mapaLegendas: new Map(),
+      })
+
+      expect(celula.precoInfo?.preco_aprovado).toBe(19.9)
+      expect(celula.precoInfo?.lucro_liquido).toBeUndefined()
+    })
+
+    it('deve extrair lucro_liquido e status DA MODALIDADE ESCOLHIDA quando célula tem escolha manual', () => {
+      const mapaClassificacoes = new Map([
+        [
+          'prod_a__canal_1',
+          {
+            id: 'c_manual',
+            produto: 'prod_a',
+            canal: 'canal_1',
+            legenda: 'leg_ativo',
+            modalidade: 'mod_simples', // Escolha manual por célula
+            created: '2026-01-01',
+            updated: '2026-01-01',
+          },
+        ],
+      ])
+
+      const modalidades = [
+        {
+          modalidade_id: 'mod_mei',
+          modalidade_nome: 'MEI',
+          preco_aprovado: 20.0,
+          status: 'aprovada',
+          precificacao_id: 'prec_mei',
+          lucro_liquido: 5.0,
+        },
+        {
+          modalidade_id: 'mod_simples',
+          modalidade_nome: 'Simples',
+          preco_aprovado: 28.5,
+          status: 'desatualizada',
+          precificacao_id: 'prec_simples',
+          lucro_liquido: 8.2,
+        },
+      ]
+
+      const mapaPrecos = {
+        prod_a__canal_1: {
+          preco_aprovado: 20.0, // Vigente é MEI
+          status: 'aprovada',
+          precificacao_id: 'prec_mei',
+          canal_id: 'canal_1',
+          lucro_liquido: 5.0,
+          modalidade_id: 'mod_mei',
+          modalidade_nome: 'MEI',
+          modalidades_disponiveis: modalidades,
+        },
+      }
+
+      const celula = extrairDadosCelulaMatriz({
+        produtoId: 'prod_a',
+        canalId: 'canal_1',
+        mapaClassificacoes,
+        mapaPrecoPorProdCanal: mapaPrecos,
+        mapaLegendas: new Map(),
+      })
+
+      expect(celula.isEscolhaManual).toBe(true)
+      expect(celula.modalidadeEscolhidaId).toBe('mod_simples')
+      // Lucro, preço e status devem ser DA MODALIDADE ESCOLHIDA (Simples: 28.50, lucro 8.20, desatualizada)
+      expect(celula.precoInfo?.preco_aprovado).toBe(28.5)
+      expect(celula.precoInfo?.lucro_liquido).toBe(8.2)
+      expect(celula.precoInfo?.status).toBe('desatualizada')
+      expect(celula.modalidadeEfetivaNome).toBe('Simples')
+    })
   })
 
   describe('getTextoContraste', () => {

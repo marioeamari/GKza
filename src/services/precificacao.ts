@@ -888,6 +888,7 @@ export const precificacaoService = {
         status: string
         precificacao_id: string
         canal_id: string
+        lucro_liquido?: number
         modalidade_id?: string
         modalidade_nome?: string
         modalidades_disponiveis?: Array<{
@@ -896,6 +897,7 @@ export const precificacaoService = {
           preco_aprovado: number
           status: string
           precificacao_id: string
+          lucro_liquido?: number
           aprovado_em?: string
           updated?: string
           created?: string
@@ -953,6 +955,7 @@ export const precificacaoService = {
         status: string
         precificacao_id: string
         canal_id: string
+        lucro_liquido?: number
         modalidade_id?: string
         modalidade_nome?: string
         modalidades_disponiveis?: Array<{
@@ -961,6 +964,7 @@ export const precificacaoService = {
           preco_aprovado: number
           status: string
           precificacao_id: string
+          lucro_liquido?: number
           aprovado_em?: string
           updated?: string
           created?: string
@@ -993,6 +997,7 @@ export const precificacaoService = {
         preco_aprovado: number
         status: string
         precificacao_id: string
+        lucro_liquido?: number
         aprovado_em?: string
         updated?: string
         created?: string
@@ -1003,12 +1008,21 @@ export const precificacaoService = {
           item.expand?.modalidade?.nome ||
           (modId !== '__padrao__' ? mapaModalidades.get(modId) : '') ||
           'Padrão'
+        const resItem = (item.resultado || {}) as Record<string, unknown>
+        const lucroItem =
+          resItem.lucro_liquido !== undefined &&
+          resItem.lucro_liquido !== null &&
+          !isNaN(Number(resItem.lucro_liquido))
+            ? Number(resItem.lucro_liquido)
+            : undefined
+
         modalidadesDisponiveis.push({
           modalidade_id: modId === '__padrao__' ? '' : modId,
           modalidade_nome: modNome,
           preco_aprovado: Number(item.preco_aprovado) || 0,
           status: item.status,
           precificacao_id: item.id,
+          lucro_liquido: lucroItem,
           aprovado_em: item.aprovado_em,
           updated: item.updated,
           created: item.created,
@@ -1019,11 +1033,20 @@ export const precificacaoService = {
         vigente.expand?.modalidade?.nome ||
         (vigente.modalidade ? mapaModalidades.get(vigente.modalidade) : undefined)
 
+      const resVigente = (vigente.resultado || {}) as Record<string, unknown>
+      const lucroVigente =
+        resVigente.lucro_liquido !== undefined &&
+        resVigente.lucro_liquido !== null &&
+        !isNaN(Number(resVigente.lucro_liquido))
+          ? Number(resVigente.lucro_liquido)
+          : undefined
+
       mapaPrecoPorProdCanal[key] = {
         preco_aprovado: Number(vigente.preco_aprovado) || 0,
         status: vigente.status,
         precificacao_id: vigente.id,
         canal_id: vigente.canal,
+        lucro_liquido: lucroVigente,
         modalidade_id: vigente.modalidade || undefined,
         modalidade_nome: vigenteModNome,
         modalidades_disponiveis: modalidadesDisponiveis,

@@ -12,6 +12,7 @@ export interface PrecoAprovadoModalidadeInfo {
   preco_aprovado: number
   status: string
   precificacao_id: string
+  lucro_liquido?: number
   aprovado_em?: string
   updated?: string
   created?: string
@@ -22,6 +23,7 @@ export interface PrecoAprovadoCanalInfo {
   status: string
   precificacao_id: string
   canal_id: string
+  lucro_liquido?: number
   modalidade_id?: string
   modalidade_nome?: string
   modalidades_disponiveis?: PrecoAprovadoModalidadeInfo[]
@@ -223,6 +225,7 @@ export function extrairDadosCelulaMatriz({
         status: modMatch.status,
         precificacao_id: modMatch.precificacao_id,
         canal_id: canalId,
+        lucro_liquido: modMatch.lucro_liquido,
         modalidade_id: modMatch.modalidade_id,
         modalidade_nome: modMatch.modalidade_nome,
         modalidades_disponiveis: modalidadesDisponiveis,
