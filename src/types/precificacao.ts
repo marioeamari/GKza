@@ -37,11 +37,13 @@ export interface PrecMatrizClassificacaoRecord {
   produto: string
   canal: string
   legenda: string
+  modalidade?: string
   observacao?: string
   expand?: {
     produto?: PrecProdutoRecord
     canal?: PrecCanalRecord
     legenda?: PrecMatrizLegendaRecord
+    modalidade?: PrecCanalModalidadeRecord
   }
 }
 

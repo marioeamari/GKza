@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-16T10:45:53.227Z",
+  "generatedAt": "2026-10-16T11:13:18.854Z",
   "collections": [
     {
       "name": "users",
@@ -6352,6 +6352,13 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "modalidade",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "prec_canal_modalidades"
         }
       ],
       "indexes": [

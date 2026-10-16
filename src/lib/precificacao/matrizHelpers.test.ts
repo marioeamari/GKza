@@ -251,6 +251,284 @@ describe('matrizHelpers - Regras da Matriz de Presença por Canal', () => {
       expect(celula.legenda?.cor).toBe('#EF4444')
       expect(celula.precoInfo).toBeUndefined()
     })
+
+    /* ========================================================================== */
+    /* NOVAS REGRAS: Preço por Modalidade, Vigente Dinâmico e Seletor de Coluna   */
+    /* ========================================================================== */
+
+    it('célula sem escolha explícita exibe o preço vigente atual e indica modalidade vigente', () => {
+      const mapaClassificacoes = new Map<string, PrecMatrizClassificacaoRecord>([
+        [
+          'p1__shopee',
+          {
+            id: 'c1',
+            produto: 'p1',
+            canal: 'shopee',
+            legenda: 'leg_ativo',
+            created: '2026-01-01',
+            updated: '2026-01-01',
+          },
+        ],
+      ])
+
+      const mapaPrecoPorProdCanal = {
+        p1__shopee: {
+          preco_aprovado: 24.9,
+          status: 'aprovada',
+          precificacao_id: 'prec_mei',
+          canal_id: 'shopee',
+          modalidade_id: 'mod_mei',
+          modalidade_nome: 'MEI',
+          modalidades_disponiveis: [
+            {
+              modalidade_id: 'mod_mei',
+              modalidade_nome: 'MEI',
+              preco_aprovado: 24.9,
+              status: 'aprovada',
+              precificacao_id: 'prec_mei',
+            },
+            {
+              modalidade_id: 'mod_simples',
+              modalidade_nome: 'Simples Nacional',
+              preco_aprovado: 28.5,
+              status: 'aprovada',
+              precificacao_id: 'prec_simples',
+            },
+          ],
+        },
+      }
+
+      const celula = extrairDadosCelulaMatriz({
+        produtoId: 'p1',
+        canalId: 'shopee',
+        mapaClassificacoes,
+        mapaPrecoPorProdCanal,
+        mapaLegendas: new Map([['leg_ativo', legAtivo]]),
+      })
+
+      expect(celula.isEscolhaManual).toBe(false)
+      expect(celula.modalidadeEscolhidaId).toBeUndefined()
+      expect(celula.precoInfo?.preco_aprovado).toBe(24.9)
+      expect(celula.modalidadeEfetivaNome).toBe('MEI')
+      expect(celula.modalidadesDisponiveis).toHaveLength(2)
+    })
+
+    it('célula com escolha manual de modalidade exibe o preço da modalidade escolhida com seu indicador', () => {
+      const mapaClassificacoes = new Map<string, PrecMatrizClassificacaoRecord>([
+        [
+          'p1__shopee',
+          {
+            id: 'c1',
+            produto: 'p1',
+            canal: 'shopee',
+            legenda: 'leg_ativo',
+            modalidade: 'mod_simples', // Escolha manual
+            created: '2026-01-01',
+            updated: '2026-01-01',
+          },
+        ],
+      ])
+
+      const mapaPrecoPorProdCanal = {
+        p1__shopee: {
+          preco_aprovado: 24.9, // vigente no canal seria MEI (24.90)
+          status: 'aprovada',
+          precificacao_id: 'prec_mei',
+          canal_id: 'shopee',
+          modalidade_id: 'mod_mei',
+          modalidade_nome: 'MEI',
+          modalidades_disponiveis: [
+            {
+              modalidade_id: 'mod_mei',
+              modalidade_nome: 'MEI',
+              preco_aprovado: 24.9,
+              status: 'aprovada',
+              precificacao_id: 'prec_mei',
+            },
+            {
+              modalidade_id: 'mod_simples',
+              modalidade_nome: 'Simples Nacional',
+              preco_aprovado: 28.5,
+              status: 'aprovada',
+              precificacao_id: 'prec_simples',
+            },
+          ],
+        },
+      }
+
+      const celula = extrairDadosCelulaMatriz({
+        produtoId: 'p1',
+        canalId: 'shopee',
+        mapaClassificacoes,
+        mapaPrecoPorProdCanal,
+        mapaLegendas: new Map([['leg_ativo', legAtivo]]),
+      })
+
+      expect(celula.isEscolhaManual).toBe(true)
+      expect(celula.modalidadeEscolhidaId).toBe('mod_simples')
+      // Preço efetivo deve ser o da modalidade escolhida
+      expect(celula.precoInfo?.preco_aprovado).toBe(28.5)
+      expect(celula.precoInfo?.modalidade_id).toBe('mod_simples')
+      expect(celula.modalidadeEfetivaNome).toBe('Simples Nacional')
+      expect(celula.modalidadeEscolhidaNome).toBe('Simples Nacional')
+    })
+
+    it('reaprovação/atualização de preço da modalidade reflete automaticamente na célula (preserva só o ID da modalidade)', () => {
+      // Registro tem apenas a referência modalidade = 'mod_simples', sem guardar valor fixo
+      const mapaClassificacoes = new Map<string, PrecMatrizClassificacaoRecord>([
+        [
+          'p1__shopee',
+          {
+            id: 'c1',
+            produto: 'p1',
+            canal: 'shopee',
+            legenda: 'leg_ativo',
+            modalidade: 'mod_simples',
+            created: '2026-01-01',
+            updated: '2026-01-01',
+          },
+        ],
+      ])
+
+      // Nova precificação aprovada no banco: o preço de 'mod_simples' subiu de 28.50 para 31.90
+      const mapaPrecoAtualizado = {
+        p1__shopee: {
+          preco_aprovado: 24.9,
+          status: 'aprovada',
+          precificacao_id: 'prec_mei',
+          canal_id: 'shopee',
+          modalidade_id: 'mod_mei',
+          modalidade_nome: 'MEI',
+          modalidades_disponiveis: [
+            {
+              modalidade_id: 'mod_mei',
+              modalidade_nome: 'MEI',
+              preco_aprovado: 24.9,
+              status: 'aprovada',
+              precificacao_id: 'prec_mei',
+            },
+            {
+              modalidade_id: 'mod_simples',
+              modalidade_nome: 'Simples Nacional',
+              preco_aprovado: 31.9, // Novo valor reaprovado
+              status: 'aprovada',
+              precificacao_id: 'prec_simples_v2',
+            },
+          ],
+        },
+      }
+
+      const celula = extrairDadosCelulaMatriz({
+        produtoId: 'p1',
+        canalId: 'shopee',
+        mapaClassificacoes,
+        mapaPrecoPorProdCanal: mapaPrecoAtualizado,
+        mapaLegendas: new Map([['leg_ativo', legAtivo]]),
+      })
+
+      // O valor exibido acompanha a atualização da precificação da modalidade
+      expect(celula.precoInfo?.preco_aprovado).toBe(31.9)
+      expect(celula.precoInfo?.precificacao_id).toBe('prec_simples_v2')
+    })
+
+    it('seletor de modalidade de coluna altera células sem escolha manual mas preserva células com escolha manual', () => {
+      // Duas células no mesmo canal:
+      // p1 não tem escolha manual (modalidade vazia)
+      // p2 tem escolha manual fixada em MEI ('mod_mei')
+      const mapaClassificacoes = new Map<string, PrecMatrizClassificacaoRecord>([
+        [
+          'p1__shopee',
+          {
+            id: 'c1',
+            produto: 'p1',
+            canal: 'shopee',
+            legenda: 'leg_ativo',
+            created: '2026-01-01',
+            updated: '2026-01-01',
+          },
+        ],
+        [
+          'p2__shopee',
+          {
+            id: 'c2',
+            produto: 'p2',
+            canal: 'shopee',
+            legenda: 'leg_ativo',
+            modalidade: 'mod_mei', // Fixada manualmente em MEI
+            created: '2026-01-01',
+            updated: '2026-01-01',
+          },
+        ],
+      ])
+
+      const modalidades = [
+        {
+          modalidade_id: 'mod_mei',
+          modalidade_nome: 'MEI',
+          preco_aprovado: 20.0,
+          status: 'aprovada',
+          precificacao_id: 'pr_mei',
+        },
+        {
+          modalidade_id: 'mod_lucro_real',
+          modalidade_nome: 'Lucro Real',
+          preco_aprovado: 35.0,
+          status: 'aprovada',
+          precificacao_id: 'pr_lr',
+        },
+      ]
+
+      const mapaPrecos = {
+        p1__shopee: {
+          preco_aprovado: 20.0,
+          status: 'aprovada',
+          precificacao_id: 'pr_mei',
+          canal_id: 'shopee',
+          modalidade_id: 'mod_mei',
+          modalidade_nome: 'MEI',
+          modalidades_disponiveis: modalidades,
+        },
+        p2__shopee: {
+          preco_aprovado: 20.0,
+          status: 'aprovada',
+          precificacao_id: 'pr_mei',
+          canal_id: 'shopee',
+          modalidade_id: 'mod_mei',
+          modalidade_nome: 'MEI',
+          modalidades_disponiveis: modalidades,
+        },
+      }
+
+      // Seletor da coluna no topo muda para 'mod_lucro_real'
+      const celulaP1 = extrairDadosCelulaMatriz({
+        produtoId: 'p1',
+        canalId: 'shopee',
+        mapaClassificacoes,
+        mapaPrecoPorProdCanal: mapaPrecos,
+        mapaLegendas: new Map([['leg_ativo', legAtivo]]),
+        modalidadeColunaId: 'mod_lucro_real',
+      })
+
+      const celulaP2 = extrairDadosCelulaMatriz({
+        produtoId: 'p2',
+        canalId: 'shopee',
+        mapaClassificacoes,
+        mapaPrecoPorProdCanal: mapaPrecos,
+        mapaLegendas: new Map([['leg_ativo', legAtivo]]),
+        modalidadeColunaId: 'mod_lucro_real',
+      })
+
+      // Célula P1 (sem escolha manual) deve ser alterada pelo seletor da coluna para Lucro Real (35.00)
+      expect(celulaP1.isEscolhaManual).toBe(false)
+      expect(celulaP1.precoInfo?.preco_aprovado).toBe(35.0)
+      expect(celulaP1.modalidadeEfetivaNome).toBe('Lucro Real')
+
+      // Célula P2 (com escolha manual MEI) deve PRESERVAR a escolha manual MEI (20.00)
+      expect(celulaP2.isEscolhaManual).toBe(true)
+      expect(celulaP2.modalidadeEscolhidaId).toBe('mod_mei')
+      expect(celulaP2.precoInfo?.preco_aprovado).toBe(20.0)
+      expect(celulaP2.modalidadeEfetivaNome).toBe('MEI')
+    })
   })
 
   describe('getTextoContraste', () => {

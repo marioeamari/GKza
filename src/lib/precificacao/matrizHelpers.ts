@@ -6,11 +6,25 @@ import {
   PrecProdutoRecord,
 } from '@/types/precificacao'
 
+export interface PrecoAprovadoModalidadeInfo {
+  modalidade_id: string
+  modalidade_nome: string
+  preco_aprovado: number
+  status: string
+  precificacao_id: string
+  aprovado_em?: string
+  updated?: string
+  created?: string
+}
+
 export interface PrecoAprovadoCanalInfo {
   preco_aprovado: number
   status: string
   precificacao_id: string
   canal_id: string
+  modalidade_id?: string
+  modalidade_nome?: string
+  modalidades_disponiveis?: PrecoAprovadoModalidadeInfo[]
 }
 
 export interface GrupoProdutosCategoria {
@@ -27,6 +41,11 @@ export interface CelulaMatrizInfo {
   classificacao?: PrecMatrizClassificacaoRecord
   legenda?: PrecMatrizLegendaRecord
   precoInfo?: PrecoAprovadoCanalInfo
+  modalidadeEscolhidaId?: string
+  modalidadeEscolhidaNome?: string
+  modalidadeEfetivaNome?: string
+  isEscolhaManual: boolean
+  modalidadesDisponiveis: PrecoAprovadoModalidadeInfo[]
 }
 
 /**
@@ -157,16 +176,21 @@ export function extrairDadosCelulaMatriz({
   mapaClassificacoes,
   mapaPrecoPorProdCanal,
   mapaLegendas,
+  modalidadeColunaId,
+  mapaModalidadesPorId,
 }: {
   produtoId: string
   canalId: string
   mapaClassificacoes: Map<string, PrecMatrizClassificacaoRecord>
   mapaPrecoPorProdCanal: Record<string, PrecoAprovadoCanalInfo>
   mapaLegendas: Map<string, PrecMatrizLegendaRecord>
+  modalidadeColunaId?: string
+  mapaModalidadesPorId?: Map<string, { id: string; nome: string }>
 }): CelulaMatrizInfo {
   const chave = `${produtoId}__${canalId}`
   const classificacao = mapaClassificacoes.get(chave)
-  const precoInfo = mapaPrecoPorProdCanal[chave]
+  const precoInfoPadrao = mapaPrecoPorProdCanal[chave]
+  const modalidadesDisponiveis = precoInfoPadrao?.modalidades_disponiveis || []
 
   let legenda: PrecMatrizLegendaRecord | undefined
   if (classificacao?.expand?.legenda) {
@@ -175,12 +199,59 @@ export function extrairDadosCelulaMatriz({
     legenda = mapaLegendas.get(classificacao.legenda)
   }
 
+  // Verifica se há escolha manual gravada na célula
+  const modalidadeGravada = classificacao?.modalidade?.trim() || ''
+  const isEscolhaManual = !!modalidadeGravada
+
+  // Regra de resolução de modalidade:
+  // 1. Escolha manual da célula tem prioridade absoluta.
+  // 2. Se não houver escolha manual, seletor de coluna (se fornecido).
+  // 3. Se nenhuma modalidade for especificada ou não existir para o produto, fallback para o vigente (precoInfoPadrao).
+  let modalidadeAlvoId = modalidadeGravada
+  if (!modalidadeAlvoId && modalidadeColunaId) {
+    modalidadeAlvoId = modalidadeColunaId
+  }
+
+  let precoInfoEfetivo: PrecoAprovadoCanalInfo | undefined = precoInfoPadrao
+  let modalidadeEfetivaNome: string | undefined = precoInfoPadrao?.modalidade_nome
+
+  if (modalidadeAlvoId && modalidadesDisponiveis.length > 0) {
+    const modMatch = modalidadesDisponiveis.find((m) => m.modalidade_id === modalidadeAlvoId)
+    if (modMatch) {
+      precoInfoEfetivo = {
+        preco_aprovado: modMatch.preco_aprovado,
+        status: modMatch.status,
+        precificacao_id: modMatch.precificacao_id,
+        canal_id: canalId,
+        modalidade_id: modMatch.modalidade_id,
+        modalidade_nome: modMatch.modalidade_nome,
+        modalidades_disponiveis: modalidadesDisponiveis,
+      }
+      modalidadeEfetivaNome = modMatch.modalidade_nome
+    }
+  }
+
+  // Nome da modalidade escolhida manualmente (se houver)
+  let modalidadeEscolhidaNome: string | undefined
+  if (modalidadeGravada) {
+    const match = modalidadesDisponiveis.find((m) => m.modalidade_id === modalidadeGravada)
+    modalidadeEscolhidaNome =
+      match?.modalidade_nome ||
+      classificacao?.expand?.modalidade?.nome ||
+      mapaModalidadesPorId?.get(modalidadeGravada)?.nome
+  }
+
   return {
     produtoId,
     canalId,
     classificacao,
     legenda,
-    precoInfo,
+    precoInfo: precoInfoEfetivo,
+    modalidadeEscolhidaId: modalidadeGravada || undefined,
+    modalidadeEscolhidaNome,
+    modalidadeEfetivaNome,
+    isEscolhaManual,
+    modalidadesDisponiveis,
   }
 }
 

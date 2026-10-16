@@ -746,6 +746,7 @@ export default function PrecificacaoCanais() {
             produtos={produtosAprovados}
             categorias={categoriasMatriz}
             legendas={legendasMatriz}
+            modalidades={modalidades}
             classificacoes={classificacoesMatriz}
             mapaPrecoPorProdCanal={mapaPrecoPorProdCanal}
             loading={loading}

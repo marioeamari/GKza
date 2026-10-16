@@ -792,7 +792,7 @@ export const precificacaoService = {
       return await pb
         .collection('prec_matriz_classificacoes')
         .getFullList<PrecMatrizClassificacaoRecord>({
-          expand: 'legenda',
+          expand: 'legenda,modalidade',
         })
     } catch (err) {
       console.warn('Erro ao listar prec_matriz_classificacoes:', err)
@@ -801,18 +801,22 @@ export const precificacaoService = {
   },
 
   /**
-   * Define, troca ou limpa a classificação de um produto em um canal.
+   * Define, troca ou limpa a classificação e/ou modalidade de um produto em um canal.
    * Se legendaId for nulo/vazio, remove o vínculo (célula vazia / não cadastrado).
+   * modalidadeId pode ser informado para travar a exibição em uma modalidade específica,
+   * ou null / '' para voltar à regra vigente dinâmica (automática pelo canal).
    */
   async setMatrizClassificacao({
     produtoId,
     canalId,
     legendaId,
+    modalidadeId,
     observacao,
   }: {
     produtoId: string
     canalId: string
     legendaId: string | null
+    modalidadeId?: string | null
     observacao?: string
   }): Promise<PrecMatrizClassificacaoRecord | null> {
     // 1. Procurar registro existente para este par (produto, canal)
@@ -830,18 +834,23 @@ export const precificacaoService = {
       return null
     }
 
+    const payload: Partial<PrecMatrizClassificacaoRecord> = {
+      legenda: legendaId,
+    }
+    if (modalidadeId !== undefined) {
+      payload.modalidade = modalidadeId || ''
+    }
+    if (observacao !== undefined) {
+      payload.observacao = observacao
+    }
+
     if (existing.length > 0) {
       const rec = existing[0]
       const updated = await pb
         .collection('prec_matriz_classificacoes')
-        .update<PrecMatrizClassificacaoRecord>(
-          rec.id,
-          {
-            legenda: legendaId,
-            ...(observacao !== undefined ? { observacao } : {}),
-          },
-          { expand: 'legenda' },
-        )
+        .update<PrecMatrizClassificacaoRecord>(rec.id, payload, {
+          expand: 'legenda,modalidade',
+        })
       // Se houvesse duplicata por inconsistência histórica, limpar extras
       if (existing.length > 1) {
         for (let i = 1; i < existing.length; i++) {
@@ -856,14 +865,16 @@ export const precificacaoService = {
         produto: produtoId,
         canal: canalId,
         legenda: legendaId,
+        modalidade: modalidadeId || '',
         observacao: observacao || '',
       },
-      { expand: 'legenda' },
+      { expand: 'legenda,modalidade' },
     )
   },
 
   /**
-   * Helper que retorna mapa de produtos aprovados com cenário vigente por canal.
+   * Helper que retorna mapa de produtos aprovados com cenário vigente por canal
+   * e todas as modalidades com preço aprovado disponíveis por produto×canal.
    * Mesma regra estrita de /precificacao/aprovados e orçamentos:
    * preco_aprovado > 0, prioridade para status='aprovada' sobre 'desatualizada',
    * desempate pelo mais recente.
@@ -877,10 +888,33 @@ export const precificacaoService = {
         status: string
         precificacao_id: string
         canal_id: string
+        modalidade_id?: string
+        modalidade_nome?: string
+        modalidades_disponiveis?: Array<{
+          modalidade_id: string
+          modalidade_nome: string
+          preco_aprovado: number
+          status: string
+          precificacao_id: string
+          aprovado_em?: string
+          updated?: string
+          created?: string
+        }>
       }
     >
   }> {
-    const [produtos, precs] = await Promise.all([this.listProdutos(), this.listPrecificacoes()])
+    const [produtos, precs, modalidades] = await Promise.all([
+      this.listProdutos(),
+      this.listPrecificacoes(),
+      this.listModalidades(),
+    ])
+
+    const mapaModalidades = new Map<string, string>()
+    for (const m of modalidades || []) {
+      if (m.id && m.nome) {
+        mapaModalidades.set(m.id, m.nome)
+      }
+    }
 
     const parseTime = (val?: string) => (val ? new Date(val).getTime() : 0)
 
@@ -892,15 +926,24 @@ export const precificacaoService = {
         (p.status === 'aprovada' || p.status === 'desatualizada'),
     )
 
-    // Ordenar: status='aprovada' primeiro, depois timestamp mais recente
-    validPrecs.sort((a, b) => {
+    // Agrupar todas as precificações válidas por chave produto__canal
+    const gruposProdCanal = new Map<string, typeof validPrecs>()
+    for (const p of validPrecs) {
+      if (!p.produto || !p.canal) continue
+      const key = `${p.produto}__${p.canal}`
+      const arr = gruposProdCanal.get(key) || []
+      arr.push(p)
+      gruposProdCanal.set(key, arr)
+    }
+
+    const sortFn = (a: (typeof validPrecs)[0], b: (typeof validPrecs)[0]) => {
       const aAprovada = a.status === 'aprovada' ? 1 : 0
       const bAprovada = b.status === 'aprovada' ? 1 : 0
       if (aAprovada !== bAprovada) return bAprovada - aAprovada
       const timeA = Math.max(parseTime(a.aprovado_em), parseTime(a.updated), parseTime(a.created))
       const timeB = Math.max(parseTime(b.aprovado_em), parseTime(b.updated), parseTime(b.created))
       return timeB - timeA
-    })
+    }
 
     // Montar mapa: chave = `${produtoId}__${canalId}`
     const mapaPrecoPorProdCanal: Record<
@@ -910,22 +953,80 @@ export const precificacaoService = {
         status: string
         precificacao_id: string
         canal_id: string
+        modalidade_id?: string
+        modalidade_nome?: string
+        modalidades_disponiveis?: Array<{
+          modalidade_id: string
+          modalidade_nome: string
+          preco_aprovado: number
+          status: string
+          precificacao_id: string
+          aprovado_em?: string
+          updated?: string
+          created?: string
+        }>
       }
     > = {}
 
     const prodIdsComAprovado = new Set<string>()
 
-    for (const p of validPrecs) {
-      if (!p.produto || !p.canal) continue
-      const key = `${p.produto}__${p.canal}`
-      if (!mapaPrecoPorProdCanal[key]) {
-        mapaPrecoPorProdCanal[key] = {
-          preco_aprovado: Number(p.preco_aprovado) || 0,
-          status: p.status,
-          precificacao_id: p.id,
-          canal_id: p.canal,
+    for (const [key, itens] of gruposProdCanal.entries()) {
+      // Ordenar: aprovada > mais recente
+      itens.sort(sortFn)
+      const vigente = itens[0]
+      if (!vigente) continue
+
+      prodIdsComAprovado.add(vigente.produto)
+
+      // Agrupar por modalidade única para listar todas as modalidades com preço aprovado
+      const porModalidade = new Map<string, (typeof validPrecs)[0]>()
+      for (const item of itens) {
+        const modId = item.modalidade || '__padrao__'
+        if (!porModalidade.has(modId)) {
+          porModalidade.set(modId, item)
         }
-        prodIdsComAprovado.add(p.produto)
+      }
+
+      const modalidadesDisponiveis: Array<{
+        modalidade_id: string
+        modalidade_nome: string
+        preco_aprovado: number
+        status: string
+        precificacao_id: string
+        aprovado_em?: string
+        updated?: string
+        created?: string
+      }> = []
+
+      for (const [modId, item] of porModalidade.entries()) {
+        const modNome =
+          item.expand?.modalidade?.nome ||
+          (modId !== '__padrao__' ? mapaModalidades.get(modId) : '') ||
+          'Padrão'
+        modalidadesDisponiveis.push({
+          modalidade_id: modId === '__padrao__' ? '' : modId,
+          modalidade_nome: modNome,
+          preco_aprovado: Number(item.preco_aprovado) || 0,
+          status: item.status,
+          precificacao_id: item.id,
+          aprovado_em: item.aprovado_em,
+          updated: item.updated,
+          created: item.created,
+        })
+      }
+
+      const vigenteModNome =
+        vigente.expand?.modalidade?.nome ||
+        (vigente.modalidade ? mapaModalidades.get(vigente.modalidade) : undefined)
+
+      mapaPrecoPorProdCanal[key] = {
+        preco_aprovado: Number(vigente.preco_aprovado) || 0,
+        status: vigente.status,
+        precificacao_id: vigente.id,
+        canal_id: vigente.canal,
+        modalidade_id: vigente.modalidade || undefined,
+        modalidade_nome: vigenteModNome,
+        modalidades_disponiveis: modalidadesDisponiveis,
       }
     }
 

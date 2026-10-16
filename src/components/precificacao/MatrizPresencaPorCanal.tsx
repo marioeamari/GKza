@@ -31,11 +31,14 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Search, Filter, Palette, Tag, Check, X, Package, Layers, Sparkles } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
+import { PrecCanalModalidadeRecord } from '@/types/precificacao'
+
 interface MatrizPresencaProps {
   canais: PrecCanalRecord[]
   produtos: PrecProdutoRecord[]
   categorias: PrecCategoriaProdutoRecord[]
   legendas: PrecMatrizLegendaRecord[]
+  modalidades?: PrecCanalModalidadeRecord[]
   classificacoes: PrecMatrizClassificacaoRecord[]
   mapaPrecoPorProdCanal: Record<string, PrecoAprovadoCanalInfo>
   loading?: boolean
@@ -49,6 +52,7 @@ export function MatrizPresencaPorCanal({
   produtos,
   categorias,
   legendas,
+  modalidades: modalidadesIniciais = [],
   classificacoes: classificacoesIniciais,
   mapaPrecoPorProdCanal,
   loading = false,
@@ -65,6 +69,8 @@ export function MatrizPresencaPorCanal({
     useState<PrecMatrizClassificacaoRecord[]>(classificacoesIniciais)
   const [salvandoCelula, setSalvandoCelula] = useState<string | null>(null)
   const [popoverAberto, setPopoverAberto] = useState<string | null>(null)
+  // Estado do seletor de modalidade por coluna: Record<canalId, modalidadeId | '__vigente__'>
+  const [modalidadePorColuna, setModalidadePorColuna] = useState<Record<string, string>>({})
 
   // Sincroniza se as classificações externas mudarem
   useMemo(() => {
@@ -82,6 +88,20 @@ export function MatrizPresencaPorCanal({
   const categoriasNormalizadas = useMemo(() => {
     return normalizarLista<PrecCategoriaProdutoRecord>(categorias)
   }, [categorias])
+
+  const modalidadesNormalizadas = useMemo(() => {
+    return normalizarLista<PrecCanalModalidadeRecord>(modalidadesIniciais)
+  }, [modalidadesIniciais])
+
+  const mapaModalidadesPorId = useMemo(() => {
+    const map = new Map<string, { id: string; nome: string; canal: string }>()
+    modalidadesNormalizadas.forEach((m) => {
+      if (m.id) {
+        map.set(m.id, { id: m.id, nome: m.nome, canal: m.canal })
+      }
+    })
+    return map
+  }, [modalidadesNormalizadas])
 
   // Mapas rápidos
   const mapaLegendas = useMemo(() => {
@@ -114,12 +134,18 @@ export function MatrizPresencaPorCanal({
   // Total de produtos na matriz
   const totalProdutosAprovados = normalizarLista(produtos).length
 
-  // Ação de definir classificação na célula com atualização otimista
-  async function handleSelecionarLegenda(
-    produtoId: string,
-    canalId: string,
-    legendaId: string | null,
-  ) {
+  // Ação de definir classificação e/ou modalidade na célula com atualização otimista
+  async function handleSalvarCelula({
+    produtoId,
+    canalId,
+    legendaId,
+    modalidadeId,
+  }: {
+    produtoId: string
+    canalId: string
+    legendaId: string | null
+    modalidadeId?: string | null
+  }) {
     const chave = `${produtoId}__${canalId}`
     const classificacaoAnterior = mapaClassificacoes.get(chave)
 
@@ -130,14 +156,32 @@ export function MatrizPresencaPorCanal({
       )
     } else {
       const legObj = mapaLegendas.get(legendaId)
+      const modObj = modalidadeId ? mapaModalidadesPorId.get(modalidadeId) : undefined
+      const novaModalidadeVal =
+        modalidadeId !== undefined ? modalidadeId || undefined : classificacaoAnterior?.modalidade
+
       const novaClassificacao: PrecMatrizClassificacaoRecord = {
         id: classificacaoAnterior?.id || `temp_${Date.now()}`,
         produto: produtoId,
         canal: canalId,
         legenda: legendaId,
+        modalidade: novaModalidadeVal,
         created: classificacaoAnterior?.created || new Date().toISOString(),
         updated: new Date().toISOString(),
-        expand: legObj ? { legenda: legObj } : undefined,
+        expand: {
+          legenda: legObj || classificacaoAnterior?.expand?.legenda,
+          modalidade: modObj
+            ? ({
+                id: modObj.id,
+                nome: modObj.nome,
+                canal: modObj.canal,
+                created: '',
+                updated: '',
+              } as PrecCanalModalidadeRecord)
+            : novaModalidadeVal === classificacaoAnterior?.modalidade
+              ? classificacaoAnterior?.expand?.modalidade
+              : undefined,
+        },
       }
 
       setClassificacoesLocais((prev) => {
@@ -154,10 +198,11 @@ export function MatrizPresencaPorCanal({
         produtoId,
         canalId,
         legendaId,
+        modalidadeId,
       })
       onAtualizacaoClassificacao?.()
     } catch (err) {
-      console.error('Erro ao salvar classificação na matriz:', err)
+      console.error('Erro ao salvar dados da célula na matriz:', err)
       // Reverter se falhar
       if (classificacaoAnterior) {
         setClassificacoesLocais((prev) => {
@@ -171,12 +216,38 @@ export function MatrizPresencaPorCanal({
       }
       toast({
         variant: 'destructive',
-        title: 'Erro ao salvar classificação',
+        title: 'Erro ao salvar alteração',
         description: 'Não foi possível registrar a alteração no servidor.',
       })
     } finally {
       setSalvandoCelula(null)
     }
+  }
+
+  // Helper para trocar a modalidade de uma célula preservando sua legenda
+  function handleTrocarModalidadeCelula(
+    produtoId: string,
+    canalId: string,
+    novaModalidadeId: string | null,
+  ) {
+    const chave = `${produtoId}__${canalId}`
+    const classificacao = mapaClassificacoes.get(chave)
+    // Se ainda não tem legenda selecionada, usa a primeira legenda ativa como padrão (ex.: "Ativo")
+    const legendaId = classificacao?.legenda || legendasNormalizadas[0]?.id || ''
+    if (!legendaId) {
+      toast({
+        variant: 'destructive',
+        title: 'Selecione uma classificação primeiro',
+      })
+      return
+    }
+
+    handleSalvarCelula({
+      produtoId,
+      canalId,
+      legendaId,
+      modalidadeId: novaModalidadeId,
+    })
   }
 
   return (
@@ -314,18 +385,63 @@ export function MatrizPresencaPorCanal({
                 {canaisNormalizados.map((canal) => {
                   const corCanal = canal.cor || '#DF5830'
                   const corTextoCabecalho = getTextoContraste(corCanal)
+                  const modalidadesCanal = modalidadesNormalizadas.filter(
+                    (m) => m.canal === canal.id && m.ativo !== false,
+                  )
+                  const modalidadeSelecionadaColuna = modalidadePorColuna[canal.id] || '__vigente__'
 
                   return (
                     <th
                       key={canal.id}
                       scope="col"
                       style={{ backgroundColor: corCanal, color: corTextoCabecalho }}
-                      className="px-3 py-2.5 text-center font-extrabold min-w-[125px] border-r border-black/10 transition-colors shadow-2xs"
+                      className="px-3 py-2 text-center font-extrabold min-w-[145px] border-r border-black/10 transition-colors shadow-2xs"
                     >
-                      <div className="flex items-center justify-center gap-1.5 truncate">
-                        <span className="truncate text-xs font-black tracking-wide">
+                      <div className="flex flex-col items-center justify-center gap-1">
+                        <span className="truncate text-xs font-black tracking-wide block max-w-[140px]">
                           {canal.nome}
                         </span>
+
+                        {/* Seletor no topo da matriz para trocar a modalidade exibida da COLUNA inteira */}
+                        {modalidadesCanal.length > 0 && (
+                          <div
+                            className="w-full max-w-[135px]"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Select
+                              value={modalidadeSelecionadaColuna}
+                              onValueChange={(val) => {
+                                setModalidadePorColuna((prev) => ({
+                                  ...prev,
+                                  [canal.id]: val,
+                                }))
+                              }}
+                            >
+                              <SelectTrigger
+                                aria-label={`Modalidade da coluna ${canal.nome}`}
+                                className="h-6 text-[10px] px-1.5 py-0 bg-black/20 hover:bg-black/30 border-white/20 text-inherit font-semibold rounded-md shadow-2xs flex items-center justify-between"
+                              >
+                                <span className="truncate text-[10px]">
+                                  {modalidadeSelecionadaColuna === '__vigente__'
+                                    ? 'Mod: Vigente'
+                                    : modalidadesCanal.find(
+                                        (m) => m.id === modalidadeSelecionadaColuna,
+                                      )?.nome || 'Mod: Vigente'}
+                                </span>
+                              </SelectTrigger>
+                              <SelectContent className="text-xs bg-white text-foreground z-50">
+                                <SelectItem value="__vigente__" className="text-xs font-semibold">
+                                  ⚡ Vigente (Automático)
+                                </SelectItem>
+                                {modalidadesCanal.map((m) => (
+                                  <SelectItem key={m.id} value={m.id} className="text-xs">
+                                    {m.nome}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
                       </div>
                     </th>
                   )
@@ -442,12 +558,20 @@ export function MatrizPresencaPorCanal({
                           {/* Células Produto × Canais */}
                           {canaisNormalizados.map((canal) => {
                             const chave = `${produto.id}__${canal.id}`
+                            const modColunaVal = modalidadePorColuna[canal.id]
+                            const modColunaId =
+                              modColunaVal && modColunaVal !== '__vigente__'
+                                ? modColunaVal
+                                : undefined
+
                             const celula = extrairDadosCelulaMatriz({
                               produtoId: produto.id,
                               canalId: canal.id,
                               mapaClassificacoes,
                               mapaPrecoPorProdCanal,
                               mapaLegendas,
+                              modalidadeColunaId: modColunaId,
+                              mapaModalidadesPorId,
                             })
 
                             const isSalvando = salvandoCelula === chave
@@ -460,14 +584,21 @@ export function MatrizPresencaPorCanal({
                               : '#6B7280'
 
                             const temPreco = celula.precoInfo && celula.precoInfo.preco_aprovado > 0
-                            const textoValor = temPreco
+                            const valorFormatado = temPreco
                               ? formatCurrency(celula.precoInfo!.preco_aprovado)
                               : temClassificacao
                                 ? celula.legenda?.nome
                                 : ''
 
+                            // Exibição do preço com indicação discreta da modalidade (ex.: 'R$ 24,90 · MEI')
+                            const modalidadeIndicador = celula.modalidadeEfetivaNome
+                            const textoExibicao =
+                              temPreco && modalidadeIndicador
+                                ? `${valorFormatado} · ${modalidadeIndicador}`
+                                : valorFormatado
+
                             const tooltipConteudo = temClassificacao ? (
-                              <div className="space-y-0.5 text-xs">
+                              <div className="space-y-1 text-xs">
                                 <div className="font-bold flex items-center gap-1.5">
                                   <span
                                     className="h-2 w-2 rounded-full"
@@ -476,13 +607,21 @@ export function MatrizPresencaPorCanal({
                                   <span>{celula.legenda?.nome}</span>
                                 </div>
                                 {temPreco ? (
-                                  <div className="text-[11px]">
-                                    Preço aprovado:{' '}
-                                    <strong className="font-mono">
-                                      {formatCurrency(celula.precoInfo!.preco_aprovado)}
-                                    </strong>
-                                    {celula.precoInfo?.status === 'desatualizada' && (
-                                      <span className="text-amber-300 ml-1">(desatualizado)</span>
+                                  <div className="text-[11px] space-y-0.5">
+                                    <div>
+                                      Preço:{' '}
+                                      <strong className="font-mono">
+                                        {formatCurrency(celula.precoInfo!.preco_aprovado)}
+                                      </strong>
+                                      {celula.precoInfo?.status === 'desatualizada' && (
+                                        <span className="text-amber-300 ml-1">(desatualizado)</span>
+                                      )}
+                                    </div>
+                                    {modalidadeIndicador && (
+                                      <div className="text-[10px] text-muted-foreground">
+                                        Modalidade: <strong>{modalidadeIndicador}</strong>
+                                        {celula.isEscolhaManual ? ' (escolha manual)' : ''}
+                                      </div>
                                     )}
                                   </div>
                                 ) : (
@@ -491,7 +630,7 @@ export function MatrizPresencaPorCanal({
                                   </div>
                                 )}
                                 <div className="text-[10px] text-muted-foreground/80 pt-1">
-                                  Clique para alterar classificação
+                                  Clique para alterar classificação ou modalidade
                                 </div>
                               </div>
                             ) : (
@@ -527,7 +666,7 @@ export function MatrizPresencaPorCanal({
                                                   }
                                                 : undefined
                                             }
-                                            className={`w-full h-8 rounded-md px-1.5 font-bold font-mono text-[11px] transition-all flex items-center justify-center border ${
+                                            className={`w-full min-h-[32px] py-1 rounded-md px-1.5 font-bold font-mono text-[11px] transition-all flex items-center justify-center border text-center ${
                                               temClassificacao
                                                 ? 'border-black/15 shadow-2xs hover:scale-[1.02] cursor-pointer'
                                                 : 'bg-slate-50/50 hover:bg-slate-100/90 text-muted-foreground/50 border-dashed border-border/70 hover:border-border cursor-pointer'
@@ -536,8 +675,8 @@ export function MatrizPresencaPorCanal({
                                             {isSalvando ? (
                                               <span className="h-3 w-3 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
                                             ) : (
-                                              <span className="truncate block">
-                                                {textoValor || '—'}
+                                              <span className="truncate block leading-tight">
+                                                {textoExibicao || '—'}
                                               </span>
                                             )}
                                           </button>
@@ -547,56 +686,155 @@ export function MatrizPresencaPorCanal({
                                         {tooltipConteudo}
                                       </TooltipContent>
 
-                                      {/* Menu Popup para Escolha de Legenda ou Limpar */}
+                                      {/* Menu Popup para Escolha de Legenda, Modalidade de Preço ou Limpar */}
                                       <PopoverContent
                                         side="bottom"
                                         align="center"
-                                        className="w-56 p-2 rounded-xl border-border bg-white shadow-lg space-y-1 z-50"
+                                        className="w-64 p-2.5 rounded-xl border-border bg-white shadow-lg space-y-2 z-50"
                                       >
-                                        <div className="px-2 py-1 border-b border-border/60 mb-1">
+                                        <div className="px-2 py-1 border-b border-border/60">
                                           <span className="text-[11px] font-bold text-foreground block truncate">
                                             {produto.sku} • {canal.nome}
                                           </span>
                                           <span className="text-[10px] text-muted-foreground block">
-                                            Selecione a classificação:
+                                            Classificação e Preço por Modalidade
                                           </span>
                                         </div>
 
-                                        {/* Opções de legendas ativas com a sua respectiva cor */}
-                                        <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                                          {legendasNormalizadas.map((leg) => {
-                                            const isSelected =
-                                              celula.classificacao?.legenda === leg.id
-                                            return (
+                                        {/* SEÇÃO 1: Escolha da Modalidade do Preço (se houver opções aprovadas) */}
+                                        {celula.modalidadesDisponiveis.length > 0 && (
+                                          <div className="space-y-1">
+                                            <div className="flex items-center justify-between px-2 pt-0.5">
+                                              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                                                Preço por Modalidade:
+                                              </span>
+                                              {celula.isEscolhaManual && (
+                                                <Badge
+                                                  variant="secondary"
+                                                  className="text-[9px] h-3.5 px-1 py-0 font-normal bg-primary/10 text-primary border-none"
+                                                >
+                                                  Fixado
+                                                </Badge>
+                                              )}
+                                            </div>
+
+                                            <div className="space-y-0.5 max-h-36 overflow-y-auto">
+                                              {/* Opção Padrão: Vigente / Automático */}
                                               <button
-                                                key={leg.id}
                                                 type="button"
                                                 onClick={() =>
-                                                  handleSelecionarLegenda(
+                                                  handleTrocarModalidadeCelula(
                                                     produto.id,
                                                     canal.id,
-                                                    leg.id,
+                                                    null,
                                                   )
                                                 }
-                                                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
-                                                  isSelected
+                                                className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs transition-colors ${
+                                                  !celula.isEscolhaManual
                                                     ? 'bg-secondary font-bold text-foreground'
                                                     : 'hover:bg-muted text-foreground'
                                                 }`}
                                               >
-                                                <div className="flex items-center gap-2">
-                                                  <span
-                                                    className="h-3 w-3 rounded-full shrink-0 border border-black/10 shadow-2xs"
-                                                    style={{ backgroundColor: leg.cor }}
-                                                  />
-                                                  <span>{leg.nome}</span>
+                                                <div className="flex flex-col text-left">
+                                                  <span className="font-semibold text-[11px]">
+                                                    ⚡ Vigente (Automático)
+                                                  </span>
+                                                  <span className="text-[10px] text-muted-foreground font-mono">
+                                                    Acompanha canal e reaprovações
+                                                  </span>
                                                 </div>
-                                                {isSelected && (
-                                                  <Check className="h-3.5 w-3.5 text-primary" />
+                                                {!celula.isEscolhaManual && (
+                                                  <Check className="h-3.5 w-3.5 text-primary shrink-0" />
                                                 )}
                                               </button>
-                                            )
-                                          })}
+
+                                              {/* Modalidades com preço aprovado */}
+                                              {celula.modalidadesDisponiveis.map((mod) => {
+                                                const isModSelected =
+                                                  celula.modalidadeEscolhidaId === mod.modalidade_id
+                                                return (
+                                                  <button
+                                                    key={mod.modalidade_id || 'sem_mod'}
+                                                    type="button"
+                                                    onClick={() =>
+                                                      handleTrocarModalidadeCelula(
+                                                        produto.id,
+                                                        canal.id,
+                                                        mod.modalidade_id,
+                                                      )
+                                                    }
+                                                    className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs transition-colors ${
+                                                      isModSelected
+                                                        ? 'bg-secondary font-bold text-foreground'
+                                                        : 'hover:bg-muted text-foreground'
+                                                    }`}
+                                                  >
+                                                    <div className="flex flex-col text-left truncate pr-1">
+                                                      <span className="font-semibold text-[11px] truncate">
+                                                        {mod.modalidade_nome}
+                                                      </span>
+                                                      <span className="text-[10px] font-mono text-emerald-700 font-bold">
+                                                        {formatCurrency(mod.preco_aprovado)}
+                                                        {mod.status === 'desatualizada' && (
+                                                          <span className="text-amber-600 font-normal ml-1">
+                                                            (desatualizado)
+                                                          </span>
+                                                        )}
+                                                      </span>
+                                                    </div>
+                                                    {isModSelected && (
+                                                      <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                                    )}
+                                                  </button>
+                                                )
+                                              })}
+                                            </div>
+                                          </div>
+                                        )}
+
+                                        {/* SEÇÃO 2: Classificação / Legenda */}
+                                        <div className="pt-1 border-t border-border/60 space-y-1">
+                                          <div className="px-2 pt-0.5">
+                                            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                                              Classificação:
+                                            </span>
+                                          </div>
+                                          <div className="space-y-0.5 max-h-36 overflow-y-auto">
+                                            {legendasNormalizadas.map((leg) => {
+                                              const isSelected =
+                                                celula.classificacao?.legenda === leg.id
+                                              return (
+                                                <button
+                                                  key={leg.id}
+                                                  type="button"
+                                                  onClick={() =>
+                                                    handleSalvarCelula({
+                                                      produtoId: produto.id,
+                                                      canalId: canal.id,
+                                                      legendaId: leg.id,
+                                                      modalidadeId: celula.modalidadeEscolhidaId,
+                                                    })
+                                                  }
+                                                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
+                                                    isSelected
+                                                      ? 'bg-secondary font-bold text-foreground'
+                                                      : 'hover:bg-muted text-foreground'
+                                                  }`}
+                                                >
+                                                  <div className="flex items-center gap-2">
+                                                    <span
+                                                      className="h-3 w-3 rounded-full shrink-0 border border-black/10 shadow-2xs"
+                                                      style={{ backgroundColor: leg.cor }}
+                                                    />
+                                                    <span>{leg.nome}</span>
+                                                  </div>
+                                                  {isSelected && (
+                                                    <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                                  )}
+                                                </button>
+                                              )
+                                            })}
+                                          </div>
                                         </div>
 
                                         {/* Opção para Limpar Classificação (Célula vazia) */}
@@ -605,12 +843,16 @@ export function MatrizPresencaPorCanal({
                                             <button
                                               type="button"
                                               onClick={() =>
-                                                handleSelecionarLegenda(produto.id, canal.id, null)
+                                                handleSalvarCelula({
+                                                  produtoId: produto.id,
+                                                  canalId: canal.id,
+                                                  legendaId: null,
+                                                })
                                               }
                                               className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-destructive hover:bg-destructive/10 transition-colors"
                                             >
                                               <X className="h-3.5 w-3.5" />
-                                              <span>Limpar classificação</span>
+                                              <span>Limpar presença na matriz</span>
                                             </button>
                                           </div>
                                         )}
