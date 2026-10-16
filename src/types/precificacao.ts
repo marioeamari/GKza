@@ -7,6 +7,44 @@ import {
   TipoProduto,
 } from '@/lib/precificacao/calculo'
 
+export interface PrecCategoriaProdutoRecord {
+  id: string
+  created: string
+  updated: string
+  nome: string
+  descricao?: string
+  cor?: string
+  ordem?: number
+  ativo?: boolean
+}
+
+export interface PrecMatrizLegendaRecord {
+  id: string
+  created: string
+  updated: string
+  nome: string
+  cor: string
+  cor_texto?: string
+  ordem?: number
+  ativo?: boolean
+  descricao?: string
+}
+
+export interface PrecMatrizClassificacaoRecord {
+  id: string
+  created: string
+  updated: string
+  produto: string
+  canal: string
+  legenda: string
+  observacao?: string
+  expand?: {
+    produto?: PrecProdutoRecord
+    canal?: PrecCanalRecord
+    legenda?: PrecMatrizLegendaRecord
+  }
+}
+
 export interface PrecProdutoRecord {
   id: string
   created: string

@@ -39,6 +39,16 @@ import { Link } from 'react-router-dom'
 import { Skeleton } from '@/components/ui/skeleton'
 import { KitDialog } from '@/components/precificacao/KitDialog'
 import { ComboDialog } from '@/components/precificacao/ComboDialog'
+import { CategoriasProdutoDialog } from '@/components/precificacao/CategoriasProdutoDialog'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Search, Tag, Filter } from 'lucide-react'
 
 export default function PrecificacaoProdutos() {
   const { toast } = useToast()
@@ -54,8 +64,43 @@ export default function PrecificacaoProdutos() {
     'catalogo',
   )
 
+  // Filtros de Kits & Combos
+  const [filtroCategoria, setFiltroCategoria] = useState<string>('todas')
+  const [buscaTexto, setBuscaTexto] = useState<string>('')
+  const [dialogCategoriasOpen, setDialogCategoriasOpen] = useState(false)
+
   // A tabela principal exibe APENAS Kits e Combos (produtos base de fabricação/revenda residem em /empresas e /fornecedores)
-  const kitsECombos = useMemo(() => filtrarApenasKitsECombos(todosProdutos), [todosProdutos])
+  const todosKitsECombos = useMemo(() => filtrarApenasKitsECombos(todosProdutos), [todosProdutos])
+
+  // Lista única de categorias presentes nos produtos
+  const categoriasDisponiveis = useMemo(() => {
+    const set = new Set<string>()
+    todosProdutos.forEach((p) => {
+      if (p.categoria?.trim()) set.add(p.categoria.trim())
+    })
+    return Array.from(set).sort()
+  }, [todosProdutos])
+
+  const kitsECombos = useMemo(() => {
+    return todosKitsECombos.filter((p) => {
+      // Filtro categoria
+      if (filtroCategoria === 'sem_categoria') {
+        if (p.categoria && p.categoria.trim() !== '') return false
+      } else if (filtroCategoria !== 'todas') {
+        if (p.categoria?.toLowerCase() !== filtroCategoria.toLowerCase()) return false
+      }
+
+      // Filtro busca (nome ou SKU)
+      if (buscaTexto.trim()) {
+        const termo = buscaTexto.toLowerCase().trim()
+        const matchNome = p.nome?.toLowerCase().includes(termo)
+        const matchSku = p.sku?.toLowerCase().includes(termo)
+        if (!matchNome && !matchSku) return false
+      }
+
+      return true
+    })
+  }, [todosKitsECombos, filtroCategoria, buscaTexto])
 
   // Ficha de Empresa (diálogo rápido com aba de produtos)
   const [dialogEmpresaOpen, setDialogEmpresaOpen] = useState(false)
@@ -210,7 +255,16 @@ export default function PrecificacaoProdutos() {
         acoes={
           <div className="flex items-center gap-2">
             <Button
-              className="bg-primary text-white font-bold text-xs"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs font-semibold"
+              onClick={() => setDialogCategoriasOpen(true)}
+            >
+              <Tag className="mr-1.5 h-3.5 w-3.5 text-primary" />
+              Categorias
+            </Button>
+            <Button
+              className="bg-primary text-white font-bold text-xs h-8"
               onClick={() => {
                 setKitEditando(null)
                 setOpenKitDialog(true)
@@ -220,7 +274,7 @@ export default function PrecificacaoProdutos() {
             </Button>
             <Button
               variant="outline"
-              className="border-primary/40 text-primary hover:bg-primary/10 font-bold text-xs"
+              className="border-primary/40 text-primary hover:bg-primary/10 font-bold text-xs h-8"
               onClick={() => {
                 setComboEditando(null)
                 setOpenComboDialog(true)
@@ -303,9 +357,49 @@ export default function PrecificacaoProdutos() {
                   revenda devem ser gerenciados nas fichas de Empresas e Fornecedores.
                 </CardDescription>
               </div>
-              <span className="text-xs font-semibold text-muted-foreground">
-                Kits & Combos ({kitsECombos.length})
-              </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Busca texto */}
+                <div className="relative w-48 sm:w-56">
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar SKU ou nome..."
+                    value={buscaTexto}
+                    onChange={(e) => setBuscaTexto(e.target.value)}
+                    className="pl-8 h-8 text-xs bg-white"
+                  />
+                </div>
+
+                {/* Filtro Categoria */}
+                <div className="w-44">
+                  <Select value={filtroCategoria} onValueChange={setFiltroCategoria}>
+                    <SelectTrigger className="h-8 text-xs bg-white">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <Filter className="h-3 w-3 text-muted-foreground shrink-0" />
+                        <span className="truncate">
+                          {filtroCategoria === 'todas'
+                            ? 'Todas categorias'
+                            : filtroCategoria === 'sem_categoria'
+                              ? 'Sem categoria'
+                              : filtroCategoria}
+                        </span>
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todas">Todas as categorias</SelectItem>
+                      <SelectItem value="sem_categoria">Sem categoria</SelectItem>
+                      {categoriasDisponiveis.map((cat) => (
+                        <SelectItem key={cat} value={cat}>
+                          {cat}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <span className="text-xs font-semibold text-muted-foreground ml-1">
+                  Exibindo {kitsECombos.length} de {todosKitsECombos.length}
+                </span>
+              </div>
             </CardHeader>
 
             <CardContent className="overflow-x-auto p-0">
@@ -377,6 +471,7 @@ export default function PrecificacaoProdutos() {
                     <tr className="border-y border-border bg-secondary/30 text-muted-foreground uppercase text-[10px] tracking-wider">
                       <th className="py-2.5 px-4 font-bold">Produto / SKU</th>
                       <th className="py-2.5 px-3 font-bold">Tipo</th>
+                      <th className="py-2.5 px-3 font-bold">Categoria</th>
                       <th className="py-2.5 px-3 font-bold">Origem / Componentes</th>
                       <th className="py-2.5 px-3 font-bold">Peso / Medidas</th>
                       <th className="py-2.5 px-3 font-bold text-right">Custo Direto</th>
@@ -445,6 +540,21 @@ export default function PrecificacaoProdutos() {
                           </td>
 
                           <td className="py-3 px-3">{renderBadgeTipo(p.tipo)}</td>
+
+                          <td className="py-3 px-3">
+                            {p.categoria ? (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] font-semibold bg-secondary/60 text-foreground border-border"
+                              >
+                                {p.categoria}
+                              </Badge>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground italic">
+                                Sem categoria
+                              </span>
+                            )}
+                          </td>
 
                           <td className="py-3 px-3 text-muted-foreground">
                             {p.tipo === 'kit' && (
@@ -889,6 +999,13 @@ export default function PrecificacaoProdutos() {
         comboParaEditar={comboEditando}
         produtosDisponiveis={todosProdutos}
         onSuccess={carregar}
+      />
+
+      {/* GERENCIAMENTO DE CATEGORIAS */}
+      <CategoriasProdutoDialog
+        open={dialogCategoriasOpen}
+        onOpenChange={setDialogCategoriasOpen}
+        onCategoriaUpdated={carregar}
       />
 
       {/* DIALOG DE CONFIRMAÇÃO DE EXCLUSÃO LIMPA */}

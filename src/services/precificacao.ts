@@ -2,7 +2,10 @@ import pb from '@/lib/pocketbase/client'
 import {
   PrecCanalModalidadeRecord,
   PrecCanalRecord,
+  PrecCategoriaProdutoRecord,
   PrecKitRecord,
+  PrecMatrizClassificacaoRecord,
+  PrecMatrizLegendaRecord,
   PrecPerfilTributarioRecord,
   PrecPrecificacaoRecord,
   PrecProdutoRecord,
@@ -697,6 +700,241 @@ export const precificacaoService = {
       }
     } catch (err) {
       console.warn('Erro ao atualizar status para desatualizada:', err)
+    }
+  },
+
+  // ==========================================
+  // CATEGORIAS DE PRODUTOS
+  // ==========================================
+  async listCategoriasProduto(apenasAtivas = false): Promise<PrecCategoriaProdutoRecord[]> {
+    try {
+      const filter = apenasAtivas ? 'ativo = true' : ''
+      return await pb
+        .collection('prec_categorias_produto')
+        .getFullList<PrecCategoriaProdutoRecord>({
+          filter: filter || undefined,
+          sort: 'ordem,nome',
+        })
+    } catch (err) {
+      console.warn('Erro ao listar prec_categorias_produto:', err)
+      return []
+    }
+  },
+
+  async createCategoriaProduto(
+    dados: Partial<PrecCategoriaProdutoRecord>,
+  ): Promise<PrecCategoriaProdutoRecord> {
+    return await pb.collection('prec_categorias_produto').create<PrecCategoriaProdutoRecord>({
+      ativo: true,
+      ordem: 10,
+      ...dados,
+    })
+  },
+
+  async updateCategoriaProduto(
+    id: string,
+    dados: Partial<PrecCategoriaProdutoRecord>,
+  ): Promise<PrecCategoriaProdutoRecord> {
+    return await pb
+      .collection('prec_categorias_produto')
+      .update<PrecCategoriaProdutoRecord>(id, dados)
+  },
+
+  async deleteCategoriaProduto(id: string): Promise<boolean> {
+    await pb.collection('prec_categorias_produto').delete(id)
+    return true
+  },
+
+  // ==========================================
+  // MATRIZ DE CANAIS: LEGENDAS
+  // ==========================================
+  async listMatrizLegendas(apenasAtivas = false): Promise<PrecMatrizLegendaRecord[]> {
+    try {
+      const filter = apenasAtivas ? 'ativo = true' : ''
+      return await pb.collection('prec_matriz_legendas').getFullList<PrecMatrizLegendaRecord>({
+        filter: filter || undefined,
+        sort: 'ordem,nome',
+      })
+    } catch (err) {
+      console.warn('Erro ao listar prec_matriz_legendas:', err)
+      return []
+    }
+  },
+
+  async createMatrizLegenda(
+    dados: Partial<PrecMatrizLegendaRecord>,
+  ): Promise<PrecMatrizLegendaRecord> {
+    return await pb.collection('prec_matriz_legendas').create<PrecMatrizLegendaRecord>({
+      ativo: true,
+      ordem: 10,
+      cor_texto: '#FFFFFF',
+      ...dados,
+    })
+  },
+
+  async updateMatrizLegenda(
+    id: string,
+    dados: Partial<PrecMatrizLegendaRecord>,
+  ): Promise<PrecMatrizLegendaRecord> {
+    return await pb.collection('prec_matriz_legendas').update<PrecMatrizLegendaRecord>(id, dados)
+  },
+
+  async deleteMatrizLegenda(id: string): Promise<boolean> {
+    await pb.collection('prec_matriz_legendas').delete(id)
+    return true
+  },
+
+  // ==========================================
+  // MATRIZ DE CANAIS: CLASSIFICAÇÕES PRODUTO + CANAL
+  // ==========================================
+  async listMatrizClassificacoes(): Promise<PrecMatrizClassificacaoRecord[]> {
+    try {
+      return await pb
+        .collection('prec_matriz_classificacoes')
+        .getFullList<PrecMatrizClassificacaoRecord>({
+          expand: 'legenda',
+        })
+    } catch (err) {
+      console.warn('Erro ao listar prec_matriz_classificacoes:', err)
+      return []
+    }
+  },
+
+  /**
+   * Define, troca ou limpa a classificação de um produto em um canal.
+   * Se legendaId for nulo/vazio, remove o vínculo (célula vazia / não cadastrado).
+   */
+  async setMatrizClassificacao({
+    produtoId,
+    canalId,
+    legendaId,
+    observacao,
+  }: {
+    produtoId: string
+    canalId: string
+    legendaId: string | null
+    observacao?: string
+  }): Promise<PrecMatrizClassificacaoRecord | null> {
+    // 1. Procurar registro existente para este par (produto, canal)
+    const existing = await pb
+      .collection('prec_matriz_classificacoes')
+      .getFullList<PrecMatrizClassificacaoRecord>({
+        filter: `produto = "${produtoId}" && canal = "${canalId}"`,
+      })
+
+    // Se legendaId é null ou vazio, excluir se houver
+    if (!legendaId) {
+      for (const rec of existing) {
+        await pb.collection('prec_matriz_classificacoes').delete(rec.id)
+      }
+      return null
+    }
+
+    if (existing.length > 0) {
+      const rec = existing[0]
+      const updated = await pb
+        .collection('prec_matriz_classificacoes')
+        .update<PrecMatrizClassificacaoRecord>(
+          rec.id,
+          {
+            legenda: legendaId,
+            ...(observacao !== undefined ? { observacao } : {}),
+          },
+          { expand: 'legenda' },
+        )
+      // Se houvesse duplicata por inconsistência histórica, limpar extras
+      if (existing.length > 1) {
+        for (let i = 1; i < existing.length; i++) {
+          await pb.collection('prec_matriz_classificacoes').delete(existing[i].id)
+        }
+      }
+      return updated
+    }
+
+    return await pb.collection('prec_matriz_classificacoes').create<PrecMatrizClassificacaoRecord>(
+      {
+        produto: produtoId,
+        canal: canalId,
+        legenda: legendaId,
+        observacao: observacao || '',
+      },
+      { expand: 'legenda' },
+    )
+  },
+
+  /**
+   * Helper que retorna mapa de produtos aprovados com cenário vigente por canal.
+   * Mesma regra estrita de /precificacao/aprovados e orçamentos:
+   * preco_aprovado > 0, prioridade para status='aprovada' sobre 'desatualizada',
+   * desempate pelo mais recente.
+   */
+  async getMapaProdutosAprovadosPorCanal(): Promise<{
+    produtos: PrecProdutoRecord[]
+    mapaPrecoPorProdCanal: Record<
+      string,
+      {
+        preco_aprovado: number
+        status: string
+        precificacao_id: string
+        canal_id: string
+      }
+    >
+  }> {
+    const [produtos, precs] = await Promise.all([this.listProdutos(), this.listPrecificacoes()])
+
+    const parseTime = (val?: string) => (val ? new Date(val).getTime() : 0)
+
+    // Filtra cenários com preco_aprovado > 0 e status in ('aprovada', 'desatualizada')
+    const validPrecs = (precs || []).filter(
+      (p) =>
+        p.preco_aprovado !== undefined &&
+        p.preco_aprovado > 0 &&
+        (p.status === 'aprovada' || p.status === 'desatualizada'),
+    )
+
+    // Ordenar: status='aprovada' primeiro, depois timestamp mais recente
+    validPrecs.sort((a, b) => {
+      const aAprovada = a.status === 'aprovada' ? 1 : 0
+      const bAprovada = b.status === 'aprovada' ? 1 : 0
+      if (aAprovada !== bAprovada) return bAprovada - aAprovada
+      const timeA = Math.max(parseTime(a.aprovado_em), parseTime(a.updated), parseTime(a.created))
+      const timeB = Math.max(parseTime(b.aprovado_em), parseTime(b.updated), parseTime(b.created))
+      return timeB - timeA
+    })
+
+    // Montar mapa: chave = `${produtoId}__${canalId}`
+    const mapaPrecoPorProdCanal: Record<
+      string,
+      {
+        preco_aprovado: number
+        status: string
+        precificacao_id: string
+        canal_id: string
+      }
+    > = {}
+
+    const prodIdsComAprovado = new Set<string>()
+
+    for (const p of validPrecs) {
+      if (!p.produto || !p.canal) continue
+      const key = `${p.produto}__${p.canal}`
+      if (!mapaPrecoPorProdCanal[key]) {
+        mapaPrecoPorProdCanal[key] = {
+          preco_aprovado: Number(p.preco_aprovado) || 0,
+          status: p.status,
+          precificacao_id: p.id,
+          canal_id: p.canal,
+        }
+        prodIdsComAprovado.add(p.produto)
+      }
+    }
+
+    // Produtos que pertencem ao repositório de aprovados (têm ao menos 1 precificação aprovada em qualquer canal)
+    const produtosAprovados = (produtos || []).filter((prod) => prodIdsComAprovado.has(prod.id))
+
+    return {
+      produtos: produtosAprovados,
+      mapaPrecoPorProdCanal,
     }
   },
 }

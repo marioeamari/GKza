@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Camera, Check, ImageIcon, Layers, Plus, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { CategoriaAutocompleteInput } from '@/components/precificacao/CategoriaAutocompleteInput'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -664,10 +665,10 @@ export function ComboDialog({
 
               <div className="space-y-1">
                 <Label className="text-xs font-semibold">Categoria</Label>
-                <Input
-                  placeholder="Ex: Combos Promocionais"
+                <CategoriaAutocompleteInput
                   value={categoria}
-                  onChange={(e) => setCategoria(e.target.value)}
+                  onChange={setCategoria}
+                  placeholder="Ex: Toalha de Banho, Pet..."
                 />
               </div>
             </div>

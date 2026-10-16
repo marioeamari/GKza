@@ -35,6 +35,7 @@ import {
   onlyDigits,
 } from '@/lib/documents'
 import { formatCurrency } from '@/lib/format'
+import { CategoriaAutocompleteInput } from '@/components/precificacao/CategoriaAutocompleteInput'
 import { fornecedoresService } from '@/services/fornecedores'
 import type { Fornecedor, FornecedorProduto } from '@/types/domain'
 
@@ -985,10 +986,10 @@ export function FornecedorDialog({
 
                 <div className="space-y-1">
                   <Label className="text-xs font-semibold">Categoria</Label>
-                  <Input
+                  <CategoriaAutocompleteInput
                     value={prodForm.categoria}
-                    onChange={(e) => setProdForm({ ...prodForm, categoria: e.target.value })}
-                    placeholder="Ex: Cama, Mesa e Banho"
+                    onChange={(cat) => setProdForm({ ...prodForm, categoria: cat })}
+                    placeholder="Ex: Toalha de Banho, Pet..."
                   />
                 </div>
 

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-15T20:26:05.472Z",
+  "generatedAt": "2026-10-16T10:45:53.227Z",
   "collections": [
     {
       "name": "users",
@@ -6171,6 +6171,192 @@
         "CREATE INDEX idx_clientes_nome ON clientes (nome)",
         "CREATE INDEX idx_clientes_tipo ON clientes (tipo)",
         "CREATE INDEX idx_clientes_documento ON clientes (documento)"
+      ]
+    },
+    {
+      "name": "prec_categorias_produto",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "cor",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ordem",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ativo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_prec_cat_prod_nome ON prec_categorias_produto (nome)",
+        "CREATE INDEX idx_prec_cat_prod_ordem ON prec_categorias_produto (ordem)"
+      ]
+    },
+    {
+      "name": "prec_matriz_legendas",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "cor",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "cor_texto",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ordem",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ativo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "descricao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_prec_matriz_leg_nome ON prec_matriz_legendas (nome)",
+        "CREATE INDEX idx_prec_matriz_leg_ordem ON prec_matriz_legendas (ordem)"
+      ]
+    },
+    {
+      "name": "prec_matriz_classificacoes",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
+      },
+      "fields": [
+        {
+          "name": "produto",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "prec_produtos"
+        },
+        {
+          "name": "canal",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "prec_canais"
+        },
+        {
+          "name": "legenda",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "prec_matriz_legendas"
+        },
+        {
+          "name": "observacao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_prec_matriz_prod_canal ON prec_matriz_classificacoes (produto, canal)",
+        "CREATE INDEX idx_prec_matriz_leg ON prec_matriz_classificacoes (legenda)"
       ]
     }
   ]

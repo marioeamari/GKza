@@ -30,6 +30,7 @@ import { useToast } from '@/hooks/use-toast'
 import { apiFieldErrors, apiMessage } from '@/lib/api-error'
 import { formatCNPJ, formatPhone, isValidCNPJ, onlyDigits } from '@/lib/documents'
 import { formatCurrency } from '@/lib/format'
+import { CategoriaAutocompleteInput } from '@/components/precificacao/CategoriaAutocompleteInput'
 import { cadastrosService } from '@/services/cadastros'
 import { precificacaoService } from '@/services/precificacao'
 import type { Empresa } from '@/types/domain'
@@ -975,10 +976,10 @@ export function EmpresaDialog({
 
                     <div className="space-y-1">
                       <Label className="text-xs font-semibold">Categoria</Label>
-                      <Input
+                      <CategoriaAutocompleteInput
                         value={prodForm.categoria}
-                        onChange={(e) => setProdForm({ ...prodForm, categoria: e.target.value })}
-                        placeholder="Ex: Cama, Mesa e Banho"
+                        onChange={(cat) => setProdForm({ ...prodForm, categoria: cat })}
+                        placeholder="Ex: Toalha de Banho, Pet..."
                       />
                     </div>
 
