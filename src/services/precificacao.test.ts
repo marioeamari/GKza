@@ -170,3 +170,185 @@ describe('Regra de Gestão de Kits & Combos (/precificacao/produtos)', () => {
     expect(prods).toEqual(mockRetorno)
   })
 })
+
+describe('Regras da Matriz de Presença por Canal (Serviço & Idempotência)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('getMapaProdutosAprovadosPorCanal prioriza status "aprovada" sobre "desatualizada" e desempata pela mais recente', async () => {
+    const mockProdutos = [
+      { id: 'prod_1', nome: 'Toalha Allure 1', sku: 'ALL-1', tipo: 'kit', status: 'ativo' },
+      { id: 'prod_2', nome: 'Toalha Allure 2', sku: 'ALL-2', tipo: 'kit', status: 'ativo' },
+      { id: 'prod_sem_aprovado', nome: 'Sem Preco', sku: 'SEM-P', tipo: 'kit', status: 'ativo' },
+    ]
+
+    // Cenários com diferentes status e datas para prod_1 no canal 'shopee'
+    const mockPrecificacoes = [
+      // Cenário A: desatualizada mais recente (timestamp 3000)
+      {
+        id: 'prec_desat_recente',
+        produto: 'prod_1',
+        canal: 'shopee',
+        status: 'desatualizada',
+        preco_aprovado: 60.0,
+        updated: '2026-05-10T12:00:00Z',
+      },
+      // Cenário B: aprovada mais antiga (timestamp 2000) - DEVE SER PRIORIZADA SOBRE A DESATUALIZADA
+      {
+        id: 'prec_aprovada_antiga',
+        produto: 'prod_1',
+        canal: 'shopee',
+        status: 'aprovada',
+        preco_aprovado: 49.9,
+        updated: '2026-05-01T12:00:00Z',
+      },
+      // Cenário C: prod_2 no canal 'mercadolivre' - dois aprovados com desempate pela mais recente
+      {
+        id: 'prec_prod2_aprov_antiga',
+        produto: 'prod_2',
+        canal: 'mercadolivre',
+        status: 'aprovada',
+        preco_aprovado: 75.0,
+        created: '2026-04-01T10:00:00Z',
+      },
+      {
+        id: 'prec_prod2_aprov_recente',
+        produto: 'prod_2',
+        canal: 'mercadolivre',
+        status: 'aprovada',
+        preco_aprovado: 79.9,
+        created: '2026-04-15T10:00:00Z',
+      },
+      // Cenário D: rascunho sem preco_aprovado ou preco <= 0 (deve ser descartado)
+      {
+        id: 'prec_rascunho',
+        produto: 'prod_sem_aprovado',
+        canal: 'shopee',
+        status: 'rascunho',
+        preco_aprovado: 0,
+      },
+    ]
+
+    vi.spyOn(precificacaoService, 'listProdutos').mockResolvedValue(mockProdutos as any)
+    vi.spyOn(precificacaoService, 'listPrecificacoes').mockResolvedValue(mockPrecificacoes as any)
+
+    const resultado = await precificacaoService.getMapaProdutosAprovadosPorCanal()
+
+    // 1. prod_1 na Shopee deve ter escolhido a 'aprovada' (49.9) mesmo sendo mais antiga que a 'desatualizada' (60.0)
+    const keyProd1 = 'prod_1__shopee'
+    expect(resultado.mapaPrecoPorProdCanal[keyProd1]).toBeDefined()
+    expect(resultado.mapaPrecoPorProdCanal[keyProd1].preco_aprovado).toBe(49.9)
+    expect(resultado.mapaPrecoPorProdCanal[keyProd1].status).toBe('aprovada')
+    expect(resultado.mapaPrecoPorProdCanal[keyProd1].precificacao_id).toBe('prec_aprovada_antiga')
+
+    // 2. prod_2 no Mercado Livre deve desempatar pelo timestamp mais recente (79.9)
+    const keyProd2 = 'prod_2__mercadolivre'
+    expect(resultado.mapaPrecoPorProdCanal[keyProd2]).toBeDefined()
+    expect(resultado.mapaPrecoPorProdCanal[keyProd2].preco_aprovado).toBe(79.9)
+    expect(resultado.mapaPrecoPorProdCanal[keyProd2].precificacao_id).toBe(
+      'prec_prod2_aprov_recente',
+    )
+
+    // 3. Apenas prod_1 e prod_2 constam em produtos aprovados; prod_sem_aprovado é filtrado
+    expect(resultado.produtos.map((p) => p.id)).toEqual(['prod_1', 'prod_2'])
+  })
+
+  it('setMatrizClassificacao cria novo vínculo quando não existe para o par produto+canal', async () => {
+    vi.spyOn(pb.collection('prec_matriz_classificacoes'), 'getFullList').mockResolvedValue(
+      [] as any,
+    )
+    const createSpy = vi
+      .spyOn(pb.collection('prec_matriz_classificacoes'), 'create')
+      .mockResolvedValue({
+        id: 'classif_nova',
+        produto: 'prod_1',
+        canal: 'canal_shopee',
+        legenda: 'leg_ativo',
+      } as any)
+
+    const res = await precificacaoService.setMatrizClassificacao({
+      produtoId: 'prod_1',
+      canalId: 'canal_shopee',
+      legendaId: 'leg_ativo',
+    })
+
+    expect(createSpy).toHaveBeenCalledTimes(1)
+    expect(createSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        produto: 'prod_1',
+        canal: 'canal_shopee',
+        legenda: 'leg_ativo',
+      }),
+      { expand: 'legenda' },
+    )
+    expect(res?.id).toBe('classif_nova')
+  })
+
+  it('setMatrizClassificacao é idempotente: troca de legenda atualiza o registro existente e não cria duplicata', async () => {
+    // Registro existente para o par prod_1 + canal_shopee
+    const mockExistente = [
+      {
+        id: 'classif_existente',
+        produto: 'prod_1',
+        canal: 'canal_shopee',
+        legenda: 'leg_ativo',
+      },
+    ]
+
+    vi.spyOn(pb.collection('prec_matriz_classificacoes'), 'getFullList').mockResolvedValue(
+      mockExistente as any,
+    )
+    const updateSpy = vi
+      .spyOn(pb.collection('prec_matriz_classificacoes'), 'update')
+      .mockResolvedValue({
+        id: 'classif_existente',
+        produto: 'prod_1',
+        canal: 'canal_shopee',
+        legenda: 'leg_rejeitado',
+      } as any)
+    const createSpy = vi.spyOn(pb.collection('prec_matriz_classificacoes'), 'create')
+
+    const res = await precificacaoService.setMatrizClassificacao({
+      produtoId: 'prod_1',
+      canalId: 'canal_shopee',
+      legendaId: 'leg_rejeitado',
+    })
+
+    expect(updateSpy).toHaveBeenCalledTimes(1)
+    expect(updateSpy).toHaveBeenCalledWith(
+      'classif_existente',
+      expect.objectContaining({ legenda: 'leg_rejeitado' }),
+      { expand: 'legenda' },
+    )
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(res?.id).toBe('classif_existente')
+  })
+
+  it('setMatrizClassificacao com legendaId=null exclui o registro existente (limpa célula)', async () => {
+    const mockExistente = [
+      {
+        id: 'classif_para_remover',
+        produto: 'prod_1',
+        canal: 'canal_shopee',
+        legenda: 'leg_ativo',
+      },
+    ]
+
+    vi.spyOn(pb.collection('prec_matriz_classificacoes'), 'getFullList').mockResolvedValue(
+      mockExistente as any,
+    )
+    const deleteSpy = vi
+      .spyOn(pb.collection('prec_matriz_classificacoes'), 'delete')
+      .mockResolvedValue(true as any)
+
+    const res = await precificacaoService.setMatrizClassificacao({
+      produtoId: 'prod_1',
+      canalId: 'canal_shopee',
+      legendaId: null,
+    })
+
+    expect(deleteSpy).toHaveBeenCalledWith('classif_para_remover')
+    expect(res).toBeNull()
+  })
+})

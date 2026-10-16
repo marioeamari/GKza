@@ -37,11 +37,24 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { marketplacesService } from '@/services/marketplaces'
 import { precificacaoService } from '@/services/precificacao'
 import type { Marketplace } from '@/types/domain'
-import { PrecCanalModalidadeRecord, PrecCanalRecord, PrecTaxaRecord } from '@/types/precificacao'
+import {
+  PrecCanalModalidadeRecord,
+  PrecCanalRecord,
+  PrecCategoriaProdutoRecord,
+  PrecMatrizClassificacaoRecord,
+  PrecMatrizLegendaRecord,
+  PrecProdutoRecord,
+  PrecTaxaRecord,
+} from '@/types/precificacao'
 import { formatarResumoCondicao } from '@/lib/precificacao/calculo'
 import { formatCurrency } from '@/lib/format'
 import { useToast } from '@/hooks/use-toast'
 import { Skeleton } from '@/components/ui/skeleton'
+import { MatrizPresencaPorCanal } from '@/components/precificacao/MatrizPresencaPorCanal'
+import { LegendasMatrizDialog } from '@/components/precificacao/LegendasMatrizDialog'
+import { CategoriasProdutoDialog } from '@/components/precificacao/CategoriasProdutoDialog'
+import { normalizarLista, PrecoAprovadoCanalInfo } from '@/lib/precificacao/matrizHelpers'
+import { Grid3X3, Sliders } from 'lucide-react'
 
 export default function PrecificacaoCanais() {
   const { toast } = useToast()
@@ -97,6 +110,40 @@ export default function PrecificacaoCanais() {
   const [verificandoVinculosMod, setVerificandoVinculosMod] = useState(false)
   const [executandoExclusaoMod, setExecutandoExclusaoMod] = useState(false)
 
+  // ==========================================
+  // ESTADOS DA MATRIZ DE PRESENÇA POR CANAL
+  // ==========================================
+  const [abaAtiva, setAbaAtiva] = useState<'matriz' | 'gestao'>('matriz')
+  const [produtosAprovados, setProdutosAprovados] = useState<PrecProdutoRecord[]>([])
+  const [mapaPrecoPorProdCanal, setMapaPrecoPorProdCanal] = useState<
+    Record<string, PrecoAprovadoCanalInfo>
+  >({})
+  const [categoriasMatriz, setCategoriasMatriz] = useState<PrecCategoriaProdutoRecord[]>([])
+  const [legendasMatriz, setLegendasMatriz] = useState<PrecMatrizLegendaRecord[]>([])
+  const [classificacoesMatriz, setClassificacoesMatriz] = useState<PrecMatrizClassificacaoRecord[]>(
+    [],
+  )
+  const [openLegendasDialog, setOpenLegendasDialog] = useState(false)
+  const [openCategoriasDialog, setOpenCategoriasDialog] = useState(false)
+
+  async function carregarDadosMatriz() {
+    try {
+      const [mapaRes, cats, legs, classifs] = await Promise.all([
+        precificacaoService.getMapaProdutosAprovadosPorCanal(),
+        precificacaoService.listCategoriasProduto(),
+        precificacaoService.listMatrizLegendas(),
+        precificacaoService.listMatrizClassificacoes(),
+      ])
+      setProdutosAprovados(normalizarLista(mapaRes?.produtos))
+      setMapaPrecoPorProdCanal(mapaRes?.mapaPrecoPorProdCanal || {})
+      setCategoriasMatriz(normalizarLista(cats))
+      setLegendasMatriz(normalizarLista(legs))
+      setClassificacoesMatriz(normalizarLista(classifs))
+    } catch (err) {
+      console.warn('Erro ao carregar dados da matriz de presença:', err)
+    }
+  }
+
   async function carregarDados(novoCanalIdSelecionar?: string) {
     try {
       setLoading(true)
@@ -106,10 +153,11 @@ export default function PrecificacaoCanais() {
         precificacaoService.listTaxas(),
         marketplacesService.listMarketplaces(),
       ])
-      setCanais(chans)
-      setModalidades(mods)
-      setTaxas(txs)
-      setMarketplacesList(mps)
+      setCanais(normalizarLista(chans))
+      setModalidades(normalizarLista(mods))
+      setTaxas(normalizarLista(txs))
+      setMarketplacesList(normalizarLista(mps))
+      await carregarDadosMatriz()
 
       if (novoCanalIdSelecionar) {
         setCanalAtivoId(novoCanalIdSelecionar)
@@ -632,1456 +680,1558 @@ export default function PrecificacaoCanais() {
   return (
     <div className="space-y-6">
       <PrecHeader
-        titulo="Canais de Venda, Modalidades & Taxas"
-        subtitulo="Gestão cadastral de marketplaces e canais próprios. Novos marketplaces criados aqui entram automaticamente no comparador."
+        titulo="Matriz de Presença & Canais de Venda"
+        subtitulo="Grade visual de produtos por canal (estilo planilha) e gestão cadastral de taxas e modalidades de marketplace."
         acoes={
-          <Button
-            className="bg-primary text-white font-bold"
-            onClick={() => {
-              setCanalEditando({
-                nome: '',
-                tipo: 'marketplace',
-                cor: '#DF5830',
-                vigencia: 'Vigente',
-              })
-              setOpenCanalDialog(true)
-            }}
-          >
-            <Plus className="mr-1.5 h-4 w-4" />
-            Novo Canal / Marketplace
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              className="bg-primary text-white font-bold"
+              onClick={() => {
+                setCanalEditando({
+                  nome: '',
+                  tipo: 'marketplace',
+                  cor: '#DF5830',
+                  vigencia: 'Vigente',
+                })
+                setOpenCanalDialog(true)
+              }}
+            >
+              <Plus className="mr-1.5 h-4 w-4" />
+              Novo Canal / Marketplace
+            </Button>
+          </div>
         }
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
-        {/* Lista Lateral de Canais */}
-        <Card className="lg:col-span-1 shadow-xs border-border/80">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-bold">Canais Cadastrados</CardTitle>
-            <CardDescription className="text-xs">
-              Selecione para gerenciar modalidades e regras
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-1 p-2">
-            {loading ? (
-              <div className="space-y-2 p-2">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : (
-              canais.map((c) => {
-                const isSelected = c.id === canalAtivoId
-                const countTaxas = taxas.filter((t) => t.canal === c.id).length
-                const pendentes = taxas.filter(
-                  (t) => t.canal === c.id && t.status_conferencia === 'pendente_conferencia',
-                ).length
-
-                return (
-                  <div
-                    key={c.id}
-                    className={`group w-full p-2.5 rounded-xl transition-all flex items-center justify-between border ${
-                      isSelected
-                        ? 'border-primary bg-primary/10 text-primary font-bold shadow-xs'
-                        : 'border-transparent hover:bg-secondary/60 text-foreground'
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setCanalAtivoId(c.id)}
-                      className="flex-1 text-left flex items-center gap-2.5 min-w-0"
-                    >
-                      <div
-                        className="h-3 w-3 rounded-full shrink-0"
-                        style={{ backgroundColor: c.cor || '#DF5830' }}
-                      />
-                      <div className="truncate">
-                        <div className="flex items-center gap-1.5">
-                          <span className="block text-xs font-semibold truncate">{c.nome}</span>
-                          {!c.ativo && (
-                            <Badge
-                              variant="outline"
-                              className="text-[9px] h-4 px-1 py-0 text-muted-foreground border-muted-foreground/30"
-                            >
-                              Inativo
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-[10px] text-muted-foreground block capitalize">
-                            {c.tipo.replace('_', ' ')} • {countTaxas} taxas
-                          </span>
-                          {c.expand?.marketplace && (
-                            <Badge
-                              variant="secondary"
-                              className="text-[9px] h-4 px-1 py-0 bg-primary/10 text-primary border border-primary/20 font-normal"
-                              title={`Vinculado ao marketplace ${c.expand.marketplace.nome}`}
-                            >
-                              🔗 {c.expand.marketplace.nome}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                    </button>
-
-                    <div className="flex items-center gap-1 shrink-0 ml-1">
-                      {pendentes > 0 && (
-                        <Badge
-                          variant="outline"
-                          className="text-amber-600 border-amber-300 text-[9px] h-5 px-1.5"
-                        >
-                          {pendentes} pend.
-                        </Badge>
-                      )}
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-70 group-hover:opacity-100 transition-opacity"
-                        title={`Excluir canal ${c.nome}`}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleAbrirExclusaoCanal(c)
-                        }}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                )
-              })
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Detalhes do Canal Ativo */}
-        <div className="lg:col-span-3 space-y-6">
-          {!canalSelecionado ? (
-            <Card className="p-8 text-center text-muted-foreground">
-              Selecione um canal à esquerda para gerenciar modalidades e regras de comissão.
-            </Card>
-          ) : (
-            <>
-              {/* Header do Canal Selecionado */}
-              <Card className="shadow-xs border-border/80">
-                <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 gap-3">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="h-10 w-10 rounded-xl flex items-center justify-center text-white font-bold"
-                      style={{ backgroundColor: canalSelecionado.cor || '#DF5830' }}
-                    >
-                      <Store className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <CardTitle className="text-lg font-black text-foreground">
-                          {canalSelecionado.nome}
-                        </CardTitle>
-                        <Badge variant="secondary" className="text-xs capitalize">
-                          {canalSelecionado.tipo.replace('_', ' ')}
-                        </Badge>
-                        {canalSelecionado.expand?.marketplace && (
-                          <Badge
-                            variant="outline"
-                            className="text-xs border-primary/30 text-primary bg-primary/5 flex items-center gap-1"
-                          >
-                            <span
-                              className="h-2 w-2 rounded-full"
-                              style={{ backgroundColor: canalSelecionado.expand.marketplace.cor }}
-                            />
-                            Vinculado: {canalSelecionado.expand.marketplace.nome}
-                          </Badge>
-                        )}
-                      </div>
-                      <CardDescription className="text-xs mt-0.5">
-                        Vigência: {canalSelecionado.vigencia || 'Valores da Planilha'}
-                        {canalSelecionado.expand?.marketplace && (
-                          <span> • Sincronizado com o módulo /marketplaces</span>
-                        )}
-                      </CardDescription>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setCanalEditando(canalSelecionado)
-                        setOpenCanalDialog(true)
-                      }}
-                    >
-                      <Edit2 className="mr-1.5 h-3.5 w-3.5" />
-                      Editar Canal
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
-                      onClick={() => handleAbrirExclusaoCanal(canalSelecionado)}
-                    >
-                      <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                      Excluir Canal
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="bg-primary text-white font-bold"
-                      onClick={handleAbrirCriarModalidade}
-                    >
-                      <Plus className="mr-1 h-3.5 w-3.5" />
-                      Adicionar Modalidade
-                    </Button>
-                  </div>
-                </CardHeader>
-
-                {/* Lista de Modalidades do Canal */}
-                <CardContent className="border-t border-border pt-4">
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                      Modalidades / Operações ({modalidadesDoCanal.length})
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                    {modalidadesDoCanal.map((m) => (
-                      <div
-                        key={m.id}
-                        className="rounded-xl border border-border p-3 bg-secondary/20 flex flex-col justify-between"
-                      >
-                        <div>
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="font-bold text-xs text-foreground block">
-                              {m.nome}
-                            </span>
-                            {m.tributos_config && m.tributos_config.habilitado !== false ? (
-                              <Badge
-                                variant="outline"
-                                className="text-[9px] px-1 py-0 border-emerald-300 text-emerald-700 bg-emerald-50"
-                              >
-                                {m.tributos_config.regime_tributario === 'mei'
-                                  ? 'MEI'
-                                  : m.tributos_config.regime_tributario === 'simples_nacional'
-                                    ? 'Simples'
-                                    : 'Tributos'}
-                              </Badge>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="text-[9px] px-1 py-0 text-muted-foreground border-border"
-                              >
-                                Global
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="text-[11px] text-muted-foreground mt-1 space-y-0.5">
-                            <span className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              Prazo: {m.prazo_recebimento_dias || 0} dias
-                            </span>
-                            {m.tributos_config && m.tributos_config.habilitado !== false ? (
-                              <span className="text-[10px] text-emerald-700 block font-mono">
-                                DAS {m.tributos_config.aliquota_das_pct ?? 0}% + ICMS{' '}
-                                {m.tributos_config.aliquota_icms_pct ?? 0}%
-                                {(m.tributos_config.das_imposto_total_mes ?? 0) > 0 &&
-                                  ` • R$ ${m.tributos_config.das_imposto_total_mes}/mês`}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] text-muted-foreground block italic">
-                                Régua global de tributos
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-end gap-1.5 mt-3 pt-2 border-t border-border/40">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6"
-                            title="Editar modalidade"
-                            onClick={() => handleAbrirEditarModalidade(m)}
-                          >
-                            <Edit2 className="h-3 w-3 text-muted-foreground" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 text-destructive hover:text-destructive hover:bg-destructive/10"
-                            title="Excluir modalidade"
-                            onClick={() => handleAbrirExclusaoModalidade(m)}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                    {modalidadesDoCanal.length === 0 && (
-                      <p className="text-xs text-muted-foreground italic col-span-full">
-                        Nenhuma modalidade cadastrada. Clique acima para adicionar (ex: FULL, MEI,
-                        Clássico).
-                      </p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Tabela de Taxas & Comissões */}
-              <Card className="shadow-xs border-border/80">
-                <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 gap-3">
-                  <div>
-                    <CardTitle className="text-base font-bold">
-                      Regras de Taxas & Comissões
-                    </CardTitle>
-                    <CardDescription className="text-xs">
-                      Linhas declaradas e auditáveis aplicadas ao preço de venda
-                    </CardDescription>
-                  </div>
-                  <Button
-                    size="sm"
-                    className="bg-primary text-white font-bold"
-                    onClick={() => {
-                      setTaxaEditando({
-                        canal: canalSelecionado.id,
-                        nome: '',
-                        base_calculo: 'preco_anunciado',
-                        tipo_valor: 'percentual',
-                        valor: 0,
-                        responsavel: 'marketplace',
-                        tipo_regra: 'comissao',
-                        financiado_por: 'marketplace',
-                      })
-                      setOpenTaxaDialog(true)
-                    }}
-                  >
-                    <Plus className="mr-1.5 h-3.5 w-3.5" />
-                    Nova Regra de Taxa
-                  </Button>
-                </CardHeader>
-                <CardContent className="overflow-x-auto p-0">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-y border-border bg-secondary/30 text-muted-foreground uppercase text-[10px] tracking-wider">
-                        <th className="py-2.5 px-4 font-bold">Nome da Taxa</th>
-                        <th className="py-2.5 px-3 font-bold">Modalidade</th>
-                        <th className="py-2.5 px-3 font-bold">Base de Cálculo</th>
-                        <th className="py-2.5 px-3 font-bold">Tipo / Valor</th>
-                        <th className="py-2.5 px-3 font-bold">Responsável</th>
-                        <th className="py-2.5 px-3 font-bold">Conferência</th>
-                        <th className="py-2.5 px-4 font-bold text-right">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/60">
-                      {taxasDoCanal.map((tx) => {
-                        const mod = modalidades.find((m) => m.id === tx.modalidade)
-                        const pendente = tx.status_conferencia === 'pendente_conferencia'
-
-                        const resumoCond = formatarResumoCondicao(tx.condicao)
-
-                        return (
-                          <tr key={tx.id} className="hover:bg-secondary/20 transition-colors">
-                            <td className="py-3 px-4">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-bold text-foreground block">{tx.nome}</span>
-                                {resumoCond && (
-                                  <Badge
-                                    variant="secondary"
-                                    className="text-[9px] bg-amber-500/10 text-amber-700 border-amber-300 font-normal px-1.5 py-0"
-                                  >
-                                    Condicional
-                                  </Badge>
-                                )}
-                              </div>
-                              <span className="text-[10px] text-muted-foreground uppercase font-mono block">
-                                {tx.tipo_regra}
-                              </span>
-                              {resumoCond && (
-                                <span className="text-[11px] text-amber-700 font-medium block mt-0.5">
-                                  {resumoCond}
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-3">
-                              {mod ? (
-                                <Badge variant="secondary" className="text-[10px]">
-                                  {mod.nome}
-                                </Badge>
-                              ) : (
-                                <span className="text-muted-foreground italic text-[11px]">
-                                  Todas as Modalidades
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-3 capitalize text-muted-foreground">
-                              {tx.base_calculo.replace('_', ' ')}
-                            </td>
-                            <td className="py-3 px-3 font-mono font-bold">
-                              {tx.tipo_valor === 'percentual'
-                                ? `${tx.valor}%`
-                                : formatCurrency(tx.valor)}
-                            </td>
-                            <td className="py-3 px-3 capitalize">
-                              <Badge variant="outline" className="text-[10px]">
-                                {tx.responsavel}
-                              </Badge>
-                            </td>
-                            <td className="py-3 px-3">
-                              {pendente ? (
-                                <div className="flex items-center gap-1.5">
-                                  <Badge
-                                    variant="outline"
-                                    className="text-amber-600 border-amber-300 text-[10px] bg-amber-50"
-                                  >
-                                    Pendente Planilha
-                                  </Badge>
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-6 text-[10px] font-bold text-emerald-600 hover:text-emerald-700"
-                                    onClick={() => handleConferirTaxa(tx.id)}
-                                  >
-                                    <ShieldCheck className="mr-1 h-3 w-3" />
-                                    Homologar
-                                  </Button>
-                                </div>
-                              ) : (
-                                <Badge
-                                  variant="outline"
-                                  className="text-emerald-600 border-emerald-300 text-[10px] bg-emerald-50"
-                                >
-                                  Conferido
-                                </Badge>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-right">
-                              <div className="flex items-center justify-end gap-1">
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  className="h-7 w-7"
-                                  onClick={() => {
-                                    setTaxaEditando(tx)
-                                    setOpenTaxaDialog(true)
-                                  }}
-                                >
-                                  <Edit2 className="h-3.5 w-3.5 text-muted-foreground" />
-                                </Button>
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  className="h-7 w-7 text-destructive"
-                                  onClick={() => handleExcluirTaxa(tx.id)}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
-                              </div>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </CardContent>
-              </Card>
-            </>
-          )}
+      {/* Navegação entre a Matriz de Presença (Planilha) e a Gestão de Regras/Taxas */}
+      <Tabs
+        value={abaAtiva}
+        onValueChange={(v) => setAbaAtiva(v as 'matriz' | 'gestao')}
+        className="w-full space-y-5"
+      >
+        <div className="flex items-center justify-between border-b border-border/80 pb-3">
+          <TabsList className="bg-secondary/40 p-1 rounded-xl h-10">
+            <TabsTrigger
+              value="matriz"
+              className="text-xs sm:text-sm font-bold flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:text-primary data-[state=active]:shadow-xs px-4"
+            >
+              <Grid3X3 className="h-4 w-4 text-primary" />
+              <span>Matriz por Canal</span>
+              <Badge
+                variant="secondary"
+                className="ml-1 text-[10px] h-4 px-1.5 py-0 font-mono bg-primary/10 text-primary border-none"
+              >
+                {produtosAprovados.length}
+              </Badge>
+            </TabsTrigger>
+            <TabsTrigger
+              value="gestao"
+              className="text-xs sm:text-sm font-bold flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:text-primary data-[state=active]:shadow-xs px-4"
+            >
+              <Sliders className="h-4 w-4" />
+              <span>Taxas, Modalidades & Regras</span>
+              <Badge variant="secondary" className="ml-1 text-[10px] h-4 px-1.5 py-0 font-mono">
+                {canais.length}
+              </Badge>
+            </TabsTrigger>
+          </TabsList>
         </div>
-      </div>
 
-      {/* DIALOG DE CANAL */}
-      <Dialog open={openCanalDialog} onOpenChange={setOpenCanalDialog}>
-        <DialogContent className="sm:max-w-[420px]">
-          <form onSubmit={handleSalvarCanal}>
-            <DialogHeader>
-              <DialogTitle>
-                {canalEditando?.id ? 'Editar Canal' : 'Novo Canal / Marketplace'}
-              </DialogTitle>
-              <DialogDescription>
-                Informe o nome e características operacionais do canal.
-              </DialogDescription>
-            </DialogHeader>
+        {/* ======================================================== */}
+        {/* ABA 1: MATRIZ DE PRESENÇA POR CANAL (GRADE TIPO PLANILHA) */}
+        {/* ======================================================== */}
+        <TabsContent value="matriz" className="m-0 focus-visible:outline-none">
+          <MatrizPresencaPorCanal
+            canais={canais}
+            produtos={produtosAprovados}
+            categorias={categoriasMatriz}
+            legendas={legendasMatriz}
+            classificacoes={classificacoesMatriz}
+            mapaPrecoPorProdCanal={mapaPrecoPorProdCanal}
+            loading={loading}
+            onAbrirLegendas={() => setOpenLegendasDialog(true)}
+            onAbrirCategorias={() => setOpenCategoriasDialog(true)}
+            onAtualizacaoClassificacao={carregarDadosMatriz}
+          />
+        </TabsContent>
 
-            <div className="space-y-3 py-4 text-xs">
-              <div className="space-y-1">
-                <Label>Nome do Canal / Plataforma</Label>
-                <Input
-                  required
-                  placeholder="Ex: Shopee, Amazon, Site Oficial..."
-                  value={canalEditando?.nome || ''}
-                  onChange={(e) => setCanalEditando((prev) => ({ ...prev, nome: e.target.value }))}
-                />
-              </div>
-
-              <div className="space-y-1">
-                <Label>Tipo de Canal</Label>
-                <Select
-                  value={canalEditando?.tipo || 'marketplace'}
-                  onValueChange={(v) =>
-                    setCanalEditando((prev) => ({
-                      ...prev,
-                      tipo: v as 'site_proprio' | 'marketplace',
-                    }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="marketplace">Marketplace</SelectItem>
-                    <SelectItem value="site_proprio">Site Próprio (E-commerce)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {canalEditando?.tipo !== 'site_proprio' && (
-                <div className="space-y-1">
-                  <Label>Marketplace Vinculado (Catálogo Único) *</Label>
-                  <Select
-                    value={canalEditando?.marketplace || '__novo__'}
-                    onValueChange={(v) => {
-                      const selectedMp = marketplacesList.find((m) => m.id === v)
-                      setCanalEditando((prev) => ({
-                        ...prev,
-                        marketplace: v,
-                        cor: selectedMp?.cor || prev?.cor,
-                      }))
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione ou crie novo no catálogo..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__novo__" className="font-bold text-primary">
-                        + Criar automaticamente no catálogo (slug único)
-                      </SelectItem>
-                      {marketplacesList.map((mp) => (
-                        <SelectItem key={mp.id} value={mp.id}>
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="h-2 w-2 rounded-full inline-block"
-                              style={{ backgroundColor: mp.cor || '#DF5830' }}
-                            />
-                            <span>{mp.nome}</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-[10px] text-muted-foreground">
-                    Porta única: se o marketplace não existir no catálogo, ele é criado
-                    automaticamente com slug único e cor de marca.
-                  </p>
-                </div>
-              )}
-
-              <div className="space-y-1">
-                <Label>Cor de Marca Obrigatória (Hex) *</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="color"
-                    className="h-8 w-12 p-0.5 cursor-pointer"
-                    value={canalEditando?.cor || '#DF5830'}
-                    onChange={(e) => setCanalEditando((prev) => ({ ...prev, cor: e.target.value }))}
-                  />
-                  <Input
-                    required
-                    placeholder="#DF5830"
-                    value={canalEditando?.cor || ''}
-                    onChange={(e) => setCanalEditando((prev) => ({ ...prev, cor: e.target.value }))}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setOpenCanalDialog(false)}>
-                Cancelar
-              </Button>
-              <Button type="submit" className="bg-primary text-white font-bold">
-                Salvar Canal
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* DIALOG DE MODALIDADE COM CONFIGURAÇÃO DE TRIBUTOS */}
-      <Dialog open={openModDialog} onOpenChange={setOpenModDialog}>
-        <DialogContent className="sm:max-w-[540px] max-h-[90vh] overflow-y-auto">
-          <form onSubmit={handleSalvarModalidade}>
-            <DialogHeader>
-              <DialogTitle>{modEditando?.id ? 'Editar Modalidade' : 'Nova Modalidade'}</DialogTitle>
-              <DialogDescription>
-                Configure as características operacionais e a régua de tributos específica desta
-                modalidade.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4 py-3 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label>Nome da Modalidade *</Label>
-                  <Input
-                    required
-                    placeholder="Ex: FULL, MEI, Clássico..."
-                    value={modEditando?.nome || ''}
-                    onChange={(e) => setModEditando((prev) => ({ ...prev, nome: e.target.value }))}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label>Prazo de Recebimento (dias)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={modEditando?.prazo_recebimento_dias ?? 7}
-                    onChange={(e) =>
-                      setModEditando((prev) => ({
-                        ...prev,
-                        prazo_recebimento_dias: parseInt(e.target.value) || 0,
-                      }))
-                    }
-                  />
-                </div>
-              </div>
-
-              {/* SEÇÃO DE TRIBUTOS ESPECÍFICOS */}
-              <div className="rounded-xl border border-border p-3.5 bg-secondary/30 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="font-bold text-xs text-foreground block">
-                      Régua de Tributos da Modalidade
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      Define a alíquota de impostos (DAS, ICMS, rateio fixo) usada nas simulações
-                      deste canal
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-semibold cursor-pointer flex items-center gap-1.5">
-                      <input
-                        type="checkbox"
-                        checked={temReguaPropriaMod}
-                        onChange={(e) => setTemReguaPropriaMod(e.target.checked)}
-                        className="rounded border-border text-primary focus:ring-primary"
-                      />
-                      <span>Personalizada</span>
-                    </label>
-                  </div>
-                </div>
-
-                {!temReguaPropriaMod ? (
-                  <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-300 text-amber-800 text-[11px]">
-                    <span className="font-bold block">
-                      Modalidade sem régua de tributos — usando global
-                    </span>
-                    <span>
-                      Esta modalidade calculará com o perfil tributário global configurado no
-                      comparador.
-                    </span>
+        {/* ======================================================== */}
+        {/* ABA 2: CADASTRO DE CANAIS, MODALIDADES E TAXAS */}
+        {/* ======================================================== */}
+        <TabsContent value="gestao" className="m-0 focus-visible:outline-none">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
+            {/* Lista Lateral de Canais */}
+            <Card className="lg:col-span-1 shadow-xs border-border/80">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-bold">Canais Cadastrados</CardTitle>
+                <CardDescription className="text-xs">
+                  Selecione para gerenciar modalidades e regras
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-1 p-2">
+                {loading ? (
+                  <div className="space-y-2 p-2">
+                    <Skeleton className="h-10 w-full" />
+                    <Skeleton className="h-10 w-full" />
                   </div>
                 ) : (
-                  <div className="space-y-3 pt-2 border-t border-border/50">
-                    <div className="space-y-1">
-                      <Label>Regime / Categoria Tributária</Label>
-                      <Select
-                        value={regimeModalidade}
-                        onValueChange={(v) => handleTrocarRegimeModalidade(v as any)}
+                  canais.map((c) => {
+                    const isSelected = c.id === canalAtivoId
+                    const countTaxas = taxas.filter((t) => t.canal === c.id).length
+                    const pendentes = taxas.filter(
+                      (t) => t.canal === c.id && t.status_conferencia === 'pendente_conferencia',
+                    ).length
+
+                    return (
+                      <div
+                        key={c.id}
+                        className={`group w-full p-2.5 rounded-xl transition-all flex items-center justify-between border ${
+                          isSelected
+                            ? 'border-primary bg-primary/10 text-primary font-bold shadow-xs'
+                            : 'border-transparent hover:bg-secondary/60 text-foreground'
+                        }`}
                       >
-                        <SelectTrigger className="bg-background">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="mei">
-                            MEI (Microempreendedor Individual - Isento % / Fixo DAS)
-                          </SelectItem>
-                          <SelectItem value="simples_nacional">
-                            Simples Nacional (DAS % + ICMS %)
-                          </SelectItem>
-                          <SelectItem value="lucro_presumido">
-                            Lucro Presumido (ICMS + PIS/COFINS/CSLL)
-                          </SelectItem>
-                          <SelectItem value="lucro_real">Lucro Real</SelectItem>
-                          <SelectItem value="personalizado">
-                            Personalizado / Operação Especial (Full, etc.)
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label>Alíquota DAS (%)</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={aliquotaDasMod}
-                          onChange={(e) => setAliquotaDasMod(parseFloat(e.target.value) || 0)}
-                        />
-                        <span className="text-[10px] text-muted-foreground block">
-                          {regimeModalidade === 'mei'
-                            ? 'MEI: 0% sobre a venda'
-                            : 'Ex: 6.95% no Simples'}
-                        </span>
-                      </div>
-
-                      <div className="space-y-1">
-                        <Label>Alíquota ICMS (%)</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={aliquotaIcmsMod}
-                          onChange={(e) => setAliquotaIcmsMod(parseFloat(e.target.value) || 0)}
-                        />
-                        <span className="text-[10px] text-muted-foreground block">
-                          {regimeModalidade === 'mei'
-                            ? 'MEI: 0% sobre a venda'
-                            : 'Ex: 2.23% ou ICMS próprio'}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label>DAS / Imposto Fixo Mensal (R$)</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={dasImpostoMesMod}
-                          onChange={(e) => setDasImpostoMesMod(parseFloat(e.target.value) || 0)}
-                        />
-                        <span className="text-[10px] text-muted-foreground block">
-                          Rateado por pedido (ex: R$ 76,50 guia MEI)
-                        </span>
-                      </div>
-
-                      <div className="space-y-1">
-                        <Label>Pedidos Estimados / Mês</Label>
-                        <Input
-                          type="number"
-                          min="1"
-                          value={pedidosMesMod}
-                          onChange={(e) => setPedidosMesMod(parseInt(e.target.value) || 1)}
-                        />
-                        <span className="text-[10px] text-muted-foreground block">
-                          Base de rateio do imposto fixo
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label>Outros Impostos (%)</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={outrosImpostosMod}
-                          onChange={(e) => setOutrosImpostosMod(parseFloat(e.target.value) || 0)}
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <Label>
-                          Base NF Reduzida (R$){' '}
-                          <span className="text-[10px] font-normal text-muted-foreground">
-                            (opcional)
-                          </span>
-                        </Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="Ex: 5.00 ou deixe vazio"
-                          value={valorBaseNfMod ?? ''}
-                          onChange={(e) =>
-                            setValorBaseNfMod(
-                              e.target.value !== '' ? parseFloat(e.target.value) : undefined,
-                            )
-                          }
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setOpenModDialog(false)}>
-                Cancelar
-              </Button>
-              <Button type="submit" className="bg-primary text-white font-bold">
-                Salvar Modalidade
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* DIALOG DE TAXA */}
-      <Dialog open={openTaxaDialog} onOpenChange={setOpenTaxaDialog}>
-        <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
-          <form onSubmit={handleSalvarTaxa}>
-            <DialogHeader>
-              <DialogTitle>
-                {taxaEditando?.id ? 'Editar Regra de Taxa' : 'Nova Regra de Taxa'}
-              </DialogTitle>
-              <DialogDescription>
-                Configure a regra auditável que será calculada sobre o preço de venda.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4 py-3 text-xs">
-              <div className="space-y-1">
-                <Label>Nome da Taxa</Label>
-                <Input
-                  required
-                  placeholder="Ex: Comissão Shopee < R$ 80, Taxa Logística > 5kg..."
-                  value={taxaEditando?.nome || ''}
-                  onChange={(e) => setTaxaEditando((prev) => ({ ...prev, nome: e.target.value }))}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label>Modalidade Específica</Label>
-                  <Select
-                    value={taxaEditando?.modalidade || 'todas'}
-                    onValueChange={(v) =>
-                      setTaxaEditando((prev) => ({
-                        ...prev,
-                        modalidade: v === 'todas' ? undefined : v,
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Todas as modalidades" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="todas">Todas as Modalidades</SelectItem>
-                      {modalidadesDoCanal.map((m) => (
-                        <SelectItem key={m.id} value={m.id}>
-                          {m.nome}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1">
-                  <Label>Tipo de Regra</Label>
-                  <Select
-                    value={taxaEditando?.tipo_regra || 'comissao'}
-                    onValueChange={(v) =>
-                      setTaxaEditando((prev) => ({
-                        ...prev,
-                        tipo_regra: v as PrecTaxaRecord['tipo_regra'],
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="comissao">Comissão</SelectItem>
-                      <SelectItem value="tarifa_fixa">Tarifa Fixa</SelectItem>
-                      <SelectItem value="transacao">Transação</SelectItem>
-                      <SelectItem value="frete">Frete</SelectItem>
-                      <SelectItem value="operacao">Operacional</SelectItem>
-                      <SelectItem value="servico">Serviço</SelectItem>
-                      <SelectItem value="afiliado">Afiliado</SelectItem>
-                      <SelectItem value="campanha">Campanha</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label>Base de Cálculo</Label>
-                  <Select
-                    value={taxaEditando?.base_calculo || 'preco_anunciado'}
-                    onValueChange={(v) =>
-                      setTaxaEditando((prev) => ({
-                        ...prev,
-                        base_calculo: v as PrecTaxaRecord['base_calculo'],
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="preco_anunciado">Preço Anunciado</SelectItem>
-                      <SelectItem value="preco_pago_cliente">Preço Pago pelo Cliente</SelectItem>
-                      <SelectItem value="prestacao_fixa">Por Pedido / Fixo</SelectItem>
-                      <SelectItem value="faixa_preco">Por Faixa de Preço</SelectItem>
-                      <SelectItem value="peso">Por Peso (kg)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1">
-                  <Label>Tipo de Cobrança</Label>
-                  <Select
-                    value={taxaEditando?.tipo_valor || 'percentual'}
-                    onValueChange={(v) =>
-                      setTaxaEditando((prev) => ({
-                        ...prev,
-                        tipo_valor: v as 'percentual' | 'fixo',
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="percentual">Percentual (%)</SelectItem>
-                      <SelectItem value="fixo">Fixo (R$)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <Label>Valor {taxaEditando?.tipo_valor === 'percentual' ? '(%)' : '(R$)'}</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={taxaEditando?.valor ?? 0}
-                  onChange={(e) =>
-                    setTaxaEditando((prev) => ({
-                      ...prev,
-                      valor: parseFloat(e.target.value) || 0,
-                    }))
-                  }
-                />
-              </div>
-
-              {/* SEÇÃO DE CONDIÇÕES CONDICIONAIS */}
-              <div className="rounded-xl border border-border bg-secondary/30 p-3.5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-xs font-bold text-foreground">
-                      Condição de Aplicação (Opcional)
-                    </Label>
-                    <p className="text-[11px] text-muted-foreground">
-                      Em branco = sem restrição (aplica sempre em todas as vendas).
-                    </p>
-                  </div>
-                  {(taxaEditando?.condicao?.faixa_preco_min !== undefined ||
-                    taxaEditando?.condicao?.faixa_preco_max !== undefined ||
-                    taxaEditando?.condicao?.peso_min_kg !== undefined ||
-                    taxaEditando?.condicao?.peso_max_kg !== undefined ||
-                    taxaEditando?.condicao?.volume_min_cm3 !== undefined ||
-                    taxaEditando?.condicao?.volume_max_cm3 !== undefined ||
-                    taxaEditando?.condicao?.categoria) && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 text-[10px] text-muted-foreground hover:text-destructive"
-                      onClick={() =>
-                        setTaxaEditando((prev) => ({
-                          ...prev,
-                          condicao: undefined,
-                        }))
-                      }
-                    >
-                      Limpar condições
-                    </Button>
-                  )}
-                </div>
-
-                {/* Faixa de Preço */}
-                <div className="space-y-1">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground">
-                    Faixa de Preço do Produto (R$)
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        placeholder="Mínimo (ex: 80.00)"
-                        value={taxaEditando?.condicao?.faixa_preco_min ?? ''}
-                        onChange={(e) => {
-                          const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
-                          setTaxaEditando((prev) => ({
-                            ...prev,
-                            condicao: {
-                              ...prev?.condicao,
-                              faixa_preco_min: val,
-                            },
-                          }))
-                        }}
-                      />
-                      <span className="text-[9px] text-muted-foreground mt-0.5 block">
-                        Aplica se preço ≥ mínimo
-                      </span>
-                    </div>
-                    <div>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        placeholder="Máximo (ex: 79.99)"
-                        value={taxaEditando?.condicao?.faixa_preco_max ?? ''}
-                        onChange={(e) => {
-                          const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
-                          setTaxaEditando((prev) => ({
-                            ...prev,
-                            condicao: {
-                              ...prev?.condicao,
-                              faixa_preco_max: val,
-                            },
-                          }))
-                        }}
-                      />
-                      <span className="text-[9px] text-muted-foreground mt-0.5 block">
-                        Aplica se preço ≤ máximo
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Faixa de Peso */}
-                <div className="space-y-1">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground">
-                    Faixa de Peso do Produto (kg)
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        placeholder="Mínimo kg (ex: 5.0)"
-                        value={
-                          taxaEditando?.condicao?.peso_min_kg ??
-                          (taxaEditando?.condicao?.peso_min_g !== undefined
-                            ? taxaEditando.condicao.peso_min_g / 1000
-                            : '')
-                        }
-                        onChange={(e) => {
-                          const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
-                          setTaxaEditando((prev) => ({
-                            ...prev,
-                            condicao: {
-                              ...prev?.condicao,
-                              peso_min_kg: val,
-                              peso_min_g: val !== undefined ? val * 1000 : undefined,
-                            },
-                          }))
-                        }}
-                      />
-                      <span className="text-[9px] text-muted-foreground mt-0.5 block">
-                        Aplica se peso ≥ mínimo
-                      </span>
-                    </div>
-                    <div>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        placeholder="Máximo kg (ex: 5.0)"
-                        value={
-                          taxaEditando?.condicao?.peso_max_kg ??
-                          (taxaEditando?.condicao?.peso_max_g !== undefined
-                            ? taxaEditando.condicao.peso_max_g / 1000
-                            : '')
-                        }
-                        onChange={(e) => {
-                          const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
-                          setTaxaEditando((prev) => ({
-                            ...prev,
-                            condicao: {
-                              ...prev?.condicao,
-                              peso_max_kg: val,
-                              peso_max_g: val !== undefined ? val * 1000 : undefined,
-                            },
-                          }))
-                        }}
-                      />
-                      <span className="text-[9px] text-muted-foreground mt-0.5 block">
-                        Aplica se peso ≤ máximo
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Faixa de Volume ou Dimensão */}
-                <div className="space-y-1">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground">
-                    Faixa de Volume (cm³) ou Dimensão
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Input
-                        type="number"
-                        step="1"
-                        placeholder="Vol. Mínimo (cm³)"
-                        value={taxaEditando?.condicao?.volume_min_cm3 ?? ''}
-                        onChange={(e) => {
-                          const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
-                          setTaxaEditando((prev) => ({
-                            ...prev,
-                            condicao: {
-                              ...prev?.condicao,
-                              volume_min_cm3: val,
-                            },
-                          }))
-                        }}
-                      />
-                      <span className="text-[9px] text-muted-foreground mt-0.5 block">
-                        Calculado de CxLxA
-                      </span>
-                    </div>
-                    <div>
-                      <Input
-                        type="number"
-                        step="1"
-                        placeholder="Vol. Máximo (cm³)"
-                        value={taxaEditando?.condicao?.volume_max_cm3 ?? ''}
-                        onChange={(e) => {
-                          const val = e.target.value === '' ? undefined : parseFloat(e.target.value)
-                          setTaxaEditando((prev) => ({
-                            ...prev,
-                            condicao: {
-                              ...prev?.condicao,
-                              volume_max_cm3: val,
-                            },
-                          }))
-                        }}
-                      />
-                      <span className="text-[9px] text-muted-foreground mt-0.5 block">
-                        Limite de volume
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Categoria do Produto */}
-                <div className="space-y-1">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground">
-                    Categoria Específica (Opcional)
-                  </span>
-                  <Input
-                    placeholder="Ex: Cama, Mesa e Banho ou Eletrônicos..."
-                    value={taxaEditando?.condicao?.categoria || ''}
-                    onChange={(e) => {
-                      const val = e.target.value
-                      setTaxaEditando((prev) => ({
-                        ...prev,
-                        condicao: {
-                          ...prev?.condicao,
-                          categoria: val || undefined,
-                        },
-                      }))
-                    }}
-                  />
-                  <span className="text-[9px] text-muted-foreground block leading-tight">
-                    Suporta termos separados por vírgula (ex.: cama, mesa e banho). A comparação
-                    ignora maiúsculas e acentos e casa por termo. Se o produto estiver sem
-                    categoria, a taxa não será aplicada e o comparador exibirá um aviso.
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setOpenTaxaDialog(false)}>
-                Cancelar
-              </Button>
-              <Button type="submit" className="bg-primary text-white font-bold">
-                Salvar Regra
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* DIÁLOGO DE CONFIRMAÇÃO DE EXCLUSÃO DE CANAL */}
-      <Dialog
-        open={!!canalExcluindo}
-        onOpenChange={(open) => {
-          if (!open && !executandoExclusaoCanal) {
-            setCanalExcluindo(null)
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader>
-            <div className="flex items-center gap-2.5 text-destructive mb-1">
-              <div className="h-9 w-9 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
-                <AlertTriangle className="h-5 w-5 text-destructive" />
-              </div>
-              <DialogTitle className="text-base font-bold text-foreground">
-                Excluir Canal de Venda
-              </DialogTitle>
-            </div>
-            <DialogDescription className="text-xs text-muted-foreground pt-1">
-              Você está prestes a excluir o canal{' '}
-              <strong className="text-foreground font-semibold">
-                &ldquo;{canalExcluindo?.nome}&rdquo;
-              </strong>
-              . Esta ação não pode ser desfeita.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="py-2 text-xs space-y-3">
-            {verificandoVinculosCanal ? (
-              <div className="p-4 rounded-xl border border-border bg-secondary/20 flex items-center gap-3">
-                <Skeleton className="h-4 w-4 rounded-full" />
-                <span className="text-xs text-muted-foreground">
-                  Verificando taxas, modalidades e precificações vinculadas...
-                </span>
-              </div>
-            ) : (
-              (() => {
-                const txCount = contagemVinculosCanal?.taxas ?? 0
-                const modCount = contagemVinculosCanal?.modalidades ?? 0
-                const precCount = contagemVinculosCanal?.precificacoes ?? 0
-                const temVinculos = txCount > 0 || modCount > 0 || precCount > 0
-
-                if (temVinculos) {
-                  return (
-                    <div className="space-y-3">
-                      <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200">
-                        <div className="flex items-start gap-2">
-                          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                          <div className="space-y-1">
-                            <span className="font-bold block text-xs">
-                              Existem dados vinculados a este canal
-                            </span>
-                            <p className="text-[11px] leading-relaxed opacity-90">
-                              Para proteger a integridade do seu catálogo e do histórico de
-                              cálculos, veja os registros dependentes:
-                            </p>
-                            <div className="flex flex-wrap gap-1.5 pt-1">
-                              {txCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setCanalAtivoId(c.id)}
+                          className="flex-1 text-left flex items-center gap-2.5 min-w-0"
+                        >
+                          <div
+                            className="h-3 w-3 rounded-full shrink-0"
+                            style={{ backgroundColor: c.cor || '#DF5830' }}
+                          />
+                          <div className="truncate">
+                            <div className="flex items-center gap-1.5">
+                              <span className="block text-xs font-semibold truncate">{c.nome}</span>
+                              {!c.ativo && (
                                 <Badge
-                                  variant="secondary"
-                                  className="text-[10px] bg-background/80 font-mono"
+                                  variant="outline"
+                                  className="text-[9px] h-4 px-1 py-0 text-muted-foreground border-muted-foreground/30"
                                 >
-                                  {txCount} {txCount === 1 ? 'taxa' : 'taxas'}
+                                  Inativo
                                 </Badge>
                               )}
-                              {modCount > 0 && (
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[10px] text-muted-foreground block capitalize">
+                                {c.tipo.replace('_', ' ')} • {countTaxas} taxas
+                              </span>
+                              {c.expand?.marketplace && (
                                 <Badge
                                   variant="secondary"
-                                  className="text-[10px] bg-background/80 font-mono"
+                                  className="text-[9px] h-4 px-1 py-0 bg-primary/10 text-primary border border-primary/20 font-normal"
+                                  title={`Vinculado ao marketplace ${c.expand.marketplace.nome}`}
                                 >
-                                  {modCount} {modCount === 1 ? 'modalidade' : 'modalidades'}
-                                </Badge>
-                              )}
-                              {precCount > 0 && (
-                                <Badge
-                                  variant="secondary"
-                                  className="text-[10px] bg-background/80 font-mono"
-                                >
-                                  {precCount} {precCount === 1 ? 'precificação' : 'precificações'}
+                                  🔗 {c.expand.marketplace.nome}
                                 </Badge>
                               )}
                             </div>
                           </div>
+                        </button>
+
+                        <div className="flex items-center gap-1 shrink-0 ml-1">
+                          {pendentes > 0 && (
+                            <Badge
+                              variant="outline"
+                              className="text-amber-600 border-amber-300 text-[9px] h-5 px-1.5"
+                            >
+                              {pendentes} pend.
+                            </Badge>
+                          )}
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-70 group-hover:opacity-100 transition-opacity"
+                            title={`Excluir canal ${c.nome}`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleAbrirExclusaoCanal(c)
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Detalhes do Canal Ativo */}
+            <div className="lg:col-span-3 space-y-6">
+              {!canalSelecionado ? (
+                <Card className="p-8 text-center text-muted-foreground">
+                  Selecione um canal à esquerda para gerenciar modalidades e regras de comissão.
+                </Card>
+              ) : (
+                <>
+                  {/* Header do Canal Selecionado */}
+                  <Card className="shadow-xs border-border/80">
+                    <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 gap-3">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="h-10 w-10 rounded-xl flex items-center justify-center text-white font-bold"
+                          style={{ backgroundColor: canalSelecionado.cor || '#DF5830' }}
+                        >
+                          <Store className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <CardTitle className="text-lg font-black text-foreground">
+                              {canalSelecionado.nome}
+                            </CardTitle>
+                            <Badge variant="secondary" className="text-xs capitalize">
+                              {canalSelecionado.tipo.replace('_', ' ')}
+                            </Badge>
+                            {canalSelecionado.expand?.marketplace && (
+                              <Badge
+                                variant="outline"
+                                className="text-xs border-primary/30 text-primary bg-primary/5 flex items-center gap-1"
+                              >
+                                <span
+                                  className="h-2 w-2 rounded-full"
+                                  style={{
+                                    backgroundColor: canalSelecionado.expand.marketplace.cor,
+                                  }}
+                                />
+                                Vinculado: {canalSelecionado.expand.marketplace.nome}
+                              </Badge>
+                            )}
+                          </div>
+                          <CardDescription className="text-xs mt-0.5">
+                            Vigência: {canalSelecionado.vigencia || 'Valores da Planilha'}
+                            {canalSelecionado.expand?.marketplace && (
+                              <span> • Sincronizado com o módulo /marketplaces</span>
+                            )}
+                          </CardDescription>
                         </div>
                       </div>
 
-                      <div className="p-3 rounded-xl border border-border bg-secondary/20 space-y-2">
-                        <span className="text-[11px] font-bold text-foreground block">
-                          Recomendação de segurança:
-                        </span>
-                        <p className="text-[11px] text-muted-foreground leading-relaxed">
-                          Se você não vende mais por este canal,{' '}
-                          <strong className="text-foreground">desative-o</strong> em vez de excluir.
-                          Ele deixará de ser sugerido nas novas simulações mas o histórico de
-                          produtos e taxas permanecerá intacto.
-                        </p>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setCanalEditando(canalSelecionado)
+                            setOpenCanalDialog(true)
+                          }}
+                        >
+                          <Edit2 className="mr-1.5 h-3.5 w-3.5" />
+                          Editar Canal
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+                          onClick={() => handleAbrirExclusaoCanal(canalSelecionado)}
+                        >
+                          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                          Excluir Canal
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="bg-primary text-white font-bold"
+                          onClick={handleAbrirCriarModalidade}
+                        >
+                          <Plus className="mr-1 h-3.5 w-3.5" />
+                          Adicionar Modalidade
+                        </Button>
                       </div>
-                    </div>
-                  )
-                }
+                    </CardHeader>
 
-                return (
-                  <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200 flex items-start gap-2.5">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-bold block text-xs">
-                        Nenhum vínculo dependente detectado
-                      </span>
-                      <p className="text-[11px] opacity-90 mt-0.5">
-                        Este canal não possui taxas, modalidades ou precificações cadastradas. A
-                        remoção pode ser feita com total segurança.
-                      </p>
-                    </div>
-                  </div>
-                )
-              })()
-            )}
+                    {/* Lista de Modalidades do Canal */}
+                    <CardContent className="border-t border-border pt-4">
+                      <div className="flex justify-between items-center mb-3">
+                        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                          Modalidades / Operações ({modalidadesDoCanal.length})
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                        {modalidadesDoCanal.map((m) => (
+                          <div
+                            key={m.id}
+                            className="rounded-xl border border-border p-3 bg-secondary/20 flex flex-col justify-between"
+                          >
+                            <div>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="font-bold text-xs text-foreground block">
+                                  {m.nome}
+                                </span>
+                                {m.tributos_config && m.tributos_config.habilitado !== false ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] px-1 py-0 border-emerald-300 text-emerald-700 bg-emerald-50"
+                                  >
+                                    {m.tributos_config.regime_tributario === 'mei'
+                                      ? 'MEI'
+                                      : m.tributos_config.regime_tributario === 'simples_nacional'
+                                        ? 'Simples'
+                                        : 'Tributos'}
+                                  </Badge>
+                                ) : (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] px-1 py-0 text-muted-foreground border-border"
+                                  >
+                                    Global
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-muted-foreground mt-1 space-y-0.5">
+                                <span className="flex items-center gap-1">
+                                  <Clock className="h-3 w-3" />
+                                  Prazo: {m.prazo_recebimento_dias || 0} dias
+                                </span>
+                                {m.tributos_config && m.tributos_config.habilitado !== false ? (
+                                  <span className="text-[10px] text-emerald-700 block font-mono">
+                                    DAS {m.tributos_config.aliquota_das_pct ?? 0}% + ICMS{' '}
+                                    {m.tributos_config.aliquota_icms_pct ?? 0}%
+                                    {(m.tributos_config.das_imposto_total_mes ?? 0) > 0 &&
+                                      ` • R$ ${m.tributos_config.das_imposto_total_mes}/mês`}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-muted-foreground block italic">
+                                    Régua global de tributos
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-end gap-1.5 mt-3 pt-2 border-t border-border/40">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-6 w-6"
+                                title="Editar modalidade"
+                                onClick={() => handleAbrirEditarModalidade(m)}
+                              >
+                                <Edit2 className="h-3 w-3 text-muted-foreground" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-6 w-6 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                title="Excluir modalidade"
+                                onClick={() => handleAbrirExclusaoModalidade(m)}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                        {modalidadesDoCanal.length === 0 && (
+                          <p className="text-xs text-muted-foreground italic col-span-full">
+                            Nenhuma modalidade cadastrada. Clique acima para adicionar (ex: FULL,
+                            MEI, Clássico).
+                          </p>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Tabela de Taxas & Comissões */}
+                  <Card className="shadow-xs border-border/80">
+                    <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 gap-3">
+                      <div>
+                        <CardTitle className="text-base font-bold">
+                          Regras de Taxas & Comissões
+                        </CardTitle>
+                        <CardDescription className="text-xs">
+                          Linhas declaradas e auditáveis aplicadas ao preço de venda
+                        </CardDescription>
+                      </div>
+                      <Button
+                        size="sm"
+                        className="bg-primary text-white font-bold"
+                        onClick={() => {
+                          setTaxaEditando({
+                            canal: canalSelecionado.id,
+                            nome: '',
+                            base_calculo: 'preco_anunciado',
+                            tipo_valor: 'percentual',
+                            valor: 0,
+                            responsavel: 'marketplace',
+                            tipo_regra: 'comissao',
+                            financiado_por: 'marketplace',
+                          })
+                          setOpenTaxaDialog(true)
+                        }}
+                      >
+                        <Plus className="mr-1.5 h-3.5 w-3.5" />
+                        Nova Regra de Taxa
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="overflow-x-auto p-0">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="border-y border-border bg-secondary/30 text-muted-foreground uppercase text-[10px] tracking-wider">
+                            <th className="py-2.5 px-4 font-bold">Nome da Taxa</th>
+                            <th className="py-2.5 px-3 font-bold">Modalidade</th>
+                            <th className="py-2.5 px-3 font-bold">Base de Cálculo</th>
+                            <th className="py-2.5 px-3 font-bold">Tipo / Valor</th>
+                            <th className="py-2.5 px-3 font-bold">Responsável</th>
+                            <th className="py-2.5 px-3 font-bold">Conferência</th>
+                            <th className="py-2.5 px-4 font-bold text-right">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/60">
+                          {taxasDoCanal.map((tx) => {
+                            const mod = modalidades.find((m) => m.id === tx.modalidade)
+                            const pendente = tx.status_conferencia === 'pendente_conferencia'
+
+                            const resumoCond = formatarResumoCondicao(tx.condicao)
+
+                            return (
+                              <tr key={tx.id} className="hover:bg-secondary/20 transition-colors">
+                                <td className="py-3 px-4">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-foreground block">
+                                      {tx.nome}
+                                    </span>
+                                    {resumoCond && (
+                                      <Badge
+                                        variant="secondary"
+                                        className="text-[9px] bg-amber-500/10 text-amber-700 border-amber-300 font-normal px-1.5 py-0"
+                                      >
+                                        Condicional
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <span className="text-[10px] text-muted-foreground uppercase font-mono block">
+                                    {tx.tipo_regra}
+                                  </span>
+                                  {resumoCond && (
+                                    <span className="text-[11px] text-amber-700 font-medium block mt-0.5">
+                                      {resumoCond}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-3">
+                                  {mod ? (
+                                    <Badge variant="secondary" className="text-[10px]">
+                                      {mod.nome}
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-muted-foreground italic text-[11px]">
+                                      Todas as Modalidades
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-3 capitalize text-muted-foreground">
+                                  {tx.base_calculo.replace('_', ' ')}
+                                </td>
+                                <td className="py-3 px-3 font-mono font-bold">
+                                  {tx.tipo_valor === 'percentual'
+                                    ? `${tx.valor}%`
+                                    : formatCurrency(tx.valor)}
+                                </td>
+                                <td className="py-3 px-3 capitalize">
+                                  <Badge variant="outline" className="text-[10px]">
+                                    {tx.responsavel}
+                                  </Badge>
+                                </td>
+                                <td className="py-3 px-3">
+                                  {pendente ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <Badge
+                                        variant="outline"
+                                        className="text-amber-600 border-amber-300 text-[10px] bg-amber-50"
+                                      >
+                                        Pendente Planilha
+                                      </Badge>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-6 text-[10px] font-bold text-emerald-600 hover:text-emerald-700"
+                                        onClick={() => handleConferirTaxa(tx.id)}
+                                      >
+                                        <ShieldCheck className="mr-1 h-3 w-3" />
+                                        Homologar
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-emerald-600 border-emerald-300 text-[10px] bg-emerald-50"
+                                    >
+                                      Conferido
+                                    </Badge>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4 text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className="h-7 w-7"
+                                      onClick={() => {
+                                        setTaxaEditando(tx)
+                                        setOpenTaxaDialog(true)
+                                      }}
+                                    >
+                                      <Edit2 className="h-3.5 w-3.5 text-muted-foreground" />
+                                    </Button>
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className="h-7 w-7 text-destructive"
+                                      onClick={() => handleExcluirTaxa(tx.id)}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+            </div>
           </div>
 
-          <DialogFooter className="flex-col sm:flex-row gap-2 pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={executandoExclusaoCanal}
-              onClick={() => setCanalExcluindo(null)}
-            >
-              Cancelar
-            </Button>
+          {/* DIALOG DE CANAL */}
+          <Dialog open={openCanalDialog} onOpenChange={setOpenCanalDialog}>
+            <DialogContent className="sm:max-w-[420px]">
+              <form onSubmit={handleSalvarCanal}>
+                <DialogHeader>
+                  <DialogTitle>
+                    {canalEditando?.id ? 'Editar Canal' : 'Novo Canal / Marketplace'}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Informe o nome e características operacionais do canal.
+                  </DialogDescription>
+                </DialogHeader>
 
-            {(() => {
-              const txCount = contagemVinculosCanal?.taxas ?? 0
-              const modCount = contagemVinculosCanal?.modalidades ?? 0
-              const precCount = contagemVinculosCanal?.precificacoes ?? 0
-              const temVinculos = txCount > 0 || modCount > 0 || precCount > 0
+                <div className="space-y-3 py-4 text-xs">
+                  <div className="space-y-1">
+                    <Label>Nome do Canal / Plataforma</Label>
+                    <Input
+                      required
+                      placeholder="Ex: Shopee, Amazon, Site Oficial..."
+                      value={canalEditando?.nome || ''}
+                      onChange={(e) =>
+                        setCanalEditando((prev) => ({ ...prev, nome: e.target.value }))
+                      }
+                    />
+                  </div>
 
-              if (temVinculos) {
-                return (
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="border-primary/40 text-primary hover:bg-primary/10"
-                      disabled={executandoExclusaoCanal || verificandoVinculosCanal}
-                      onClick={handleDesativarCanal}
+                  <div className="space-y-1">
+                    <Label>Tipo de Canal</Label>
+                    <Select
+                      value={canalEditando?.tipo || 'marketplace'}
+                      onValueChange={(v) =>
+                        setCanalEditando((prev) => ({
+                          ...prev,
+                          tipo: v as 'site_proprio' | 'marketplace',
+                        }))
+                      }
                     >
-                      Apenas Desativar Canal
-                    </Button>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="marketplace">Marketplace</SelectItem>
+                        <SelectItem value="site_proprio">Site Próprio (E-commerce)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {canalEditando?.tipo !== 'site_proprio' && (
+                    <div className="space-y-1">
+                      <Label>Marketplace Vinculado (Catálogo Único) *</Label>
+                      <Select
+                        value={canalEditando?.marketplace || '__novo__'}
+                        onValueChange={(v) => {
+                          const selectedMp = marketplacesList.find((m) => m.id === v)
+                          setCanalEditando((prev) => ({
+                            ...prev,
+                            marketplace: v,
+                            cor: selectedMp?.cor || prev?.cor,
+                          }))
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione ou crie novo no catálogo..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__novo__" className="font-bold text-primary">
+                            + Criar automaticamente no catálogo (slug único)
+                          </SelectItem>
+                          {marketplacesList.map((mp) => (
+                            <SelectItem key={mp.id} value={mp.id}>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="h-2 w-2 rounded-full inline-block"
+                                  style={{ backgroundColor: mp.cor || '#DF5830' }}
+                                />
+                                <span>{mp.nome}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[10px] text-muted-foreground">
+                        Porta única: se o marketplace não existir no catálogo, ele é criado
+                        automaticamente com slug único e cor de marca.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <Label>Cor de Marca Obrigatória (Hex) *</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="color"
+                        className="h-8 w-12 p-0.5 cursor-pointer"
+                        value={canalEditando?.cor || '#DF5830'}
+                        onChange={(e) =>
+                          setCanalEditando((prev) => ({ ...prev, cor: e.target.value }))
+                        }
+                      />
+                      <Input
+                        required
+                        placeholder="#DF5830"
+                        value={canalEditando?.cor || ''}
+                        onChange={(e) =>
+                          setCanalEditando((prev) => ({ ...prev, cor: e.target.value }))
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setOpenCanalDialog(false)}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" className="bg-primary text-white font-bold">
+                    Salvar Canal
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          {/* DIALOG DE MODALIDADE COM CONFIGURAÇÃO DE TRIBUTOS */}
+          <Dialog open={openModDialog} onOpenChange={setOpenModDialog}>
+            <DialogContent className="sm:max-w-[540px] max-h-[90vh] overflow-y-auto">
+              <form onSubmit={handleSalvarModalidade}>
+                <DialogHeader>
+                  <DialogTitle>
+                    {modEditando?.id ? 'Editar Modalidade' : 'Nova Modalidade'}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Configure as características operacionais e a régua de tributos específica desta
+                    modalidade.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4 py-3 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label>Nome da Modalidade *</Label>
+                      <Input
+                        required
+                        placeholder="Ex: FULL, MEI, Clássico..."
+                        value={modEditando?.nome || ''}
+                        onChange={(e) =>
+                          setModEditando((prev) => ({ ...prev, nome: e.target.value }))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label>Prazo de Recebimento (dias)</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={modEditando?.prazo_recebimento_dias ?? 7}
+                        onChange={(e) =>
+                          setModEditando((prev) => ({
+                            ...prev,
+                            prazo_recebimento_dias: parseInt(e.target.value) || 0,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  {/* SEÇÃO DE TRIBUTOS ESPECÍFICOS */}
+                  <div className="rounded-xl border border-border p-3.5 bg-secondary/30 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-bold text-xs text-foreground block">
+                          Régua de Tributos da Modalidade
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          Define a alíquota de impostos (DAS, ICMS, rateio fixo) usada nas
+                          simulações deste canal
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs font-semibold cursor-pointer flex items-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            checked={temReguaPropriaMod}
+                            onChange={(e) => setTemReguaPropriaMod(e.target.checked)}
+                            className="rounded border-border text-primary focus:ring-primary"
+                          />
+                          <span>Personalizada</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {!temReguaPropriaMod ? (
+                      <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-300 text-amber-800 text-[11px]">
+                        <span className="font-bold block">
+                          Modalidade sem régua de tributos — usando global
+                        </span>
+                        <span>
+                          Esta modalidade calculará com o perfil tributário global configurado no
+                          comparador.
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 pt-2 border-t border-border/50">
+                        <div className="space-y-1">
+                          <Label>Regime / Categoria Tributária</Label>
+                          <Select
+                            value={regimeModalidade}
+                            onValueChange={(v) => handleTrocarRegimeModalidade(v as any)}
+                          >
+                            <SelectTrigger className="bg-background">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="mei">
+                                MEI (Microempreendedor Individual - Isento % / Fixo DAS)
+                              </SelectItem>
+                              <SelectItem value="simples_nacional">
+                                Simples Nacional (DAS % + ICMS %)
+                              </SelectItem>
+                              <SelectItem value="lucro_presumido">
+                                Lucro Presumido (ICMS + PIS/COFINS/CSLL)
+                              </SelectItem>
+                              <SelectItem value="lucro_real">Lucro Real</SelectItem>
+                              <SelectItem value="personalizado">
+                                Personalizado / Operação Especial (Full, etc.)
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label>Alíquota DAS (%)</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={aliquotaDasMod}
+                              onChange={(e) => setAliquotaDasMod(parseFloat(e.target.value) || 0)}
+                            />
+                            <span className="text-[10px] text-muted-foreground block">
+                              {regimeModalidade === 'mei'
+                                ? 'MEI: 0% sobre a venda'
+                                : 'Ex: 6.95% no Simples'}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            <Label>Alíquota ICMS (%)</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={aliquotaIcmsMod}
+                              onChange={(e) => setAliquotaIcmsMod(parseFloat(e.target.value) || 0)}
+                            />
+                            <span className="text-[10px] text-muted-foreground block">
+                              {regimeModalidade === 'mei'
+                                ? 'MEI: 0% sobre a venda'
+                                : 'Ex: 2.23% ou ICMS próprio'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label>DAS / Imposto Fixo Mensal (R$)</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={dasImpostoMesMod}
+                              onChange={(e) => setDasImpostoMesMod(parseFloat(e.target.value) || 0)}
+                            />
+                            <span className="text-[10px] text-muted-foreground block">
+                              Rateado por pedido (ex: R$ 76,50 guia MEI)
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            <Label>Pedidos Estimados / Mês</Label>
+                            <Input
+                              type="number"
+                              min="1"
+                              value={pedidosMesMod}
+                              onChange={(e) => setPedidosMesMod(parseInt(e.target.value) || 1)}
+                            />
+                            <span className="text-[10px] text-muted-foreground block">
+                              Base de rateio do imposto fixo
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label>Outros Impostos (%)</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={outrosImpostosMod}
+                              onChange={(e) =>
+                                setOutrosImpostosMod(parseFloat(e.target.value) || 0)
+                              }
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <Label>
+                              Base NF Reduzida (R$){' '}
+                              <span className="text-[10px] font-normal text-muted-foreground">
+                                (opcional)
+                              </span>
+                            </Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              placeholder="Ex: 5.00 ou deixe vazio"
+                              value={valorBaseNfMod ?? ''}
+                              onChange={(e) =>
+                                setValorBaseNfMod(
+                                  e.target.value !== '' ? parseFloat(e.target.value) : undefined,
+                                )
+                              }
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setOpenModDialog(false)}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" className="bg-primary text-white font-bold">
+                    Salvar Modalidade
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          {/* DIALOG DE TAXA */}
+          <Dialog open={openTaxaDialog} onOpenChange={setOpenTaxaDialog}>
+            <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
+              <form onSubmit={handleSalvarTaxa}>
+                <DialogHeader>
+                  <DialogTitle>
+                    {taxaEditando?.id ? 'Editar Regra de Taxa' : 'Nova Regra de Taxa'}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Configure a regra auditável que será calculada sobre o preço de venda.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4 py-3 text-xs">
+                  <div className="space-y-1">
+                    <Label>Nome da Taxa</Label>
+                    <Input
+                      required
+                      placeholder="Ex: Comissão Shopee < R$ 80, Taxa Logística > 5kg..."
+                      value={taxaEditando?.nome || ''}
+                      onChange={(e) =>
+                        setTaxaEditando((prev) => ({ ...prev, nome: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label>Modalidade Específica</Label>
+                      <Select
+                        value={taxaEditando?.modalidade || 'todas'}
+                        onValueChange={(v) =>
+                          setTaxaEditando((prev) => ({
+                            ...prev,
+                            modalidade: v === 'todas' ? undefined : v,
+                          }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Todas as modalidades" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todas">Todas as Modalidades</SelectItem>
+                          {modalidadesDoCanal.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.nome}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label>Tipo de Regra</Label>
+                      <Select
+                        value={taxaEditando?.tipo_regra || 'comissao'}
+                        onValueChange={(v) =>
+                          setTaxaEditando((prev) => ({
+                            ...prev,
+                            tipo_regra: v as PrecTaxaRecord['tipo_regra'],
+                          }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="comissao">Comissão</SelectItem>
+                          <SelectItem value="tarifa_fixa">Tarifa Fixa</SelectItem>
+                          <SelectItem value="transacao">Transação</SelectItem>
+                          <SelectItem value="frete">Frete</SelectItem>
+                          <SelectItem value="operacao">Operacional</SelectItem>
+                          <SelectItem value="servico">Serviço</SelectItem>
+                          <SelectItem value="afiliado">Afiliado</SelectItem>
+                          <SelectItem value="campanha">Campanha</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label>Base de Cálculo</Label>
+                      <Select
+                        value={taxaEditando?.base_calculo || 'preco_anunciado'}
+                        onValueChange={(v) =>
+                          setTaxaEditando((prev) => ({
+                            ...prev,
+                            base_calculo: v as PrecTaxaRecord['base_calculo'],
+                          }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="preco_anunciado">Preço Anunciado</SelectItem>
+                          <SelectItem value="preco_pago_cliente">
+                            Preço Pago pelo Cliente
+                          </SelectItem>
+                          <SelectItem value="prestacao_fixa">Por Pedido / Fixo</SelectItem>
+                          <SelectItem value="faixa_preco">Por Faixa de Preço</SelectItem>
+                          <SelectItem value="peso">Por Peso (kg)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label>Tipo de Cobrança</Label>
+                      <Select
+                        value={taxaEditando?.tipo_valor || 'percentual'}
+                        onValueChange={(v) =>
+                          setTaxaEditando((prev) => ({
+                            ...prev,
+                            tipo_valor: v as 'percentual' | 'fixo',
+                          }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="percentual">Percentual (%)</SelectItem>
+                          <SelectItem value="fixo">Fixo (R$)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label>
+                      Valor {taxaEditando?.tipo_valor === 'percentual' ? '(%)' : '(R$)'}
+                    </Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      required
+                      value={taxaEditando?.valor ?? 0}
+                      onChange={(e) =>
+                        setTaxaEditando((prev) => ({
+                          ...prev,
+                          valor: parseFloat(e.target.value) || 0,
+                        }))
+                      }
+                    />
+                  </div>
+
+                  {/* SEÇÃO DE CONDIÇÕES CONDICIONAIS */}
+                  <div className="rounded-xl border border-border bg-secondary/30 p-3.5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-xs font-bold text-foreground">
+                          Condição de Aplicação (Opcional)
+                        </Label>
+                        <p className="text-[11px] text-muted-foreground">
+                          Em branco = sem restrição (aplica sempre em todas as vendas).
+                        </p>
+                      </div>
+                      {(taxaEditando?.condicao?.faixa_preco_min !== undefined ||
+                        taxaEditando?.condicao?.faixa_preco_max !== undefined ||
+                        taxaEditando?.condicao?.peso_min_kg !== undefined ||
+                        taxaEditando?.condicao?.peso_max_kg !== undefined ||
+                        taxaEditando?.condicao?.volume_min_cm3 !== undefined ||
+                        taxaEditando?.condicao?.volume_max_cm3 !== undefined ||
+                        taxaEditando?.condicao?.categoria) && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 text-[10px] text-muted-foreground hover:text-destructive"
+                          onClick={() =>
+                            setTaxaEditando((prev) => ({
+                              ...prev,
+                              condicao: undefined,
+                            }))
+                          }
+                        >
+                          Limpar condições
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Faixa de Preço */}
+                    <div className="space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground">
+                        Faixa de Preço do Produto (R$)
+                      </span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="Mínimo (ex: 80.00)"
+                            value={taxaEditando?.condicao?.faixa_preco_min ?? ''}
+                            onChange={(e) => {
+                              const val =
+                                e.target.value === '' ? undefined : parseFloat(e.target.value)
+                              setTaxaEditando((prev) => ({
+                                ...prev,
+                                condicao: {
+                                  ...prev?.condicao,
+                                  faixa_preco_min: val,
+                                },
+                              }))
+                            }}
+                          />
+                          <span className="text-[9px] text-muted-foreground mt-0.5 block">
+                            Aplica se preço ≥ mínimo
+                          </span>
+                        </div>
+                        <div>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="Máximo (ex: 79.99)"
+                            value={taxaEditando?.condicao?.faixa_preco_max ?? ''}
+                            onChange={(e) => {
+                              const val =
+                                e.target.value === '' ? undefined : parseFloat(e.target.value)
+                              setTaxaEditando((prev) => ({
+                                ...prev,
+                                condicao: {
+                                  ...prev?.condicao,
+                                  faixa_preco_max: val,
+                                },
+                              }))
+                            }}
+                          />
+                          <span className="text-[9px] text-muted-foreground mt-0.5 block">
+                            Aplica se preço ≤ máximo
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Faixa de Peso */}
+                    <div className="space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground">
+                        Faixa de Peso do Produto (kg)
+                      </span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="Mínimo kg (ex: 5.0)"
+                            value={
+                              taxaEditando?.condicao?.peso_min_kg ??
+                              (taxaEditando?.condicao?.peso_min_g !== undefined
+                                ? taxaEditando.condicao.peso_min_g / 1000
+                                : '')
+                            }
+                            onChange={(e) => {
+                              const val =
+                                e.target.value === '' ? undefined : parseFloat(e.target.value)
+                              setTaxaEditando((prev) => ({
+                                ...prev,
+                                condicao: {
+                                  ...prev?.condicao,
+                                  peso_min_kg: val,
+                                  peso_min_g: val !== undefined ? val * 1000 : undefined,
+                                },
+                              }))
+                            }}
+                          />
+                          <span className="text-[9px] text-muted-foreground mt-0.5 block">
+                            Aplica se peso ≥ mínimo
+                          </span>
+                        </div>
+                        <div>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="Máximo kg (ex: 5.0)"
+                            value={
+                              taxaEditando?.condicao?.peso_max_kg ??
+                              (taxaEditando?.condicao?.peso_max_g !== undefined
+                                ? taxaEditando.condicao.peso_max_g / 1000
+                                : '')
+                            }
+                            onChange={(e) => {
+                              const val =
+                                e.target.value === '' ? undefined : parseFloat(e.target.value)
+                              setTaxaEditando((prev) => ({
+                                ...prev,
+                                condicao: {
+                                  ...prev?.condicao,
+                                  peso_max_kg: val,
+                                  peso_max_g: val !== undefined ? val * 1000 : undefined,
+                                },
+                              }))
+                            }}
+                          />
+                          <span className="text-[9px] text-muted-foreground mt-0.5 block">
+                            Aplica se peso ≤ máximo
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Faixa de Volume ou Dimensão */}
+                    <div className="space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground">
+                        Faixa de Volume (cm³) ou Dimensão
+                      </span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Input
+                            type="number"
+                            step="1"
+                            placeholder="Vol. Mínimo (cm³)"
+                            value={taxaEditando?.condicao?.volume_min_cm3 ?? ''}
+                            onChange={(e) => {
+                              const val =
+                                e.target.value === '' ? undefined : parseFloat(e.target.value)
+                              setTaxaEditando((prev) => ({
+                                ...prev,
+                                condicao: {
+                                  ...prev?.condicao,
+                                  volume_min_cm3: val,
+                                },
+                              }))
+                            }}
+                          />
+                          <span className="text-[9px] text-muted-foreground mt-0.5 block">
+                            Calculado de CxLxA
+                          </span>
+                        </div>
+                        <div>
+                          <Input
+                            type="number"
+                            step="1"
+                            placeholder="Vol. Máximo (cm³)"
+                            value={taxaEditando?.condicao?.volume_max_cm3 ?? ''}
+                            onChange={(e) => {
+                              const val =
+                                e.target.value === '' ? undefined : parseFloat(e.target.value)
+                              setTaxaEditando((prev) => ({
+                                ...prev,
+                                condicao: {
+                                  ...prev?.condicao,
+                                  volume_max_cm3: val,
+                                },
+                              }))
+                            }}
+                          />
+                          <span className="text-[9px] text-muted-foreground mt-0.5 block">
+                            Limite de volume
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Categoria do Produto */}
+                    <div className="space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground">
+                        Categoria Específica (Opcional)
+                      </span>
+                      <Input
+                        placeholder="Ex: Cama, Mesa e Banho ou Eletrônicos..."
+                        value={taxaEditando?.condicao?.categoria || ''}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          setTaxaEditando((prev) => ({
+                            ...prev,
+                            condicao: {
+                              ...prev?.condicao,
+                              categoria: val || undefined,
+                            },
+                          }))
+                        }}
+                      />
+                      <span className="text-[9px] text-muted-foreground block leading-tight">
+                        Suporta termos separados por vírgula (ex.: cama, mesa e banho). A comparação
+                        ignora maiúsculas e acentos e casa por termo. Se o produto estiver sem
+                        categoria, a taxa não será aplicada e o comparador exibirá um aviso.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setOpenTaxaDialog(false)}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" className="bg-primary text-white font-bold">
+                    Salvar Regra
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          {/* DIÁLOGO DE CONFIRMAÇÃO DE EXCLUSÃO DE CANAL */}
+          <Dialog
+            open={!!canalExcluindo}
+            onOpenChange={(open) => {
+              if (!open && !executandoExclusaoCanal) {
+                setCanalExcluindo(null)
+              }
+            }}
+          >
+            <DialogContent className="sm:max-w-[480px]">
+              <DialogHeader>
+                <div className="flex items-center gap-2.5 text-destructive mb-1">
+                  <div className="h-9 w-9 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="h-5 w-5 text-destructive" />
+                  </div>
+                  <DialogTitle className="text-base font-bold text-foreground">
+                    Excluir Canal de Venda
+                  </DialogTitle>
+                </div>
+                <DialogDescription className="text-xs text-muted-foreground pt-1">
+                  Você está prestes a excluir o canal{' '}
+                  <strong className="text-foreground font-semibold">
+                    &ldquo;{canalExcluindo?.nome}&rdquo;
+                  </strong>
+                  . Esta ação não pode ser desfeita.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="py-2 text-xs space-y-3">
+                {verificandoVinculosCanal ? (
+                  <div className="p-4 rounded-xl border border-border bg-secondary/20 flex items-center gap-3">
+                    <Skeleton className="h-4 w-4 rounded-full" />
+                    <span className="text-xs text-muted-foreground">
+                      Verificando taxas, modalidades e precificações vinculadas...
+                    </span>
+                  </div>
+                ) : (
+                  (() => {
+                    const txCount = contagemVinculosCanal?.taxas ?? 0
+                    const modCount = contagemVinculosCanal?.modalidades ?? 0
+                    const precCount = contagemVinculosCanal?.precificacoes ?? 0
+                    const temVinculos = txCount > 0 || modCount > 0 || precCount > 0
+
+                    if (temVinculos) {
+                      return (
+                        <div className="space-y-3">
+                          <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200">
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                              <div className="space-y-1">
+                                <span className="font-bold block text-xs">
+                                  Existem dados vinculados a este canal
+                                </span>
+                                <p className="text-[11px] leading-relaxed opacity-90">
+                                  Para proteger a integridade do seu catálogo e do histórico de
+                                  cálculos, veja os registros dependentes:
+                                </p>
+                                <div className="flex flex-wrap gap-1.5 pt-1">
+                                  {txCount > 0 && (
+                                    <Badge
+                                      variant="secondary"
+                                      className="text-[10px] bg-background/80 font-mono"
+                                    >
+                                      {txCount} {txCount === 1 ? 'taxa' : 'taxas'}
+                                    </Badge>
+                                  )}
+                                  {modCount > 0 && (
+                                    <Badge
+                                      variant="secondary"
+                                      className="text-[10px] bg-background/80 font-mono"
+                                    >
+                                      {modCount} {modCount === 1 ? 'modalidade' : 'modalidades'}
+                                    </Badge>
+                                  )}
+                                  {precCount > 0 && (
+                                    <Badge
+                                      variant="secondary"
+                                      className="text-[10px] bg-background/80 font-mono"
+                                    >
+                                      {precCount}{' '}
+                                      {precCount === 1 ? 'precificação' : 'precificações'}
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="p-3 rounded-xl border border-border bg-secondary/20 space-y-2">
+                            <span className="text-[11px] font-bold text-foreground block">
+                              Recomendação de segurança:
+                            </span>
+                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                              Se você não vende mais por este canal,{' '}
+                              <strong className="text-foreground">desative-o</strong> em vez de
+                              excluir. Ele deixará de ser sugerido nas novas simulações mas o
+                              histórico de produtos e taxas permanecerá intacto.
+                            </p>
+                          </div>
+                        </div>
+                      )
+                    }
+
+                    return (
+                      <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200 flex items-start gap-2.5">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold block text-xs">
+                            Nenhum vínculo dependente detectado
+                          </span>
+                          <p className="text-[11px] opacity-90 mt-0.5">
+                            Este canal não possui taxas, modalidades ou precificações cadastradas. A
+                            remoção pode ser feita com total segurança.
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  })()
+                )}
+              </div>
+
+              <DialogFooter className="flex-col sm:flex-row gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={executandoExclusaoCanal}
+                  onClick={() => setCanalExcluindo(null)}
+                >
+                  Cancelar
+                </Button>
+
+                {(() => {
+                  const txCount = contagemVinculosCanal?.taxas ?? 0
+                  const modCount = contagemVinculosCanal?.modalidades ?? 0
+                  const precCount = contagemVinculosCanal?.precificacoes ?? 0
+                  const temVinculos = txCount > 0 || modCount > 0 || precCount > 0
+
+                  if (temVinculos) {
+                    return (
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="border-primary/40 text-primary hover:bg-primary/10"
+                          disabled={executandoExclusaoCanal || verificandoVinculosCanal}
+                          onClick={handleDesativarCanal}
+                        >
+                          Apenas Desativar Canal
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          disabled={executandoExclusaoCanal || verificandoVinculosCanal}
+                          onClick={() => handleConfirmarExclusaoCanal(true)}
+                        >
+                          {executandoExclusaoCanal ? 'Excluindo...' : 'Excluir Canal e Vínculos'}
+                        </Button>
+                      </>
+                    )
+                  }
+
+                  return (
                     <Button
                       type="button"
                       variant="destructive"
                       disabled={executandoExclusaoCanal || verificandoVinculosCanal}
-                      onClick={() => handleConfirmarExclusaoCanal(true)}
+                      onClick={() => handleConfirmarExclusaoCanal(false)}
                     >
-                      {executandoExclusaoCanal ? 'Excluindo...' : 'Excluir Canal e Vínculos'}
+                      {executandoExclusaoCanal ? 'Excluindo...' : 'Excluir Canal'}
                     </Button>
-                  </>
-                )
-              }
+                  )
+                })()}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
-              return (
+          {/* DIÁLOGO DE CONFIRMAÇÃO DE EXCLUSÃO DE MODALIDADE */}
+          <Dialog
+            open={!!modalidadeExcluindo}
+            onOpenChange={(open) => {
+              if (!open && !executandoExclusaoMod) {
+                setModalidadeExcluindo(null)
+              }
+            }}
+          >
+            <DialogContent className="sm:max-w-[440px]">
+              <DialogHeader>
+                <div className="flex items-center gap-2.5 text-destructive mb-1">
+                  <div className="h-9 w-9 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="h-5 w-5 text-destructive" />
+                  </div>
+                  <DialogTitle className="text-base font-bold text-foreground">
+                    Excluir Modalidade de Venda
+                  </DialogTitle>
+                </div>
+                <DialogDescription className="text-xs text-muted-foreground pt-1">
+                  Deseja realmente remover a modalidade{' '}
+                  <strong className="text-foreground font-semibold">
+                    &ldquo;{modalidadeExcluindo?.nome}&rdquo;
+                  </strong>
+                  ?
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="py-2 text-xs space-y-3">
+                {verificandoVinculosMod ? (
+                  <div className="p-4 rounded-xl border border-border bg-secondary/20 flex items-center gap-3">
+                    <Skeleton className="h-4 w-4 rounded-full" />
+                    <span className="text-xs text-muted-foreground">
+                      Verificando taxas e precificações vinculadas...
+                    </span>
+                  </div>
+                ) : (
+                  (() => {
+                    const txCount = contagemVinculosModalidade?.taxas ?? 0
+                    const precCount = contagemVinculosModalidade?.precificacoes ?? 0
+                    const temVinculos = txCount > 0 || precCount > 0
+
+                    if (temVinculos) {
+                      return (
+                        <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                            <div className="space-y-1">
+                              <span className="font-bold block text-xs">
+                                Atenção aos dados dependentes
+                              </span>
+                              <p className="text-[11px] leading-relaxed opacity-90">
+                                Existem{' '}
+                                {txCount > 0 && (
+                                  <strong>
+                                    {txCount} {txCount === 1 ? 'taxa' : 'taxas'}
+                                  </strong>
+                                )}
+                                {txCount > 0 && precCount > 0 && ' e '}
+                                {precCount > 0 && (
+                                  <strong>
+                                    {precCount} {precCount === 1 ? 'precificação' : 'precificações'}
+                                  </strong>
+                                )}{' '}
+                                específicas para esta modalidade. Ao excluir, esses registros também
+                                serão removidos para evitar erros nos cálculos.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    }
+
+                    return (
+                      <p className="text-xs text-muted-foreground">
+                        Esta modalidade não possui taxas ou precificações associadas. Ela será
+                        removida imediatamente do canal.
+                      </p>
+                    )
+                  })()
+                )}
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={executandoExclusaoMod}
+                  onClick={() => setModalidadeExcluindo(null)}
+                >
+                  Cancelar
+                </Button>
                 <Button
                   type="button"
                   variant="destructive"
-                  disabled={executandoExclusaoCanal || verificandoVinculosCanal}
-                  onClick={() => handleConfirmarExclusaoCanal(false)}
+                  disabled={executandoExclusaoMod || verificandoVinculosMod}
+                  onClick={() => {
+                    const temVinculos =
+                      (contagemVinculosModalidade?.taxas ?? 0) > 0 ||
+                      (contagemVinculosModalidade?.precificacoes ?? 0) > 0
+                    handleConfirmarExclusaoModalidade(temVinculos)
+                  }}
                 >
-                  {executandoExclusaoCanal ? 'Excluindo...' : 'Excluir Canal'}
+                  {executandoExclusaoMod ? 'Excluindo...' : 'Excluir Modalidade'}
                 </Button>
-              )
-            })()}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+      </Tabs>
 
-      {/* DIÁLOGO DE CONFIRMAÇÃO DE EXCLUSÃO DE MODALIDADE */}
-      <Dialog
-        open={!!modalidadeExcluindo}
-        onOpenChange={(open) => {
-          if (!open && !executandoExclusaoMod) {
-            setModalidadeExcluindo(null)
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-[440px]">
-          <DialogHeader>
-            <div className="flex items-center gap-2.5 text-destructive mb-1">
-              <div className="h-9 w-9 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
-                <AlertTriangle className="h-5 w-5 text-destructive" />
-              </div>
-              <DialogTitle className="text-base font-bold text-foreground">
-                Excluir Modalidade de Venda
-              </DialogTitle>
-            </div>
-            <DialogDescription className="text-xs text-muted-foreground pt-1">
-              Deseja realmente remover a modalidade{' '}
-              <strong className="text-foreground font-semibold">
-                &ldquo;{modalidadeExcluindo?.nome}&rdquo;
-              </strong>
-              ?
-            </DialogDescription>
-          </DialogHeader>
+      {/* Diálogos Globais da Matriz: Legendas e Categorias */}
+      <LegendasMatrizDialog
+        open={openLegendasDialog}
+        onOpenChange={setOpenLegendasDialog}
+        onLegendaUpdated={carregarDadosMatriz}
+      />
 
-          <div className="py-2 text-xs space-y-3">
-            {verificandoVinculosMod ? (
-              <div className="p-4 rounded-xl border border-border bg-secondary/20 flex items-center gap-3">
-                <Skeleton className="h-4 w-4 rounded-full" />
-                <span className="text-xs text-muted-foreground">
-                  Verificando taxas e precificações vinculadas...
-                </span>
-              </div>
-            ) : (
-              (() => {
-                const txCount = contagemVinculosModalidade?.taxas ?? 0
-                const precCount = contagemVinculosModalidade?.precificacoes ?? 0
-                const temVinculos = txCount > 0 || precCount > 0
-
-                if (temVinculos) {
-                  return (
-                    <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200">
-                      <div className="flex items-start gap-2">
-                        <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                        <div className="space-y-1">
-                          <span className="font-bold block text-xs">
-                            Atenção aos dados dependentes
-                          </span>
-                          <p className="text-[11px] leading-relaxed opacity-90">
-                            Existem{' '}
-                            {txCount > 0 && (
-                              <strong>
-                                {txCount} {txCount === 1 ? 'taxa' : 'taxas'}
-                              </strong>
-                            )}
-                            {txCount > 0 && precCount > 0 && ' e '}
-                            {precCount > 0 && (
-                              <strong>
-                                {precCount} {precCount === 1 ? 'precificação' : 'precificações'}
-                              </strong>
-                            )}{' '}
-                            específicas para esta modalidade. Ao excluir, esses registros também
-                            serão removidos para evitar erros nos cálculos.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                }
-
-                return (
-                  <p className="text-xs text-muted-foreground">
-                    Esta modalidade não possui taxas ou precificações associadas. Ela será removida
-                    imediatamente do canal.
-                  </p>
-                )
-              })()
-            )}
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={executandoExclusaoMod}
-              onClick={() => setModalidadeExcluindo(null)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={executandoExclusaoMod || verificandoVinculosMod}
-              onClick={() => {
-                const temVinculos =
-                  (contagemVinculosModalidade?.taxas ?? 0) > 0 ||
-                  (contagemVinculosModalidade?.precificacoes ?? 0) > 0
-                handleConfirmarExclusaoModalidade(temVinculos)
-              }}
-            >
-              {executandoExclusaoMod ? 'Excluindo...' : 'Excluir Modalidade'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CategoriasProdutoDialog
+        open={openCategoriasDialog}
+        onOpenChange={setOpenCategoriasDialog}
+        onCategoriaUpdated={carregarDadosMatriz}
+      />
     </div>
   )
 }
