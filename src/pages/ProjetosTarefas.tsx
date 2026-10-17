@@ -17,8 +17,13 @@ import {
   ChevronsUpDown,
   ChevronsDownUp,
   AlertTriangle,
+  ArrowUp,
+  ArrowDown,
+  GripVertical,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Switch } from '@/components/ui/switch'
 import { PageHeader } from '@/components/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -40,6 +45,14 @@ import {
   getTarefaPendenciasResumo,
   loadPersistedExpandedTarefas,
   savePersistedExpandedTarefas,
+  loadPersistedCriterioOrdenacao,
+  savePersistedCriterioOrdenacao,
+  loadPersistedManualOrderMap,
+  savePersistedManualOrderMap,
+  sortTarefas,
+  reorderTarefas,
+  insertTarefaAt,
+  type CriterioOrdenacaoTarefas,
 } from '@/lib/projetosTarefasRules'
 import type { Projeto, Tarefa, MetaMeta, TarefaEtapa } from '@/types/domain'
 
@@ -84,6 +97,33 @@ export default function ProjetosTarefas() {
   useEffect(() => {
     savePersistedExpandedTarefas(expandedTarefaIds)
   }, [expandedTarefaIds])
+
+  // MODO "Organizar ordem" (Toggle) e Seletor de Critério ('manual' | 'prazo' | 'prioridade')
+  const [isOrganizarOrdem, setIsOrganizarOrdem] = useState(false)
+  const [criterioOrdenacao, setCriterioOrdenacao] = useState<CriterioOrdenacaoTarefas>(() =>
+    loadPersistedCriterioOrdenacao(),
+  )
+  const [manualOrderMap, setManualOrderMap] = useState<Partial<Record<TarefaEtapa, string[]>>>(() =>
+    loadPersistedManualOrderMap(),
+  )
+
+  // Ao ativar o toggle "Organizar ordem", garante que o critério passe para 'manual'
+  const handleToggleOrganizarOrdem = (checked: boolean) => {
+    setIsOrganizarOrdem(checked)
+    if (checked) {
+      setCriterioOrdenacao('manual')
+      savePersistedCriterioOrdenacao('manual')
+    }
+  }
+
+  const handleCriterioChange = (novoCriterio: CriterioOrdenacaoTarefas) => {
+    setCriterioOrdenacao(novoCriterio)
+    savePersistedCriterioOrdenacao(novoCriterio)
+  }
+
+  // Drag and drop state para reordenação manual dentro ou entre colunas
+  const [draggedTarefaId, setDraggedTarefaId] = useState<string | null>(null)
+  const [dragOverTarefaId, setDragOverTarefaId] = useState<string | null>(null)
 
   const toggleTarefaExpanded = useCallback((tarefaId: string, e?: React.SyntheticEvent) => {
     e?.stopPropagation()
@@ -219,21 +259,94 @@ export default function ProjetosTarefas() {
     )
   }, [metas, matchesContext])
 
-  // Colunas do Kanban
-  const colAFazer = useMemo(
-    () => filteredTarefas.filter((t) => t.etapa === 'a_fazer'),
-    [filteredTarefas],
-  )
-  const colEmProgresso = useMemo(
-    () => filteredTarefas.filter((t) => t.etapa === 'em_progresso'),
-    [filteredTarefas],
-  )
-  const colConcluida = useMemo(
-    () => filteredTarefas.filter((t) => t.etapa === 'concluida'),
-    [filteredTarefas],
+  // Colunas do Kanban com ordenação aplicada conforme o critério vigente
+  const colAFazer = useMemo(() => {
+    const list = filteredTarefas.filter((t) => t.etapa === 'a_fazer')
+    return sortTarefas(list, criterioOrdenacao, manualOrderMap.a_fazer)
+  }, [filteredTarefas, criterioOrdenacao, manualOrderMap.a_fazer])
+
+  const colEmProgresso = useMemo(() => {
+    const list = filteredTarefas.filter((t) => t.etapa === 'em_progresso')
+    return sortTarefas(list, criterioOrdenacao, manualOrderMap.em_progresso)
+  }, [filteredTarefas, criterioOrdenacao, manualOrderMap.em_progresso])
+
+  const colConcluida = useMemo(() => {
+    const list = filteredTarefas.filter((t) => t.etapa === 'concluida')
+    return sortTarefas(list, criterioOrdenacao, manualOrderMap.concluida)
+  }, [filteredTarefas, criterioOrdenacao, manualOrderMap.concluida])
+
+  // Atualiza e persiste a ordem manual de uma coluna inteira no banco e no cache local
+  const persistColumnOrder = useCallback(
+    async (etapa: TarefaEtapa, reorderedColumnTarefas: Tarefa[]) => {
+      const newIdList = reorderedColumnTarefas.map((t) => t.id)
+
+      // 1. Atualiza estado e localStorage
+      const updatedMap = {
+        ...manualOrderMap,
+        [etapa]: newIdList,
+      }
+      setManualOrderMap(updatedMap)
+      savePersistedManualOrderMap(updatedMap)
+
+      // 2. Atualiza estado local de tarefas com novos números de ordem
+      const orderValuesById = new Map<string, number>()
+      reorderedColumnTarefas.forEach((t, idx) => {
+        orderValuesById.set(t.id, idx * 10)
+      })
+
+      setTarefas((prev) =>
+        prev.map((t) => {
+          if (orderValuesById.has(t.id)) {
+            return { ...t, ordem: orderValuesById.get(t.id)!, etapa }
+          }
+          return t
+        }),
+      )
+
+      // 3. Persistência assíncrona no banco via updateOrdensLote
+      try {
+        const batchUpdates = reorderedColumnTarefas.map((t, idx) => ({
+          id: t.id,
+          ordem: idx * 10,
+          etapa,
+        }))
+        await projetosTarefasService.updateOrdensLote(batchUpdates)
+      } catch (err) {
+        console.warn('Erro ao persistir ordem no banco:', err)
+      }
+    },
+    [manualOrderMap],
   )
 
-  // Ações de mover etapa da tarefa
+  // Reordenação por setas (subir/descer) na lista da coluna
+  const handleMoveOrdemSeta = useCallback(
+    async (tarefa: Tarefa, direction: 'up' | 'down', e?: React.MouseEvent) => {
+      e?.stopPropagation()
+      if (!can(user?.role, 'writeFinance')) {
+        toast({ title: 'Sem permissão para reordenar tarefa', variant: 'destructive' })
+        return
+      }
+
+      const columnList =
+        tarefa.etapa === 'a_fazer'
+          ? colAFazer
+          : tarefa.etapa === 'em_progresso'
+            ? colEmProgresso
+            : colConcluida
+
+      const currentIndex = columnList.findIndex((t) => t.id === tarefa.id)
+      if (currentIndex === -1) return
+
+      const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
+      if (targetIndex < 0 || targetIndex >= columnList.length) return
+
+      const reordered = reorderTarefas(columnList, currentIndex, targetIndex)
+      await persistColumnOrder(tarefa.etapa, reordered)
+    },
+    [colAFazer, colEmProgresso, colConcluida, persistColumnOrder, user?.role, toast],
+  )
+
+  // Ações de mover etapa da tarefa (via botões Avançar/Voltar)
   const handleMoveEtapa = async (tarefaId: string, novaEtapa: TarefaEtapa) => {
     if (!can(user?.role, 'writeFinance')) {
       toast({ title: 'Sem permissão', variant: 'destructive' })
@@ -250,20 +363,113 @@ export default function ProjetosTarefas() {
     }
   }
 
-  // Suporte a HTML5 Drag and Drop no desktop
+  // Suporte a HTML5 Drag and Drop com reordenação exata e troca de coluna
   const handleDragStart = (e: React.DragEvent, tarefaId: string) => {
     e.dataTransfer.setData('text/plain', tarefaId)
+    setDraggedTarefaId(tarefaId)
   }
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOverCard = (e: React.DragEvent, overTarefaId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (dragOverTarefaId !== overTarefaId) {
+      setDragOverTarefaId(overTarefaId)
+    }
+  }
+
+  const handleDragOverColumn = (e: React.DragEvent) => {
     e.preventDefault()
   }
 
-  const handleDrop = (e: React.DragEvent, targetEtapa: TarefaEtapa) => {
+  const handleDropOnCard = async (
+    e: React.DragEvent,
+    targetTarefa: Tarefa,
+    targetEtapa: TarefaEtapa,
+  ) => {
     e.preventDefault()
-    const tarefaId = e.dataTransfer.getData('text/plain')
-    if (tarefaId) {
-      handleMoveEtapa(tarefaId, targetEtapa)
+    e.stopPropagation()
+    const sourceTarefaId = e.dataTransfer.getData('text/plain') || draggedTarefaId
+    setDraggedTarefaId(null)
+    setDragOverTarefaId(null)
+
+    if (!sourceTarefaId || sourceTarefaId === targetTarefa.id) return
+
+    const sourceTarefa = tarefas.find((t) => t.id === sourceTarefaId)
+    if (!sourceTarefa) return
+
+    const targetColumnList =
+      targetEtapa === 'a_fazer'
+        ? colAFazer
+        : targetEtapa === 'em_progresso'
+          ? colEmProgresso
+          : colConcluida
+
+    const targetIndex = targetColumnList.findIndex((t) => t.id === targetTarefa.id)
+    if (targetIndex === -1) return
+
+    if (sourceTarefa.etapa === targetEtapa) {
+      // Reordenação na mesma coluna
+      const currentIndex = targetColumnList.findIndex((t) => t.id === sourceTarefaId)
+      if (currentIndex !== -1) {
+        const reordered = reorderTarefas(targetColumnList, currentIndex, targetIndex)
+        await persistColumnOrder(targetEtapa, reordered)
+      }
+    } else {
+      // Movimentação para outra coluna na posição específica
+      const reorderedTarget = insertTarefaAt(
+        targetColumnList,
+        { ...sourceTarefa, etapa: targetEtapa },
+        targetIndex,
+      )
+      await persistColumnOrder(targetEtapa, reorderedTarget)
+
+      // Atualiza também a coluna de origem removendo o item
+      const sourceColumnList =
+        sourceTarefa.etapa === 'a_fazer'
+          ? colAFazer
+          : sourceTarefa.etapa === 'em_progresso'
+            ? colEmProgresso
+            : colConcluida
+      const updatedSource = sourceColumnList.filter((t) => t.id !== sourceTarefaId)
+      await persistColumnOrder(sourceTarefa.etapa, updatedSource)
+    }
+  }
+
+  const handleDropOnColumn = async (e: React.DragEvent, targetEtapa: TarefaEtapa) => {
+    e.preventDefault()
+    const sourceTarefaId = e.dataTransfer.getData('text/plain') || draggedTarefaId
+    setDraggedTarefaId(null)
+    setDragOverTarefaId(null)
+
+    if (!sourceTarefaId) return
+
+    const sourceTarefa = tarefas.find((t) => t.id === sourceTarefaId)
+    if (!sourceTarefa) return
+
+    if (sourceTarefa.etapa !== targetEtapa) {
+      const targetColumnList =
+        targetEtapa === 'a_fazer'
+          ? colAFazer
+          : targetEtapa === 'em_progresso'
+            ? colEmProgresso
+            : colConcluida
+
+      // Insere no fim da coluna de destino
+      const reorderedTarget = insertTarefaAt(
+        targetColumnList,
+        { ...sourceTarefa, etapa: targetEtapa },
+        targetColumnList.length,
+      )
+      await persistColumnOrder(targetEtapa, reorderedTarget)
+
+      const sourceColumnList =
+        sourceTarefa.etapa === 'a_fazer'
+          ? colAFazer
+          : sourceTarefa.etapa === 'em_progresso'
+            ? colEmProgresso
+            : colConcluida
+      const updatedSource = sourceColumnList.filter((t) => t.id !== sourceTarefaId)
+      await persistColumnOrder(sourceTarefa.etapa, updatedSource)
     }
   }
 
@@ -351,7 +557,7 @@ export default function ProjetosTarefas() {
     return { percentual: 0, tipo: 'tarefas', label: '0% (vincule um projeto)' }
   }
 
-  const renderTarefaCard = (tarefa: Tarefa) => {
+  const renderTarefaCard = (tarefa: Tarefa, indexInColumn: number, totalInColumn: number) => {
     const isExpanded = expandedTarefaIds.has(tarefa.id)
     const resumo = getTarefaPendenciasResumo(tarefa)
 
@@ -370,19 +576,24 @@ export default function ProjetosTarefas() {
     }
 
     const contentId = `tarefa-content-${tarefa.id}`
+    const isBeingDraggedOver = dragOverTarefaId === tarefa.id
 
     return (
       <div
         key={tarefa.id}
         draggable
         onDragStart={(e) => handleDragStart(e, tarefa.id)}
+        onDragOver={(e) => handleDragOverCard(e, tarefa.id)}
+        onDrop={(e) => handleDropOnCard(e, tarefa, tarefa.etapa)}
         className={`rounded-xl border bg-white shadow-xs transition-all duration-200 select-none ${
+          isBeingDraggedOver ? 'border-primary ring-2 ring-primary/20 scale-[1.01]' : ''
+        } ${
           isExpanded
             ? 'border-primary/40 shadow-sm'
             : 'border-border hover:border-primary/40 hover:shadow-xs'
         }`}
       >
-        {/* CABEÇALHO DO ACCORDION: Linha compacta com apenas o TÍTULO (padrão colapsado) */}
+        {/* CABEÇALHO DO ACCORDION: Linha compacta com TÍTULO e suporte a arrastar pelo título ou grip */}
         <div
           role="button"
           tabIndex={0}
@@ -402,7 +613,19 @@ export default function ProjetosTarefas() {
               : 'hover:bg-muted/10'
           }`}
         >
-          <div className="flex items-start gap-2.5 min-w-0 flex-1">
+          <div className="flex items-start gap-2 min-w-0 flex-1">
+            {/* Controles de Organizar Ordem: Alça Grip de Arrasto */}
+            {isOrganizarOrdem && (
+              <span
+                className="flex items-center justify-center h-6 w-5 text-muted-foreground/80 hover:text-primary cursor-grab active:cursor-grabbing shrink-0 mt-0.5"
+                title="Arrastar para reordenar tarefa"
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <GripVertical className="h-4 w-4" />
+              </span>
+            )}
+
             {/* Botão Chevron Accordion */}
             <span
               className={`flex items-center justify-center h-6 w-6 rounded-md border text-muted-foreground transition-all shrink-0 mt-0.5 ${
@@ -429,11 +652,39 @@ export default function ProjetosTarefas() {
             </h4>
           </div>
 
-          {/* INDICADORES COMPACTOS DE PENDÊNCIAS / ALERTAS (discretos e informativos) */}
+          {/* INDICADORES COMPACTOS DE PENDÊNCIAS / ALERTAS E BOTÕES DE SETAS NO MODO ORGANIZAR */}
           <div
             className="flex items-center gap-1.5 shrink-0 pt-0.5 self-start"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Controles de Reordenação: Setas Subir e Descer ↑↓ (apenas com Organizar Ordem ativo) */}
+            {isOrganizarOrdem && (
+              <div className="flex items-center bg-muted/60 rounded-md p-0.5 border border-border/80 mr-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  disabled={indexInColumn === 0}
+                  className="h-5 w-5 text-muted-foreground hover:text-primary disabled:opacity-25"
+                  onClick={(e) => handleMoveOrdemSeta(tarefa, 'up', e)}
+                  title="Subir na lista"
+                >
+                  <ArrowUp className="h-3 w-3" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  disabled={indexInColumn === totalInColumn - 1}
+                  className="h-5 w-5 text-muted-foreground hover:text-primary disabled:opacity-25"
+                  onClick={(e) => handleMoveOrdemSeta(tarefa, 'down', e)}
+                  title="Descer na lista"
+                >
+                  <ArrowDown className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
+
             {/* Indicador de subtarefas / checklist pendentes */}
             {resumo.hasChecklist && (
               <span
@@ -790,7 +1041,51 @@ export default function ProjetosTarefas() {
                 </Button>
               </div>
 
-              <span className="text-xs text-muted-foreground whitespace-nowrap">Filtrar por:</span>
+              {/* TOGGLE MODO ORGANIZAR ORDEM E SELETOR DE CRITÉRIO */}
+              <div className="flex items-center gap-2 border-r border-border/70 pr-2 mr-1">
+                <div
+                  className="flex items-center gap-2 px-2 py-1 rounded-lg bg-muted/40 border border-border/60 hover:bg-muted/70 transition-colors cursor-pointer"
+                  onClick={() => handleToggleOrganizarOrdem(!isOrganizarOrdem)}
+                  title="Ativar modo de reordenação manual nas colunas do quadro"
+                >
+                  <Switch
+                    id="toggle-organizar-ordem"
+                    checked={isOrganizarOrdem}
+                    onCheckedChange={handleToggleOrganizarOrdem}
+                    className="scale-90 data-[state=checked]:bg-primary"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <label
+                    htmlFor="toggle-organizar-ordem"
+                    className="text-xs font-semibold text-foreground cursor-pointer select-none whitespace-nowrap flex items-center gap-1"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <SlidersHorizontal className="h-3 w-3 text-primary" />
+                    <span>Organizar ordem</span>
+                  </label>
+                </div>
+
+                {/* Seletor de Critério de Ordenação */}
+                <div className="flex items-center gap-1">
+                  <span className="text-[11px] text-muted-foreground whitespace-nowrap hidden md:inline">
+                    Ordem:
+                  </span>
+                  <select
+                    value={criterioOrdenacao}
+                    onChange={(e) =>
+                      handleCriterioChange(e.target.value as CriterioOrdenacaoTarefas)
+                    }
+                    className="h-8 text-xs rounded-lg border border-border bg-white px-2 py-1 text-foreground font-medium focus:ring-1 focus:ring-primary"
+                    title="Selecione o critério de ordenação das colunas"
+                  >
+                    <option value="manual">Manual (Personalizada)</option>
+                    <option value="prazo">Prazo (Mais próximo)</option>
+                    <option value="prioridade">Prioridade (Mais urgente)</option>
+                  </select>
+                </div>
+              </div>
+
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Filtrar:</span>
               <select
                 value={selectedProjetoFilter}
                 onChange={(e) => setSelectedProjetoFilter(e.target.value)}
@@ -813,8 +1108,8 @@ export default function ProjetosTarefas() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* COLUNA: A FAZER */}
             <div
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, 'a_fazer')}
+              onDragOver={handleDragOverColumn}
+              onDrop={(e) => handleDropOnColumn(e, 'a_fazer')}
               className="bg-muted/40 rounded-xl p-3 border border-border flex flex-col min-h-[500px]"
             >
               <div className="flex items-center justify-between pb-3 border-b border-border/80">
@@ -844,7 +1139,7 @@ export default function ProjetosTarefas() {
               </div>
 
               <div className="space-y-3 mt-3 flex-1 overflow-y-auto">
-                {colAFazer.map((tarefa) => renderTarefaCard(tarefa))}
+                {colAFazer.map((tarefa, idx) => renderTarefaCard(tarefa, idx, colAFazer.length))}
                 {colAFazer.length === 0 && (
                   <div className="py-12 text-center text-xs text-muted-foreground">
                     Nenhuma tarefa nesta etapa
@@ -855,8 +1150,8 @@ export default function ProjetosTarefas() {
 
             {/* COLUNA: EM PROGRESSO */}
             <div
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, 'em_progresso')}
+              onDragOver={handleDragOverColumn}
+              onDrop={(e) => handleDropOnColumn(e, 'em_progresso')}
               className="bg-muted/40 rounded-xl p-3 border border-border flex flex-col min-h-[500px]"
             >
               <div className="flex items-center justify-between pb-3 border-b border-border/80">
@@ -886,7 +1181,9 @@ export default function ProjetosTarefas() {
               </div>
 
               <div className="space-y-3 mt-3 flex-1 overflow-y-auto">
-                {colEmProgresso.map((tarefa) => renderTarefaCard(tarefa))}
+                {colEmProgresso.map((tarefa, idx) =>
+                  renderTarefaCard(tarefa, idx, colEmProgresso.length),
+                )}
                 {colEmProgresso.length === 0 && (
                   <div className="py-12 text-center text-xs text-muted-foreground">
                     Nenhuma tarefa em andamento
@@ -897,8 +1194,8 @@ export default function ProjetosTarefas() {
 
             {/* COLUNA: CONCLUÍDA */}
             <div
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, 'concluida')}
+              onDragOver={handleDragOverColumn}
+              onDrop={(e) => handleDropOnColumn(e, 'concluida')}
               className="bg-muted/40 rounded-xl p-3 border border-border flex flex-col min-h-[500px]"
             >
               <div className="flex items-center justify-between pb-3 border-b border-border/80">
@@ -928,7 +1225,9 @@ export default function ProjetosTarefas() {
               </div>
 
               <div className="space-y-3 mt-3 flex-1 overflow-y-auto">
-                {colConcluida.map((tarefa) => renderTarefaCard(tarefa))}
+                {colConcluida.map((tarefa, idx) =>
+                  renderTarefaCard(tarefa, idx, colConcluida.length),
+                )}
                 {colConcluida.length === 0 && (
                   <div className="py-12 text-center text-xs text-muted-foreground">
                     Nenhuma tarefa concluída ainda

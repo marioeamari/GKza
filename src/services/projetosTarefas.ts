@@ -102,8 +102,24 @@ export const projetosTarefasService = {
     return pb.collection('tarefas').update<Tarefa>(id, data)
   },
 
-  async updateEtapa(id: string, etapa: TarefaEtapa): Promise<Tarefa> {
-    return pb.collection('tarefas').update<Tarefa>(id, { etapa })
+  async updateEtapa(id: string, etapa: TarefaEtapa, ordem?: number): Promise<Tarefa> {
+    const payload: Partial<CreateTarefaInput> = { etapa }
+    if (typeof ordem === 'number') {
+      payload.ordem = ordem
+    }
+    return pb.collection('tarefas').update<Tarefa>(id, payload)
+  },
+
+  async updateOrdensLote(
+    updates: Array<{ id: string; ordem: number; etapa?: TarefaEtapa }>,
+  ): Promise<void> {
+    await Promise.all(
+      updates.map((u) => {
+        const payload: { ordem: number; etapa?: TarefaEtapa } = { ordem: u.ordem }
+        if (u.etapa) payload.etapa = u.etapa
+        return pb.collection('tarefas').update(u.id, payload)
+      }),
+    )
   },
 
   async deleteTarefa(id: string): Promise<boolean> {

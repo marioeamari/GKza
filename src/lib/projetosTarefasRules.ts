@@ -19,18 +19,46 @@
  *      * Contagem de subtarefas/checklist pendentes (ex: '2/5 pendentes' ou '✓ 5/5')
  *      * Alerta discreto de atraso ou vencimento iminente (se prazo expirou ou é hoje)
  *      * Ponto/badge sutil da prioridade quando alta ou urgente
- * 4. Persistência de estado de expansão:
+ * 5. Persistência de estado de expansão:
  *    - O estado de quais tarefas estão expandidas é persistido (ex.: localStorage com fallback em memória),
  *      garantindo que alternar entre abas (Quadro, Projetos, Metas) ou recarregar a tela não resete o estado escolhido.
- * 5. Acessibilidade:
+ * 6. NOVO - MODO "ORGANIZAR ORDEM" & SELETOR DE CRITÉRIO DE ORDENAÇÃO:
+ *    - O topo do quadro Kanban conta com um switch/toggle "Organizar ordem" ao lado dos botões "Expandir tudo" / "Recolher tudo".
+ *    - Ao ATIVAR o toggle:
+ *      * Ativa controles explícitos de reordenação em cada tarefa nas colunas (A Fazer, Em Progresso, Concluída):
+ *        alça/grip de arrasto (drag-and-drop) e botões de setas ↑ e ↓ para subir ou descer na coluna.
+ *      * Arrastar pelo título ou grip na linha compacta do accordion funciona fluidamente mesmo colapsado.
+ *      * O modo força/seleciona o critério 'manual'.
+ *    - Ao DESATIVAR o toggle:
+ *      * Os controles de reordenação são ocultados e o quadro exibe a lista limpa com a ordenação vigente.
+ *    - Critérios de ordenação disponíveis no seletor:
+ *      * 'manual': Respeita a ordem personalizada do usuário gravada por coluna no campo 'ordem' (e sincronizada no cache local).
+ *      * 'prazo': Ordena por data de prazo ascendente (tarefas com prazo mais próximo primeiro, tarefas sem prazo ao final).
+ *      * 'prioridade': Ordena por urgência (urgente > alta > media > baixa).
+ *      * Alternar para 'prazo' ou 'prioridade' recalcula dinamicamente a exibição; voltar a 'manual' restaura imediatamente a ordem salva pelo usuário.
+ *    - Persistência e integridade:
+ *      * A ordem manual persiste no banco de dados (campo 'ordem' da coleção tarefas) e em cache local por coluna, sobrevivendo a recarregamentos.
+ *      * A expansão/recolhimento do accordion (individual ou em lote) NUNCA altera ou reseta a ordem das tarefas.
+ * 7. Acessibilidade:
  *    - Botão do trigger possui aria-expanded e aria-controls vinculado ao container de conteúdo.
- *    - Navegável por teclado (Enter e Espaço expandem/colapsam).
+ *    - Navegável por teclado (Enter e Espaço expandem/colapsam; botões ↑/↓ acessíveis).
  *    - Suporta expansão e colapso em lote ("Expandir todas" / "Recolher todas") para agilidade.
  */
 
-import type { Tarefa } from '@/types/domain'
+import type { Tarefa, TarefaEtapa, TarefaPrioridade } from '@/types/domain'
 
 export const STORAGE_EXPANDED_TAREFAS_KEY = 'projetos_tarefas_expanded_ids'
+export const STORAGE_ORDEM_CRITERIO_KEY = 'projetos_tarefas_ordem_criterio'
+export const STORAGE_MANUAL_ORDER_KEY = 'projetos_tarefas_manual_order_map'
+
+export type CriterioOrdenacaoTarefas = 'manual' | 'prazo' | 'prioridade'
+
+export const PESOS_PRIORIDADE: Record<TarefaPrioridade, number> = {
+  urgente: 4,
+  alta: 3,
+  media: 2,
+  baixa: 1,
+}
 
 /**
  * Classes utilitárias CSS para renderização do título da tarefa no accordion.
@@ -126,4 +154,184 @@ export function savePersistedExpandedTarefas(expandedIds: Set<string>): void {
   } catch {
     // Ignore storage quota or access errors
   }
+}
+
+/**
+ * Carrega o critério de ordenação do localStorage.
+ * Padrão: 'manual'.
+ */
+export function loadPersistedCriterioOrdenacao(): CriterioOrdenacaoTarefas {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return 'manual'
+  }
+  try {
+    const raw = window.localStorage.getItem(STORAGE_ORDEM_CRITERIO_KEY)
+    if (raw === 'manual' || raw === 'prazo' || raw === 'prioridade') {
+      return raw
+    }
+  } catch {
+    // Silently fallback to manual
+  }
+  return 'manual'
+}
+
+/**
+ * Salva o critério de ordenação no localStorage.
+ */
+export function savePersistedCriterioOrdenacao(criterio: CriterioOrdenacaoTarefas): void {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  try {
+    window.localStorage.setItem(STORAGE_ORDEM_CRITERIO_KEY, criterio)
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+/**
+ * Carrega o mapa local de ordem manual por etapa: Record<TarefaEtapa, string[] (IDs ordenados)>
+ */
+export function loadPersistedManualOrderMap(): Partial<Record<TarefaEtapa, string[]>> {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return {}
+  }
+  try {
+    const raw = window.localStorage.getItem(STORAGE_MANUAL_ORDER_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    if (typeof parsed === 'object' && parsed !== null) {
+      return parsed
+    }
+  } catch {
+    // Silently fallback
+  }
+  return {}
+}
+
+/**
+ * Salva o mapa local de ordem manual por etapa no localStorage.
+ */
+export function savePersistedManualOrderMap(
+  orderMap: Partial<Record<TarefaEtapa, string[]>>,
+): void {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  try {
+    window.localStorage.setItem(STORAGE_MANUAL_ORDER_KEY, JSON.stringify(orderMap))
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+/**
+ * Ordena uma lista de tarefas por um critério específico:
+ * - 'manual': respeita a ordem numérica (campo 'ordem') ou a ordem do array / cache local
+ * - 'prazo': tarefas com prazo definido mais próximo primeiro; tarefas sem prazo ao final (ordenadas por created)
+ * - 'prioridade': urgente > alta > media > baixa; desempate por prazo ou created
+ */
+export function sortTarefas(
+  tarefas: Tarefa[],
+  criterio: CriterioOrdenacaoTarefas,
+  manualIdOrder?: string[],
+): Tarefa[] {
+  const lista = [...tarefas]
+
+  if (criterio === 'prazo') {
+    return lista.sort((a, b) => {
+      if (a.prazo && b.prazo) {
+        const diff = new Date(a.prazo).getTime() - new Date(b.prazo).getTime()
+        if (diff !== 0) return diff
+      } else if (a.prazo && !b.prazo) {
+        return -1
+      } else if (!a.prazo && b.prazo) {
+        return 1
+      }
+      return (a.created || '').localeCompare(b.created || '')
+    })
+  }
+
+  if (criterio === 'prioridade') {
+    return lista.sort((a, b) => {
+      const pesoA = PESOS_PRIORIDADE[a.prioridade] ?? 0
+      const pesoB = PESOS_PRIORIDADE[b.prioridade] ?? 0
+      if (pesoB !== pesoA) {
+        return pesoB - pesoA // decrescente (maior peso primeiro)
+      }
+      // Desempate por prazo
+      if (a.prazo && b.prazo) {
+        const diff = new Date(a.prazo).getTime() - new Date(b.prazo).getTime()
+        if (diff !== 0) return diff
+      } else if (a.prazo && !b.prazo) {
+        return -1
+      } else if (!a.prazo && b.prazo) {
+        return 1
+      }
+      return (a.created || '').localeCompare(b.created || '')
+    })
+  }
+
+  // 'manual': se houver mapa de IDs explícito passado, respeitar
+  if (manualIdOrder && manualIdOrder.length > 0) {
+    const posMap = new Map<string, number>()
+    manualIdOrder.forEach((id, index) => posMap.set(id, index))
+
+    return lista.sort((a, b) => {
+      const posA = posMap.has(a.id) ? posMap.get(a.id)! : 999999
+      const posB = posMap.has(b.id) ? posMap.get(b.id)! : 999999
+      if (posA !== posB) return posA - posB
+      const ordemA = typeof a.ordem === 'number' ? a.ordem : 0
+      const ordemB = typeof b.ordem === 'number' ? b.ordem : 0
+      if (ordemA !== ordemB) return ordemA - ordemB
+      return (a.created || '').localeCompare(b.created || '')
+    })
+  }
+
+  // Fallback para o campo ordem e created
+  return lista.sort((a, b) => {
+    const ordemA = typeof a.ordem === 'number' ? a.ordem : 0
+    const ordemB = typeof b.ordem === 'number' ? b.ordem : 0
+    if (ordemA !== ordemB) return ordemA - ordemB
+    return (a.created || '').localeCompare(b.created || '')
+  })
+}
+
+/**
+ * Move um elemento dentro de um array de tarefas (ex: mover para cima, para baixo, ou drop entre índices)
+ * Retorna o novo array de tarefas com os índices atualizados no campo `ordem` (0, 10, 20...).
+ */
+export function reorderTarefas(
+  tarefas: Tarefa[],
+  fromIndex: number,
+  toIndex: number,
+): Array<Tarefa & { ordem: number }> {
+  if (fromIndex < 0 || fromIndex >= tarefas.length)
+    return tarefas.map((t, idx) => ({ ...t, ordem: idx * 10 }))
+  if (toIndex < 0 || toIndex >= tarefas.length)
+    return tarefas.map((t, idx) => ({ ...t, ordem: idx * 10 }))
+  if (fromIndex === toIndex) return tarefas.map((t, idx) => ({ ...t, ordem: idx * 10 }))
+
+  const result = [...tarefas]
+  const [removed] = result.splice(fromIndex, 1)
+  result.splice(toIndex, 0, removed)
+
+  return result.map((item, index) => ({
+    ...item,
+    ordem: index * 10,
+  }))
+}
+
+/**
+ * Insere ou move uma tarefa dentro de uma coluna (etapa destino)
+ */
+export function insertTarefaAt(
+  columnTarefas: Tarefa[],
+  tarefaToInsert: Tarefa,
+  targetIndex: number,
+): Array<Tarefa & { ordem: number }> {
+  const filtered = columnTarefas.filter((t) => t.id !== tarefaToInsert.id)
+  const safeIndex = Math.max(0, Math.min(targetIndex, filtered.length))
+  filtered.splice(safeIndex, 0, tarefaToInsert)
+
+  return filtered.map((t, idx) => ({
+    ...t,
+    ordem: idx * 10,
+  }))
 }
