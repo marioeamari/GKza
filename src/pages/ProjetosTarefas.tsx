@@ -402,10 +402,10 @@ export default function ProjetosTarefas() {
               : 'hover:bg-muted/10'
           }`}
         >
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <div className="flex items-start gap-2.5 min-w-0 flex-1">
             {/* Botão Chevron Accordion */}
             <span
-              className={`flex items-center justify-center h-6 w-6 rounded-md border text-muted-foreground transition-all shrink-0 ${
+              className={`flex items-center justify-center h-6 w-6 rounded-md border text-muted-foreground transition-all shrink-0 mt-0.5 ${
                 isExpanded
                   ? 'bg-primary text-white border-primary rotate-180 shadow-xs'
                   : 'bg-background border-border/80 group-hover:border-primary group-hover:text-primary'
@@ -416,9 +416,9 @@ export default function ProjetosTarefas() {
               <ChevronDown className="h-3.5 w-3.5 transition-transform duration-200" />
             </span>
 
-            {/* Título da Tarefa */}
+            {/* Título da Tarefa (sem truncamento/ellipsis: quebra em quantas linhas forem necessárias) */}
             <h4
-              className={`text-sm leading-snug truncate transition-colors ${
+              className={`text-sm leading-snug break-words whitespace-normal transition-colors flex-1 min-w-0 ${
                 isExpanded
                   ? 'font-bold text-primary'
                   : 'font-medium text-foreground group-hover:text-primary'
@@ -430,7 +430,10 @@ export default function ProjetosTarefas() {
           </div>
 
           {/* INDICADORES COMPACTOS DE PENDÊNCIAS / ALERTAS (discretos e informativos) */}
-          <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="flex items-center gap-1.5 shrink-0 pt-0.5 self-start"
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Indicador de subtarefas / checklist pendentes */}
             {resumo.hasChecklist && (
               <span

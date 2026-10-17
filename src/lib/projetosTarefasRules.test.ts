@@ -49,6 +49,17 @@ describe('Regras de Accordion e Indicadores de Tarefas (/projetos)', () => {
     })
   })
 
+  describe('Regra de Exibição do Título sem Truncamento na Linha Compacta', () => {
+    it('garante que as classes do título da tarefa não contêm truncate ou line-clamp e permitem wrap natural', async () => {
+      const { TAREFA_TITULO_CLASSES } = await import('./projetosTarefasRules')
+      expect(TAREFA_TITULO_CLASSES.titulo).not.toContain('truncate')
+      expect(TAREFA_TITULO_CLASSES.titulo).not.toContain('line-clamp')
+      expect(TAREFA_TITULO_CLASSES.titulo).not.toContain('text-ellipsis')
+      expect(TAREFA_TITULO_CLASSES.titulo).toContain('break-words')
+      expect(TAREFA_TITULO_CLASSES.titulo).toContain('whitespace-normal')
+    })
+  })
+
   describe('Indicador Discreto de Pendências e Alertas na Linha Compacta', () => {
     const tarefaBase: Tarefa = {
       id: 'tar-123',

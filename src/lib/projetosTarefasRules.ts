@@ -1,13 +1,20 @@
 /**
  * Regras e utilitários do módulo de Tarefas e Projetos.
  *
- * REGRA VIGENTE / NOVA:
+ * REGRA VIGENTE / ATUALIZADA:
  * 1. Por padrão, cada tarefa nas listas/quadro do módulo /projetos é renderizada de forma colapsada (accordion fechado),
- *    exibindo apenas o título de forma compacta e minimalista.
- * 2. Clicar no chevron/botão de expansão (ou no cabeçalho do accordion com teclado/enter/espaço) alterna o estado
+ *    exibindo apenas a linha compacta com chevron à esquerda, o título da tarefa e os badges/indicadores à direita.
+ * 2. TÍTULO COMPLETO SEM TRUNCAMENTO (Ajuste aprovado):
+ *    - Na linha compacta (tarefa colapsada) e no cabeçalho do cartão, o título da tarefa NUNCA deve sofrer truncamento/ellipsis
+ *      (sem 'truncate', 'text-ellipsis' ou 'line-clamp').
+ *    - O título deve ser renderizado por completo com quebra de linha natural (break-words / whitespace-normal),
+ *      expandindo a altura vertical do cartão conforme necessário.
+ *    - O layout mantém alinhamento limpo: chevron fixo à esquerda no topo, título à esquerda ocupando o espaço flexível,
+ *      e indicadores de pendências/atraso/prioridade fixados à direita sem esmagar o título (shrink-0).
+ * 3. Clicar no cabeçalho ou no chevron/botão de expansão (ou Enter/Espaço no teclado) alterna o estado
  *    da tarefa para expandido, revelando o conteúdo completo (descrição, prioridade, contexto, projeto, checklist interativa,
  *    prazos, responsável e ações rápidas de movimentação/edição/exclusão).
- * 3. Indicador compacto de pendências e criticidade:
+ * 4. Indicador compacto de pendências e criticidade:
  *    - Quando colapsada, a linha exibe chips discretos sem poluir a lista:
  *      * Contagem de subtarefas/checklist pendentes (ex: '2/5 pendentes' ou '✓ 5/5')
  *      * Alerta discreto de atraso ou vencimento iminente (se prazo expirou ou é hoje)
@@ -24,6 +31,17 @@
 import type { Tarefa } from '@/types/domain'
 
 export const STORAGE_EXPANDED_TAREFAS_KEY = 'projetos_tarefas_expanded_ids'
+
+/**
+ * Classes utilitárias CSS para renderização do título da tarefa no accordion.
+ * Garante título completo (sem truncamento/ellipsis) com quebra de linha natural
+ * e altura vertical dinâmica.
+ */
+export const TAREFA_TITULO_CLASSES = {
+  container: 'flex items-start gap-2.5 min-w-0 flex-1',
+  titulo: 'text-sm leading-snug break-words whitespace-normal transition-colors',
+  badgesContainer: 'flex items-center gap-1.5 shrink-0 pt-0.5',
+}
 
 export interface TarefaPendenciasResumo {
   totalChecklist: number
