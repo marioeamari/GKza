@@ -11,6 +11,7 @@ import Dashboard from '@/pages/Dashboard'
 import Despesas from '@/pages/Despesas'
 import Empresas from '@/pages/Empresas'
 import Fornecedores from '@/pages/Fornecedores'
+import Insumos from '@/pages/Insumos'
 import Lancamentos from '@/pages/Lancamentos'
 import Marketplaces from '@/pages/Marketplaces'
 import NotFound from '@/pages/NotFound'
@@ -102,6 +103,8 @@ export default function App() {
           <Route path="/cadastros/pessoas" element={<Pessoas />} />
           <Route path="/cadastros/empresas" element={<Empresas />} />
           <Route path="/cadastros/fornecedores" element={<Fornecedores />} />
+          <Route path="/cadastros/insumos" element={<Insumos />} />
+          <Route path="/insumos" element={<Insumos />} />
           <Route path="/empresas" element={<Empresas />} />
           <Route path="/pessoas" element={<Pessoas />} />
           <Route path="/fornecedores" element={<Fornecedores />} />

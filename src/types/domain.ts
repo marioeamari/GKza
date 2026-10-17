@@ -662,6 +662,39 @@ export interface ResumoCaixaOfertas {
   saldoAcumuladoGeral: number
 }
 
+// -------------------------------------------------------------
+// Insumos & Serviços Terceirizados (Rastreabilidade de Origem)
+// -------------------------------------------------------------
+
+export type InsumoTipo = 'insumo' | 'servico'
+export type InsumoDimensaoTipo = 'nenhuma' | '2d' | '3d'
+
+export interface InsumoCategoriaRecord extends RecordModel {
+  nome: string
+  cor?: string
+  ordem?: number
+  ativo?: boolean
+}
+
+export interface InsumoRecord extends RecordModel {
+  nome: string
+  categoria?: string
+  tipo: InsumoTipo
+  dimensao_tipo?: InsumoDimensaoTipo
+  dimensao_largura_cm?: number
+  dimensao_altura_cm?: number
+  dimensao_comprimento_cm?: number
+  unidade?: string
+  valor_unitario?: number
+  fornecedor?: string
+  observacoes?: string
+  ativo?: boolean
+  expand?: {
+    categoria?: InsumoCategoriaRecord
+    fornecedor?: Fornecedor
+  }
+}
+
 export type LembreteRapidoPrioridade = 'normal' | 'urgente'
 export type LembreteRapidoStatus = 'pendente' | 'concluido'
 

@@ -240,6 +240,7 @@ export function AppLayout() {
     { to: '/dizimos', label: 'Dízimos & Ofertas', icon: HeartHandshake },
     { to: '/categorias', label: 'Classificações', icon: Tags },
     { to: '/marketplaces', label: 'Marketplaces', icon: Store },
+    { to: '/insumos', label: 'Insumos & Serviços', icon: Package },
     { to: '/empresas', label: 'Empresas', icon: Building2 },
     { to: '/pessoas', label: 'Pessoas', icon: CircleUserRound },
     { to: '/fornecedores', label: 'Fornecedores', icon: Truck },
@@ -276,6 +277,7 @@ export function AppLayout() {
     { to: '/dizimos', label: 'Dízimos', icon: HeartHandshake },
     { to: '/categorias', label: 'Categorias', icon: Tags },
     { to: '/marketplaces', label: 'Marketplaces', icon: Store },
+    { to: '/insumos', label: 'Insumos & Serviços', icon: Package },
     { to: '/cadastros', label: 'Cadastros', icon: Building2 },
     { to: '/configuracoes', label: 'Configurações', icon: Settings },
   ]

@@ -26,8 +26,22 @@ export interface ItemComposicaoCusto {
   custo_unitario: number
   base?: BaseCustoLinha
   categoria_custo?: CategoriaCustoLinha
-  fornecedor?: string
+  fornecedor?: string // ID ou nome do fornecedor original
+  fornecedor_id?: string
+  fornecedor_nome?: string
+  insumo_id?: string
+  insumo_tipo?: 'insumo' | 'servico'
+  dimensao_tipo?: 'nenhuma' | '2d' | '3d'
+  dimensao_largura_cm?: number
+  dimensao_altura_cm?: number
+  dimensao_comprimento_cm?: number
+  dimensao_formatada?: string
+  categoria_nome?: string
   perda_pct?: number
+  // Snapshot imutável no momento da vinculação/execução
+  snapshot_data?: string
+  snapshot_valor_unitario?: number
+  snapshot_fornecedor_nome?: string
 }
 
 export interface DespesaCompraRateio {

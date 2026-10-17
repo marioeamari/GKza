@@ -3,6 +3,7 @@ import {
   Building2,
   Mail,
   MapPin,
+  Package,
   Pencil,
   Phone,
   Plus,
@@ -142,6 +143,12 @@ export default function Cadastros() {
       label: 'Fornecedores (PJ/PF)',
       description: 'Fornecedores, insumos e revenda',
       icon: Truck,
+    },
+    {
+      to: '/insumos',
+      label: 'Insumos & Serviços',
+      description: 'Catálogo de insumos, embalagens e costura com rastreabilidade',
+      icon: Package,
     },
   ]
 
