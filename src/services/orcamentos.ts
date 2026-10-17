@@ -64,9 +64,23 @@ export const orcamentosService = {
           composicaoArray = []
         }
       }
+
+      let composicaoReceitaArray: any[] = []
+      if (Array.isArray(it.composicao_receita)) {
+        composicaoReceitaArray = it.composicao_receita
+      } else if (typeof it.composicao_receita === 'string' && it.composicao_receita.trim()) {
+        try {
+          const parsed = JSON.parse(it.composicao_receita)
+          if (Array.isArray(parsed)) composicaoReceitaArray = parsed
+        } catch {
+          composicaoReceitaArray = []
+        }
+      }
+
       return {
         ...it,
         composicao: composicaoArray,
+        composicao_receita: composicaoReceitaArray,
       }
     })
 
@@ -151,9 +165,23 @@ export const orcamentosService = {
           composicaoArray = []
         }
       }
+
+      let composicaoReceitaArray: any[] = []
+      if (Array.isArray(it.composicao_receita)) {
+        composicaoReceitaArray = it.composicao_receita
+      } else if (typeof it.composicao_receita === 'string' && it.composicao_receita.trim()) {
+        try {
+          const parsed = JSON.parse(it.composicao_receita)
+          if (Array.isArray(parsed)) composicaoReceitaArray = parsed
+        } catch {
+          composicaoReceitaArray = []
+        }
+      }
+
       return {
         ...it,
         composicao: composicaoArray,
+        composicao_receita: composicaoReceitaArray,
       }
     })
 
@@ -261,6 +289,7 @@ export const orcamentosService = {
       formData.append('fretes_canais', JSON.stringify(it.fretes_canais || {}))
       formData.append('produtos_canais', JSON.stringify(it.produtos_canais || {}))
       formData.append('composicao', JSON.stringify(it.composicao || []))
+      formData.append('composicao_receita', JSON.stringify(it.composicao_receita || []))
 
       if (it.modelo) formData.append('modelo', it.modelo)
       if (it.tema) formData.append('tema', it.tema)
@@ -361,6 +390,7 @@ export const orcamentosService = {
         formData.append('fretes_canais', JSON.stringify(it.fretes_canais || {}))
         formData.append('produtos_canais', JSON.stringify(it.produtos_canais || {}))
         formData.append('composicao', JSON.stringify(it.composicao || []))
+        formData.append('composicao_receita', JSON.stringify(it.composicao_receita || []))
 
         if (it.modelo) formData.append('modelo', it.modelo)
         else formData.append('modelo', '')

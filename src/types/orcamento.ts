@@ -92,6 +92,7 @@ export interface OrcamentoItemRecord {
   fretes_canais: Record<string, OrcamentoFreteCanalItem>
   produtos_canais?: Record<string, OrcamentoProdutoVinculadoCanal>
   composicao?: ItemComposicaoOrcamento[]
+  composicao_receita?: any[]
   ordem?: number
   created?: string
   updated?: string
@@ -173,6 +174,7 @@ export interface CreateOrcamentoInput {
     fretes_canais: Record<string, OrcamentoFreteCanalItem>
     produtos_canais?: Record<string, OrcamentoProdutoVinculadoCanal>
     composicao?: ItemComposicaoOrcamento[]
+    composicao_receita?: any[]
     ordem?: number
   }>
 }

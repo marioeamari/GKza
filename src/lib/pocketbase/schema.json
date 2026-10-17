@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-17T17:51:35.319Z",
+  "generatedAt": "2026-10-17T18:32:20.523Z",
   "collections": [
     {
       "name": "users",
@@ -6088,6 +6088,12 @@
         },
         {
           "name": "composicao",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "composicao_receita",
           "type": "json",
           "required": false,
           "system": false
