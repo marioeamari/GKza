@@ -52,6 +52,8 @@ import {
   converterUnitarioParaCheio,
   formatarMoedaBR,
 } from '@/lib/precificacao/orcamentoCalculo'
+import { congelarSnapshotReceita } from '@/services/insumos'
+import type { ItemComposicaoCusto } from '@/lib/precificacao/calculo'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -87,6 +89,7 @@ interface FormItemLinha {
   precos_canais: Record<string, OrcamentoPrecoCanalItem>
   fretes_canais: Record<string, OrcamentoFreteCanalItem>
   produtos_canais: Record<string, OrcamentoProdutoVinculadoCanal>
+  composicao_receita?: ItemComposicaoCusto[]
 }
 
 export default function PrecificacaoOrcamentoForm() {
@@ -284,6 +287,7 @@ export default function PrecificacaoOrcamentoForm() {
                   precos_canais: it.precos_canais || {},
                   fretes_canais: it.fretes_canais || {},
                   produtos_canais: it.produtos_canais || {},
+                  composicao_receita: it.composicao_receita || [],
                 }
               }),
             )
@@ -639,7 +643,7 @@ export default function PrecificacaoOrcamentoForm() {
   }
 
   // Ao selecionar um Produto Vinculado aprovado para um canal específico no item
-  const handleSelecionarProdutoVinculadoNoCanal = (
+  const handleSelecionarProdutoVinculadoNoCanal = async (
     index: number,
     canalId: string,
     produtoId: string,
@@ -647,13 +651,29 @@ export default function PrecificacaoOrcamentoForm() {
     const canalObj = canaisDisponiveis.find((c) => c.id === canalId)
     if (!canalObj) return
 
+    const prodsCanal = produtosAprovadosPorCanal[canalId] || []
+    const prodAprovado = prodsCanal.find((p) => p.produto_id === produtoId)
+
+    // Se houver um produto vinculado selecionado, carrega o produto técnico e congela sua receita técnica
+    let receitaCongelada: ItemComposicaoCusto[] | undefined = undefined
+    if (prodAprovado && produtoId && produtoId !== 'none') {
+      try {
+        const prodCompleto = await precificacaoService.getProduto(produtoId)
+        if (prodCompleto?.composicao && prodCompleto.composicao.length > 0) {
+          receitaCongelada = congelarSnapshotReceita(prodCompleto.composicao)
+        }
+      } catch (err) {
+        console.warn(
+          'Não foi possível carregar a composição técnica do produto para congelar snapshot:',
+          err,
+        )
+      }
+    }
+
     setItens((prev) => {
       const copy = [...prev]
       const it = copy[index]
       if (!it) return prev
-
-      const prodsCanal = produtosAprovadosPorCanal[canalId] || []
-      const prodAprovado = prodsCanal.find((p) => p.produto_id === produtoId)
 
       const precos = { ...it.precos_canais }
       const produtosCanais = { ...it.produtos_canais }
@@ -716,6 +736,9 @@ export default function PrecificacaoOrcamentoForm() {
         modelo_nome: novoModeloNome,
         precos_canais: precos,
         produtos_canais: produtosCanais,
+        // Se conseguimos congelar a receita técnica do produto selecionado, persistimos no item
+        composicao_receita:
+          receitaCongelada !== undefined ? receitaCongelada : it.composicao_receita,
       }
       return copy
     })
@@ -991,6 +1014,7 @@ export default function PrecificacaoOrcamentoForm() {
           precos_canais: it.precos_canais,
           fretes_canais: it.fretes_canais,
           produtos_canais: it.produtos_canais,
+          composicao_receita: it.composicao_receita,
           ordem: idx,
         })),
       }

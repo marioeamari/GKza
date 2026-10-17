@@ -787,6 +787,122 @@ export default function PrecificacaoOrcamentoDetalhes() {
         </Card>
       )}
 
+      {/* PAINEL: RECEITA & INSUMOS UTILIZADOS (RASTREABILIDADE CONGELADA) */}
+      {(() => {
+        const itensComReceita = itens.filter(
+          (it) => Array.isArray(it.composicao_receita) && it.composicao_receita.length > 0,
+        )
+
+        if (itensComReceita.length === 0) return null
+
+        return (
+          <Card className="shadow-xs border-border/80 overflow-hidden">
+            <CardHeader className="border-b border-border/60 bg-muted/20 pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base font-bold flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                    Receita & Insumos Utilizados (Rastreabilidade Congelada)
+                  </CardTitle>
+                  <CardDescription className="text-xs mt-0.5">
+                    Snapshot imutável dos insumos vinculados no momento da aprovação/orçamento.
+                    Alterações posteriores no catálogo não afetam esta proposta.
+                  </CardDescription>
+                </div>
+                <Badge variant="outline" className="text-xs font-mono bg-background">
+                  {itensComReceita.length}{' '}
+                  {itensComReceita.length === 1 ? 'item com receita' : 'itens com receita'}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4 space-y-4">
+              {itensComReceita.map((item, itIdx) => (
+                <div
+                  key={item.id || itIdx}
+                  className="space-y-2 rounded-lg border border-border/70 p-3 bg-secondary/10"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm text-foreground">
+                      #{itIdx + 1} - {item.modelo_nome || 'Item'} (Qtd: {item.quantidade || 1})
+                    </span>
+                    <span className="text-[11px] text-muted-foreground font-mono">
+                      {item.composicao_receita?.length || 0} linha(s) de receita
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-border bg-secondary/40 text-[11px] font-semibold text-muted-foreground">
+                          <th className="py-2 px-3">Código</th>
+                          <th className="py-2 px-3">Insumo / Descrição</th>
+                          <th className="py-2 px-2 text-center">Tipo</th>
+                          <th className="py-2 px-2">Dimensão</th>
+                          <th className="py-2 px-3">Fornecedor</th>
+                          <th className="py-2 px-2 text-right">Qtd</th>
+                          <th className="py-2 px-3 text-right">R$ Unit. (Momento)</th>
+                          <th className="py-2 px-3 text-right font-bold">Subtotal</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {item.composicao_receita?.map((linha, lIdx) => {
+                          const subtotalLinha =
+                            Math.round((linha.qtd || 0) * (linha.custo_unitario || 0) * 100) / 100
+                          return (
+                            <tr key={lIdx} className="hover:bg-secondary/20">
+                              <td className="py-2 px-3 font-mono font-bold text-primary">
+                                {linha.codigo || `C${lIdx}`}
+                              </td>
+                              <td className="py-2 px-3 font-medium text-foreground">
+                                {linha.descricao}
+                                {linha.categoria_nome && (
+                                  <span className="ml-1.5 text-[10px] text-muted-foreground">
+                                    ({linha.categoria_nome})
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2 px-2 text-center">
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] py-0 px-1.5 capitalize"
+                                >
+                                  {linha.insumo_tipo || linha.categoria_custo || 'insumo'}
+                                </Badge>
+                              </td>
+                              <td className="py-2 px-2 font-mono text-[11px] text-muted-foreground">
+                                {linha.dimensao_formatada ? (
+                                  <span className="bg-secondary/60 px-1 py-0.5 rounded text-foreground">
+                                    {linha.dimensao_formatada}
+                                  </span>
+                                ) : (
+                                  '-'
+                                )}
+                              </td>
+                              <td className="py-2 px-3 text-muted-foreground text-[11px] truncate max-w-[150px]">
+                                {linha.fornecedor_nome || '-'}
+                              </td>
+                              <td className="py-2 px-2 text-right font-mono">
+                                {linha.qtd} {linha.unidade || 'un'}
+                              </td>
+                              <td className="py-2 px-3 text-right font-mono text-muted-foreground">
+                                {formatarMoedaBR(linha.custo_unitario || 0)}
+                              </td>
+                              <td className="py-2 px-3 text-right font-mono font-bold text-foreground">
+                                {formatarMoedaBR(subtotalLinha)}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )
+      })()}
+
       {/* OBSERVAÇÕES */}
       {orcamento.observacoes && (
         <Card className="shadow-xs border-border/80">

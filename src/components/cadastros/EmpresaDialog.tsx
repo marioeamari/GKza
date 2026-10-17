@@ -33,7 +33,12 @@ import { formatCurrency } from '@/lib/format'
 import { CategoriaAutocompleteInput } from '@/components/precificacao/CategoriaAutocompleteInput'
 import { cadastrosService } from '@/services/cadastros'
 import { precificacaoService } from '@/services/precificacao'
-import type { Empresa } from '@/types/domain'
+import {
+  insumosService,
+  formatarDimensaoInsumo,
+  aplicarAutoPreenchimentoEmbalagem,
+} from '@/services/insumos'
+import type { Empresa, InsumoRecord } from '@/types/domain'
 import type { PrecProdutoRecord } from '@/types/precificacao'
 import {
   calcularCustoBaseProduto,
@@ -126,6 +131,11 @@ export function EmpresaDialog({
   const [removerImagem, setRemoverImagem] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Catálogo de insumos ativos para o seletor rápido
+  const [insumosAtivos, setInsumosAtivos] = useState<InsumoRecord[]>([])
+  // Flag para rastrear se o usuário alterou manualmente o campo de embalagem adicional
+  const [embalagemEditadaManualmente, setEmbalagemEditadaManualmente] = useState(false)
+
   const carregarProdutos = useCallback(async (empresaId: string) => {
     try {
       setLoadingProdutos(true)
@@ -157,6 +167,12 @@ export function EmpresaDialog({
         setProdutos([])
       }
       setErrors({})
+
+      // Carrega catálogo de insumos ativos
+      insumosService
+        .listInsumos({ apenasAtivos: true })
+        .then((data) => setInsumosAtivos(data))
+        .catch(() => {})
     }
   }, [open, record, defaultTab, carregarProdutos])
 
@@ -243,6 +259,7 @@ export function EmpresaDialog({
     }
     setEditingProduto(null)
     setProdForm(initialProduto)
+    setEmbalagemEditadaManualmente(false)
     setProdComposicao([
       {
         codigo: 'C0',
@@ -262,6 +279,12 @@ export function EmpresaDialog({
 
   function handleEditarProduto(p: PrecProdutoRecord) {
     setEditingProduto(p)
+    // Se o produto já possui um custo_adicional_embalagem cadastrado explicitamente, consideramos manual
+    setEmbalagemEditadaManualmente(
+      p.custo_adicional_embalagem !== undefined &&
+        p.custo_adicional_embalagem !== null &&
+        Number(p.custo_adicional_embalagem) > 0,
+    )
     setProdForm({
       nome: p.nome,
       sku: p.sku,
@@ -321,6 +344,76 @@ export function EmpresaDialog({
       setImagemPreview(null)
     }
     setProdutoDialog(true)
+  }
+
+  // Handler para selecionar insumo do catálogo em uma linha da composição C0..C12
+  function handleSelecionarInsumoNaLinha(idx: number, insumoId: string) {
+    const arr = [...prodComposicao]
+    if (!arr[idx]) return
+
+    if (!insumoId || insumoId === 'manual') {
+      // Volta para modo manual ou limpa vínculo mantendo a descrição e custos já digitados
+      arr[idx] = {
+        ...arr[idx],
+        insumo_id: undefined,
+        insumo_tipo: undefined,
+        dimensao_tipo: undefined,
+        dimensao_largura_cm: undefined,
+        dimensao_altura_cm: undefined,
+        dimensao_comprimento_cm: undefined,
+        dimensao_formatada: undefined,
+        categoria_nome: undefined,
+        fornecedor_id: undefined,
+        fornecedor_nome: undefined,
+      }
+      setProdComposicao(arr)
+      return
+    }
+
+    const insumo = insumosAtivos.find((i) => i.id === insumoId)
+    if (!insumo) return
+
+    const dimFormatada = formatarDimensaoInsumo(insumo)
+    const fornNome =
+      insumo.expand?.fornecedor?.nome_fantasia ||
+      insumo.expand?.fornecedor?.razao_social ||
+      undefined
+    const catNome = insumo.expand?.categoria?.nome || undefined
+    const custoUnit = Number(insumo.valor_unitario) || 0
+
+    arr[idx] = {
+      ...arr[idx],
+      descricao: insumo.nome,
+      custo_unitario: custoUnit,
+      unidade: insumo.unidade || arr[idx].unidade || 'un',
+      categoria_custo: insumo.tipo === 'servico' ? 'servico' : 'insumo',
+      insumo_id: insumo.id,
+      insumo_tipo: insumo.tipo,
+      dimensao_tipo: insumo.dimensao_tipo,
+      dimensao_largura_cm: insumo.dimensao_largura_cm,
+      dimensao_altura_cm: insumo.dimensao_altura_cm,
+      dimensao_comprimento_cm: insumo.dimensao_comprimento_cm,
+      dimensao_formatada: dimFormatada,
+      categoria_nome: catNome,
+      fornecedor: insumo.fornecedor,
+      fornecedor_id: insumo.fornecedor,
+      fornecedor_nome: fornNome,
+    }
+    setProdComposicao(arr)
+
+    // Regra: se o insumo for da categoria "Embalagem", autopreenche custo_adicional_embalagem
+    // SOMENTE se o usuário ainda não tiver digitado valor manualmente (ou se for 0/vazio)
+    const resAuto = aplicarAutoPreenchimentoEmbalagem({
+      insumo,
+      valorEmbalagemAtual: prodForm.custo_adicional_embalagem,
+      editadoManualmente: embalagemEditadaManualmente,
+    })
+    if (resAuto.deveAtualizar && resAuto.novoValor !== null) {
+      setProdForm((prev) => ({
+        ...prev,
+        custo_adicional_embalagem: String(resAuto.novoValor),
+      }))
+    }
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1100,66 +1193,145 @@ export function EmpresaDialog({
                         </div>
                       ) : (
                         prodComposicao.map((item, idx) => (
-                          <div key={idx} className="flex items-center gap-2">
-                            <Input
-                              className="w-16 h-8 text-xs font-mono font-bold bg-white"
-                              placeholder="C0"
-                              value={item.codigo || `C${idx}`}
-                              onChange={(e) => {
-                                const arr = [...prodComposicao]
-                                arr[idx].codigo = e.target.value
-                                setProdComposicao(arr)
-                              }}
-                            />
-                            <Input
-                              className="flex-1 h-8 text-xs bg-white"
-                              placeholder="Descrição do insumo ou serviço..."
-                              value={item.descricao}
-                              onChange={(e) => {
-                                const arr = [...prodComposicao]
-                                arr[idx].descricao = e.target.value
-                                setProdComposicao(arr)
-                              }}
-                            />
-                            <div className="w-20">
+                          <div
+                            key={idx}
+                            className="p-2 rounded-lg border border-border/80 bg-white space-y-1.5 shadow-2xs"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              {/* Código C0..C12 */}
                               <Input
-                                type="number"
-                                step="0.01"
-                                className="h-8 text-xs font-mono bg-white"
-                                placeholder="Qtd"
-                                value={item.qtd}
+                                className="w-16 h-8 text-xs font-mono font-bold bg-white"
+                                placeholder="C0"
+                                value={item.codigo || `C${idx}`}
                                 onChange={(e) => {
                                   const arr = [...prodComposicao]
-                                  arr[idx].qtd = parseFloat(e.target.value) || 0
+                                  arr[idx].codigo = e.target.value
                                   setProdComposicao(arr)
                                 }}
                               />
-                            </div>
-                            <div className="w-24">
+
+                              {/* Seletor Rápido do Catálogo de Insumos */}
+                              <div className="w-48 sm:w-56">
+                                <select
+                                  aria-label="Catálogo de Insumos"
+                                  className="w-full h-8 px-2 text-xs rounded-md border border-input bg-secondary/30 focus:outline-hidden focus:ring-1 focus:ring-primary truncate"
+                                  value={item.insumo_id || ''}
+                                  onChange={(e) =>
+                                    handleSelecionarInsumoNaLinha(idx, e.target.value)
+                                  }
+                                >
+                                  <option value="">(Manual / Personalizado)</option>
+                                  {insumosAtivos.map((ins) => {
+                                    const dim = formatarDimensaoInsumo(ins)
+                                    const dimStr = dim ? ` [${dim}]` : ''
+                                    const catStr = ins.expand?.categoria?.nome
+                                      ? ` (${ins.expand.categoria.nome})`
+                                      : ''
+                                    return (
+                                      <option key={ins.id} value={ins.id}>
+                                        {ins.nome}
+                                        {dimStr}
+                                        {catStr} - R$ {Number(ins.valor_unitario).toFixed(2)}
+                                      </option>
+                                    )
+                                  })}
+                                </select>
+                              </div>
+
+                              {/* Descrição do insumo/serviço */}
                               <Input
-                                type="number"
-                                step="0.01"
-                                className="h-8 text-xs font-mono bg-white"
-                                placeholder="R$ Unit"
-                                value={item.custo_unitario}
+                                className="flex-1 min-w-[140px] h-8 text-xs bg-white"
+                                placeholder="Descrição do insumo ou serviço..."
+                                value={item.descricao}
                                 onChange={(e) => {
                                   const arr = [...prodComposicao]
-                                  arr[idx].custo_unitario = parseFloat(e.target.value) || 0
+                                  arr[idx].descricao = e.target.value
                                   setProdComposicao(arr)
                                 }}
                               />
+
+                              {/* Qtd */}
+                              <div className="w-20">
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  className="h-8 text-xs font-mono bg-white"
+                                  placeholder="Qtd"
+                                  value={item.qtd}
+                                  onChange={(e) => {
+                                    const arr = [...prodComposicao]
+                                    arr[idx].qtd = parseFloat(e.target.value) || 0
+                                    setProdComposicao(arr)
+                                  }}
+                                />
+                              </div>
+
+                              {/* Custo Unitário (R$) */}
+                              <div className="w-24">
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  className="h-8 text-xs font-mono bg-white"
+                                  placeholder="R$ Unit"
+                                  value={item.custo_unitario}
+                                  onChange={(e) => {
+                                    const arr = [...prodComposicao]
+                                    arr[idx].custo_unitario = parseFloat(e.target.value) || 0
+                                    setProdComposicao(arr)
+                                  }}
+                                />
+                              </div>
+
+                              {/* Excluir linha */}
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-destructive hover:bg-destructive/10 shrink-0"
+                                onClick={() => {
+                                  setProdComposicao(prodComposicao.filter((_, i) => i !== idx))
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
                             </div>
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="ghost"
-                              className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                              onClick={() => {
-                                setProdComposicao(prodComposicao.filter((_, i) => i !== idx))
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+
+                            {/* Tags de metadados do insumo vinculado */}
+                            {(item.insumo_id ||
+                              item.dimensao_formatada ||
+                              item.fornecedor_nome) && (
+                              <div className="flex flex-wrap items-center gap-1.5 pl-1 text-[11px] text-muted-foreground">
+                                {item.insumo_tipo && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] py-0 px-1.5 capitalize"
+                                  >
+                                    {item.insumo_tipo}
+                                  </Badge>
+                                )}
+                                {item.dimensao_formatada && (
+                                  <span className="font-mono bg-secondary/60 px-1.5 py-0.5 rounded text-[10px] text-foreground">
+                                    📏 {item.dimensao_formatada}
+                                  </span>
+                                )}
+                                {item.categoria_nome && (
+                                  <Badge variant="secondary" className="text-[10px] py-0 px-1.5">
+                                    {item.categoria_nome}
+                                  </Badge>
+                                )}
+                                {item.fornecedor_nome && (
+                                  <span className="text-[10px] text-muted-foreground truncate max-w-[200px]">
+                                    🏢 {item.fornecedor_nome}
+                                  </span>
+                                )}
+                                <span className="font-mono text-[10px] font-semibold text-primary ml-auto">
+                                  Subtotal:{' '}
+                                  {formatCurrency(
+                                    round2((item.qtd || 0) * (item.custo_unitario || 0)),
+                                  )}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         ))
                       )}
@@ -1175,9 +1347,10 @@ export function EmpresaDialog({
                         step="0.01"
                         min="0"
                         value={prodForm.custo_adicional_embalagem}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          setEmbalagemEditadaManualmente(true)
                           setProdForm({ ...prodForm, custo_adicional_embalagem: e.target.value })
-                        }
+                        }}
                         placeholder="0.10"
                       />
                     </div>
