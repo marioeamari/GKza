@@ -18,7 +18,7 @@ export function formatarDimensaoInsumo(item: {
   dimensao_largura_cm?: number | null
   dimensao_altura_cm?: number | null
 }): string {
-  const tipo = item.dimensao_tipo || 'nenhuma'
+  const tipo = (item.dimensao_tipo || 'nenhuma').toLowerCase()
   if (tipo === '2d') {
     const l = item.dimensao_largura_cm ?? 0
     const a = item.dimensao_altura_cm ?? 0
@@ -33,6 +33,67 @@ export function formatarDimensaoInsumo(item: {
     return `3D: ${c} × ${l} × ${a} cm`
   }
   return 'Sem dimensão'
+}
+
+/**
+ * Verifica se um insumo ou categoria pertence ao grupo "Embalagem"
+ */
+export function isInsumoEmbalagem(insumo: {
+  categoria_nome?: string
+  expand?: { categoria?: { nome?: string } }
+}): boolean {
+  const catNome = (insumo.categoria_nome || insumo.expand?.categoria?.nome || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+  return catNome.includes('embalagem')
+}
+
+/**
+ * Regra de autopreenchimento de Embalagem Adicional:
+ * - Só altera quando o usuário NÃO editou manualmente o campo (ou quando valor atual for igual ao default/vazio)
+ * - Retorna o novo valor e o texto de tipo+dimensão para exibição na caixa
+ */
+export function aplicarAutoPreenchimentoEmbalagem(params: {
+  insumo: InsumoRecord
+  valorEmbalagemAtual: string | number
+  editadoManualmente: boolean
+}): {
+  novoValor: number | null
+  tipoEDimensaoTexto: string
+  deveAtualizar: boolean
+} {
+  const { insumo, valorEmbalagemAtual, editadoManualmente } = params
+  const isEmbalagem = isInsumoEmbalagem(insumo)
+  const dimensaoTexto = formatarDimensaoInsumo(insumo)
+  const tipoEDimensaoTexto = `${insumo.tipo === 'servico' ? 'Serviço' : 'Insumo'} • ${dimensaoTexto}`
+
+  if (!isEmbalagem) {
+    return {
+      novoValor: null,
+      tipoEDimensaoTexto,
+      deveAtualizar: false,
+    }
+  }
+
+  const valorUnit = Number(insumo.valor_unitario) || 0
+  const valorAtualNum = Number(String(valorEmbalagemAtual).replace(',', '.')) || 0
+
+  // Se o usuário editou manualmente de forma deliberada (flag true) e o valor é diferente, NÃO sobrescreve
+  if (editadoManualmente && valorAtualNum > 0) {
+    return {
+      novoValor: valorAtualNum,
+      tipoEDimensaoTexto,
+      deveAtualizar: false,
+    }
+  }
+
+  return {
+    novoValor: valorUnit,
+    tipoEDimensaoTexto,
+    deveAtualizar: true,
+  }
 }
 
 /**

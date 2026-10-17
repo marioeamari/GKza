@@ -38,6 +38,7 @@ import {
   FileSpreadsheet,
   History,
   Factory,
+  Package,
 } from 'lucide-react'
 import { ContextSelector } from '@/components/ContextSelector'
 
