@@ -15,6 +15,12 @@ export const fornecedoresService = {
 
   deleteFornecedor: (id: string) => pb.collection('fornecedores').delete(id),
 
+  listFornecedoresPorTipo: (tipo: 'revenda' | 'insumos' | 'servicos') =>
+    pb.collection<Fornecedor>('fornecedores').getFullList({
+      filter: `tipos ~ '${tipo}'`,
+      sort: 'nome_fantasia',
+    }),
+
   // Produtos fornecidos (fornecedores_produtos)
   listProdutosPorFornecedor: (fornecedorId: string) =>
     pb.collection<FornecedorProduto>('fornecedores_produtos').getFullList({

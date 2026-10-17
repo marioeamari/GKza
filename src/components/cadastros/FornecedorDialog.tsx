@@ -37,7 +37,12 @@ import {
 import { formatCurrency } from '@/lib/format'
 import { CategoriaAutocompleteInput } from '@/components/precificacao/CategoriaAutocompleteInput'
 import { fornecedoresService } from '@/services/fornecedores'
-import type { Fornecedor, FornecedorProduto } from '@/types/domain'
+import {
+  FORNECEDOR_TIPOS_LISTA,
+  FORNECEDOR_TIPO_CONFIG,
+  normalizarTiposFornecedor,
+} from '@/lib/classificacao-fornecedores'
+import type { Fornecedor, FornecedorProduto, FornecedorTipo } from '@/types/domain'
 
 interface FornecedorDialogProps {
   open: boolean
@@ -66,6 +71,7 @@ const initialFornecedor = {
   prazo_entrega_dias: '',
   condicao_pagamento: '',
   observacoes: '',
+  tipos: ['revenda'] as FornecedorTipo[],
 }
 
 const initialProduto = {
@@ -143,6 +149,7 @@ export function FornecedorDialog({
               : '',
           condicao_pagamento: record.condicao_pagamento || '',
           observacoes: record.observacoes || '',
+          tipos: normalizarTiposFornecedor(record.tipos),
         })
         setTipoDoc(record.cpf && !record.cnpj ? 'cpf' : 'cnpj')
         carregarProdutos(record.id)
@@ -176,6 +183,9 @@ export function FornecedorDialog({
     }
     if (!form.nome_fantasia.trim()) {
       nextErrors.nome_fantasia = 'Informe o nome fantasia.'
+    }
+    if (!form.tipos || form.tipos.length === 0) {
+      nextErrors.tipos = 'Selecione ao menos um tipo de fornecimento.'
     }
 
     if (tipoDoc === 'cnpj') {
@@ -244,6 +254,7 @@ export function FornecedorDialog({
         prazo_entrega_dias: form.prazo_entrega_dias ? Number(form.prazo_entrega_dias) : undefined,
         condicao_pagamento: form.condicao_pagamento.trim() || undefined,
         observacoes: form.observacoes.trim() || undefined,
+        tipos: form.tipos,
       }
 
       const saved = await fornecedoresService.saveFornecedor(payload, record?.id)
@@ -510,6 +521,55 @@ export function FornecedorDialog({
             <TabsContent value="dados" className="mt-0">
               <form onSubmit={handleSaveFornecedor} className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
+                  {/* Classificação do Fornecedor (Multi-seleção: revenda | insumos | servicos) */}
+                  <div className="space-y-1.5 sm:col-span-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-bold text-foreground">
+                        Classificação do Fornecedor *
+                      </Label>
+                      <span className="text-[11px] text-muted-foreground">
+                        Selecione as modalidades aplicáveis
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      {FORNECEDOR_TIPOS_LISTA.map((t) => {
+                        const ativo = form.tipos.includes(t)
+                        const cfg = FORNECEDOR_TIPO_CONFIG[t]
+                        return (
+                          <button
+                            key={t}
+                            type="button"
+                            disabled={!canWrite}
+                            onClick={() => {
+                              const existe = form.tipos.includes(t)
+                              let novos: FornecedorTipo[]
+                              if (existe) {
+                                novos = form.tipos.filter((item) => item !== t)
+                                if (novos.length === 0) novos = [t]
+                              } else {
+                                novos = [...form.tipos, t]
+                              }
+                              setForm({ ...form, tipos: novos })
+                            }}
+                            className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                              ativo
+                                ? `${cfg.badgeClass} ring-2 ring-primary/30 shadow-xs`
+                                : 'bg-white/80 border-border text-muted-foreground hover:bg-secondary/50'
+                            }`}
+                          >
+                            <span
+                              className={`h-2 w-2 rounded-full ${
+                                ativo ? 'bg-current' : 'bg-muted-foreground/40'
+                              }`}
+                            />
+                            {cfg.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {errors.tipos && <p className="text-[11px] text-destructive">{errors.tipos}</p>}
+                  </div>
+
                   <div className="space-y-1 sm:col-span-2">
                     <Label className="text-xs font-semibold">Razão Social *</Label>
                     <Input

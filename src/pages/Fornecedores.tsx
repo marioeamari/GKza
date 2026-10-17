@@ -38,7 +38,12 @@ import { apiMessage } from '@/lib/api-error'
 import { onlyDigits } from '@/lib/documents'
 import { can } from '@/lib/permissions'
 import { fornecedoresService } from '@/services/fornecedores'
-import type { Fornecedor, FornecedorProduto } from '@/types/domain'
+import {
+  FORNECEDOR_TIPO_CONFIG,
+  fornecedorCorrespondeTipo,
+  normalizarTiposFornecedor,
+} from '@/lib/classificacao-fornecedores'
+import type { Fornecedor, FornecedorProduto, FornecedorTipo } from '@/types/domain'
 
 export default function Fornecedores() {
   const { user } = useAuth()
@@ -47,6 +52,7 @@ export default function Fornecedores() {
   const [produtosCountMap, setProdutosCountMap] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [filtroTipo, setFiltroTipo] = useState<'todos' | FornecedorTipo>('todos')
   const [fornecedorDialog, setFornecedorDialog] = useState(false)
   const [editingFornecedor, setEditingFornecedor] = useState<Fornecedor | null>(null)
   const [deleting, setDeleting] = useState<{ id: string; label: string } | null>(null)
@@ -87,16 +93,19 @@ export default function Fornecedores() {
 
   const filteredFornecedores = useMemo(
     () =>
-      fornecedores.filter(
-        (f) =>
+      fornecedores.filter((f) => {
+        if (!fornecedorCorrespondeTipo(f, filtroTipo)) return false
+        if (!normalized && !digits) return true
+        return (
           f.razao_social.toLocaleLowerCase('pt-BR').includes(normalized) ||
           f.nome_fantasia.toLocaleLowerCase('pt-BR').includes(normalized) ||
           (f.cnpj && digits && onlyDigits(f.cnpj).includes(digits)) ||
           (f.cpf && digits && onlyDigits(f.cpf).includes(digits)) ||
           (f.cidade && f.cidade.toLocaleLowerCase('pt-BR').includes(normalized)) ||
-          (f.contato_nome && f.contato_nome.toLocaleLowerCase('pt-BR').includes(normalized)),
-      ),
-    [fornecedores, normalized, digits],
+          (f.contato_nome && f.contato_nome.toLocaleLowerCase('pt-BR').includes(normalized))
+        )
+      }),
+    [fornecedores, normalized, digits, filtroTipo],
   )
 
   const writable = can(user?.role, 'writeRegistry')
@@ -177,16 +186,58 @@ export default function Fornecedores() {
         }
       />
 
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative w-full sm:max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-10"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nome, razão social, CNPJ/CPF ou cidade..."
-          />
+      <div className="mb-5 flex flex-col gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full sm:max-w-md">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-10"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por nome, razão social, CNPJ/CPF ou cidade..."
+            />
+          </div>
+
+          {/* Filtro de tipos de fornecedor */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+            <button
+              type="button"
+              onClick={() => setFiltroTipo('todos')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                filtroTipo === 'todos'
+                  ? 'bg-primary text-white border-primary shadow-xs'
+                  : 'bg-white border-border text-muted-foreground hover:bg-secondary/60'
+              }`}
+            >
+              Todos ({fornecedores.length})
+            </button>
+            {(['revenda', 'insumos', 'servicos'] as FornecedorTipo[]).map((t) => {
+              const ativo = filtroTipo === t
+              const cfg = FORNECEDOR_TIPO_CONFIG[t]
+              const total = fornecedores.filter((f) => fornecedorCorrespondeTipo(f, t)).length
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setFiltroTipo(t)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border flex items-center gap-1.5 ${
+                    ativo
+                      ? `${cfg.badgeClass} ring-2 ring-primary/30 shadow-xs`
+                      : 'bg-white border-border text-muted-foreground hover:bg-secondary/60'
+                  }`}
+                >
+                  <span
+                    className={`h-2 w-2 rounded-full ${
+                      ativo ? 'bg-current' : 'bg-muted-foreground/40'
+                    }`}
+                  />
+                  {cfg.label} ({total})
+                </button>
+              )
+            })}
+          </div>
         </div>
+
         <p className="text-xs text-muted-foreground">
           {filteredFornecedores.length === 1
             ? '1 fornecedor encontrado'
@@ -239,7 +290,22 @@ export default function Fornecedores() {
                     </div>
                   </div>
 
-                  <h2 className="mt-4 font-bold text-base text-foreground">{f.nome_fantasia}</h2>
+                  <div className="mt-4 flex flex-wrap items-center gap-1.5">
+                    {normalizarTiposFornecedor(f.tipos).map((t) => {
+                      const cfg = FORNECEDOR_TIPO_CONFIG[t]
+                      return (
+                        <Badge
+                          key={t}
+                          variant="outline"
+                          className={`text-[11px] font-semibold border ${cfg.badgeClass}`}
+                        >
+                          {cfg.label}
+                        </Badge>
+                      )
+                    })}
+                  </div>
+
+                  <h2 className="mt-2 font-bold text-base text-foreground">{f.nome_fantasia}</h2>
                   <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">
                     {f.razao_social}
                   </p>

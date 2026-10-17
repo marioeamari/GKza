@@ -29,6 +29,7 @@ import { fornecedoresService } from '@/services/fornecedores'
 import { PrecCanalRecord, PrecKitRecord, PrecProdutoRecord } from '@/types/precificacao'
 import { SkuApelidosManager } from '@/components/precificacao/SkuApelidosManager'
 import { Empresa, Fornecedor, FornecedorProduto } from '@/types/domain'
+import { FORNECEDOR_TIPO_CONFIG, normalizarTiposFornecedor } from '@/lib/classificacao-fornecedores'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EmpresaDialog } from '@/components/cadastros/EmpresaDialog'
 import { FornecedorDialog } from '@/components/cadastros/FornecedorDialog'
@@ -872,12 +873,20 @@ export default function PrecificacaoProdutos() {
                         <span className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary">
                           <Truck className="h-5 w-5" />
                         </span>
-                        <Badge
-                          variant="outline"
-                          className="text-[11px] font-semibold border-blue-500/30 text-blue-700 bg-blue-50"
-                        >
-                          Revenda
-                        </Badge>
+                        <div className="flex flex-wrap items-center gap-1 justify-end">
+                          {normalizarTiposFornecedor(forn.tipos).map((t) => {
+                            const cfg = FORNECEDOR_TIPO_CONFIG[t]
+                            return (
+                              <Badge
+                                key={t}
+                                variant="outline"
+                                className={`text-[10px] font-semibold border ${cfg.badgeClass}`}
+                              >
+                                {cfg.label}
+                              </Badge>
+                            )
+                          })}
+                        </div>
                       </div>
 
                       <h3 className="mt-3 font-bold text-base text-foreground line-clamp-1">

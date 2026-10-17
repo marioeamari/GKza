@@ -666,6 +666,22 @@ export function calcularCustoBaseProduto(produto: ProdutoCalculoInput): {
     }
   } else if (produto.tipo === 'revenda') {
     custo_direto = produto.custo_aquisicao_unitario || 0
+    detalhes.push(`Aquisição: R$ ${custo_direto.toFixed(2)}`)
+
+    // Suporte unificado à composição por linhas de insumos na revenda
+    if (produto.composicao && produto.composicao.length > 0) {
+      for (const item of produto.composicao) {
+        const perda = (item.perda_pct || 0) / 100
+        const qtdAjustada = item.qtd * (1 + perda)
+        const subtotal = qtdAjustada * item.custo_unitario
+        custo_direto += subtotal
+        detalhes.push(
+          `Composição (${item.descricao}): Qtd ${item.qtd} x R$ ${item.custo_unitario.toFixed(2)} = R$ ${subtotal.toFixed(2)}`,
+        )
+      }
+    }
+
+    // Preservação retrocompatível de despesas de compra legadas
     if (produto.despesas_compra && produto.despesas_compra.length > 0) {
       for (const desp of produto.despesas_compra) {
         custo_direto += desp.valor || 0

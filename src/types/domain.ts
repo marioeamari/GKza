@@ -32,6 +32,8 @@ export interface Estabelecimento extends RecordModel {
   ativa?: boolean
 }
 
+export type FornecedorTipo = 'revenda' | 'insumos' | 'servicos'
+
 export interface Fornecedor extends RecordModel {
   razao_social: string
   nome_fantasia: string
@@ -49,6 +51,7 @@ export interface Fornecedor extends RecordModel {
   prazo_entrega_dias?: number
   condicao_pagamento?: string
   observacoes?: string
+  tipos?: FornecedorTipo[]
 }
 
 export interface FornecedorProduto extends RecordModel {
