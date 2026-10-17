@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-16T17:18:01.326Z",
+  "generatedAt": "2026-10-17T03:16:45.815Z",
   "collections": [
     {
       "name": "users",
@@ -5749,7 +5749,7 @@
         {
           "name": "ganho_total",
           "type": "number",
-          "required": true,
+          "required": false,
           "system": false
         },
         {
@@ -5761,13 +5761,13 @@
         {
           "name": "divida_semanal",
           "type": "number",
-          "required": true,
+          "required": false,
           "system": false
         },
         {
           "name": "a_receber",
           "type": "number",
-          "required": true,
+          "required": false,
           "system": false
         },
         {

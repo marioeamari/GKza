@@ -348,4 +348,47 @@ describe('Regras do Módulo de Funcionários (Aritmética Exata da Planilha)', (
       expect(t1).not.toBe(t2)
     })
   })
+
+  describe('7. Fechamento de Folha sem dívidas (divida_semanal = 0)', () => {
+    it('calcula espelho com dívida semanal igual a zero quando não há descontos ou vales', () => {
+      // Caso real relatado: funcionário trabalhou no período e não tem dívidas ativas nem vales
+      const espelho = calcularEspelhoFolha({
+        periodoInicio: '2026-10-10',
+        periodoFim: '2026-10-17',
+        valorHora: 10,
+        pontosBrutos: [
+          { data: '2026-10-10', entrada: '08:00', saida: '17:06' }, // ~9.1h ou 91 reais
+        ],
+        dividas: [],
+        saldoNegativoAnterior: 0,
+        outrosDescontos: [],
+      })
+
+      // Dívida semanal é 0 (legítimo e comum — sem dívidas na semana)
+      expect(espelho.totalDescontos).toBe(0)
+      expect(espelho.descontosDividas).toEqual([])
+      expect(espelho.aReceber).toBe(espelho.totalMonetarioTrabalhado)
+      expect(espelho.estaNegativo).toBe(false)
+
+      // Garante que o payload gerado para fechamento de folha preserva divida_semanal = 0
+      const payloadFolha = {
+        funcionario: 'gpafyugfrcbyy21',
+        periodo_inicio: espelho.periodoInicio,
+        periodo_fim: espelho.periodoFim,
+        ganho_total: espelho.totalMonetarioTrabalhado,
+        descontos: {
+          dividas: espelho.descontosDividas,
+          saldoNegativoAnterior: espelho.saldoNegativoAnterior,
+          outros: espelho.outrosDescontos,
+        },
+        divida_semanal: espelho.totalDescontos,
+        a_receber: espelho.aReceber,
+        quitada: true,
+      }
+
+      expect(payloadFolha.divida_semanal).toBe(0)
+      expect(payloadFolha.a_receber).toBeGreaterThan(0)
+      expect(payloadFolha.ganho_total).toBeGreaterThan(0)
+    })
+  })
 })
