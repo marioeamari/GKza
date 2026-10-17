@@ -110,6 +110,15 @@ export const fornecedoresService = {
       embalagem: fp.embalagem || '',
       codigo_barras: fp.codigo_barras || '',
       status: fp.ativo !== false ? 'ativo' : 'inativo',
+      composicao: Array.isArray(fp.composicao) ? fp.composicao : undefined,
+      custo_adicional_embalagem:
+        fp.custo_adicional_embalagem !== undefined && fp.custo_adicional_embalagem !== null
+          ? Number(fp.custo_adicional_embalagem)
+          : undefined,
+      custo_etiqueta:
+        fp.custo_etiqueta !== undefined && fp.custo_etiqueta !== null
+          ? Number(fp.custo_etiqueta)
+          : undefined,
     }
 
     let precSalvo: any = null

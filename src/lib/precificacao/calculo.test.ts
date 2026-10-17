@@ -46,6 +46,38 @@ describe('Motor de Cálculo de Precificação - ERP GKza', () => {
     expect(custo.custo_total).toBe(18.5)
   })
 
+  it('(1c) motor de custos de revenda unificado: aquisição + despesas_compra + embalagem + etiqueta + composição', () => {
+    const custoRevendaCompleto = calcularCustoBaseProduto({
+      sku: 'REV-COMPLETO',
+      nome: 'Produto de Revenda com Composição',
+      tipo: 'revenda',
+      custo_aquisicao_unitario: 20.0,
+      despesas_compra: [{ descricao: 'Frete proporcional', valor: 3.0 }],
+      custo_adicional_embalagem: 1.5,
+      custo_etiqueta: 0.5,
+      composicao: [
+        { codigo: 'C0', descricao: 'Caixa Especial Reforçada', qtd: 1, custo_unitario: 2.5 },
+        { codigo: 'C1', descricao: 'Laço de Fita Cetim', qtd: 2, custo_unitario: 0.75 },
+      ],
+    })
+
+    // Custo direto = Aquisição (20.00) + Composição (2.50 + 1.50 = 4.00) + Despesas (3.00) = 27.00
+    // Embalagem = 1.50, Etiqueta = 0.50
+    // Custo total = 27.00 + 1.50 + 0.50 = 29.00
+    expect(custoRevendaCompleto.custo_direto).toBe(27.0)
+    expect(custoRevendaCompleto.custo_embalagem).toBe(1.5)
+    expect(custoRevendaCompleto.custo_etiqueta).toBe(0.5)
+    expect(custoRevendaCompleto.custo_total).toBe(29.0)
+    expect(custoRevendaCompleto.detalhes).toEqual(
+      expect.arrayContaining([
+        'Aquisição: R$ 20.00',
+        'Composição (Caixa Especial Reforçada): Qtd 1 x R$ 2.50 = R$ 2.50',
+        'Composição (Laço de Fita Cetim): Qtd 2 x R$ 0.75 = R$ 1.50',
+        'Despesa compra (Frete proporcional): R$ 3.00',
+      ]),
+    )
+  })
+
   it('(2) deve calcular kit com múltiplos itens agregados', () => {
     const custo = calcularCustoBaseProduto({
       sku: 'KIT-3UN',

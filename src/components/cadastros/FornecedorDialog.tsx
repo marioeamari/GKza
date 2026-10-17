@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  Boxes,
   Camera,
   Image as ImageIcon,
   LoaderCircle,
@@ -38,11 +39,22 @@ import { formatCurrency } from '@/lib/format'
 import { CategoriaAutocompleteInput } from '@/components/precificacao/CategoriaAutocompleteInput'
 import { fornecedoresService } from '@/services/fornecedores'
 import {
+  insumosService,
+  formatarDimensaoInsumo,
+  aplicarAutoPreenchimentoEmbalagem,
+} from '@/services/insumos'
+import {
+  calcularCustoBaseProduto,
+  round2,
+  type ItemComposicaoCusto,
+} from '@/lib/precificacao/calculo'
+import {
   FORNECEDOR_TIPOS_LISTA,
   FORNECEDOR_TIPO_CONFIG,
+  filtrarItensParaSeletorComposicao,
   normalizarTiposFornecedor,
 } from '@/lib/classificacao-fornecedores'
-import type { Fornecedor, FornecedorProduto, FornecedorTipo } from '@/types/domain'
+import type { Fornecedor, FornecedorProduto, FornecedorTipo, InsumoRecord } from '@/types/domain'
 
 interface FornecedorDialogProps {
   open: boolean
@@ -91,6 +103,8 @@ const initialProduto = {
   moeda: 'BRL',
   ncm: '',
   observacoes: '',
+  custo_adicional_embalagem: '',
+  custo_etiqueta: '',
   ativo: true,
 }
 
@@ -121,6 +135,11 @@ export function FornecedorDialog({
   const [imagemPreview, setImagemPreview] = useState<string | null>(null)
   const [removerImagem, setRemoverImagem] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Composição analítica de custos / insumos do produto de revenda
+  const [prodComposicao, setProdComposicao] = useState<ItemComposicaoCusto[]>([])
+  const [insumosAtivos, setInsumosAtivos] = useState<InsumoRecord[]>([])
+  const [embalagemEditadaManualmente, setEmbalagemEditadaManualmente] = useState(false)
 
   // Tipo de documento (CNPJ ou CPF)
   const [tipoDoc, setTipoDoc] = useState<'cnpj' | 'cpf'>('cnpj')
@@ -159,6 +178,18 @@ export function FornecedorDialog({
         setProdutos([])
       }
       setErrors({})
+
+      // Carregar catálogo de insumos ativos para o seletor isolado de composição
+      insumosService
+        .listInsumos({ apenasAtivos: true })
+        .then((data) => {
+          // Garante filtragem estrita pelo seletor de composição
+          const insumosFiltrados = filtrarItensParaSeletorComposicao(
+            data.map((i) => ({ ...i, _collection: 'insumos' })),
+          ) as unknown as InsumoRecord[]
+          setInsumosAtivos(insumosFiltrados.length > 0 ? insumosFiltrados : data)
+        })
+        .catch(() => {})
     }
   }, [open, record, defaultTab])
 
@@ -294,6 +325,8 @@ export function FornecedorDialog({
     }
     setEditingProduto(null)
     setProdForm(initialProduto)
+    setProdComposicao([])
+    setEmbalagemEditadaManualmente(false)
     setProdErrors({})
     setImagemFile(null)
     setImagemPreview(null)
@@ -304,6 +337,12 @@ export function FornecedorDialog({
 
   function handleEditarProduto(p: FornecedorProduto) {
     setEditingProduto(p)
+    // Se o produto já possui um custo_adicional_embalagem cadastrado explicitamente, consideramos manual
+    setEmbalagemEditadaManualmente(
+      p.custo_adicional_embalagem !== undefined &&
+        p.custo_adicional_embalagem !== null &&
+        Number(p.custo_adicional_embalagem) > 0,
+    )
     setProdForm({
       descricao: p.descricao,
       sku_fornecedor: p.sku_fornecedor || '',
@@ -328,8 +367,15 @@ export function FornecedorDialog({
       moeda: p.moeda || 'BRL',
       ncm: p.ncm || '',
       observacoes: p.observacoes || '',
+      custo_adicional_embalagem:
+        p.custo_adicional_embalagem !== undefined && p.custo_adicional_embalagem !== null
+          ? String(p.custo_adicional_embalagem)
+          : '',
+      custo_etiqueta:
+        p.custo_etiqueta !== undefined && p.custo_etiqueta !== null ? String(p.custo_etiqueta) : '',
       ativo: p.ativo !== false,
     })
+    setProdComposicao(Array.isArray(p.composicao) ? p.composicao : [])
     setProdErrors({})
     setImagemFile(null)
     setRemoverImagem(false)
@@ -340,6 +386,75 @@ export function FornecedorDialog({
       setImagemPreview(null)
     }
     setProdutoDialog(true)
+  }
+
+  // Handler para selecionar insumo do catálogo em uma linha da composição
+  function handleSelecionarInsumoNaLinha(idx: number, insumoId: string) {
+    const arr = [...prodComposicao]
+    if (!arr[idx]) return
+
+    if (!insumoId || insumoId === 'manual') {
+      arr[idx] = {
+        ...arr[idx],
+        insumo_id: undefined,
+        insumo_tipo: undefined,
+        dimensao_tipo: undefined,
+        dimensao_largura_cm: undefined,
+        dimensao_altura_cm: undefined,
+        dimensao_comprimento_cm: undefined,
+        dimensao_formatada: undefined,
+        categoria_nome: undefined,
+        fornecedor_id: undefined,
+        fornecedor_nome: undefined,
+      }
+      setProdComposicao(arr)
+      return
+    }
+
+    const insumo = insumosAtivos.find((i) => i.id === insumoId)
+    if (!insumo) return
+
+    const dimFormatada = formatarDimensaoInsumo(insumo)
+    const fornNome =
+      insumo.expand?.fornecedor?.nome_fantasia ||
+      insumo.expand?.fornecedor?.razao_social ||
+      undefined
+    const catNome = insumo.expand?.categoria?.nome || undefined
+    const custoUnit = Number(insumo.valor_unitario) || 0
+
+    arr[idx] = {
+      ...arr[idx],
+      descricao: insumo.nome,
+      custo_unitario: custoUnit,
+      unidade: insumo.unidade || arr[idx].unidade || 'un',
+      categoria_custo: insumo.tipo === 'servico' ? 'servico' : 'insumo',
+      insumo_id: insumo.id,
+      insumo_tipo: insumo.tipo,
+      dimensao_tipo: insumo.dimensao_tipo,
+      dimensao_largura_cm: insumo.dimensao_largura_cm,
+      dimensao_altura_cm: insumo.dimensao_altura_cm,
+      dimensao_comprimento_cm: insumo.dimensao_comprimento_cm,
+      dimensao_formatada: dimFormatada,
+      categoria_nome: catNome,
+      fornecedor: insumo.fornecedor,
+      fornecedor_id: insumo.fornecedor,
+      fornecedor_nome: fornNome,
+    }
+    setProdComposicao(arr)
+
+    // Regra: se o insumo for da categoria "Embalagem", autopreenche custo_adicional_embalagem
+    // SOMENTE se o usuário ainda não tiver editado manualmente (flag embalagemEditadaManualmente)
+    const resAuto = aplicarAutoPreenchimentoEmbalagem({
+      insumo,
+      valorEmbalagemAtual: prodForm.custo_adicional_embalagem,
+      editadoManualmente: embalagemEditadaManualmente,
+    })
+    if (resAuto.deveAtualizar && resAuto.novoValor !== null) {
+      setProdForm((prev) => ({
+        ...prev,
+        custo_adicional_embalagem: String(resAuto.novoValor),
+      }))
+    }
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -442,6 +557,20 @@ export function FornecedorDialog({
       formData.append('moeda', prodForm.moeda.trim() || 'BRL')
       if (prodForm.ncm.trim()) formData.append('ncm', prodForm.ncm.trim())
       if (prodForm.observacoes.trim()) formData.append('observacoes', prodForm.observacoes.trim())
+      if (prodForm.custo_adicional_embalagem) {
+        formData.append(
+          'custo_adicional_embalagem',
+          String(parseFloat(prodForm.custo_adicional_embalagem.replace(',', '.')) || 0),
+        )
+      }
+      if (prodForm.custo_etiqueta) {
+        formData.append(
+          'custo_etiqueta',
+          String(parseFloat(prodForm.custo_etiqueta.replace(',', '.')) || 0),
+        )
+      }
+      // Composição analítica de insumos/serviços vinculados à revenda
+      formData.append('composicao', JSON.stringify(prodComposicao))
       formData.append('ativo', String(prodForm.ativo))
 
       // Tratamento do campo imagem
@@ -932,269 +1061,551 @@ export function FornecedorDialog({
           </Tabs>
         </DialogContent>
       </Dialog>
-
-      {/* MODAL SECUNDÁRIO: PRODUTO FORNECIDO */}
+      {/* MODAL SECUNDÁRIO: PRODUTO FORNECIDO (REVENDA) */}
       <Dialog open={produtoDialog} onOpenChange={setProdutoDialog}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-          <form onSubmit={handleSaveProduto}>
-            <DialogHeader>
-              <DialogTitle>
-                {editingProduto
-                  ? 'Editar Produto do Fornecedor'
-                  : 'Adicionar Produto do Fornecedor'}
-              </DialogTitle>
-              <DialogDescription>
-                Informe os dados do produto, preço de custo, peso e dimensões para alimentar o motor
-                de precificação.
-              </DialogDescription>
-            </DialogHeader>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+          {(() => {
+            const custoAquisicaoNum =
+              parseFloat(prodForm.preco_custo_unitario.replace(',', '.')) || 0
+            const previewCusto = calcularCustoBaseProduto({
+              sku: prodForm.sku_fornecedor || 'REV-PREVIEW',
+              nome: prodForm.descricao || 'Preview',
+              tipo: 'revenda',
+              custo_aquisicao_unitario: custoAquisicaoNum,
+              peso_g: parseFloat(prodForm.peso_g) || 0,
+              composicao: prodComposicao,
+              custo_etiqueta: parseFloat(prodForm.custo_etiqueta) || 0,
+              custo_adicional_embalagem: parseFloat(prodForm.custo_adicional_embalagem) || 0,
+            })
 
-            <div className="space-y-3 py-3 text-xs">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1 sm:col-span-2">
-                  <Label className="text-xs font-semibold">Imagem de Referência do Produto</Label>
-                  <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-secondary/20">
-                    <div className="relative h-16 w-16 rounded-lg border border-border bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
-                      {imagemPreview ? (
-                        <img
-                          src={imagemPreview}
-                          alt="Preview do produto"
-                          className="h-full w-full object-cover"
+            return (
+              <form onSubmit={handleSaveProduto}>
+                <DialogHeader>
+                  <DialogTitle>
+                    {editingProduto
+                      ? 'Editar Produto do Fornecedor (Revenda)'
+                      : 'Adicionar Produto do Fornecedor (Revenda)'}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Fornecedor: <strong className="text-foreground">{record?.nome_fantasia}</strong>
+                    . Cadastre os dados físicos, preço de aquisição e monte a composição analítica
+                    de insumos e embalagem.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3 py-3 text-xs">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label className="text-xs font-semibold">
+                        Imagem de Referência do Produto
+                      </Label>
+                      <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-secondary/20">
+                        <div className="relative h-16 w-16 rounded-lg border border-border bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
+                          {imagemPreview ? (
+                            <img
+                              src={imagemPreview}
+                              alt="Preview do produto"
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <ImageIcon className="h-6 w-6 text-muted-foreground/40" />
+                          )}
+                        </div>
+                        <div className="flex-1 space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs font-semibold"
+                              onClick={() => fileInputRef.current?.click()}
+                            >
+                              <Camera className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                              {imagemPreview ? 'Alterar Imagem' : 'Anexar Imagem'}
+                            </Button>
+                            {imagemPreview && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 text-xs text-destructive hover:bg-destructive/10"
+                                onClick={handleRemoverImagem}
+                              >
+                                <X className="mr-1 h-3.5 w-3.5" />
+                                Remover
+                              </Button>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            PNG, JPG, WEBP até 5MB. Usada como referência visual do item do
+                            fornecedor.
+                          </p>
+                        </div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleFileChange}
                         />
-                      ) : (
-                        <ImageIcon className="h-6 w-6 text-muted-foreground/40" />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label className="text-xs font-semibold">Descrição do Produto *</Label>
+                      <Input
+                        required
+                        value={prodForm.descricao}
+                        onChange={(e) => setProdForm({ ...prodForm, descricao: e.target.value })}
+                        placeholder="Ex: Toalha de Banho Algodão Egípcio 70x140cm"
+                      />
+                      {prodErrors.descricao && (
+                        <p className="text-[11px] text-destructive">{prodErrors.descricao}</p>
                       )}
                     </div>
-                    <div className="flex-1 space-y-1.5">
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 text-xs font-semibold"
-                          onClick={() => fileInputRef.current?.click()}
-                        >
-                          <Camera className="mr-1.5 h-3.5 w-3.5 text-primary" />
-                          {imagemPreview ? 'Alterar Imagem' : 'Anexar Imagem'}
-                        </Button>
-                        {imagemPreview && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 text-xs text-destructive hover:bg-destructive/10"
-                            onClick={handleRemoverImagem}
-                          >
-                            <X className="mr-1 h-3.5 w-3.5" />
-                            Remover
-                          </Button>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-muted-foreground">
-                        PNG, JPG, WEBP até 5MB. Usada como referência visual do item do fornecedor.
-                      </p>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">SKU / Código no Fornecedor</Label>
+                      <Input
+                        value={prodForm.sku_fornecedor}
+                        onChange={(e) =>
+                          setProdForm({ ...prodForm, sku_fornecedor: e.target.value })
+                        }
+                        placeholder="Ex: TB-ALG-70140"
+                      />
                     </div>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleFileChange}
-                    />
+
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Código de Barras (EAN / GTIN)</Label>
+                      <Input
+                        value={prodForm.codigo_barras}
+                        onChange={(e) =>
+                          setProdForm({ ...prodForm, codigo_barras: e.target.value })
+                        }
+                        placeholder="789..."
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Marca</Label>
+                      <Input
+                        value={prodForm.marca}
+                        onChange={(e) => setProdForm({ ...prodForm, marca: e.target.value })}
+                        placeholder="Ex: Teka, Karsten, Buddemeyer..."
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Categoria</Label>
+                      <CategoriaAutocompleteInput
+                        value={prodForm.categoria}
+                        onChange={(cat) => setProdForm({ ...prodForm, categoria: cat })}
+                        placeholder="Ex: Toalha de Banho, Pet..."
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">
+                        Preço de Custo Unitário (R$) *
+                      </Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        required
+                        value={prodForm.preco_custo_unitario}
+                        onChange={(e) =>
+                          setProdForm({ ...prodForm, preco_custo_unitario: e.target.value })
+                        }
+                        placeholder="0.00"
+                      />
+                      {prodErrors.preco_custo_unitario && (
+                        <p className="text-[11px] text-destructive">
+                          {prodErrors.preco_custo_unitario}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Preço da Última Compra (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={prodForm.preco_ultima_compra}
+                        onChange={(e) =>
+                          setProdForm({ ...prodForm, preco_ultima_compra: e.target.value })
+                        }
+                        placeholder="0.00"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Unidade de Medida</Label>
+                      <Input
+                        value={prodForm.unidade}
+                        onChange={(e) => setProdForm({ ...prodForm, unidade: e.target.value })}
+                        placeholder="un, cx, kg, par..."
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Tipo de Embalagem</Label>
+                      <Input
+                        value={prodForm.embalagem}
+                        onChange={(e) => setProdForm({ ...prodForm, embalagem: e.target.value })}
+                        placeholder="Caixa papelão, saco plástico..."
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Peso do Produto (gramas)</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={prodForm.peso_g}
+                        onChange={(e) => setProdForm({ ...prodForm, peso_g: e.target.value })}
+                        placeholder="Ex: 350"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs font-semibold">Compr. (cm)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={prodForm.comprimento_cm}
+                          onChange={(e) =>
+                            setProdForm({ ...prodForm, comprimento_cm: e.target.value })
+                          }
+                          placeholder="25"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs font-semibold">Larg. (cm)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={prodForm.largura_cm}
+                          onChange={(e) => setProdForm({ ...prodForm, largura_cm: e.target.value })}
+                          placeholder="18"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs font-semibold">Alt. (cm)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={prodForm.altura_cm}
+                          onChange={(e) => setProdForm({ ...prodForm, altura_cm: e.target.value })}
+                          placeholder="6"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">NCM Fiscal</Label>
+                      <Input
+                        value={prodForm.ncm}
+                        onChange={(e) => setProdForm({ ...prodForm, ncm: e.target.value })}
+                        placeholder="0000.00.00"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Moeda do Custo</Label>
+                      <Input
+                        value={prodForm.moeda}
+                        onChange={(e) => setProdForm({ ...prodForm, moeda: e.target.value })}
+                        placeholder="BRL"
+                      />
+                    </div>
+
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label className="text-xs font-semibold">Observações do Produto</Label>
+                      <Textarea
+                        rows={2}
+                        value={prodForm.observacoes}
+                        onChange={(e) => setProdForm({ ...prodForm, observacoes: e.target.value })}
+                        placeholder="Informações técnicas, lote mínimo, cores..."
+                      />
+                    </div>
+                  </div>
+
+                  {/* COMPOSIÇÃO ANALÍTICA DE INSUMOS/SERVIÇOS VINCULADOS À REVENDA */}
+                  <div className="rounded-xl border border-primary/20 bg-primary/5 p-3.5 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-1.5 font-bold text-xs uppercase tracking-wider text-primary">
+                          <Boxes className="h-3.5 w-3.5" />
+                          <span>Composição de Custos / Insumos Adicionais</span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Insumos, embalagens especiais ou serviços agregados a este produto de
+                          revenda.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[11px] font-semibold bg-white shrink-0"
+                        onClick={() => {
+                          const nextIdx = prodComposicao.length
+                          setProdComposicao([
+                            ...prodComposicao,
+                            {
+                              codigo: `C${nextIdx}`,
+                              descricao: '',
+                              qtd: 1,
+                              custo_unitario: 0,
+                              categoria_custo: 'insumo',
+                            },
+                          ])
+                        }}
+                      >
+                        <Plus className="mr-1 h-3 w-3" />
+                        Adicionar Insumo (C{prodComposicao.length})
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {prodComposicao.length === 0 ? (
+                        <div className="p-3 text-center rounded-lg border border-dashed border-primary/30 bg-white/70">
+                          <p className="text-xs text-muted-foreground">
+                            Nenhum insumo ou serviço adicional vinculado à revenda. Clique acima
+                            caso este produto exija componentes ou serviços extras.
+                          </p>
+                        </div>
+                      ) : (
+                        prodComposicao.map((item, idx) => (
+                          <div
+                            key={idx}
+                            className="p-2 rounded-lg border border-border/80 bg-white space-y-1.5 shadow-2xs"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              {/* Código C0..C12 */}
+                              <Input
+                                className="w-16 h-8 text-xs font-mono font-bold bg-white"
+                                placeholder="C0"
+                                value={item.codigo || `C${idx}`}
+                                onChange={(e) => {
+                                  const arr = [...prodComposicao]
+                                  arr[idx].codigo = e.target.value
+                                  setProdComposicao(arr)
+                                }}
+                              />
+
+                              {/* Seletor Rápido do Catálogo de Insumos (Isolado de fornecedores_produtos) */}
+                              <div className="w-48 sm:w-56">
+                                <select
+                                  aria-label="Catálogo de Insumos"
+                                  className="w-full h-8 px-2 text-xs rounded-md border border-input bg-secondary/30 focus:outline-hidden focus:ring-1 focus:ring-primary truncate"
+                                  value={item.insumo_id || ''}
+                                  onChange={(e) =>
+                                    handleSelecionarInsumoNaLinha(idx, e.target.value)
+                                  }
+                                >
+                                  <option value="">(Manual / Personalizado)</option>
+                                  {insumosAtivos.map((ins) => {
+                                    const dim = formatarDimensaoInsumo(ins)
+                                    const dimStr = dim ? ` [${dim}]` : ''
+                                    const catStr = ins.expand?.categoria?.nome
+                                      ? ` (${ins.expand.categoria.nome})`
+                                      : ''
+                                    return (
+                                      <option key={ins.id} value={ins.id}>
+                                        {ins.nome}
+                                        {dimStr}
+                                        {catStr} - R$ {Number(ins.valor_unitario).toFixed(2)}
+                                      </option>
+                                    )
+                                  })}
+                                </select>
+                              </div>
+
+                              {/* Descrição do insumo/serviço */}
+                              <Input
+                                className="flex-1 min-w-[140px] h-8 text-xs bg-white"
+                                placeholder="Descrição do insumo ou serviço..."
+                                value={item.descricao}
+                                onChange={(e) => {
+                                  const arr = [...prodComposicao]
+                                  arr[idx].descricao = e.target.value
+                                  setProdComposicao(arr)
+                                }}
+                              />
+
+                              {/* Qtd */}
+                              <div className="w-20">
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  className="h-8 text-xs font-mono bg-white"
+                                  placeholder="Qtd"
+                                  value={item.qtd}
+                                  onChange={(e) => {
+                                    const arr = [...prodComposicao]
+                                    arr[idx].qtd = parseFloat(e.target.value) || 0
+                                    setProdComposicao(arr)
+                                  }}
+                                />
+                              </div>
+
+                              {/* Custo Unitário (R$) */}
+                              <div className="w-24">
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  className="h-8 text-xs font-mono bg-white"
+                                  placeholder="R$ Unit"
+                                  value={item.custo_unitario}
+                                  onChange={(e) => {
+                                    const arr = [...prodComposicao]
+                                    arr[idx].custo_unitario = parseFloat(e.target.value) || 0
+                                    setProdComposicao(arr)
+                                  }}
+                                />
+                              </div>
+
+                              {/* Excluir linha */}
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-destructive hover:bg-destructive/10 shrink-0"
+                                onClick={() => {
+                                  setProdComposicao(prodComposicao.filter((_, i) => i !== idx))
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+
+                            {/* Tags de metadados do insumo vinculado */}
+                            {(item.insumo_id ||
+                              item.dimensao_formatada ||
+                              item.fornecedor_nome) && (
+                              <div className="flex flex-wrap items-center gap-1.5 pl-1 text-[11px] text-muted-foreground">
+                                {item.insumo_tipo && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] py-0 px-1.5 capitalize"
+                                  >
+                                    {item.insumo_tipo}
+                                  </Badge>
+                                )}
+                                {item.dimensao_formatada && (
+                                  <span className="font-mono bg-secondary/60 px-1.5 py-0.5 rounded text-[10px] text-foreground">
+                                    📏 {item.dimensao_formatada}
+                                  </span>
+                                )}
+                                {item.categoria_nome && (
+                                  <Badge variant="secondary" className="text-[10px] py-0 px-1.5">
+                                    {item.categoria_nome}
+                                  </Badge>
+                                )}
+                                {item.fornecedor_nome && (
+                                  <span className="text-[10px] text-muted-foreground truncate max-w-[200px]">
+                                    🏢 {item.fornecedor_nome}
+                                  </span>
+                                )}
+                                <span className="font-mono text-[10px] font-semibold text-primary ml-auto">
+                                  Subtotal:{' '}
+                                  {formatCurrency(
+                                    round2((item.qtd || 0) * (item.custo_unitario || 0)),
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* CUSTOS INDIRETOS / GLOBAIS: EMBALAGEM ADICIONAL E ETIQUETA */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-border pt-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Embalagem Adicional (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={prodForm.custo_adicional_embalagem}
+                        onChange={(e) => {
+                          setEmbalagemEditadaManualmente(true)
+                          setProdForm({ ...prodForm, custo_adicional_embalagem: e.target.value })
+                        }}
+                        placeholder="0.00"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Etiqueta (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={prodForm.custo_etiqueta}
+                        onChange={(e) =>
+                          setProdForm({ ...prodForm, custo_etiqueta: e.target.value })
+                        }
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+
+                  {/* CARD DE RESUMO DE CUSTO BASE CALCULADO EM TEMPO REAL */}
+                  <div className="rounded-xl border border-border bg-secondary/30 p-3 flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] font-semibold text-muted-foreground uppercase block">
+                        Custo Base Calculado (Aquisição + Composição + Embalagem + Etiqueta)
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        Aquisição: {formatCurrency(custoAquisicaoNum)} • Composição:{' '}
+                        {formatCurrency(
+                          round2(
+                            prodComposicao.reduce(
+                              (acc, it) => acc + (it.qtd || 0) * (it.custo_unitario || 0),
+                              0,
+                            ),
+                          ),
+                        )}{' '}
+                        • Embalagem: {formatCurrency(previewCusto.custo_embalagem)} • Etiqueta:{' '}
+                        {formatCurrency(previewCusto.custo_etiqueta)}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-base font-black font-mono text-primary block">
+                        {formatCurrency(previewCusto.custo_total)}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        Custo total unitário
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="space-y-1 sm:col-span-2">
-                  <Label className="text-xs font-semibold">Descrição do Produto *</Label>
-                  <Input
-                    required
-                    value={prodForm.descricao}
-                    onChange={(e) => setProdForm({ ...prodForm, descricao: e.target.value })}
-                    placeholder="Ex: Toalha de Banho Algodão Egípcio 70x140cm"
-                  />
-                  {prodErrors.descricao && (
-                    <p className="text-[11px] text-destructive">{prodErrors.descricao}</p>
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold">SKU / Código no Fornecedor</Label>
-                  <Input
-                    value={prodForm.sku_fornecedor}
-                    onChange={(e) => setProdForm({ ...prodForm, sku_fornecedor: e.target.value })}
-                    placeholder="Ex: TB-ALG-70140"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold">Código de Barras (EAN / GTIN)</Label>
-                  <Input
-                    value={prodForm.codigo_barras}
-                    onChange={(e) => setProdForm({ ...prodForm, codigo_barras: e.target.value })}
-                    placeholder="789..."
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold">Marca</Label>
-                  <Input
-                    value={prodForm.marca}
-                    onChange={(e) => setProdForm({ ...prodForm, marca: e.target.value })}
-                    placeholder="Ex: Teka, Karsten, Buddemeyer..."
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold">Categoria</Label>
-                  <CategoriaAutocompleteInput
-                    value={prodForm.categoria}
-                    onChange={(cat) => setProdForm({ ...prodForm, categoria: cat })}
-                    placeholder="Ex: Toalha de Banho, Pet..."
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold">Preço de Custo Unitário (R$) *</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={prodForm.preco_custo_unitario}
-                    onChange={(e) =>
-                      setProdForm({ ...prodForm, preco_custo_unitario: e.target.value })
-                    }
-                    placeholder="0.00"
-                  />
-                  {prodErrors.preco_custo_unitario && (
-                    <p className="text-[11px] text-destructive">
-                      {prodErrors.preco_custo_unitario}
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold">Preço da Última Compra (R$)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={prodForm.preco_ultima_compra}
-                    onChange={(e) =>
-                      setProdForm({ ...prodForm, preco_ultima_compra: e.target.value })
-                    }
-                    placeholder="0.00"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold">Unidade de Medida</Label>
-                  <Input
-                    value={prodForm.unidade}
-                    onChange={(e) => setProdForm({ ...prodForm, unidade: e.target.value })}
-                    placeholder="un, cx, kg, par..."
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold">Tipo de Embalagem</Label>
-                  <Input
-                    value={prodForm.embalagem}
-                    onChange={(e) => setProdForm({ ...prodForm, embalagem: e.target.value })}
-                    placeholder="Caixa papelão, saco plástico..."
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold">Peso do Produto (gramas)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={prodForm.peso_g}
-                    onChange={(e) => setProdForm({ ...prodForm, peso_g: e.target.value })}
-                    placeholder="Ex: 350"
-                  />
-                </div>
-
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold">Compr. (cm)</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={prodForm.comprimento_cm}
-                      onChange={(e) => setProdForm({ ...prodForm, comprimento_cm: e.target.value })}
-                      placeholder="25"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold">Larg. (cm)</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={prodForm.largura_cm}
-                      onChange={(e) => setProdForm({ ...prodForm, largura_cm: e.target.value })}
-                      placeholder="18"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold">Alt. (cm)</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={prodForm.altura_cm}
-                      onChange={(e) => setProdForm({ ...prodForm, altura_cm: e.target.value })}
-                      placeholder="6"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold">NCM Fiscal</Label>
-                  <Input
-                    value={prodForm.ncm}
-                    onChange={(e) => setProdForm({ ...prodForm, ncm: e.target.value })}
-                    placeholder="0000.00.00"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold">Moeda do Custo</Label>
-                  <Input
-                    value={prodForm.moeda}
-                    onChange={(e) => setProdForm({ ...prodForm, moeda: e.target.value })}
-                    placeholder="BRL"
-                  />
-                </div>
-
-                <div className="space-y-1 sm:col-span-2">
-                  <Label className="text-xs font-semibold">Observações do Produto</Label>
-                  <Textarea
-                    rows={2}
-                    value={prodForm.observacoes}
-                    onChange={(e) => setProdForm({ ...prodForm, observacoes: e.target.value })}
-                    placeholder="Informações técnicas, lote mínimo, cores..."
-                  />
-                </div>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setProdutoDialog(false)}>
-                Cancelar
-              </Button>
-              <Button disabled={savingProd} className="bg-primary text-white font-bold">
-                {savingProd ? (
-                  <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="mr-2 h-4 w-4" />
-                )}
-                Salvar Produto
-              </Button>
-            </DialogFooter>
-          </form>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setProdutoDialog(false)}>
+                    Cancelar
+                  </Button>
+                  <Button disabled={savingProd} className="bg-primary text-white font-bold">
+                    {savingProd ? (
+                      <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="mr-2 h-4 w-4" />
+                    )}
+                    Salvar Produto
+                  </Button>
+                </DialogFooter>
+              </form>
+            )
+          })()}
         </DialogContent>
-      </Dialog>
+      </Dialog>{' '}
     </>
   )
 }

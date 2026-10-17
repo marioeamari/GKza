@@ -74,6 +74,9 @@ export interface FornecedorProduto extends RecordModel {
   ncm?: string
   observacoes?: string
   ativo?: boolean
+  composicao?: import('@/lib/precificacao/calculo').ItemComposicaoCusto[]
+  custo_adicional_embalagem?: number
+  custo_etiqueta?: number
   expand?: {
     fornecedor?: Fornecedor
   }

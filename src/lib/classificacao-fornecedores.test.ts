@@ -1,94 +1,94 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
-  classificarFornecedoresEEstabelecimentos,
-  type FornecedorRaw,
+  normalizarTiposFornecedor,
+  fornecedorCorrespondeTipo,
+  filtrarItensParaSeletorPrecificacao,
+  filtrarItensParaSeletorComposicao,
+  FORNECEDOR_TIPO_CONFIG,
+  FORNECEDOR_TIPOS_LISTA,
 } from './classificacao-fornecedores'
 import { estabelecimentosService } from '@/services/estabelecimentos'
 import pb from '@/lib/pocketbase/client'
 
-describe('Regra de classificação: Fornecedores vs Estabelecimentos', () => {
-  const mockFornecedores: FornecedorRaw[] = [
-    { id: 'hm0ebfctv6gnpal', nome_fantasia: 'Eduardo Toalhas', razao_social: 'Eduardo Toalhas ME' },
-    {
-      id: '6osobnalrpcv6b1',
-      nome_fantasia: 'Armazém Alecrim',
-      razao_social: 'Armazém Alecrim Ltda',
-    },
-    { id: '9bdkezq7du2rv1m', nome_fantasia: 'Multi Carnes', razao_social: 'Multi Carnes' },
-    { id: 'jnwehxso7jszcdn', nome_fantasia: 'Maytá', razao_social: 'Maytá Alimentos' },
-    {
-      id: 'qst2tsitj391kx3',
-      nome_fantasia: 'Sabor da casa',
-      razao_social: 'Sabor da Casa Restaurante',
-    },
-    { id: '7q2obp75wkj4ipg', nome_fantasia: 'Muffat', razao_social: 'Muffato Supermercados' },
-    { id: 'urmu8koky7n8k8u', nome_fantasia: 'Parque', razao_social: 'Parque Hortifruti' },
-  ]
-
-  it('deve manter fornecedor com produtos de revenda em fornecedores (ex: Eduardo Toalhas)', () => {
-    const fornecedorIdsComProdutos = new Set(['hm0ebfctv6gnpal'])
-    const nomesCitadosEmDespesas = new Set(['muffat', 'parque'])
-
-    const result = classificarFornecedoresEEstabelecimentos({
-      fornecedores: mockFornecedores,
-      fornecedorIdsComProdutos,
-      nomesCitadosEmDespesas,
+describe('Regras de classificação e filtragem de Fornecedores', () => {
+  describe('normalizarTiposFornecedor', () => {
+    it('deve fazer fallback para ["revenda"] quando tipos for nulo, indefinido ou array vazio', () => {
+      expect(normalizarTiposFornecedor(null)).toEqual(['revenda'])
+      expect(normalizarTiposFornecedor(undefined)).toEqual(['revenda'])
+      expect(normalizarTiposFornecedor([])).toEqual(['revenda'])
     })
 
-    // hm0ebfctv6gnpal deve ficar em fornecedores
-    expect(result.permanecemEmFornecedores.some((f) => f.id === 'hm0ebfctv6gnpal')).toBe(true)
-    expect(result.removidosDeFornecedores.includes('hm0ebfctv6gnpal')).toBe(false)
+    it('deve filtrar valores inválidos e manter apenas tipos válidos', () => {
+      expect(normalizarTiposFornecedor(['invalido', 'outro'] as any)).toEqual(['revenda'])
+      expect(normalizarTiposFornecedor(['revenda', 'invalido'] as any)).toEqual(['revenda'])
+      expect(normalizarTiposFornecedor(['insumos', 'servicos'])).toEqual(['insumos', 'servicos'])
+    })
+
+    it('deve preservar combinações válidas múltiplas', () => {
+      expect(normalizarTiposFornecedor(['revenda', 'insumos', 'servicos'])).toEqual([
+        'revenda',
+        'insumos',
+        'servicos',
+      ])
+    })
   })
 
-  it('deve migrar os 6 fornecedores sem produtos de revenda para estabelecimentos e removê-los de fornecedores', () => {
-    const fornecedorIdsComProdutos = new Set(['hm0ebfctv6gnpal'])
-    const nomesCitadosEmDespesas = new Set(['muffat', 'parque', 'sabor da casa'])
-
-    const result = classificarFornecedoresEEstabelecimentos({
-      fornecedores: mockFornecedores,
-      fornecedorIdsComProdutos,
-      nomesCitadosEmDespesas,
+  describe('fornecedorCorrespondeTipo', () => {
+    it('filtro "todos" deve retornar true para qualquer fornecedor', () => {
+      expect(fornecedorCorrespondeTipo({ tipos: ['revenda'] }, 'todos')).toBe(true)
+      expect(fornecedorCorrespondeTipo({ tipos: ['insumos'] }, 'todos')).toBe(true)
+      expect(fornecedorCorrespondeTipo({ tipos: null }, 'todos')).toBe(true)
     })
 
-    const migradosIds = result.migramParaEstabelecimentos.map((e) => e.id)
-    expect(migradosIds).toContain('6osobnalrpcv6b1') // Armazém Alecrim
-    expect(migradosIds).toContain('9bdkezq7du2rv1m') // Multi Carnes
-    expect(migradosIds).toContain('jnwehxso7jszcdn') // Maytá
-    expect(migradosIds).toContain('qst2tsitj391kx3') // Sabor da casa
-    expect(migradosIds).toContain('7q2obp75wkj4ipg') // Muffat
-    expect(migradosIds).toContain('urmu8koky7n8k8u') // Parque
+    it('deve retornar true somente se o fornecedor possuir o tipo especificado (com fallback se nulo)', () => {
+      // Fornecedor sem tipos cai no fallback ['revenda']
+      expect(fornecedorCorrespondeTipo({ tipos: null }, 'revenda')).toBe(true)
+      expect(fornecedorCorrespondeTipo({ tipos: null }, 'insumos')).toBe(false)
 
-    // Todos os 6 devem estar na lista de remoção de fornecedores
-    expect(result.removidosDeFornecedores).toEqual(
-      expect.arrayContaining([
-        '6osobnalrpcv6b1',
-        '9bdkezq7du2rv1m',
-        'jnwehxso7jszcdn',
-        'qst2tsitj391kx3',
-        '7q2obp75wkj4ipg',
-        'urmu8koky7n8k8u',
-      ]),
-    )
-    expect(result.removidosDeFornecedores.includes('hm0ebfctv6gnpal')).toBe(false)
+      // Fornecedor de insumos e serviços
+      const fornInsumoServico = { tipos: ['insumos', 'servicos'] }
+      expect(fornecedorCorrespondeTipo(fornInsumoServico, 'insumos')).toBe(true)
+      expect(fornecedorCorrespondeTipo(fornInsumoServico, 'servicos')).toBe(true)
+      expect(fornecedorCorrespondeTipo(fornInsumoServico, 'revenda')).toBe(false)
+    })
   })
 
-  it('deve duplicar quando um fornecedor tem produtos de revenda E consta em despesas de consumo', () => {
-    const fornecedorIdsComProdutos = new Set(['hm0ebfctv6gnpal'])
-    // Eduardo Toalhas citado em despesas de consumo
-    const nomesCitadosEmDespesas = new Set(['eduardo toalhas'])
+  describe('FORNECEDOR_TIPO_CONFIG e FORNECEDOR_TIPOS_LISTA', () => {
+    it('deve possuir configuração visual completa para cada tipo válido', () => {
+      expect(FORNECEDOR_TIPOS_LISTA).toEqual(['revenda', 'insumos', 'servicos'])
+      FORNECEDOR_TIPOS_LISTA.forEach((tipo) => {
+        const cfg = FORNECEDOR_TIPO_CONFIG[tipo]
+        expect(cfg).toBeDefined()
+        expect(cfg.label).toBeTruthy()
+        expect(cfg.badgeClass).toBeTruthy()
+        expect(cfg.bgSoft).toBeTruthy()
+        expect(cfg.border).toBeTruthy()
+        expect(cfg.text).toBeTruthy()
+      })
+    })
+  })
 
-    const result = classificarFornecedoresEEstabelecimentos({
-      fornecedores: mockFornecedores,
-      fornecedorIdsComProdutos,
-      nomesCitadosEmDespesas,
+  describe('filtrarItensParaSeletor (isolamento entre precificação e composição)', () => {
+    const itensMistos = [
+      { id: '1', nome: 'Toalha de Banho', _collection: 'fornecedores_produtos', tipo: 'revenda' },
+      { id: '2', nome: 'Fita de Cetim', _collection: 'insumos', tipo: 'insumo' },
+      { id: '3', nome: 'Serviço Estamparia', _collection: 'insumos', tipo: 'servico' },
+      { id: '4', nome: 'Item Desconhecido', _collection: 'outra_colecao', tipo: 'revenda' },
+    ]
+
+    it('filtrarItensParaSeletorPrecificacao deve listar EXCLUSIVAMENTE itens de fornecedores_produtos', () => {
+      const res = filtrarItensParaSeletorPrecificacao(itensMistos)
+      expect(res).toHaveLength(1)
+      expect(res[0].id).toBe('1')
+      expect(res[0]._collection).toBe('fornecedores_produtos')
     })
 
-    // Deve estar duplicado em ambos
-    expect(result.duplicadosEmAmbos.some((d) => d.id === 'hm0ebfctv6gnpal')).toBe(true)
-    expect(result.permanecemEmFornecedores.some((f) => f.id === 'hm0ebfctv6gnpal')).toBe(true)
-    expect(result.migramParaEstabelecimentos.some((e) => e.id === 'hm0ebfctv6gnpal')).toBe(true)
-    // NÃO deve ser removido de fornecedores
-    expect(result.removidosDeFornecedores.includes('hm0ebfctv6gnpal')).toBe(false)
+    it('filtrarItensParaSeletorComposicao deve listar EXCLUSIVAMENTE itens de insumos (sem revenda)', () => {
+      const res = filtrarItensParaSeletorComposicao(itensMistos)
+      expect(res).toHaveLength(2)
+      expect(res.map((i) => i.id)).toEqual(['2', '3'])
+      expect(res.every((i) => i._collection === 'insumos')).toBe(true)
+    })
   })
 })
 
