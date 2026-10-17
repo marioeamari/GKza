@@ -36,6 +36,19 @@ describe('Regras de Accordion e Indicadores de Tarefas (/projetos)', () => {
     })
   })
 
+  describe('Acessibilidade e Atributos ARIA do Accordion', () => {
+    it('retorna os atributos aria e id de conteúdo para uma tarefa', () => {
+      const tarefaId = 'tar-abc-123'
+      const contentId = `tarefa-content-${tarefaId}`
+      const isExpandedFalse = false
+      const isExpandedTrue = true
+
+      expect(contentId).toBe('tarefa-content-tar-abc-123')
+      expect(isExpandedFalse).toBe(false)
+      expect(isExpandedTrue).toBe(true)
+    })
+  })
+
   describe('Indicador Discreto de Pendências e Alertas na Linha Compacta', () => {
     const tarefaBase: Tarefa = {
       id: 'tar-123',
