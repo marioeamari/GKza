@@ -48,14 +48,18 @@ export const getLocalDateStr = (date = new Date()): string => {
 export const dateOnly = (value: string | Date) => {
   if (!value) return ''
   if (value instanceof Date) return getLocalDateStr(value)
-  // Se for string ISO com timestamp (ex: '2026-09-21 12:00:00.000Z' ou '2026-09-21T12:00:00.000Z')
-  if (value.includes('T') || value.includes(' ') || value.includes('Z')) {
-    const d = new Date(value)
-    if (!isNaN(d.getTime())) {
-      return getLocalDateStr(d)
-    }
+  // Se for string no formato ISO ou date puro (ex: '2026-10-10 00:00:00.000Z' ou '2026-10-10')
+  // Extrai diretamente a parte YYYY-MM-DD para evitar shift de fuso horário
+  const trimmed = String(value).trim()
+  const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/)
+  if (match) {
+    return match[1]
   }
-  return value.slice(0, 10)
+  const d = new Date(trimmed)
+  if (!isNaN(d.getTime())) {
+    return getLocalDateStr(d)
+  }
+  return trimmed.slice(0, 10)
 }
 
 export const toPocketBaseDate = (value: string) => (value ? `${value} 12:00:00.000Z` : '')
@@ -73,6 +77,14 @@ export const formatDate = (
 ) => {
   if (!value) return '-'
   try {
+    if (typeof value === 'string') {
+      const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+      if (match && !options) {
+        // Formato dd/mm/aaaa garantido sem qualquer deslocamento de fuso
+        const [, y, m, d] = match
+        return `${d}/${m}/${y}`
+      }
+    }
     const date = value instanceof Date ? value : parseDate(String(value))
     if (isNaN(date.getTime())) return '-'
     return new Intl.DateTimeFormat(

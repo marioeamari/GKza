@@ -45,6 +45,20 @@
  *      Folha 1: 579,64 - 112,50 = R$ -467,14 (em termos de repasse, o funcionário tem saldo devedor de R$ 467,14).
  *      Folha 2: 537,74 - 117,67 = R$ -420,07 (saldo devedor de R$ 420,07).
  *    - Quando não quitado integralmente, esse saldo vira o Saldo Negativo da folha seguinte!
+ *
+ * 6. REGRAS DO CICLO DE FOLHA GKZA (REFORMULAÇÃO):
+ *    (1) ESPELHO DA FOLHA: mostra APENAS períodos em aberto. Períodos cobertos por folha quitada
+ *        vivem exclusivamente no Histórico de Fechamentos. Rodapé sempre "Aguardando fechamento" (âmbar).
+ *    (2) HISTÓRICO DE FECHAMENTOS: datas no fuso correto dd/mm/aaaa sem deslocamento.
+ *        Banner verde "✅ Quitada em dd/mm" e botão "Ver histórico do período" com detalhamento completo.
+ *    (3) SEM REABERTURA: folha quitada é IMUTÁVEL. Nenhuma reabertura ou edição retroativa.
+ *        Divergências com pagamentos passados viram despesa/vale no período EM ABERTO com descritivo
+ *        (ex: "Divergência do período dd/mm–dd/mm").
+ *    (4) CONFIRMAÇÃO DO FUNCIONÁRIO NA TELA DE PONTO:
+ *        Funcionário confere e confirma cada data trabalhada do período.
+ *        Admin só pode fechar a folha quando TODAS as datas trabalhadas estiverem confirmadas.
+ *        Se faltar confirmação, botão "Fechar Folha" fica desabilitado com contador explicativo
+ *        (ex: "Aguardando confirmação do funcionário — 3 de 5 dias confirmados").
  */
 
 import { getLocalDateStr, dateOnly } from './format'
@@ -85,6 +99,31 @@ export interface DescontoAvulsoItem {
   id?: string
   descricao: string
   valor: number
+  origemDivergencia?: boolean
+  periodoReferencia?: string
+}
+
+export interface FolhaQuitadaPeriodo {
+  id: string
+  periodo_inicio: string
+  periodo_fim: string
+  quitada: boolean
+}
+
+export interface ConfirmacaoDataStatus {
+  data: string // YYYY-MM-DD
+  confirmado: boolean
+  confirmadoEm?: string
+  divergenciaApontada?: boolean
+  motivoDivergencia?: string
+}
+
+export interface ValidacaoFechamentoFolha {
+  podeFechar: boolean
+  totalDiasTrabalhados: number
+  totalDiasConfirmados: number
+  diasPendentes: string[]
+  motivoBloqueio?: string
 }
 
 export interface EspelhoFolhaCalculado {
@@ -495,4 +534,197 @@ export function calcularEspelhoFolha(params: {
     saldoLiquidoEmpregado,
     estaNegativo,
   }
+}
+
+/**
+ * Verifica se um dia/data (YYYY-MM-DD) está dentro de algum período coberto por folha quitada.
+ */
+export function isDataCobertaPorFolhaQuitada(
+  dataYYYYMMDD: string,
+  folhasQuitadas: FolhaQuitadaPeriodo[],
+): boolean {
+  const data = normalizarDataPonto(dataYYYYMMDD)
+  if (!data) return false
+
+  return folhasQuitadas.some((f) => {
+    if (!f.quitada) return false
+    const ini = normalizarDataPonto(f.periodo_inicio)
+    const fim = normalizarDataPonto(f.periodo_fim)
+    return data >= ini && data <= fim
+  })
+}
+
+/**
+ * Filtra pontos para manter APENAS pontos de períodos abertos (não quitados).
+ * Regra (1): Espelho da Folha mostra APENAS períodos abertos.
+ */
+export function filtrarPontosPeriodoAberto<T extends { data: string }>(
+  pontos: T[],
+  folhasQuitadas: FolhaQuitadaPeriodo[],
+): T[] {
+  return pontos.filter((p) => !isDataCobertaPorFolhaQuitada(p.data, folhasQuitadas))
+}
+
+/**
+ * Valida se um período (inicio - fim) sobrepõe alguma folha quitada existente.
+ * Regra (1) e (3): Períodos quitados não podem reaparecer no espelho nem serem reabertos.
+ */
+export function isPeriodoSobrepostoAFolhaQuitada(
+  inicioYYYYMMDD: string,
+  fimYYYYMMDD: string,
+  folhasQuitadas: FolhaQuitadaPeriodo[],
+): boolean {
+  const ini = normalizarDataPonto(inicioYYYYMMDD)
+  const fim = normalizarDataPonto(fimYYYYMMDD)
+  if (!ini || !fim) return false
+
+  return folhasQuitadas.some((f) => {
+    if (!f.quitada) return false
+    const fIni = normalizarDataPonto(f.periodo_inicio)
+    const fFim = normalizarDataPonto(f.periodo_fim)
+    // Sobreposição: ini <= fFim && fim >= fIni
+    return ini <= fFim && fim >= fIni
+  })
+}
+
+/**
+ * Encontra o início do próximo período em aberto para um funcionário.
+ * Se houver folhas quitadas, o próximo período aberto começa no dia seguinte ao término da folha quitada mais recente.
+ */
+export function calcularProximoPeriodoAberto(
+  folhasQuitadas: FolhaQuitadaPeriodo[],
+  hojeRef = getLocalDateStr(),
+): { inicio: string; fim: string } {
+  const quitadasOrdenadas = folhasQuitadas
+    .filter((f) => f.quitada)
+    .slice()
+    .sort((a, b) =>
+      normalizarDataPonto(b.periodo_fim).localeCompare(normalizarDataPonto(a.periodo_fim)),
+    )
+
+  if (quitadasOrdenadas.length === 0) {
+    // 7 dias atrás até hoje
+    const [y, m, d] = hojeRef.split('-').map(Number)
+    const dt = new Date(y, m - 1, d)
+    dt.setDate(dt.getDate() - 7)
+    return {
+      inicio: getLocalDateStr(dt),
+      fim: hojeRef,
+    }
+  }
+
+  const ultima = quitadasOrdenadas[0]
+  const fimUltima = normalizarDataPonto(ultima.periodo_fim)
+  const [uy, um, ud] = fimUltima.split('-').map(Number)
+  const dtInicio = new Date(uy, um - 1, ud)
+  dtInicio.setDate(dtInicio.getDate() + 1)
+  const inicio = getLocalDateStr(dtInicio)
+
+  // O fim pode ser hoje ou 7 dias após o início se hoje for anterior
+  const fim = hojeRef >= inicio ? hojeRef : inicio
+
+  return { inicio, fim }
+}
+
+/**
+ * Regra (4): Validação de Confirmação do Funcionário.
+ * O administrador só pode fechar a folha / realizar o pagamento quando o funcionário tiver confirmado
+ * TODAS as datas trabalhadas do período.
+ * Retorna contagem e status explicativo.
+ */
+export function validarConfirmacoesFechamento(params: {
+  pontosTrabalhados: Array<{ data: string; entrada: string; saida?: string }>
+  confirmacoesPorData: Record<string, { confirmado: boolean; divergenciaApontada?: boolean }>
+}): ValidacaoFechamentoFolha {
+  // Apenas datas com expediente trabalhado (saída registrada ou entrada efetiva)
+  const datasTrabalhadasUnicas = Array.from(
+    new Set(
+      params.pontosTrabalhados
+        .filter((p) => Boolean(p.entrada && p.entrada.trim() !== ''))
+        .map((p) => normalizarDataPonto(p.data)),
+    ),
+  ).sort()
+
+  const totalDiasTrabalhados = datasTrabalhadasUnicas.length
+
+  if (totalDiasTrabalhados === 0) {
+    return {
+      podeFechar: true,
+      totalDiasTrabalhados: 0,
+      totalDiasConfirmados: 0,
+      diasPendentes: [],
+    }
+  }
+
+  const diasConfirmados: string[] = []
+  const diasPendentes: string[] = []
+
+  for (const data of datasTrabalhadasUnicas) {
+    const conf = params.confirmacoesPorData[data]
+    if (conf && conf.confirmado) {
+      diasConfirmados.push(data)
+    } else {
+      diasPendentes.push(data)
+    }
+  }
+
+  const totalDiasConfirmados = diasConfirmados.length
+  const podeFechar = totalDiasConfirmados === totalDiasTrabalhados
+
+  let motivoBloqueio: string | undefined
+  if (!podeFechar) {
+    motivoBloqueio = `Aguardando confirmação do funcionário — ${totalDiasConfirmados} de ${totalDiasTrabalhados} ${
+      totalDiasTrabalhados === 1 ? 'dia confirmado' : 'dias confirmados'
+    }`
+  }
+
+  return {
+    podeFechar,
+    totalDiasTrabalhados,
+    totalDiasConfirmados,
+    diasPendentes,
+    motivoBloqueio,
+  }
+}
+
+/**
+ * Regra (3): Converte apontamento de divergência de folha passada em item de desconto/vale para o período aberto.
+ */
+export function criarDescontoDivergenciaPassada(params: {
+  periodoPassadoInicio: string
+  periodoPassadoFim: string
+  valor: number
+  motivo?: string
+}): DescontoAvulsoItem {
+  const pIni = formatarDataDDMM(params.periodoPassadoInicio)
+  const pFim = formatarDataDDMM(params.periodoPassadoFim)
+  const sufixoMotivo = params.motivo ? ` (${params.motivo})` : ''
+
+  return {
+    id: `div_${Date.now()}`,
+    descricao: `Divergência do período ${pIni}–${pFim}${sufixoMotivo}`,
+    valor: Math.abs(params.valor),
+    origemDivergencia: true,
+    periodoReferencia: `${params.periodoPassadoInicio} a ${params.periodoPassadoFim}`,
+  }
+}
+
+/**
+ * Formata data YYYY-MM-DD para dd/mm estrito sem deslocamento de timezone
+ */
+export function formatarDataDDMM(dataStr: string): string {
+  const limpa = normalizarDataPonto(dataStr)
+  if (!limpa || limpa.length < 10) return dataStr || ''
+  const [, m, d] = limpa.split('-')
+  return `${d}/${m}`
+}
+
+/**
+ * Formata data YYYY-MM-DD para dd/mm/aaaa estrito sem deslocamento de timezone
+ */
+export function formatarDataDDMMAAAA(dataStr: string): string {
+  const limpa = normalizarDataPonto(dataStr)
+  if (!limpa || limpa.length < 10) return dataStr || ''
+  const [y, m, d] = limpa.split('-')
+  return `${d}/${m}/${y}`
 }

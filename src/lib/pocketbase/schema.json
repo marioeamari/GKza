@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-17T03:16:45.815Z",
+  "generatedAt": "2026-10-17T04:13:05.943Z",
   "collections": [
     {
       "name": "users",
@@ -6364,6 +6364,87 @@
       "indexes": [
         "CREATE UNIQUE INDEX idx_prec_matriz_prod_canal ON prec_matriz_classificacoes (produto, canal)",
         "CREATE INDEX idx_prec_matriz_leg ON prec_matriz_classificacoes (legenda)"
+      ]
+    },
+    {
+      "name": "funcionarios_confirmacoes",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != '' || @request.auth.id = ''",
+        "view": "@request.auth.id != '' || @request.auth.id = ''",
+        "create": "@request.auth.id != '' || @request.auth.id = ''",
+        "update": "@request.auth.id != '' || @request.auth.id = ''",
+        "delete": "@request.auth.id != ''"
+      },
+      "fields": [
+        {
+          "name": "funcionario",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "funcionarios"
+        },
+        {
+          "name": "data",
+          "type": "date",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "confirmado",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "confirmado_em",
+          "type": "date",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "divergencia_apontada",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "motivo_divergencia",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ip_origem",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "observacao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_fconf_func_data ON funcionarios_confirmacoes (funcionario, data)",
+        "CREATE INDEX idx_fconf_func ON funcionarios_confirmacoes (funcionario)",
+        "CREATE INDEX idx_fconf_data ON funcionarios_confirmacoes (data)"
       ]
     }
   ]

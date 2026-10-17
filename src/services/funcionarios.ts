@@ -89,6 +89,20 @@ export interface FuncionarioFolhaRecord {
   }
 }
 
+export interface FuncionarioConfirmacaoRecord {
+  id: string
+  funcionario: string
+  data: string // YYYY-MM-DD
+  confirmado: boolean
+  confirmado_em?: string
+  divergencia_apontada?: boolean
+  motivo_divergencia?: string
+  ip_origem?: string
+  observacao?: string
+  created?: string
+  updated?: string
+}
+
 export const funcionariosService = {
   // --- FUNCIONÁRIOS ---
   async listarFuncionarios(somenteAtivos = false): Promise<FuncionarioRecord[]> {
@@ -447,6 +461,98 @@ export const funcionariosService = {
       return records[0] || null
     } catch (_) {
       return null
+    }
+  },
+
+  // --- CONFIRMAÇÕES DE ATIVIDADE DO FUNCIONÁRIO ---
+  async listarConfirmacoes(params: {
+    funcionarioId: string
+    dataInicio?: string
+    dataFim?: string
+  }): Promise<FuncionarioConfirmacaoRecord[]> {
+    if (!params.funcionarioId) return []
+    const filters: string[] = [`funcionario = "${params.funcionarioId}"`]
+    if (params.dataInicio) {
+      const ini = normalizarDataPonto(params.dataInicio)
+      filters.push(`data >= "${ini} 00:00:00"`)
+    }
+    if (params.dataFim) {
+      const fim = normalizarDataPonto(params.dataFim)
+      filters.push(`data <= "${fim} 23:59:59"`)
+    }
+
+    try {
+      const records = await pb
+        .collection('funcionarios_confirmacoes')
+        .getFullList<FuncionarioConfirmacaoRecord>({
+          filter: filters.join(' && '),
+          sort: 'data',
+        })
+
+      return records.map((r) => ({
+        ...r,
+        data: normalizarDataPonto(r.data),
+      }))
+    } catch (err) {
+      console.warn('Erro ao listar confirmações:', err)
+      return []
+    }
+  },
+
+  async buscarConfirmacaoPorData(
+    funcionarioId: string,
+    dataYYYYMMDD: string,
+  ): Promise<FuncionarioConfirmacaoRecord | null> {
+    if (!funcionarioId || !dataYYYYMMDD) return null
+    const diaLimpo = normalizarDataPonto(dataYYYYMMDD)
+    try {
+      const filtro = `funcionario = "${funcionarioId}" && ${buildFiltroPontoData(diaLimpo)}`
+      const rec = await pb
+        .collection('funcionarios_confirmacoes')
+        .getFirstListItem<FuncionarioConfirmacaoRecord>(filtro)
+      return {
+        ...rec,
+        data: normalizarDataPonto(rec.data),
+      }
+    } catch {
+      return null
+    }
+  },
+
+  async confirmarDataTrabalhada(params: {
+    funcionarioId: string
+    data: string // YYYY-MM-DD
+    divergencia?: boolean
+    motivoDivergencia?: string
+  }): Promise<FuncionarioConfirmacaoRecord> {
+    const diaLimpo = normalizarDataPonto(params.data)
+    const existente = await this.buscarConfirmacaoPorData(params.funcionarioId, diaLimpo)
+
+    const payload = {
+      funcionario: params.funcionarioId,
+      data: toPocketBaseDate(diaLimpo),
+      confirmado: !params.divergencia,
+      confirmado_em: !params.divergencia ? new Date().toISOString() : null,
+      divergencia_apontada: Boolean(params.divergencia),
+      motivo_divergencia: params.motivoDivergencia || '',
+    }
+
+    if (existente) {
+      const atualizado = await pb
+        .collection('funcionarios_confirmacoes')
+        .update<FuncionarioConfirmacaoRecord>(existente.id, payload)
+      return {
+        ...atualizado,
+        data: normalizarDataPonto(atualizado.data),
+      }
+    }
+
+    const criado = await pb
+      .collection('funcionarios_confirmacoes')
+      .create<FuncionarioConfirmacaoRecord>(payload)
+    return {
+      ...criado,
+      data: normalizarDataPonto(criado.data),
     }
   },
 

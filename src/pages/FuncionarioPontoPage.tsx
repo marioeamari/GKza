@@ -38,15 +38,26 @@ import {
   type FuncionarioEstacaoRecord,
   type FuncionarioPontoRecord,
   type FuncionarioDividaRecord,
+  type FuncionarioConfirmacaoRecord,
 } from '@/services/funcionarios'
 import {
   formatarDataExtensoPlanilha,
   calcularLinhaPonto,
   formatarMinutosEmHHMM,
   converterMinutosEmHorasDecimais,
+  formatarDataDDMMAAAA,
 } from '@/lib/funcionarios'
 import { formatCurrency, getLocalDateStr } from '@/lib/format'
 import { normalizarDataPonto } from '@/lib/funcionarios'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 
 const SESSION_STORAGE_KEY = 'gkza_funcionario_session_token'
 
@@ -67,10 +78,16 @@ export default function FuncionarioPontoPage() {
   // Estado do ponto do dia de hoje
   const [pontoHoje, setPontoHoje] = useState<FuncionarioPontoRecord | null>(null)
   const [historicoPontos, setHistoricoPontos] = useState<FuncionarioPontoRecord[]>([])
+  const [confirmacoes, setConfirmacoes] = useState<FuncionarioConfirmacaoRecord[]>([])
   const [dividas, setDividas] = useState<FuncionarioDividaRecord[]>([])
   const [horaAtual, setHoraAtual] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
   const [mostrarQREstacao, setMostrarQREstacao] = useState(false)
+
+  // Modal de Divergência do Colaborador
+  const [modalDivergenciaData, setModalDivergenciaData] = useState<string | null>(null)
+  const [motivoDivergenciaTexto, setMotivoDivergenciaTexto] = useState('')
+  const [salvandoConfirmacao, setSalvandoConfirmacao] = useState(false)
 
   // Relógio em tempo real
   useEffect(() => {
@@ -108,6 +125,13 @@ export default function FuncionarioPontoPage() {
         dataInicio: dataInicioStr,
       })
       setHistoricoPontos(pontos)
+
+      // Carregar confirmações do período recente
+      const confs = await funcionariosService.listarConfirmacoes({
+        funcionarioId: func.id,
+        dataInicio: dataInicioStr,
+      })
+      setConfirmacoes(confs)
 
       // Carregar dívidas ativas do funcionário
       const divs = await funcionariosService.listarDividas(func.id)
@@ -483,6 +507,91 @@ export default function FuncionarioPontoPage() {
   const totalDividasAcumuladas = useMemo(() => {
     return dividas.reduce((acc, d) => acc + (d.saldo_atual || 0), 0)
   }, [dividas])
+
+  // Mapa de confirmações por data YYYY-MM-DD
+  const mapConfirmacoes = useMemo(() => {
+    const mapa: Record<string, FuncionarioConfirmacaoRecord> = {}
+    for (const c of confirmacoes) {
+      mapa[normalizarDataPonto(c.data)] = c
+    }
+    return mapa
+  }, [confirmacoes])
+
+  // Ações de Confirmação pelo Funcionário
+  const handleConfirmarDia = async (dataYYYYMMDD: string) => {
+    if (!funcionarioAtual || salvandoConfirmacao) return
+    setSalvandoConfirmacao(true)
+    try {
+      const novaConf = await funcionariosService.confirmarDataTrabalhada({
+        funcionarioId: funcionarioAtual.id,
+        data: dataYYYYMMDD,
+        divergencia: false,
+      })
+      setConfirmacoes((prev) => {
+        const filtered = prev.filter((c) => normalizarDataPonto(c.data) !== dataYYYYMMDD)
+        return [...filtered, novaConf]
+      })
+      toast({
+        title: 'Período trabalhado confirmado!',
+        description: `Você confirmou as horas de ${formatarDataDDMMAAAA(dataYYYYMMDD)}.`,
+      })
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao confirmar',
+        description: err.message || 'Não foi possível confirmar o dia.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSalvandoConfirmacao(false)
+    }
+  }
+
+  const handleAbrirDivergencia = (dataYYYYMMDD: string) => {
+    setModalDivergenciaData(dataYYYYMMDD)
+    const conf = mapConfirmacoes[dataYYYYMMDD]
+    setMotivoDivergenciaTexto(conf?.motivo_divergencia || '')
+  }
+
+  const handleSalvarDivergencia = async () => {
+    if (!funcionarioAtual || !modalDivergenciaData || salvandoConfirmacao) return
+    if (!motivoDivergenciaTexto.trim()) {
+      toast({
+        title: 'Informe a divergência',
+        description: 'Descreva o que está incorreto nas horas ou valor.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setSalvandoConfirmacao(true)
+    try {
+      const novaConf = await funcionariosService.confirmarDataTrabalhada({
+        funcionarioId: funcionarioAtual.id,
+        data: modalDivergenciaData,
+        divergencia: true,
+        motivoDivergencia: motivoDivergenciaTexto.trim(),
+      })
+      setConfirmacoes((prev) => {
+        const filtered = prev.filter((c) => normalizarDataPonto(c.data) !== modalDivergenciaData)
+        return [...filtered, novaConf]
+      })
+      toast({
+        title: 'Divergência apontada!',
+        description:
+          'Seu apontamento foi enviado para o administrador ajustar neste mesmo período.',
+      })
+      setModalDivergenciaData(null)
+      setMotivoDivergenciaTexto('')
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao salvar divergência',
+        description: err.message,
+        variant: 'destructive',
+      })
+    } finally {
+      setSalvandoConfirmacao(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -866,18 +975,29 @@ export default function FuncionarioPontoPage() {
                   </div>
                 )}
 
-                {/* HISTÓRICO RECENTE DE PONTOS */}
+                {/* HISTÓRICO RECENTE DE PONTOS COM CONFERÊNCIA POR DATA (REGRA 4) */}
                 <div className="space-y-2 pt-2">
-                  <span className="text-xs font-bold text-gray-900 block">
-                    Espelho de Pontos Recentes
-                  </span>
-                  <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-gray-900 block">
+                      Minha Atividade & Conferência do Período
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      Confirme cada dia trabalhado
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
                     {historicoPontos.length === 0 ? (
                       <p className="text-xs text-muted-foreground py-2 text-center">
                         Nenhum registro nos últimos 30 dias.
                       </p>
                     ) : (
                       historicoPontos.map((p) => {
+                        const dataNorm = normalizarDataPonto(p.data)
+                        const conf = mapConfirmacoes[dataNorm]
+                        const estaConfirmado = Boolean(conf && conf.confirmado)
+                        const temDivergencia = Boolean(conf && conf.divergencia_apontada)
+
                         const { horasFormatadas, valorTotalDia } = p.saida
                           ? calcularLinhaPonto(
                               p.data,
@@ -892,27 +1012,89 @@ export default function FuncionarioPontoPage() {
                         return (
                           <div
                             key={p.id}
-                            className="flex items-center justify-between rounded-lg border border-border/60 bg-white p-2.5 text-xs shadow-2xs"
+                            className={`rounded-xl border p-3 text-xs shadow-2xs space-y-2 transition ${
+                              estaConfirmado
+                                ? 'border-emerald-200 bg-emerald-50/40'
+                                : temDivergencia
+                                  ? 'border-amber-300 bg-amber-50/40'
+                                  : 'border-border/70 bg-white'
+                            }`}
                           >
-                            <div>
-                              <div className="font-semibold text-gray-900">
-                                {formatarDataExtensoPlanilha(p.data)}
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <div className="font-semibold text-gray-900">
+                                  {formatarDataExtensoPlanilha(p.data)}
+                                </div>
+                                <div className="text-[11px] text-muted-foreground">
+                                  {p.entrada} às {p.saida || '(aberto)'}
+                                  {p.origem === 'fora_do_local' && (
+                                    <span className="ml-1 text-amber-700 font-semibold">
+                                      • fora do local
+                                    </span>
+                                  )}
+                                </div>
                               </div>
-                              <div className="text-[11px] text-muted-foreground">
-                                {p.entrada} às {p.saida || '(aberto)'}
-                                {p.origem === 'fora_do_local' && (
-                                  <span className="ml-1 text-amber-700 font-semibold">
-                                    • fora do local
-                                  </span>
-                                )}
+                              <div className="text-right">
+                                <div className="font-mono font-bold text-gray-900">
+                                  {horasFormatadas}
+                                </div>
+                                <div className="text-[11px] text-emerald-700 font-semibold">
+                                  {p.saida ? formatCurrency(valorTotalDia) : 'Em aberto'}
+                                </div>
                               </div>
                             </div>
-                            <div className="text-right">
-                              <div className="font-mono font-bold text-gray-900">
-                                {horasFormatadas}
-                              </div>
-                              <div className="text-[11px] text-emerald-700 font-semibold">
-                                {p.saida ? formatCurrency(valorTotalDia) : 'Em aberto'}
+
+                            {/* BARRA DE CONFIRMAÇÃO DO COLABORADOR */}
+                            <div className="pt-2 border-t border-border/40 flex items-center justify-between gap-2">
+                              {estaConfirmado ? (
+                                <Badge
+                                  variant="outline"
+                                  className="border-emerald-300 bg-emerald-100/70 text-emerald-800 gap-1 text-[11px]"
+                                >
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                                  Dia conferido e confirmado
+                                </Badge>
+                              ) : temDivergencia ? (
+                                <div className="flex-1">
+                                  <Badge
+                                    variant="outline"
+                                    className="border-amber-400 bg-amber-100 text-amber-900 gap-1 text-[10px]"
+                                  >
+                                    <AlertCircle className="h-3 w-3 text-amber-700" />
+                                    Divergência apontada
+                                  </Badge>
+                                  {conf.motivo_divergencia && (
+                                    <p className="text-[10px] text-amber-800 mt-1 italic">
+                                      "{conf.motivo_divergencia}"
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-[11px] text-muted-foreground">
+                                  Conferiu este horário?
+                                </span>
+                              )}
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {!estaConfirmado && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleConfirmarDia(dataNorm)}
+                                    disabled={salvandoConfirmacao}
+                                    className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold gap-1 shadow-2xs"
+                                  >
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                    Confirmar
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleAbrirDivergencia(dataNorm)}
+                                  className="h-7 text-xs text-amber-800 hover:bg-amber-100/60"
+                                >
+                                  {temDivergencia ? 'Editar divergência' : 'Apontar divergência'}
+                                </Button>
                               </div>
                             </div>
                           </div>
@@ -926,6 +1108,64 @@ export default function FuncionarioPontoPage() {
           </>
         )}
       </main>
+
+      {/* MODAL DE APONTAMENTO DE DIVERGÊNCIA PELO FUNCIONÁRIO */}
+      <Dialog
+        open={Boolean(modalDivergenciaData)}
+        onOpenChange={(aberto) => !aberto && setModalDivergenciaData(null)}
+      >
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-gray-900 flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-600" />
+              Apontar Divergência de Horas
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {modalDivergenciaData
+                ? `Data: ${formatarDataDDMMAAAA(modalDivergenciaData)}. Descreva o que está incorreto para ajuste no período vigente.`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2 text-xs">
+            <div className="space-y-1.5">
+              <Label className="font-semibold text-gray-800">
+                O que precisa ser corrigido neste dia?
+              </Label>
+              <Textarea
+                value={motivoDivergenciaTexto}
+                onChange={(e) => setMotivoDivergenciaTexto(e.target.value)}
+                placeholder="Ex: Saí às 17:30 em vez de 16:30; faltou contabilizar 1 hora extra..."
+                rows={4}
+                className="text-xs bg-white"
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              A conferência fica registrada e o administrador fará o ajuste neste mesmo período
+              antes do fechamento.
+            </p>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setModalDivergenciaData(null)}
+              className="text-xs"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSalvarDivergencia}
+              disabled={salvandoConfirmacao}
+              className="bg-[#DF5830] hover:bg-[#c94b26] text-white text-xs font-bold"
+            >
+              Salvar Apontamento
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

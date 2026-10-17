@@ -7,6 +7,13 @@ import {
   calcularEspelhoFolha,
   normalizarDataPonto,
   buildFiltroPontoData,
+  filtrarPontosPeriodoAberto,
+  isPeriodoSobrepostoAFolhaQuitada,
+  calcularProximoPeriodoAberto,
+  validarConfirmacoesFechamento,
+  formatarDataDDMMAAAA,
+  formatarDataDDMM,
+  criarDescontoDivergenciaPassada,
   validarPodeRegistrarEntrada,
   validarTokenDiarioEstacao,
   gerarTokenDiarioCriptografico,
@@ -389,6 +396,183 @@ describe('Regras do Módulo de Funcionários (Aritmética Exata da Planilha)', (
       expect(payloadFolha.divida_semanal).toBe(0)
       expect(payloadFolha.a_receber).toBeGreaterThan(0)
       expect(payloadFolha.ganho_total).toBeGreaterThan(0)
+    })
+  })
+
+  describe('8. REGRAS REFORMULADAS DO CICLO DE FOLHA', () => {
+    const folhasQuitadasMock = [
+      {
+        id: 'folha_antiga_1',
+        periodo_inicio: '2026-10-01',
+        periodo_fim: '2026-10-07',
+        quitada: true,
+      },
+      {
+        id: 'folha_antiga_2',
+        periodo_inicio: '2026-10-08 00:00:00.000Z',
+        periodo_fim: '2026-10-14 23:59:59.000Z',
+        quitada: true,
+      },
+    ]
+
+    describe('TESTE: período quitado não aparece no espelho', () => {
+      it('filtra pontos de períodos fechados e mantém apenas os abertos', () => {
+        const pontos = [
+          { data: '2026-10-05', entrada: '08:00', saida: '17:00' }, // dentro da folha 1 (quitada)
+          { data: '2026-10-10', entrada: '08:00', saida: '17:00' }, // dentro da folha 2 (quitada)
+          { data: '2026-10-15', entrada: '08:00', saida: '17:00' }, // aberto!
+          { data: '2026-10-16', entrada: '08:00', saida: '17:00' }, // aberto!
+        ]
+
+        const abertos = filtrarPontosPeriodoAberto(pontos, folhasQuitadasMock)
+        expect(abertos.length).toBe(2)
+        expect(abertos.map((p) => p.data)).toEqual(['2026-10-15', '2026-10-16'])
+      })
+
+      it('detecta se um período sobrepõe folha quitada para bloquear seletores', () => {
+        expect(
+          isPeriodoSobrepostoAFolhaQuitada('2026-10-02', '2026-10-06', folhasQuitadasMock),
+        ).toBe(true)
+        expect(
+          isPeriodoSobrepostoAFolhaQuitada('2026-10-07', '2026-10-10', folhasQuitadasMock),
+        ).toBe(true)
+        // Período posterior aberto
+        expect(
+          isPeriodoSobrepostoAFolhaQuitada('2026-10-15', '2026-10-22', folhasQuitadasMock),
+        ).toBe(false)
+      })
+
+      it('calcula o próximo período aberto iniciando no dia posterior à última folha', () => {
+        const proximo = calcularProximoPeriodoAberto(folhasQuitadasMock, '2026-10-20')
+        expect(proximo.inicio).toBe('2026-10-15')
+        expect(proximo.fim).toBe('2026-10-20')
+      })
+    })
+
+    describe('TESTE: datas do histórico exibem o dia correto (sem deslocamento de fuso)', () => {
+      it('formata datas em formato dd/mm/aaaa estrito sem shift de fuso horário', () => {
+        expect(formatarDataDDMMAAAA('2026-10-10')).toBe('10/10/2026')
+        expect(formatarDataDDMMAAAA('2026-10-14 00:00:00.000Z')).toBe('14/10/2026')
+        expect(formatarDataDDMMAAAA('2026-10-01T00:00:00Z')).toBe('01/10/2026')
+
+        expect(formatarDataDDMM('2026-10-10')).toBe('10/10')
+        expect(formatarDataDDMM('2026-10-14 23:59:59.000Z')).toBe('14/10')
+      })
+    })
+
+    describe('TESTE: fechamento bloqueado enquanto houver data não confirmada e liberado com todas confirmadas', () => {
+      const pontosDoPeriodo = [
+        { data: '2026-10-15', entrada: '08:00', saida: '17:00' },
+        { data: '2026-10-16', entrada: '08:00', saida: '17:00' },
+        { data: '2026-10-17', entrada: '08:00', saida: '17:00' },
+      ]
+
+      it('bloqueia o fechamento quando nenhuma data foi confirmada', () => {
+        const validacao = validarConfirmacoesFechamento({
+          pontosTrabalhados: pontosDoPeriodo,
+          confirmacoesPorData: {},
+        })
+
+        expect(validacao.podeFechar).toBe(false)
+        expect(validacao.totalDiasTrabalhados).toBe(3)
+        expect(validacao.totalDiasConfirmados).toBe(0)
+        expect(validacao.diasPendentes).toEqual(['2026-10-15', '2026-10-16', '2026-10-17'])
+        expect(validacao.motivoBloqueio).toBe(
+          'Aguardando confirmação do funcionário — 0 de 3 dias confirmados',
+        )
+      })
+
+      it('bloqueia o fechamento com confirmação parcial (ex: 2 de 3 dias)', () => {
+        const validacao = validarConfirmacoesFechamento({
+          pontosTrabalhados: pontosDoPeriodo,
+          confirmacoesPorData: {
+            '2026-10-15': { confirmado: true },
+            '2026-10-16': { confirmado: true },
+            // 2026-10-17 pendente
+          },
+        })
+
+        expect(validacao.podeFechar).toBe(false)
+        expect(validacao.totalDiasConfirmados).toBe(2)
+        expect(validacao.diasPendentes).toEqual(['2026-10-17'])
+        expect(validacao.motivoBloqueio).toBe(
+          'Aguardando confirmação do funcionário — 2 de 3 dias confirmados',
+        )
+      })
+
+      it('bloqueia o fechamento se o dia foi marcado com divergência não sanada', () => {
+        const validacao = validarConfirmacoesFechamento({
+          pontosTrabalhados: pontosDoPeriodo,
+          confirmacoesPorData: {
+            '2026-10-15': { confirmado: true },
+            '2026-10-16': { confirmado: true },
+            '2026-10-17': { confirmado: false, divergenciaApontada: true },
+          },
+        })
+
+        expect(validacao.podeFechar).toBe(false)
+        expect(validacao.totalDiasConfirmados).toBe(2)
+        expect(validacao.diasPendentes).toEqual(['2026-10-17'])
+      })
+
+      it('libera o fechamento quando TODAS as datas trabalhadas foram confirmadas', () => {
+        const validacao = validarConfirmacoesFechamento({
+          pontosTrabalhados: pontosDoPeriodo,
+          confirmacoesPorData: {
+            '2026-10-15': { confirmado: true },
+            '2026-10-16': { confirmado: true },
+            '2026-10-17': { confirmado: true },
+          },
+        })
+
+        expect(validacao.podeFechar).toBe(true)
+        expect(validacao.totalDiasTrabalhados).toBe(3)
+        expect(validacao.totalDiasConfirmados).toBe(3)
+        expect(validacao.diasPendentes).toEqual([])
+        expect(validacao.motivoBloqueio).toBeUndefined()
+      })
+    })
+
+    describe('TESTE: divergência vira despesa/vale no período aberto', () => {
+      it('cria item de desconto com descrição e período de referência corretos', () => {
+        const descontoDivergencia = criarDescontoDivergenciaPassada({
+          periodoPassadoInicio: '2026-10-01',
+          periodoPassadoFim: '2026-10-07',
+          valor: 85.5,
+          motivo: 'Ajuste de hora extra não contabilizada',
+        })
+
+        expect(descontoDivergencia.valor).toBe(85.5)
+        expect(descontoDivergencia.descricao).toBe(
+          'Divergência do período 01/10–07/10 (Ajuste de hora extra não contabilizada)',
+        )
+        expect(descontoDivergencia.origemDivergencia).toBe(true)
+        expect(descontoDivergencia.periodoReferencia).toBe('2026-10-01 a 2026-10-07')
+      })
+
+      it('incorpora a divergência nos cálculos do espelho aberto', () => {
+        const descontoDivergencia = criarDescontoDivergenciaPassada({
+          periodoPassadoInicio: '2026-10-01',
+          periodoPassadoFim: '2026-10-07',
+          valor: 50.0,
+        })
+
+        const espelhoAberto = calcularEspelhoFolha({
+          periodoInicio: '2026-10-15',
+          periodoFim: '2026-10-22',
+          valorHora: 20,
+          pontosBrutos: [
+            { data: '2026-10-15', entrada: '08:00', saida: '17:00' }, // 9h = 180 reais
+          ],
+          dividas: [],
+          saldoNegativoAnterior: 0,
+          outrosDescontos: [descontoDivergencia],
+        })
+
+        expect(espelhoAberto.totalMonetarioTrabalhado).toBe(180)
+        expect(espelhoAberto.totalDescontos).toBe(50)
+        expect(espelhoAberto.aReceber).toBe(130)
+      })
     })
   })
 })

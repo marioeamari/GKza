@@ -61,10 +61,21 @@ import {
   calcularEspelhoFolha,
   formatarDataExtensoPlanilha,
   normalizarDataPonto,
+  filtrarPontosPeriodoAberto,
+  isDataCobertaPorFolhaQuitada,
+  isPeriodoSobrepostoAFolhaQuitada,
+  calcularProximoPeriodoAberto,
+  validarConfirmacoesFechamento,
+  formatarDataDDMMAAAA,
+  formatarDataDDMM,
+  criarDescontoDivergenciaPassada,
   type EspelhoFolhaCalculado,
   type DescontoAvulsoItem,
+  type ValidacaoFechamentoFolha,
 } from '@/lib/funcionarios'
 import { formatCurrency, getLocalDateStr } from '@/lib/format'
+import { type FuncionarioConfirmacaoRecord } from '@/services/funcionarios'
+import { Info, CalendarCheck, Eye, History } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
 
 export default function FuncionariosPage() {
@@ -84,6 +95,7 @@ export default function FuncionariosPage() {
   const [estacoes, setEstacoes] = useState<FuncionarioEstacaoRecord[]>([])
   const [pontos, setPontos] = useState<FuncionarioPontoRecord[]>([])
   const [folhas, setFolhas] = useState<FuncionarioFolhaRecord[]>([])
+  const [confirmacoes, setConfirmacoes] = useState<FuncionarioConfirmacaoRecord[]>([])
 
   // Filtros da Folha do Período (personalizado, semanal, quinzenal, etc.)
   const [periodoInicio, setPeriodoInicio] = useState<string>('')
@@ -92,6 +104,22 @@ export default function FuncionariosPage() {
   const [descontosAvulsos, setDescontosAvulsos] = useState<DescontoAvulsoItem[]>([])
   const [novoDescontoDesc, setNovoDescontoDesc] = useState('')
   const [novoDescontoValor, setNovoDescontoValor] = useState('')
+
+  // Modal Detalhes do Período Fechado / Histórico (Regra 2)
+  const [folhaHistoricoSelecionada, setFolhaHistoricoSelecionada] =
+    useState<FuncionarioFolhaRecord | null>(null)
+  const [pontosHistoricoModal, setPontosHistoricoModal] = useState<FuncionarioPontoRecord[]>([])
+  const [carregandoDetalheHistorico, setCarregandoDetalheHistorico] = useState(false)
+
+  // Modal Lançar Divergência Passada como Despesa/Vale no Período Aberto (Regra 3)
+  const [isDivergenciaModalOpen, setIsDivergenciaModalOpen] = useState(false)
+  const [divergenciaForm, setDivergenciaForm] = useState({
+    folhaPassadaId: '',
+    periodoInicio: '',
+    periodoFim: '',
+    valor: '',
+    motivo: '',
+  })
 
   // Modais de Criação e Edição
   const [isFuncionarioModalOpen, setIsFuncionarioModalOpen] = useState(false)
@@ -188,15 +216,23 @@ export default function FuncionariosPage() {
   const carregarDadosDoFuncionario = useCallback(async (funcId: string) => {
     if (!funcId) return
     try {
-      const [pontosList, dividasList, folhasList, ultimaFolha] = await Promise.all([
+      const [pontosList, dividasList, folhasList, ultimaFolha, confsList] = await Promise.all([
         funcionariosService.listarPontos({ funcionarioId: funcId }),
         funcionariosService.listarDividas(funcId),
         funcionariosService.listarFolhas(funcId),
         funcionariosService.buscarUltimaFolhaQuitada(funcId),
+        funcionariosService.listarConfirmacoes({ funcionarioId: funcId }),
       ])
       setPontos(pontosList)
       setDividas(dividasList)
       setFolhas(folhasList)
+      setConfirmacoes(confsList)
+
+      // Ajuste automático do seletor para período ABERTO válido
+      const folhasQuitadas = folhasList.filter((f) => f.quitada)
+      const proximoAberto = calcularProximoPeriodoAberto(folhasQuitadas)
+      setPeriodoInicio(proximoAberto.inicio)
+      setPeriodoFim(proximoAberto.fim)
 
       // Se a última folha fechada tinha saldo a receber negativo, pré-carrega como saldo negativo anterior!
       if (ultimaFolha && ultimaFolha.a_receber < 0) {
@@ -220,16 +256,52 @@ export default function FuncionariosPage() {
     return funcionarios.find((f) => f.id === selectedFuncionarioId) || null
   }, [funcionarios, selectedFuncionarioId])
 
-  // Pontos filtrados pelo período selecionado (com normalização segura YYYY-MM-DD)
+  // Folhas quitadas do colaborador
+  const folhasQuitadas = useMemo(() => {
+    return folhas.filter((f) => f.quitada)
+  }, [folhas])
+
+  // REGRA (1): Espelho da folha mostra APENAS pontos de períodos abertos (nunca cobertos por folha quitada)
+  const pontosPeriodoAberto = useMemo(() => {
+    return filtrarPontosPeriodoAberto(pontos, folhasQuitadas)
+  }, [pontos, folhasQuitadas])
+
+  // Pontos filtrados pelo período selecionado no espelho (APENAS ABERTOS)
   const pontosFiltradosPeriodo = useMemo(() => {
-    if (!periodoInicio || !periodoFim) return pontos
+    if (!periodoInicio || !periodoFim) return pontosPeriodoAberto
     const ini = normalizarDataPonto(periodoInicio)
     const fim = normalizarDataPonto(periodoFim)
-    return pontos.filter((p) => {
+    return pontosPeriodoAberto.filter((p) => {
       const dataP = normalizarDataPonto(p.data)
       return dataP >= ini && dataP <= fim
     })
-  }, [pontos, periodoInicio, periodoFim])
+  }, [pontosPeriodoAberto, periodoInicio, periodoFim])
+
+  // Verificação se o período atual do seletor tenta cobrir um período já quitado
+  const periodoTentativaQuitado = useMemo(() => {
+    if (!periodoInicio || !periodoFim) return false
+    return isPeriodoSobrepostoAFolhaQuitada(periodoInicio, periodoFim, folhasQuitadas)
+  }, [periodoInicio, periodoFim, folhasQuitadas])
+
+  // Mapa de confirmações por data
+  const mapConfirmacoes = useMemo(() => {
+    const mapa: Record<string, { confirmado: boolean; divergenciaApontada?: boolean }> = {}
+    for (const c of confirmacoes) {
+      mapa[normalizarDataPonto(c.data)] = {
+        confirmado: c.confirmado,
+        divergenciaApontada: c.divergencia_apontada,
+      }
+    }
+    return mapa
+  }, [confirmacoes])
+
+  // REGRA (4): Validação de confirmações para liberação do fechamento da folha
+  const validacaoFechamento: ValidacaoFechamentoFolha = useMemo(() => {
+    return validarConfirmacoesFechamento({
+      pontosTrabalhados: pontosFiltradosPeriodo,
+      confirmacoesPorData: mapConfirmacoes,
+    })
+  }, [pontosFiltradosPeriodo, mapConfirmacoes])
 
   // 3. Cálculo do Espelho da Folha (Regras Aritméticas da Planilha Oficial)
   const espelhoFolha: EspelhoFolhaCalculado | null = useMemo(() => {
@@ -532,6 +604,19 @@ export default function FuncionariosPage() {
   // --- FECHAMENTO E QUITAÇÃO DA FOLHA ---
   const handleConfirmarFechamentoFolha = async () => {
     if (!espelhoFolha || !funcionarioAtual) return
+
+    // Trava de segurança no fechamento: exige todas as confirmações
+    if (!validacaoFechamento.podeFechar) {
+      toast({
+        title: 'Fechamento Bloqueado',
+        description:
+          validacaoFechamento.motivoBloqueio ||
+          'O funcionário precisa confirmar todas as datas trabalhadas antes do fechamento.',
+        variant: 'destructive',
+      })
+      return
+    }
+
     try {
       const usuarioNome = user?.name || user?.email || 'Admin'
       await funcionariosService.fecharFolha({
@@ -554,9 +639,10 @@ export default function FuncionariosPage() {
 
       toast({
         title: 'Folha fechada e quitada com sucesso!',
-        description: `Período ${espelhoFolha.periodoInicio} a ${espelhoFolha.periodoFim} finalizado. Dívidas abatidas.`,
+        description: `Período ${formatarDataDDMMAAAA(espelhoFolha.periodoInicio)} a ${formatarDataDDMMAAAA(espelhoFolha.periodoFim)} finalizado e arquivado no Histórico.`,
       })
       setIsFecharFolhaModalOpen(false)
+      setDescontosAvulsos([])
       carregarDadosDoFuncionario(funcionarioAtual.id)
     } catch (err: any) {
       toast({
@@ -565,6 +651,80 @@ export default function FuncionariosPage() {
         variant: 'destructive',
       })
     }
+  }
+
+  // REGRA (2): Abrir detalhe completo do histórico do período
+  const handleVerHistoricoPeriodo = async (folha: FuncionarioFolhaRecord) => {
+    setFolhaHistoricoSelecionada(folha)
+    setCarregandoDetalheHistorico(true)
+    try {
+      const pontosList = await funcionariosService.listarPontos({
+        funcionarioId: folha.funcionario,
+        dataInicio: folha.periodo_inicio,
+        dataFim: folha.periodo_fim,
+      })
+      setPontosHistoricoModal(pontosList)
+    } catch (err) {
+      console.warn('Erro ao carregar pontos do histórico:', err)
+      setPontosHistoricoModal([])
+    } finally {
+      setCarregandoDetalheHistorico(false)
+    }
+  }
+
+  // REGRA (3): Lançar divergência apontada de pagamento passado como despesa/vale no período aberto
+  const handleAbrirModalDivergencia = (folhaPassada?: FuncionarioFolhaRecord) => {
+    if (folhaPassada) {
+      setDivergenciaForm({
+        folhaPassadaId: folhaPassada.id,
+        periodoInicio: folhaPassada.periodo_inicio,
+        periodoFim: folhaPassada.periodo_fim,
+        valor: '',
+        motivo: '',
+      })
+    } else {
+      setDivergenciaForm({
+        folhaPassadaId: '',
+        periodoInicio: '',
+        periodoFim: '',
+        valor: '',
+        motivo: '',
+      })
+    }
+    setIsDivergenciaModalOpen(true)
+  }
+
+  const handleSalvarDivergenciaNoPeriodoAberto = (e: React.FormEvent) => {
+    e.preventDefault()
+    const valorNum = parseFloat(divergenciaForm.valor.replace(',', '.'))
+    if (
+      !divergenciaForm.periodoInicio ||
+      !divergenciaForm.periodoFim ||
+      isNaN(valorNum) ||
+      valorNum <= 0
+    ) {
+      toast({
+        title: 'Dados incompletos',
+        description: 'Informe o período da divergência e um valor numérico positivo.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    const novoDesconto = criarDescontoDivergenciaPassada({
+      periodoPassadoInicio: divergenciaForm.periodoInicio,
+      periodoPassadoFim: divergenciaForm.periodoFim,
+      valor: valorNum,
+      motivo: divergenciaForm.motivo,
+    })
+
+    setDescontosAvulsos((prev) => [...prev, novoDesconto])
+    setIsDivergenciaModalOpen(false)
+    setActiveTab('folha')
+    toast({
+      title: 'Divergência incluída no período aberto!',
+      description: `Lançada como "${novoDesconto.descricao}" no valor de ${formatCurrency(novoDesconto.valor)}.`,
+    })
   }
 
   // Atualização automática à meia-noite (America/Sao_Paulo) para renovar os tokens diários na tela
@@ -730,19 +890,27 @@ export default function FuncionariosPage() {
                   <Button
                     onClick={() => handleOpenPontoModal()}
                     variant="outline"
-                    className="h-10 flex-1 border-border font-semibold gap-1.5 text-xs"
+                    className="h-10 border-border font-semibold gap-1 text-xs shrink-0"
                   >
                     <Plus className="h-3.5 w-3.5 text-[#DF5830]" />
-                    Lançar / Corrigir Ponto
+                    Ponto
                   </Button>
-
                   <Button
                     onClick={() => setIsFecharFolhaModalOpen(true)}
-                    className="h-10 bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1.5 text-xs shadow-xs"
+                    disabled={!validacaoFechamento.podeFechar || periodoTentativaQuitado}
+                    title={
+                      validacaoFechamento.motivoBloqueio ||
+                      (periodoTentativaQuitado ? 'Período já quitado' : undefined)
+                    }
+                    className={`h-10 text-white font-bold gap-1.5 text-xs shadow-xs flex-1 ${
+                      validacaoFechamento.podeFechar && !periodoTentativaQuitado
+                        ? 'bg-emerald-600 hover:bg-emerald-700'
+                        : 'bg-gray-400 cursor-not-allowed opacity-75'
+                    }`}
                   >
                     <CheckCircle2 className="h-4 w-4" />
                     Fechar Folha
-                  </Button>
+                  </Button>{' '}
                 </div>
               </div>
 
@@ -779,6 +947,57 @@ export default function FuncionariosPage() {
                     <Badge variant="outline" className="capitalize">
                       {funcionarioAtual.ciclo_pagamento}
                     </Badge>
+                  </div>
+                </div>
+              )}
+
+              {/* AVISO DE CONFERÊNCIA DO FUNCIONÁRIO (REGRA 4) */}
+              {espelhoFolha && (
+                <div className="mt-3 pt-3 border-t border-border/50 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    {validacaoFechamento.podeFechar ? (
+                      <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 gap-1 text-xs py-1">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                        Todas as {validacaoFechamento.totalDiasTrabalhados} datas trabalhadas
+                        confirmadas pelo funcionário
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="bg-amber-50 text-amber-900 border-amber-300 gap-1.5 text-xs py-1"
+                      >
+                        <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                        {validacaoFechamento.motivoBloqueio}
+                      </Badge>
+                    )}
+                  </div>
+
+                  {!validacaoFechamento.podeFechar && (
+                    <span className="text-[11px] text-muted-foreground">
+                      O botão "Fechar Folha" será habilitado automaticamente quando o colaborador
+                      confirmar os dias pendentes.
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* AVISO CASO SEJA SELECIONADO PERÍODO JÁ QUITADO */}
+              {periodoTentativaQuitado && (
+                <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 flex items-start gap-2">
+                  <Info className="h-4 w-4 text-amber-700 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Este período já está coberto por folha quitada!</p>
+                    <p className="text-amber-800 mt-0.5">
+                      Conforme a regra do sistema, períodos fechados e quitados vivem exclusivamente
+                      no{' '}
+                      <button
+                        onClick={() => setActiveTab('folhas')}
+                        className="underline font-bold text-amber-950 hover:text-black"
+                      >
+                        Histórico de Fechamentos
+                      </button>{' '}
+                      e não podem ser reabertos.
+                    </p>
                   </div>
                 </div>
               )}
@@ -1052,9 +1271,9 @@ export default function FuncionariosPage() {
                     <span className="font-bold text-gray-700">Status Pagamento:</span>
                     <Badge
                       variant="outline"
-                      className="border-amber-300 text-amber-800 bg-amber-50"
+                      className="border-amber-300 text-amber-800 bg-amber-50 font-bold"
                     >
-                      Sem Pgnto (Aguardando Quitação)
+                      Aguardando fechamento
                     </Badge>
                   </div>
                 </div>
@@ -1306,8 +1525,29 @@ export default function FuncionariosPage() {
           </div>
         </TabsContent>
 
-        {/* TAB 5: HISTÓRICO DE FOLHAS FECHADAS */}
+        {/* TAB 5: HISTÓRICO DE FOLHAS FECHADAS (REGRAS 2 E 3) */}
         <TabsContent value="folhas" className="space-y-4 focus-visible:outline-none">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-gray-900">
+                Histórico de Fechamentos Concluídos
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Folhas quitadas são imutáveis (pagamentos já realizados). Para qualquer divergência,
+                lance um ajuste no período aberto.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleAbrirModalDivergencia()}
+              className="text-xs font-semibold gap-1.5 border-amber-300 text-amber-900 hover:bg-amber-50"
+            >
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+              Lançar Divergência Passada
+            </Button>
+          </div>
+
           <div className="rounded-xl border border-border/80 bg-white overflow-hidden shadow-xs">
             <table className="w-full text-xs text-left border-collapse">
               <thead>
@@ -1316,9 +1556,9 @@ export default function FuncionariosPage() {
                   <th className="py-2.5 px-4">Funcionário</th>
                   <th className="py-2.5 px-3 text-right">Ganho Total</th>
                   <th className="py-2.5 px-3 text-right">Dívida Semanal</th>
-                  <th className="py-2.5 px-3 text-right">A Receber</th>
-                  <th className="py-2.5 px-3 text-center">Status</th>
-                  <th className="py-2.5 px-3 text-center">Data Quitação</th>
+                  <th className="py-2.5 px-3 text-right">Valor Pago / A Receber</th>
+                  <th className="py-2.5 px-3 text-center">Status & Quitação</th>
+                  <th className="py-2.5 px-4 text-center">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
@@ -1329,41 +1569,107 @@ export default function FuncionariosPage() {
                     </td>
                   </tr>
                 ) : (
-                  folhas.map((f) => (
-                    <tr key={f.id} className="hover:bg-gray-50/50">
-                      <td className="py-2.5 px-4 font-mono font-semibold">
-                        {f.periodo_inicio} até {f.periodo_fim}
-                      </td>
-                      <td className="py-2.5 px-4 font-semibold text-gray-900">
-                        {f.expand?.funcionario?.nome || funcionarioAtual?.nome}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-mono font-bold text-gray-900">
-                        {formatCurrency(f.ganho_total)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-mono">
-                        {formatCurrency(f.divida_semanal)}
-                      </td>
-                      <td
-                        className={`py-2.5 px-3 text-right font-mono font-bold ${
-                          f.a_receber < 0 ? 'text-red-600' : 'text-emerald-700'
-                        }`}
-                      >
-                        {formatCurrency(f.a_receber)}
-                      </td>
-                      <td className="py-2.5 px-3 text-center">
-                        <Badge variant={f.quitada ? 'default' : 'outline'}>
-                          {f.quitada ? 'Quitada' : 'Aberta'}
-                        </Badge>
-                      </td>
-                      <td className="py-2.5 px-3 text-center text-muted-foreground">
-                        {f.data_quitacao || '—'}
-                      </td>
-                    </tr>
-                  ))
+                  folhas.map((f) => {
+                    const dataQuitacaoFormatada = f.data_quitacao
+                      ? formatarDataDDMMAAAA(f.data_quitacao)
+                      : '—'
+                    const dataQuitacaoCurta = f.data_quitacao
+                      ? formatarDataDDMM(f.data_quitacao)
+                      : ''
+
+                    return (
+                      <tr key={f.id} className="hover:bg-gray-50/50">
+                        <td className="py-2.5 px-4 font-mono font-semibold">
+                          {formatarDataDDMMAAAA(f.periodo_inicio)} até{' '}
+                          {formatarDataDDMMAAAA(f.periodo_fim)}
+                        </td>
+                        <td className="py-2.5 px-4 font-semibold text-gray-900">
+                          {f.expand?.funcionario?.nome || funcionarioAtual?.nome}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono font-bold text-gray-900">
+                          {formatCurrency(f.ganho_total)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono">
+                          {formatCurrency(f.divida_semanal)}
+                        </td>
+                        <td
+                          className={`py-2.5 px-3 text-right font-mono font-bold ${
+                            f.a_receber < 0 ? 'text-red-600' : 'text-emerald-700'
+                          }`}
+                        >
+                          {formatCurrency(f.a_receber)}
+                        </td>
+                        <td className="py-2.5 px-3 text-center">
+                          {f.quitada ? (
+                            <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white font-semibold text-[10px] gap-1">
+                              ✅ Quitada em {dataQuitacaoCurta || dataQuitacaoFormatada}
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="border-amber-300 text-amber-800 bg-amber-50"
+                            >
+                              Em aberto
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-4 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleVerHistoricoPeriodo(f)}
+                              className="h-7 text-xs font-semibold gap-1 text-gray-800 hover:bg-gray-100"
+                            >
+                              <Eye className="h-3.5 w-3.5 text-[#DF5830]" />
+                              Ver histórico do período
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Apontar divergência para este pagamento"
+                              onClick={() => handleAbrirModalDivergencia(f)}
+                              className="h-7 text-xs text-amber-800 hover:bg-amber-100"
+                            >
+                              Divergência
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })
                 )}
               </tbody>
             </table>
           </div>
+
+          {/* BANNER VERDE NO RODAPÉ DO HISTÓRICO COM O STATUS REAL (REGRA 2) */}
+          {folhas.length > 0 && (
+            <div className="rounded-xl border border-emerald-300 bg-emerald-50/80 p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-emerald-950">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0">
+                  ✓
+                </div>
+                <div>
+                  <p className="font-bold text-sm">
+                    {folhas.filter((f) => f.quitada).length} fechamento(s) quitado(s) com
+                    imutabilidade garantida
+                  </p>
+                  <p className="text-xs text-emerald-800">
+                    Última quitação:{' '}
+                    {folhas[0]?.data_quitacao
+                      ? `✅ Quitada em ${formatarDataDDMM(folhas[0].data_quitacao)} (${formatarDataDDMMAAAA(folhas[0].data_quitacao)})`
+                      : 'Sem registro de data'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-xs text-emerald-900 flex items-center gap-1 font-semibold">
+                <Lock className="h-4 w-4 text-emerald-700" />
+                Registros protegidos contra reabertura
+              </div>
+            </div>
+          )}
         </TabsContent>
       </Tabs>
 
@@ -1932,6 +2238,304 @@ export default function FuncionariosPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* MODAL 6: DETALHE COMPLETO DO HISTÓRICO DO PERÍODO (REGRA 2) */}
+      <Dialog
+        open={Boolean(folhaHistoricoSelecionada)}
+        onOpenChange={(aberto) => !aberto && setFolhaHistoricoSelecionada(null)}
+      >
+        <DialogContent className="max-w-2xl bg-white max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <div className="flex items-center justify-between pr-6">
+              <DialogTitle className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <History className="h-5 w-5 text-[#DF5830]" />
+                Histórico Completo do Período Fechado
+              </DialogTitle>
+              {folhaHistoricoSelecionada?.quitada && (
+                <Badge className="bg-emerald-600 text-white text-xs">
+                  ✅ Quitada em {formatarDataDDMM(folhaHistoricoSelecionada.data_quitacao || '')}
+                </Badge>
+              )}
+            </div>
+            <DialogDescription className="text-xs">
+              {folhaHistoricoSelecionada && (
+                <span>
+                  Período:{' '}
+                  <strong>{formatarDataDDMMAAAA(folhaHistoricoSelecionada.periodo_inicio)}</strong>{' '}
+                  até <strong>{formatarDataDDMMAAAA(folhaHistoricoSelecionada.periodo_fim)}</strong>{' '}
+                  • {folhaHistoricoSelecionada.expand?.funcionario?.nome || funcionarioAtual?.nome}
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          {folhaHistoricoSelecionada && (
+            <div className="space-y-4 text-xs py-2">
+              {/* RESUMO MONETÁRIO */}
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                  <span className="text-[11px] text-muted-foreground font-semibold">
+                    Ganho Total
+                  </span>
+                  <div className="font-mono font-bold text-base text-[#DF5830] mt-0.5">
+                    {formatCurrency(folhaHistoricoSelecionada.ganho_total)}
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                  <span className="text-[11px] text-muted-foreground font-semibold">
+                    Descontos / Dívida
+                  </span>
+                  <div className="font-mono font-bold text-base text-gray-900 mt-0.5">
+                    {formatCurrency(folhaHistoricoSelecionada.divida_semanal)}
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                  <span className="text-[11px] text-muted-foreground font-semibold">
+                    Valor Pago
+                  </span>
+                  <div
+                    className={`font-mono font-black text-base mt-0.5 ${
+                      folhaHistoricoSelecionada.a_receber < 0 ? 'text-red-600' : 'text-emerald-700'
+                    }`}
+                  >
+                    {formatCurrency(folhaHistoricoSelecionada.a_receber)}
+                  </div>
+                </div>
+              </div>
+
+              {/* PONTOS BATIDOS DO PERÍODO */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-gray-900 text-xs">
+                    Pontos Batidos no Período ({pontosHistoricoModal.length} registros)
+                  </span>
+                  {carregandoDetalheHistorico && (
+                    <span className="text-[11px] text-muted-foreground">Carregando pontos...</span>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-border overflow-hidden">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-gray-50 border-b border-border text-[11px] font-bold text-gray-700">
+                      <tr>
+                        <th className="py-2 px-3">Data</th>
+                        <th className="py-2 px-2 text-center">Entrada</th>
+                        <th className="py-2 px-2 text-center">Saída</th>
+                        <th className="py-2 px-2 text-center">Origem</th>
+                        <th className="py-2 px-3 text-right">Observação</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {pontosHistoricoModal.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-4 text-center text-muted-foreground">
+                            Nenhum ponto registrado neste período.
+                          </td>
+                        </tr>
+                      ) : (
+                        pontosHistoricoModal.map((p) => (
+                          <tr key={p.id}>
+                            <td className="py-2 px-3 font-medium text-gray-900">
+                              {formatarDataExtensoPlanilha(p.data)} ({formatarDataDDMMAAAA(p.data)})
+                            </td>
+                            <td className="py-2 px-2 text-center font-mono">{p.entrada}</td>
+                            <td className="py-2 px-2 text-center font-mono">{p.saida || '—'}</td>
+                            <td className="py-2 px-2 text-center">
+                              <Badge variant="outline" className="text-[10px]">
+                                {p.origem === 'estacao_qr'
+                                  ? 'Estação QR'
+                                  : p.origem === 'admin'
+                                    ? 'Admin'
+                                    : 'Fora'}
+                              </Badge>
+                            </td>
+                            <td className="py-2 px-3 text-right text-muted-foreground">
+                              {p.observacao || '—'}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* DETALHAMENTO DE DESCONTOS DA FOLHA */}
+              {folhaHistoricoSelecionada.descontos && (
+                <div className="space-y-2 pt-2 border-t border-border/60">
+                  <span className="font-bold text-gray-900 text-xs">Descontos Aplicados</span>
+                  <div className="rounded-lg border border-border p-3 bg-gray-50/50 space-y-1.5">
+                    {/* Dívidas */}
+                    {folhaHistoricoSelecionada.descontos.dividas?.map((d: any, i: number) => (
+                      <div key={i} className="flex justify-between">
+                        <span className="text-gray-700">
+                          {d.descricao} ({d.percentual}% do ganho):
+                        </span>
+                        <span className="font-mono font-bold text-gray-900">
+                          {formatCurrency(d.valorAbatido)}
+                        </span>
+                      </div>
+                    ))}
+                    {/* Saldo Negativo Anterior */}
+                    {folhaHistoricoSelecionada.descontos.saldoNegativoAnterior > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-700">Saldo Negativo Folha Anterior:</span>
+                        <span className="font-mono font-bold text-gray-900">
+                          {formatCurrency(
+                            folhaHistoricoSelecionada.descontos.saldoNegativoAnterior,
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {/* Outros / Vales */}
+                    {folhaHistoricoSelecionada.descontos.outros?.map((o: any, i: number) => (
+                      <div key={i} className="flex justify-between">
+                        <span className="text-gray-700">{o.descricao}:</span>
+                        <span className="font-mono font-bold text-gray-900">
+                          {formatCurrency(o.valor)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* AVISO DE IMUTABILIDADE */}
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-[11px] text-muted-foreground flex items-center justify-between">
+                <span>Esta folha está liquidada e seu registro histórico é imutável.</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    handleAbrirModalDivergencia(folhaHistoricoSelecionada)
+                    setFolhaHistoricoSelecionada(null)
+                  }}
+                  className="text-xs text-amber-800 border-amber-300 hover:bg-amber-50 gap-1"
+                >
+                  <AlertTriangle className="h-3 w-3 text-amber-600" />
+                  Apontar Divergência
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setFolhaHistoricoSelecionada(null)}
+              className="text-xs"
+            >
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL 7: LANÇAR DIVERGÊNCIA DE FOLHA PASSADA COMO DESPESA NO PERÍODO ABERTO (REGRA 3) */}
+      <Dialog open={isDivergenciaModalOpen} onOpenChange={setIsDivergenciaModalOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-gray-900 flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+              Lançar Divergência de Período Passado
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Conforme as regras do sistema, folhas fechadas não são reabertas. A divergência é
+              lançada como item de desconto/vale no período <strong>EM ABERTO</strong> do
+              colaborador.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form
+            onSubmit={handleSalvarDivergenciaNoPeriodoAberto}
+            className="space-y-3.5 text-xs py-2"
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="font-semibold text-gray-800">Início Período Passado</Label>
+                <Input
+                  type="date"
+                  required
+                  value={divergenciaForm.periodoInicio}
+                  onChange={(e) =>
+                    setDivergenciaForm({ ...divergenciaForm, periodoInicio: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="font-semibold text-gray-800">Fim Período Passado</Label>
+                <Input
+                  type="date"
+                  required
+                  value={divergenciaForm.periodoFim}
+                  onChange={(e) =>
+                    setDivergenciaForm({ ...divergenciaForm, periodoFim: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="font-semibold text-gray-800">
+                Valor do Ajuste / Divergência (R$)
+              </Label>
+              <Input
+                type="number"
+                step="0.01"
+                required
+                placeholder="Ex: 50.00"
+                value={divergenciaForm.valor}
+                onChange={(e) => setDivergenciaForm({ ...divergenciaForm, valor: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="font-semibold text-gray-800">
+                Motivo da Divergência (opcional)
+              </Label>
+              <Input
+                placeholder="Ex: Diferença de horas extras, pagamento a menor..."
+                value={divergenciaForm.motivo}
+                onChange={(e) => setDivergenciaForm({ ...divergenciaForm, motivo: e.target.value })}
+              />
+            </div>
+
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-900">
+              Será criado no espelho da folha aberta o item:
+              <br />
+              <strong className="font-mono text-gray-900">
+                "Divergência do período{' '}
+                {divergenciaForm.periodoInicio
+                  ? formatarDataDDMM(divergenciaForm.periodoInicio)
+                  : 'dd/mm'}
+                –
+                {divergenciaForm.periodoFim
+                  ? formatarDataDDMM(divergenciaForm.periodoFim)
+                  : 'dd/mm'}
+                "
+              </strong>
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsDivergenciaModalOpen(false)}
+                className="text-xs"
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                className="bg-[#DF5830] hover:bg-[#c94b26] text-white text-xs font-bold"
+              >
+                Lançar no Período Aberto
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
