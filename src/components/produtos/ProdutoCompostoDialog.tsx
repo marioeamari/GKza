@@ -517,57 +517,29 @@ export function ProdutoCompostoDialog({
             )}
           </div>
 
-          {/* Embalagem e Etiqueta extras + Card Resumo de Custo Total */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="space-y-1">
-              <Label htmlFor="custoEmb" className="text-xs">
-                Custo Embalagem Adicional (R$)
-              </Label>
-              <Input
-                id="custoEmb"
-                type="number"
-                disabled={readOnly}
-                step="0.01"
-                min="0"
-                value={custoEmbalagem}
-                onChange={(e) => setCustoEmbalagem(Number(e.target.value))}
-                className="text-xs"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <Label htmlFor="custoEti" className="text-xs">
-                Custo Etiqueta (R$)
-              </Label>
-              <Input
-                id="custoEti"
-                type="number"
-                disabled={readOnly}
-                step="0.01"
-                min="0"
-                value={custoEtiqueta}
-                onChange={(e) => setCustoEtiqueta(Number(e.target.value))}
-                className="text-xs"
-              />
-            </div>
-
-            {/* Painel do Custo Total Consolidado */}
-            <div className="p-3 rounded-lg bg-orange-50 border border-orange-200 text-right flex flex-col justify-center">
-              <span className="text-[11px] font-semibold text-orange-900 uppercase tracking-wider">
+          {/* Card Resumo de Custo Total Consolidado (Campos legados de Embalagem e Etiqueta removidos da UI; entram na Composição por Linhas) */}
+          <div className="p-3.5 rounded-lg bg-orange-50/70 border border-orange-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-[11px] font-semibold text-orange-900 uppercase tracking-wider block">
                 Custo Total Consolidado
               </span>
-              <p className="text-xl font-bold text-[#DF5830]">
+              <p className="text-xs text-orange-800 mt-0.5">
+                {classificacao === 'revenda'
+                  ? 'Aquisição Base de Origem + Subtotal da Composição por Linhas'
+                  : 'Subtotal da Composição por Linhas de Produtos Base'}
+                {(custoEmbalagem > 0 || custoEtiqueta > 0) && (
+                  <span className="block text-[11px] text-orange-700/80 font-mono mt-0.5">
+                    * Inclui custos legados preservados deste registro (Emb:{' '}
+                    {formatCurrency(resumoCustos.custo_embalagem)} | Eti:{' '}
+                    {formatCurrency(custoEtiqueta)})
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="text-right sm:shrink-0">
+              <p className="text-2xl font-bold text-[#DF5830]">
                 {formatCurrency(resumoCustos.custo_total)}
               </p>
-              <span className="text-[10px] text-orange-800">
-                {classificacao === 'revenda'
-                  ? resumoCustos.custo_embalagem === 0 && custoEmbalagem > 0
-                    ? 'Aquisição Base + Composição (já inclui embalagem)'
-                    : 'Aquisição Base + Composição + Embalagem'
-                  : resumoCustos.custo_embalagem === 0 && custoEmbalagem > 0
-                    ? 'Composição Fabricação (já inclui embalagem)'
-                    : 'Composição Fabricação + Embalagem'}
-              </span>
             </div>
           </div>
 

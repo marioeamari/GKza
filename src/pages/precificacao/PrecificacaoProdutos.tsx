@@ -26,6 +26,7 @@ import {
 import { filtrarApenasKitsECombos, precificacaoService } from '@/services/precificacao'
 import { cadastrosService } from '@/services/cadastros'
 import { fornecedoresService } from '@/services/fornecedores'
+import { produtosBaseService } from '@/services/produtos'
 import { PrecCanalRecord, PrecKitRecord, PrecProdutoRecord } from '@/types/precificacao'
 import { SkuApelidosManager } from '@/components/precificacao/SkuApelidosManager'
 import { Empresa, Fornecedor, FornecedorProduto } from '@/types/domain'
@@ -124,21 +125,27 @@ export default function PrecificacaoProdutos() {
   const [produtoParaExcluir, setProdutoParaExcluir] = useState<PrecProdutoRecord | null>(null)
   const [deletando, setDeletando] = useState(false)
 
+  const [produtosBaseLista, setProdutosBaseLista] = useState<
+    import('@/types/domain').ProdutoBaseRecord[]
+  >([])
+
   async function carregar() {
     try {
       setLoading(true)
-      const [prods, emps, forns, fornsProds, canaisList] = await Promise.all([
+      const [prods, emps, forns, fornsProds, canaisList, pBaseList] = await Promise.all([
         precificacaoService.listProdutos(),
         cadastrosService.listEmpresas(),
         fornecedoresService.listFornecedores(),
         fornecedoresService.listTodosProdutos().catch(() => [] as FornecedorProduto[]),
         precificacaoService.listCanais().catch(() => [] as PrecCanalRecord[]),
+        produtosBaseService.list().catch(() => [] as import('@/types/domain').ProdutoBaseRecord[]),
       ])
       setTodosProdutos(prods)
       setEmpresas(emps)
       setFornecedores(forns)
       setFornecedoresProdutos(fornsProds)
       setCanais(canaisList)
+      setProdutosBaseLista(pBaseList)
 
       // Carregar prec_kits vinculados para kits e combos
       const kitsOuCombos = filtrarApenasKitsECombos(prods)
@@ -998,6 +1005,7 @@ export default function PrecificacaoProdutos() {
         onOpenChange={setOpenKitDialog}
         kitParaEditar={kitEditando}
         produtosDisponiveis={todosProdutos}
+        produtosBase={produtosBaseLista}
         onSuccess={carregar}
       />
 
@@ -1007,6 +1015,8 @@ export default function PrecificacaoProdutos() {
         onOpenChange={setOpenComboDialog}
         comboParaEditar={comboEditando}
         produtosDisponiveis={todosProdutos}
+        produtosBase={produtosBaseLista}
+        kitsMap={kitsMap}
         onSuccess={carregar}
       />
 

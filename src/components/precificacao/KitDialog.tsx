@@ -1,5 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
-import { Boxes, Camera, Check, ImageIcon, Search, Sparkles, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Boxes,
+  Calculator,
+  Camera,
+  Check,
+  ImageIcon,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { CategoriaAutocompleteInput } from '@/components/precificacao/CategoriaAutocompleteInput'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,8 +31,15 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { precificacaoService } from '@/services/precificacao'
+import { produtosBaseService } from '@/services/produtos'
 import { PrecKitRecord, PrecProdutoRecord } from '@/types/precificacao'
-import { calcularCustoBaseProduto } from '@/lib/precificacao/calculo'
+import type { ProdutoBaseRecord } from '@/types/domain'
+import type { ItemComposicaoCusto } from '@/lib/precificacao/calculo'
+import {
+  buildItensPrincipaisOpcoes,
+  calcularCustoTotalKit,
+  ItemPrincipalOpcao,
+} from '@/lib/precificacao/kitComboHelpers'
 import { formatCurrency } from '@/lib/format'
 import { useToast } from '@/hooks/use-toast'
 import { apiFieldErrors, apiMessage } from '@/lib/api-error'
@@ -31,6 +49,7 @@ interface KitDialogProps {
   onOpenChange: (open: boolean) => void
   kitParaEditar?: PrecProdutoRecord | null
   produtosDisponiveis: PrecProdutoRecord[]
+  produtosBase?: import('@/types/domain').ProdutoBaseRecord[]
   onSuccess: () => void
 }
 
@@ -39,12 +58,18 @@ export function KitDialog({
   onOpenChange,
   kitParaEditar,
   produtosDisponiveis,
+  produtosBase: produtosBaseProp,
   onSuccess,
 }: KitDialogProps) {
   const { toast } = useToast()
   const isEditing = Boolean(kitParaEditar?.id)
 
-  const [produtoBaseId, setProdutoBaseId] = useState<string>('')
+  const [produtosBaseLista, setProdutosBaseLista] = useState<ProdutoBaseRecord[]>(
+    produtosBaseProp || [],
+  )
+
+  // Item Principal selecionado (formato composto "comp_id" ou "base_id")
+  const [itemPrincipalId, setItemPrincipalId] = useState<string>('')
   const [buscaProdText, setBuscaProdText] = useState('')
   const [quantidade, setQuantidade] = useState<number>(2)
   const [nome, setNome] = useState('')
@@ -56,8 +81,15 @@ export function KitDialog({
   const [comprimentoCm, setComprimentoCm] = useState<number | undefined>(undefined)
   const [larguraCm, setLarguraCm] = useState<number | undefined>(undefined)
   const [alturaCm, setAlturaCm] = useState<number | undefined>(undefined)
-  const [custoEmbalagem, setCustoEmbalagem] = useState<number>(0.1)
-  const [custoEtiqueta, setCustoEtiqueta] = useState<number>(0.05)
+
+  // Preservação de campos legados (não exibidos em formulários novos/edição, mas preservados no cálculo e payload)
+  const [custoEmbalagemLegado, setCustoEmbalagemLegado] = useState<number>(0)
+  const [custoEtiquetaLegado, setCustoEtiquetaLegado] = useState<number>(0)
+
+  // Composição analítica de produtos base (insumos, embalagens, etiquetas, etc.)
+  const [composicao, setComposicao] = useState<ItemComposicaoCusto[]>([])
+  const [insumoSelecionadoId, setInsumoSelecionadoId] = useState<string>('')
+  const [qtdInsumo, setQtdInsumo] = useState<number>(1)
 
   // Upload próprio de imagem
   const [imagemFile, setImagemFile] = useState<File | null>(null)
@@ -68,30 +100,45 @@ export function KitDialog({
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
 
-  // Apenas produtos simples (fabricação própria ou revenda) podem ser base do kit
-  const produtosBaseOpcoes = produtosDisponiveis.filter(
-    (p) => p.tipo === 'fabricacao_propria' || p.tipo === 'revenda',
-  )
+  // Se produtosBaseProp não foi passado, carrega sob demanda
+  useEffect(() => {
+    if (open && (!produtosBaseProp || produtosBaseProp.length === 0)) {
+      produtosBaseService
+        .list()
+        .then((res) => setProdutosBaseLista(res))
+        .catch((err) => console.warn('Erro ao carregar produtos_base no KitDialog:', err))
+    } else if (produtosBaseProp && produtosBaseProp.length > 0) {
+      setProdutosBaseLista(produtosBaseProp)
+    }
+  }, [open, produtosBaseProp])
 
-  const produtoBaseSelecionado = produtosBaseOpcoes.find((p) => p.id === produtoBaseId)
+  // Opções consolidadas para o Item Principal:
+  // Produto Composto (prec_produtos) + Produto Base (produtos_base com tipo='revenda')
+  const itensPrincipaisOpcoes: ItemPrincipalOpcao[] = useMemo(() => {
+    return buildItensPrincipaisOpcoes({
+      produtosCompostos: produtosDisponiveis,
+      produtosBase: produtosBaseLista,
+      idAtualParaExcluir: kitParaEditar?.id,
+      contexto: 'kit',
+    })
+  }, [produtosDisponiveis, produtosBaseLista, kitParaEditar?.id])
 
-  // Custo unitário base do produto componente
-  const custoBaseUnitario = produtoBaseSelecionado
-    ? calcularCustoBaseProduto({
-        sku: produtoBaseSelecionado.sku,
-        nome: produtoBaseSelecionado.nome,
-        tipo: produtoBaseSelecionado.tipo,
-        composicao: produtoBaseSelecionado.composicao,
-        perda_pct: produtoBaseSelecionado.perda_pct,
-        custo_aquisicao_unitario: produtoBaseSelecionado.custo_aquisicao_unitario,
-        despesas_compra: produtoBaseSelecionado.despesas_compra,
-        custo_etiqueta: produtoBaseSelecionado.custo_etiqueta,
-        custo_adicional_embalagem: produtoBaseSelecionado.custo_adicional_embalagem,
-      }).custo_total
-    : 0
-
+  const itemPrincipalSelecionado = itensPrincipaisOpcoes.find((p) => p.id === itemPrincipalId)
+  const custoBaseUnitario = itemPrincipalSelecionado?.custoUnitario || 0
   const custoComponentesTotal = custoBaseUnitario * (quantidade || 1)
-  const custoFinalEstimado = custoComponentesTotal + (custoEmbalagem || 0) + (custoEtiqueta || 0)
+
+  // Cálculo auditado do custo total (componentes + linhas analíticas + campos legados retrocompatíveis)
+  const calculoTotais = useMemo(() => {
+    return calcularCustoTotalKit({
+      custoComponenteUnitario: custoBaseUnitario,
+      quantidadeComponente: quantidade,
+      composicao,
+      custoEmbalagemLegado,
+      custoEtiquetaLegado,
+    })
+  }, [custoBaseUnitario, quantidade, composicao, custoEmbalagemLegado, custoEtiquetaLegado])
+
+  const custoFinalEstimado = calculoTotais.custoTotal
 
   // Reset / inicialização ao abrir
   useEffect(() => {
@@ -107,8 +154,9 @@ export function KitDialog({
       setComprimentoCm(kitParaEditar.dimensao_comprimento_cm)
       setLarguraCm(kitParaEditar.dimensao_largura_cm)
       setAlturaCm(kitParaEditar.dimensao_altura_cm)
-      setCustoEmbalagem(kitParaEditar.custo_adicional_embalagem ?? 0.1)
-      setCustoEtiqueta(kitParaEditar.custo_etiqueta ?? 0.05)
+      setCustoEmbalagemLegado(kitParaEditar.custo_adicional_embalagem || 0)
+      setCustoEtiquetaLegado(kitParaEditar.custo_etiqueta || 0)
+      setComposicao(kitParaEditar.composicao || [])
       setImagemFile(null)
       setRemoverImagem(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -124,15 +172,23 @@ export function KitDialog({
         .then((kitRecord: PrecKitRecord | null) => {
           const primeiroItem = kitRecord?.itens?.[0]
           if (primeiroItem?.produto_id) {
-            setProdutoBaseId(primeiroItem.produto_id)
+            const rawId = primeiroItem.produto_id
+            // Verifica se casou com composto ou base
+            const opt = itensPrincipaisOpcoes.find((o) => o.rawId === rawId)
+            if (opt) {
+              setItemPrincipalId(opt.id)
+            } else {
+              // Tenta fallback 'comp_' ou 'base_'
+              setItemPrincipalId(`comp_${rawId}`)
+            }
             setQuantidade(primeiroItem.qtd_efetiva || kitParaEditar.qtd_por_kit || 2)
           } else {
             setQuantidade(kitParaEditar.qtd_por_kit || 2)
           }
         })
     } else {
-      // Novo Kit
-      setProdutoBaseId('')
+      // Novo Kit: campos legados zerados por padrão
+      setItemPrincipalId('')
       setBuscaProdText('')
       setQuantidade(2)
       setNome('')
@@ -144,8 +200,11 @@ export function KitDialog({
       setComprimentoCm(undefined)
       setLarguraCm(undefined)
       setAlturaCm(undefined)
-      setCustoEmbalagem(0.1)
-      setCustoEtiqueta(0.05)
+      setCustoEmbalagemLegado(0)
+      setCustoEtiquetaLegado(0)
+      setComposicao([])
+      setInsumoSelecionadoId('')
+      setQtdInsumo(1)
       setImagemFile(null)
       setImagemPreview(null)
       setRemoverImagem(false)
@@ -154,50 +213,92 @@ export function KitDialog({
     setFormErrors({})
   }, [open, kitParaEditar])
 
-  // Ao selecionar um produto base (apenas em modo de criação), sugere nome, SKU, peso e dimensões
-  function handleSelectProdutoBase(prodId: string) {
-    setProdutoBaseId(prodId)
-    const base = produtosBaseOpcoes.find((p) => p.id === prodId)
-    if (!base) return
+  // Ao selecionar um produto componente (apenas em modo de criação), sugere nome, SKU, peso e dimensões
+  function handleSelectProdutoComponente(optId: string) {
+    setItemPrincipalId(optId)
+    const itemOpt = itensPrincipaisOpcoes.find((p) => p.id === optId)
+    if (!itemOpt) return
 
     const qtd = quantidade > 1 ? quantidade : 2
     if (!isEditing) {
-      setNome(`Kit ${qtd} ${base.nome}`)
-      setSku(`KIT-${qtd}-${base.sku}`)
-      setMarca(base.marca || '')
-      setCategoria(base.categoria || '')
-      if (base.peso_g) {
-        setPesoG(base.peso_g * qtd)
+      setNome(`Kit ${qtd} ${itemOpt.nome}`)
+      const baseSku = itemOpt.sku || `PROD-${itemOpt.rawId.slice(0, 6).toUpperCase()}`
+      setSku(`KIT-${qtd}-${baseSku}`)
+      if (itemOpt.rawComposto?.marca) setMarca(itemOpt.rawComposto.marca)
+      if (itemOpt.rawComposto?.categoria) setCategoria(itemOpt.rawComposto.categoria)
+      if (itemOpt.peso_g) {
+        setPesoG(itemOpt.peso_g * qtd)
       }
-      setComprimentoCm(base.dimensao_comprimento_cm)
-      setLarguraCm(base.dimensao_largura_cm)
-      if (base.dimensao_altura_cm) {
-        setAlturaCm(base.dimensao_altura_cm * qtd)
+      setComprimentoCm(itemOpt.dimensao_comprimento_cm)
+      setLarguraCm(itemOpt.dimensao_largura_cm)
+      if (itemOpt.dimensao_altura_cm) {
+        setAlturaCm(itemOpt.dimensao_altura_cm * qtd)
       }
-      // Se não tem imagem anexada e o produto base tem imagem, exibir prévia
-      if (!imagemFile && !imagemPreview && base.imagem) {
-        setImagemPreview(precificacaoService.getProdutoImageUrl(base))
+      // Se não tem imagem anexada e o componente tem imagem, exibir prévia
+      if (!imagemFile && !imagemPreview && itemOpt.imagem) {
+        if (itemOpt.origem === 'composto' && itemOpt.rawComposto) {
+          setImagemPreview(precificacaoService.getProdutoImageUrl(itemOpt.rawComposto))
+        } else if (itemOpt.origem === 'produto_base' && itemOpt.rawBase) {
+          setImagemPreview(produtosBaseService.getImageUrl(itemOpt.rawBase))
+        }
       }
     }
   }
 
-  // Ao mudar a quantidade, se o nome/sku ainda seguir o padrão, atualiza automaticamente
+  // Ao mudar a quantidade, atualiza proporcionalmente peso e dimensões
   function handleQuantidadeChange(novaQtd: number) {
     const qtdVal = Math.max(2, novaQtd || 2)
     setQuantidade(qtdVal)
 
-    if (produtoBaseSelecionado && !isEditing) {
-      // Atualizar peso proporcional
-      if (produtoBaseSelecionado.peso_g) {
-        setPesoG(produtoBaseSelecionado.peso_g * qtdVal)
+    if (itemPrincipalSelecionado && !isEditing) {
+      if (itemPrincipalSelecionado.peso_g) {
+        setPesoG(itemPrincipalSelecionado.peso_g * qtdVal)
       }
-      if (produtoBaseSelecionado.dimensao_altura_cm) {
-        setAlturaCm(produtoBaseSelecionado.dimensao_altura_cm * qtdVal)
+      if (itemPrincipalSelecionado.dimensao_altura_cm) {
+        setAlturaCm(itemPrincipalSelecionado.dimensao_altura_cm * qtdVal)
       }
-      // Atualizar sugestão de nome e SKU se ainda não foi customizado
-      setNome(`Kit ${qtdVal} ${produtoBaseSelecionado.nome}`)
-      setSku(`KIT-${qtdVal}-${produtoBaseSelecionado.sku}`)
+      const baseSku =
+        itemPrincipalSelecionado.sku ||
+        `PROD-${itemPrincipalSelecionado.rawId.slice(0, 6).toUpperCase()}`
+      setNome(`Kit ${qtdVal} ${itemPrincipalSelecionado.nome}`)
+      setSku(`KIT-${qtdVal}-${baseSku}`)
     }
+  }
+
+  // Gerenciamento da Composição Analítica por Linhas (insumos, embalagens, etiquetas)
+  function adicionarLinhaComposicao() {
+    if (!insumoSelecionadoId) return
+    const itemBase = produtosBaseLista.find((b) => b.id === insumoSelecionadoId)
+    if (!itemBase) return
+
+    const novaLinha: ItemComposicaoCusto = {
+      id: `K${composicao.length}`,
+      codigo: `K${composicao.length}`,
+      descricao: itemBase.nome,
+      qtd: qtdInsumo > 0 ? qtdInsumo : 1,
+      custo_unitario: Number(itemBase.custo_unitario) || 0,
+      unidade: itemBase.unidade || 'un',
+      categoria_custo:
+        itemBase.tipo === 'embalagem'
+          ? 'embalagem'
+          : itemBase.tipo === 'etiqueta'
+            ? 'etiqueta'
+            : itemBase.tipo === 'servico'
+              ? 'servico'
+              : 'insumo',
+      fornecedor_id: itemBase.fornecedor,
+      fornecedor_nome: itemBase.expand?.fornecedor?.nome_fantasia || 'Fornecedor',
+      insumo_id: itemBase.id,
+      insumo_tipo: itemBase.tipo === 'servico' ? 'servico' : 'insumo',
+    }
+
+    setComposicao([...composicao, novaLinha])
+    setInsumoSelecionadoId('')
+    setQtdInsumo(1)
+  }
+
+  function removerLinhaComposicao(index: number) {
+    setComposicao(composicao.filter((_, idx) => idx !== index))
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -243,7 +344,7 @@ export function KitDialog({
       })
       return
     }
-    if (!produtoBaseId) {
+    if (!itemPrincipalId || !itemPrincipalSelecionado) {
       setFormErrors({ form: 'Selecione o produto base do Kit.' })
       return
     }
@@ -254,6 +355,8 @@ export function KitDialog({
 
     setSaving(true)
     try {
+      // Novos kits nascem com custo_adicional_embalagem e custo_etiqueta zerados;
+      // kits existentes preservam valores já gravados nesses campos respeitando regra de dupla contagem.
       const payload: Partial<PrecProdutoRecord> = {
         tipo: 'kit',
         status: 'ativo',
@@ -266,10 +369,11 @@ export function KitDialog({
         dimensao_comprimento_cm: comprimentoCm,
         dimensao_largura_cm: larguraCm,
         dimensao_altura_cm: alturaCm,
-        custo_adicional_embalagem: custoEmbalagem,
-        custo_etiqueta: custoEtiqueta,
+        composicao,
+        custo_adicional_embalagem: calculoTotais.custoEmbalagemEfetivo,
+        custo_etiqueta: calculoTotais.custoEtiquetaEfetivo,
         qtd_por_kit: quantidade,
-        empresa: produtoBaseSelecionado?.empresa,
+        empresa: itemPrincipalSelecionado?.empresa,
       }
       delete payload.imagem
 
@@ -306,10 +410,10 @@ export function KitDialog({
         }
       }
 
-      // Persistir estrutura de prec_kits
+      // Persistir estrutura de prec_kits (produto_id grava o ID original da entidade no banco)
       const itemKit = {
-        produto_id: produtoBaseId,
-        nome: produtoBaseSelecionado?.nome || 'Produto Base',
+        produto_id: itemPrincipalSelecionado.rawId,
+        nome: itemPrincipalSelecionado.nome,
         qtd_efetiva: quantidade,
         custo_unitario: custoBaseUnitario,
       }
@@ -338,7 +442,7 @@ export function KitDialog({
     }
   }
 
-  const produtosFiltrados = produtosBaseOpcoes.filter((p) => {
+  const produtosFiltrados = itensPrincipaisOpcoes.filter((p) => {
     if (!buscaProdText.trim()) return true
     const term = buscaProdText.toLowerCase()
     return p.nome.toLowerCase().includes(term) || p.sku.toLowerCase().includes(term)
@@ -388,18 +492,17 @@ export function KitDialog({
                   </span>
                 )}
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-2 space-y-1">
                   <Label className="text-xs font-semibold">Produto Componente *</Label>
                   <Select
-                    value={produtoBaseId || 'nenhum'}
+                    value={itemPrincipalId || 'nenhum'}
                     onValueChange={(v) => {
-                      if (v !== 'nenhum') handleSelectProdutoBase(v)
+                      if (v !== 'nenhum') handleSelectProdutoComponente(v)
                     }}
                   >
                     <SelectTrigger className="bg-white">
-                      <SelectValue placeholder="Selecione o produto base..." />
+                      <SelectValue placeholder="Selecione o produto base ou composto..." />
                     </SelectTrigger>
                     <SelectContent>
                       <div className="p-1 border-b border-border">
@@ -417,8 +520,8 @@ export function KitDialog({
                       <SelectItem value="nenhum">Selecione um produto...</SelectItem>
                       {produtosFiltrados.map((p) => (
                         <SelectItem key={p.id} value={p.id}>
-                          {p.nome} [SKU: {p.sku}] (
-                          {p.tipo === 'fabricacao_propria' ? 'Fabricação' : 'Revenda'})
+                          {p.nome} [SKU: {p.sku || 'S/SKU'}] — {p.tipoLabel} —{' '}
+                          {formatCurrency(p.custoUnitario)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -439,9 +542,8 @@ export function KitDialog({
                   <span className="text-[10px] text-muted-foreground">Mínimo 2 unidades</span>
                 </div>
               </div>
-
               {/* Custo em tempo real */}
-              {produtoBaseSelecionado && (
+              {itemPrincipalSelecionado && (
                 <div className="p-2.5 rounded-xl bg-white/80 border border-primary/20 flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">
                     Custo dos componentes ({quantidade} un × {formatCurrency(custoBaseUnitario)}):
@@ -450,6 +552,126 @@ export function KitDialog({
                     {formatCurrency(custoComponentesTotal)}
                   </span>
                 </div>
+              )}{' '}
+            </div>
+
+            {/* SEÇÃO COMPOSIÇÃO POR LINHAS DE PRODUTOS BASE (Insumos, Embalagens, Etiquetas, Serviços) */}
+            <div className="space-y-3 p-3.5 rounded-xl border border-neutral-200 bg-white">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-xs font-semibold flex items-center gap-1.5 text-neutral-800">
+                    <Calculator className="h-4 w-4 text-[#DF5830]" />
+                    Composição por Linhas de Produtos Base
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Insumos, etiquetas, embalagens, tecidos ou serviços que compõem o kit.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="text-[11px] text-muted-foreground">Subtotal Composição</span>
+                  <p className="text-xs font-bold text-neutral-900 font-mono">
+                    {formatCurrency(calculoTotais.custoComposicao)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Adicionar linha de composição */}
+              <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                <div className="flex-1">
+                  <Select value={insumoSelecionadoId} onValueChange={setInsumoSelecionadoId}>
+                    <SelectTrigger className="text-xs bg-white">
+                      <SelectValue placeholder="Escolha um item de produtos_base (insumo, embalagem, serviço)..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {produtosBaseLista
+                        .filter((b) => b.tipo !== 'revenda')
+                        .map((b) => (
+                          <SelectItem key={b.id} value={b.id}>
+                            {b.nome} ({b.tipo}) — {b.expand?.fornecedor?.nome_fantasia || 'Forn.'} —{' '}
+                            {formatCurrency(Number(b.custo_unitario) || 0)}/{b.unidade || 'un'}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="w-24">
+                  <Input
+                    type="number"
+                    min="0.01"
+                    step="0.1"
+                    value={qtdInsumo}
+                    onChange={(e) => setQtdInsumo(Number(e.target.value))}
+                    placeholder="Qtd"
+                    className="text-xs"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={adicionarLinhaComposicao}
+                  disabled={!insumoSelecionadoId}
+                  className="gap-1 text-xs border-orange-200 text-orange-700 hover:bg-orange-50 shrink-0"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Adicionar
+                </Button>
+              </div>
+
+              {/* Tabela de composição analítica do Kit */}
+              {composicao.length > 0 ? (
+                <div className="border rounded-md overflow-hidden text-xs">
+                  <table className="w-full text-left">
+                    <thead className="bg-neutral-50 text-neutral-600 font-semibold border-b">
+                      <tr>
+                        <th className="py-2 px-3">Item / Origem</th>
+                        <th className="py-2 px-2 text-center">Qtd</th>
+                        <th className="py-2 px-2 text-right">Unitário</th>
+                        <th className="py-2 px-2 text-right">Subtotal</th>
+                        <th className="py-2 px-2 text-center w-10">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-100">
+                      {composicao.map((item, idx) => {
+                        const sub = (item.qtd || 1) * (item.custo_unitario || 0)
+                        return (
+                          <tr key={idx} className="hover:bg-neutral-50/50">
+                            <td className="py-2 px-3">
+                              <span className="font-medium text-neutral-800">{item.descricao}</span>
+                              {item.fornecedor_nome && (
+                                <span className="block text-[10px] text-muted-foreground">
+                                  Fornecedor: {item.fornecedor_nome}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2 px-2 text-center">{item.qtd}</td>
+                            <td className="py-2 px-2 text-right font-mono">
+                              {formatCurrency(item.custo_unitario)}
+                            </td>
+                            <td className="py-2 px-2 text-right font-semibold font-mono text-neutral-800">
+                              {formatCurrency(sub)}
+                            </td>
+                            <td className="py-2 px-2 text-center">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-red-500 hover:bg-red-50"
+                                onClick={() => removerLinhaComposicao(idx)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-xs text-neutral-400 italic text-center py-2">
+                  Nenhum item adicional inserido na composição (opcional).
+                </p>
               )}
             </div>
 
@@ -583,36 +805,21 @@ export function KitDialog({
               </div>
             </div>
 
-            {/* Embalagem e Etiqueta adicionais */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-border pt-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Embalagem Adicional do Kit (R$)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={custoEmbalagem}
-                  onChange={(e) => setCustoEmbalagem(parseFloat(e.target.value) || 0)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Etiqueta (R$)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={custoEtiqueta}
-                  onChange={(e) => setCustoEtiqueta(parseFloat(e.target.value) || 0)}
-                />
-              </div>
-            </div>
-
-            {/* Resumo do custo final */}
+            {/* Resumo do custo final (Campos legados de embalagem/etiqueta removidos da UI; entram na Composição por Linhas) */}
             <div className="p-3 rounded-xl bg-secondary/30 border border-border flex items-center justify-between">
               <div>
                 <span className="font-bold text-xs text-foreground block">
                   Custo Base Final Estimado
                 </span>
                 <span className="text-[11px] text-muted-foreground">
-                  Componentes + embalagem + etiqueta
+                  Componentes ({formatCurrency(custoComponentesTotal)}) + Composição por Linhas (
+                  {formatCurrency(calculoTotais.custoComposicao)})
+                  {(custoEmbalagemLegado > 0 || custoEtiquetaLegado > 0) && (
+                    <span className="block text-[10px] text-amber-700 font-mono mt-0.5">
+                      * Inclui legado: Emb {formatCurrency(calculoTotais.custoEmbalagemEfetivo)} |
+                      Eti {formatCurrency(calculoTotais.custoEtiquetaEfetivo)}
+                    </span>
+                  )}
                 </span>
               </div>
               <span className="text-base font-bold font-mono text-primary">

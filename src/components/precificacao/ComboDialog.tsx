@@ -1,5 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
-import { Camera, Check, ImageIcon, Layers, Plus, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Calculator,
+  Camera,
+  Check,
+  ImageIcon,
+  Layers,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { CategoriaAutocompleteInput } from '@/components/precificacao/CategoriaAutocompleteInput'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,12 +31,19 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { precificacaoService } from '@/services/precificacao'
+import { produtosBaseService } from '@/services/produtos'
 import { PrecKitRecord, PrecProdutoRecord } from '@/types/precificacao'
-import { calcularCustoBaseProduto, ItemKitConfig } from '@/lib/precificacao/calculo'
+import type { ItemKitConfig } from '@/lib/precificacao/calculo'
+import type { ProdutoBaseRecord } from '@/types/domain'
+import type { ItemComposicaoCusto } from '@/lib/precificacao/calculo'
+import {
+  buildItensPrincipaisOpcoes,
+  calcularCustoTotalConsolidado,
+  ItemPrincipalOpcao,
+} from '@/lib/precificacao/kitComboHelpers'
 import { formatCurrency } from '@/lib/format'
 import { useToast } from '@/hooks/use-toast'
 import { apiFieldErrors, apiMessage } from '@/lib/api-error'
-
 interface ComboLinhaItem {
   produto_id: string
   quantidade: number
@@ -36,6 +54,7 @@ interface ComboDialogProps {
   onOpenChange: (open: boolean) => void
   comboParaEditar?: PrecProdutoRecord | null
   produtosDisponiveis: PrecProdutoRecord[]
+  produtosBase?: import('@/types/domain').ProdutoBaseRecord[]
   kitsMap?: Record<string, PrecKitRecord>
   onSuccess: () => void
 }
@@ -45,16 +64,22 @@ export function ComboDialog({
   onOpenChange,
   comboParaEditar,
   produtosDisponiveis,
+  produtosBase: produtosBaseProp,
   kitsMap,
   onSuccess,
 }: ComboDialogProps) {
   const { toast } = useToast()
   const isEditing = Boolean(comboParaEditar?.id)
 
+  const [produtosBaseLista, setProdutosBaseLista] = useState<ProdutoBaseRecord[]>(
+    produtosBaseProp || [],
+  )
+
   const [itens, setItens] = useState<ComboLinhaItem[]>([
     { produto_id: '', quantidade: 1 },
     { produto_id: '', quantidade: 1 },
   ])
+  const [buscaText, setBuscaText] = useState('')
   const [nome, setNome] = useState('')
   const [sku, setSku] = useState('')
   const [marca, setMarca] = useState('')
@@ -64,8 +89,15 @@ export function ComboDialog({
   const [comprimentoCm, setComprimentoCm] = useState<number | undefined>(undefined)
   const [larguraCm, setLarguraCm] = useState<number | undefined>(undefined)
   const [alturaCm, setAlturaCm] = useState<number | undefined>(undefined)
-  const [custoEmbalagem, setCustoEmbalagem] = useState<number>(0.1)
-  const [custoEtiqueta, setCustoEtiqueta] = useState<number>(0.05)
+
+  // Preservação de campos legados (não exibidos na UI; mantidos se já gravados)
+  const [custoEmbalagemLegado, setCustoEmbalagemLegado] = useState<number>(0)
+  const [custoEtiquetaLegado, setCustoEtiquetaLegado] = useState<number>(0)
+
+  // Composição analítica de produtos base (insumos, embalagens, etiquetas, serviços)
+  const [composicao, setComposicao] = useState<ItemComposicaoCusto[]>([])
+  const [insumoSelecionadoId, setInsumoSelecionadoId] = useState<string>('')
+  const [qtdInsumo, setQtdInsumo] = useState<number>(1)
 
   // Upload próprio de imagem
   const [imagemFile, setImagemFile] = useState<File | null>(null)
@@ -75,17 +107,32 @@ export function ComboDialog({
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
-  const [buscaText, setBuscaText] = useState('')
 
-  // Componentes aceitam fabricação própria, revenda e kit (kit dentro de combo)
-  // Combos não podem se auto-conter para evitar ciclos
-  const produtosOpcoes = produtosDisponiveis.filter(
-    (p) =>
-      (p.tipo === 'fabricacao_propria' || p.tipo === 'revenda' || p.tipo === 'kit') &&
-      (!comboParaEditar || p.id !== comboParaEditar.id),
-  )
+  // Carrega produtos_base caso não fornecido via prop
+  useEffect(() => {
+    if (open && (!produtosBaseProp || produtosBaseProp.length === 0)) {
+      produtosBaseService
+        .list()
+        .then((res) => setProdutosBaseLista(res))
+        .catch((err) => console.warn('Erro ao carregar produtos_base no ComboDialog:', err))
+    } else if (produtosBaseProp && produtosBaseProp.length > 0) {
+      setProdutosBaseLista(produtosBaseProp)
+    }
+  }, [open, produtosBaseProp])
 
-  // Cálculo dos custos dos componentes em tempo real
+  // Opções consolidadas para Itens Principais do Combo:
+  // Produtos Compostos (prec_produtos) + Produtos Base (produtos_base com tipo='revenda')
+  const itensPrincipaisOpcoes: ItemPrincipalOpcao[] = useMemo(() => {
+    return buildItensPrincipaisOpcoes({
+      produtosCompostos: produtosDisponiveis,
+      produtosBase: produtosBaseLista,
+      idAtualParaExcluir: comboParaEditar?.id,
+      contexto: 'combo',
+      kitsMap,
+    })
+  }, [produtosDisponiveis, produtosBaseLista, comboParaEditar?.id, kitsMap])
+
+  // Calcular custos de cada linha de item principal
   let somaCustosComponentes = 0
   let somaPesos = 0
   let maxComprimento = 0
@@ -93,57 +140,43 @@ export function ComboDialog({
   let somaAlturas = 0
 
   const itensCalculados = itens.map((item) => {
-    const prod = produtosOpcoes.find((p) => p.id === item.produto_id)
-    let custoUnit = 0
-    if (prod) {
-      // Se for kit, busca itens do kit para calcular o custo dinamicamente
-      const kitRecord = kitsMap?.[prod.id]
-      const kitItensConfig = kitRecord?.itens?.map((it) => ({
-        produto_id: it.produto_id,
-        nome: it.nome,
-        qtd_efetiva: it.qtd_efetiva,
-        custo_unitario: it.custo_unitario,
-      }))
-
-      custoUnit = calcularCustoBaseProduto({
-        sku: prod.sku,
-        nome: prod.nome,
-        tipo: prod.tipo,
-        composicao: prod.composicao,
-        perda_pct: prod.perda_pct,
-        custo_aquisicao_unitario: prod.custo_aquisicao_unitario,
-        despesas_compra: prod.despesas_compra,
-        custo_etiqueta: prod.custo_etiqueta,
-        custo_adicional_embalagem: prod.custo_adicional_embalagem,
-        kit_itens: kitItensConfig,
-        kit_custos_adicionais: kitRecord?.custos_adicionais,
-      }).custo_total
-    }
+    const opt = itensPrincipaisOpcoes.find((p) => p.id === item.produto_id)
+    const custoUnit = opt?.custoUnitario || 0
     const subtotal = custoUnit * (item.quantidade || 1)
     somaCustosComponentes += subtotal
 
-    if (prod) {
-      if (prod.peso_g) somaPesos += prod.peso_g * (item.quantidade || 1)
-      if (prod.dimensao_comprimento_cm && prod.dimensao_comprimento_cm > maxComprimento) {
-        maxComprimento = prod.dimensao_comprimento_cm
+    if (opt) {
+      if (opt.peso_g) somaPesos += opt.peso_g * (item.quantidade || 1)
+      if (opt.dimensao_comprimento_cm && opt.dimensao_comprimento_cm > maxComprimento) {
+        maxComprimento = opt.dimensao_comprimento_cm
       }
-      if (prod.dimensao_largura_cm && prod.dimensao_largura_cm > maxLargura) {
-        maxLargura = prod.dimensao_largura_cm
+      if (opt.dimensao_largura_cm && opt.dimensao_largura_cm > maxLargura) {
+        maxLargura = opt.dimensao_largura_cm
       }
-      if (prod.dimensao_altura_cm) {
-        somaAlturas += prod.dimensao_altura_cm * (item.quantidade || 1)
+      if (opt.dimensao_altura_cm) {
+        somaAlturas += opt.dimensao_altura_cm * (item.quantidade || 1)
       }
     }
 
     return {
       ...item,
-      produto: prod,
+      opcao: opt,
       custoUnit,
       subtotal,
     }
   })
 
-  const custoTotalEstimado = somaCustosComponentes + (custoEmbalagem || 0) + (custoEtiqueta || 0)
+  // Cálculo auditado do custo total consolidado
+  const calculoTotais = useMemo(() => {
+    return calcularCustoTotalConsolidado({
+      custoBaseItens: somaCustosComponentes,
+      composicao,
+      custoEmbalagemLegado,
+      custoEtiquetaLegado,
+    })
+  }, [somaCustosComponentes, composicao, custoEmbalagemLegado, custoEtiquetaLegado])
+
+  const custoTotalEstimado = calculoTotais.custoTotal
 
   // Reset / inicialização
   useEffect(() => {
@@ -159,8 +192,9 @@ export function ComboDialog({
       setComprimentoCm(comboParaEditar.dimensao_comprimento_cm)
       setLarguraCm(comboParaEditar.dimensao_largura_cm)
       setAlturaCm(comboParaEditar.dimensao_altura_cm)
-      setCustoEmbalagem(comboParaEditar.custo_adicional_embalagem ?? 0.1)
-      setCustoEtiqueta(comboParaEditar.custo_etiqueta ?? 0.05)
+      setCustoEmbalagemLegado(comboParaEditar.custo_adicional_embalagem || 0)
+      setCustoEtiquetaLegado(comboParaEditar.custo_etiqueta || 0)
+      setComposicao(comboParaEditar.composicao || [])
       setImagemFile(null)
       setRemoverImagem(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -176,10 +210,13 @@ export function ComboDialog({
         .then((kitRecord: PrecKitRecord | null) => {
           if (kitRecord?.itens && kitRecord.itens.length > 0) {
             setItens(
-              kitRecord.itens.map((it) => ({
-                produto_id: it.produto_id || '',
-                quantidade: it.qtd_efetiva || 1,
-              })),
+              kitRecord.itens.map((it) => {
+                const opt = itensPrincipaisOpcoes.find((o) => o.rawId === it.produto_id)
+                return {
+                  produto_id: opt ? opt.id : `comp_${it.produto_id}`,
+                  quantidade: it.qtd_efetiva || 1,
+                }
+              }),
             )
           } else {
             setItens([
@@ -189,7 +226,7 @@ export function ComboDialog({
           }
         })
     } else {
-      // Novo Combo
+      // Novo Combo: campos legados zerados por padrão
       setItens([
         { produto_id: '', quantidade: 1 },
         { produto_id: '', quantidade: 1 },
@@ -203,8 +240,11 @@ export function ComboDialog({
       setComprimentoCm(undefined)
       setLarguraCm(undefined)
       setAlturaCm(undefined)
-      setCustoEmbalagem(0.1)
-      setCustoEtiqueta(0.05)
+      setCustoEmbalagemLegado(0)
+      setCustoEtiquetaLegado(0)
+      setComposicao([])
+      setInsumoSelecionadoId('')
+      setQtdInsumo(1)
       setImagemFile(null)
       setImagemPreview(null)
       setRemoverImagem(false)
@@ -222,17 +262,53 @@ export function ComboDialog({
 
     // Sugere nome baseado nos itens selecionados se nome estiver em branco
     if (!nome.trim()) {
-      const nomes = itens
+      const nomes = itensCalculados
         .map((it) => {
-          const p = produtosOpcoes.find((prod) => prod.id === it.produto_id)
-          if (!p) return null
-          return it.quantidade > 1 ? `${it.quantidade}x ${p.nome}` : p.nome
+          const opt = it.opcao
+          if (!opt) return null
+          return it.quantidade > 1 ? `${it.quantidade}x ${opt.nome}` : opt.nome
         })
         .filter(Boolean)
       if (nomes.length > 0) {
         setNome(`Combo ${nomes.join(' + ')}`)
       }
     }
+  }
+
+  // Gerenciamento da Composição Analítica por Linhas (insumos, embalagens, etiquetas, serviços)
+  function adicionarLinhaComposicao() {
+    if (!insumoSelecionadoId) return
+    const itemBase = produtosBaseLista.find((b) => b.id === insumoSelecionadoId)
+    if (!itemBase) return
+
+    const novaLinha: ItemComposicaoCusto = {
+      id: `C${composicao.length}`,
+      codigo: `C${composicao.length}`,
+      descricao: itemBase.nome,
+      qtd: qtdInsumo > 0 ? qtdInsumo : 1,
+      custo_unitario: Number(itemBase.custo_unitario) || 0,
+      unidade: itemBase.unidade || 'un',
+      categoria_custo:
+        itemBase.tipo === 'embalagem'
+          ? 'embalagem'
+          : itemBase.tipo === 'etiqueta'
+            ? 'etiqueta'
+            : itemBase.tipo === 'servico'
+              ? 'servico'
+              : 'insumo',
+      fornecedor_id: itemBase.fornecedor,
+      fornecedor_nome: itemBase.expand?.fornecedor?.nome_fantasia || 'Fornecedor',
+      insumo_id: itemBase.id,
+      insumo_tipo: itemBase.tipo === 'servico' ? 'servico' : 'insumo',
+    }
+
+    setComposicao([...composicao, novaLinha])
+    setInsumoSelecionadoId('')
+    setQtdInsumo(1)
+  }
+
+  function removerLinhaComposicao(index: number) {
+    setComposicao(composicao.filter((_, idx) => idx !== index))
   }
 
   function handleAdicionarLinha() {
@@ -315,7 +391,9 @@ export function ComboDialog({
 
     setSaving(true)
     try {
-      // Combos e kits pertencem exclusivamente ao catálogo (sem empresa)
+      // Combos pertencem exclusivamente ao catálogo (sem empresa)
+      // Novos combos nascem com custo_adicional_embalagem e custo_etiqueta zerados;
+      // combos existentes preservam valores já gravados nesses campos respeitando regra de dupla contagem.
       const payload: Partial<PrecProdutoRecord> = {
         tipo: 'combo',
         status: 'ativo',
@@ -328,8 +406,9 @@ export function ComboDialog({
         dimensao_comprimento_cm: comprimentoCm,
         dimensao_largura_cm: larguraCm,
         dimensao_altura_cm: alturaCm,
-        custo_adicional_embalagem: custoEmbalagem,
-        custo_etiqueta: custoEtiqueta,
+        composicao,
+        custo_adicional_embalagem: calculoTotais.custoEmbalagemEfetivo,
+        custo_etiqueta: calculoTotais.custoEtiquetaEfetivo,
         empresa: '',
       }
       delete payload.imagem
@@ -367,36 +446,14 @@ export function ComboDialog({
         }
       }
 
-      // Persistir estrutura em prec_kits
+      // Persistir estrutura em prec_kits (produto_id grava o ID original da entidade no banco)
       const kitItensFormatados: ItemKitConfig[] = itensValidos.map((it) => {
-        const prod = produtosOpcoes.find((p) => p.id === it.produto_id)
-        let custoUnit = 0
-        if (prod) {
-          const kitRecord = kitsMap?.[prod.id]
-          const kitItensConfig = kitRecord?.itens?.map((itRec) => ({
-            produto_id: itRec.produto_id,
-            nome: itRec.nome,
-            qtd_efetiva: itRec.qtd_efetiva,
-            custo_unitario: itRec.custo_unitario,
-          }))
-
-          custoUnit = calcularCustoBaseProduto({
-            sku: prod.sku,
-            nome: prod.nome,
-            tipo: prod.tipo,
-            composicao: prod.composicao,
-            perda_pct: prod.perda_pct,
-            custo_aquisicao_unitario: prod.custo_aquisicao_unitario,
-            despesas_compra: prod.despesas_compra,
-            custo_etiqueta: prod.custo_etiqueta,
-            custo_adicional_embalagem: prod.custo_adicional_embalagem,
-            kit_itens: kitItensConfig,
-            kit_custos_adicionais: kitRecord?.custos_adicionais,
-          }).custo_total
-        }
+        const opt = itensPrincipaisOpcoes.find((p) => p.id === it.produto_id)
+        const rawId = opt?.rawId || it.produto_id.replace(/^(comp_|base_)/, '')
+        const custoUnit = opt?.custoUnitario || 0
         return {
-          produto_id: it.produto_id,
-          nome: prod?.nome || 'Produto Componente',
+          produto_id: rawId,
+          nome: opt?.nome || 'Produto Componente',
           qtd_efetiva: it.quantidade,
           custo_unitario: custoUnit,
         }
@@ -427,7 +484,7 @@ export function ComboDialog({
     }
   }
 
-  const produtosFiltrados = produtosOpcoes.filter((p) => {
+  const produtosFiltrados = itensPrincipaisOpcoes.filter((p) => {
     if (!buscaText.trim()) return true
     const term = buscaText.toLowerCase()
     return p.nome.toLowerCase().includes(term) || p.sku.toLowerCase().includes(term)
@@ -521,8 +578,8 @@ export function ComboDialog({
                           <SelectItem value="nenhum">Selecione...</SelectItem>
                           {produtosFiltrados.map((p) => (
                             <SelectItem key={p.id} value={p.id}>
-                              {p.nome} [SKU: {p.sku}] (
-                              {p.tipo === 'fabricacao_propria' ? 'Fabricação' : 'Revenda'})
+                              {p.nome} [SKU: {p.sku || 'S/SKU'}] — {p.tipoLabel} —{' '}
+                              {formatCurrency(p.custoUnitario)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -585,6 +642,126 @@ export function ComboDialog({
                   Sugerir Peso, Medidas & Nome
                 </Button>
               </div>
+            </div>
+
+            {/* SEÇÃO COMPOSIÇÃO POR LINHAS DE PRODUTOS BASE (Insumos, Embalagens, Etiquetas, Serviços) */}
+            <div className="space-y-3 p-3.5 rounded-xl border border-neutral-200 bg-white">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-xs font-semibold flex items-center gap-1.5 text-neutral-800">
+                    <Calculator className="h-4 w-4 text-[#DF5830]" />
+                    Composição por Linhas de Produtos Base
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Insumos, etiquetas, embalagens, tecidos ou serviços que compõem o combo.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="text-[11px] text-muted-foreground">Subtotal Composição</span>
+                  <p className="text-xs font-bold text-neutral-900 font-mono">
+                    {formatCurrency(calculoTotais.custoComposicao)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Adicionar linha de composição */}
+              <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                <div className="flex-1">
+                  <Select value={insumoSelecionadoId} onValueChange={setInsumoSelecionadoId}>
+                    <SelectTrigger className="text-xs bg-white">
+                      <SelectValue placeholder="Escolha um item de produtos_base (insumo, embalagem, serviço)..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {produtosBaseLista
+                        .filter((b) => b.tipo !== 'revenda')
+                        .map((b) => (
+                          <SelectItem key={b.id} value={b.id}>
+                            {b.nome} ({b.tipo}) — {b.expand?.fornecedor?.nome_fantasia || 'Forn.'} —{' '}
+                            {formatCurrency(Number(b.custo_unitario) || 0)}/{b.unidade || 'un'}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="w-24">
+                  <Input
+                    type="number"
+                    min="0.01"
+                    step="0.1"
+                    value={qtdInsumo}
+                    onChange={(e) => setQtdInsumo(Number(e.target.value))}
+                    placeholder="Qtd"
+                    className="text-xs"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={adicionarLinhaComposicao}
+                  disabled={!insumoSelecionadoId}
+                  className="gap-1 text-xs border-orange-200 text-orange-700 hover:bg-orange-50 shrink-0"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Adicionar
+                </Button>
+              </div>
+
+              {/* Tabela de composição analítica do Combo */}
+              {composicao.length > 0 ? (
+                <div className="border rounded-md overflow-hidden text-xs">
+                  <table className="w-full text-left">
+                    <thead className="bg-neutral-50 text-neutral-600 font-semibold border-b">
+                      <tr>
+                        <th className="py-2 px-3">Item / Origem</th>
+                        <th className="py-2 px-2 text-center">Qtd</th>
+                        <th className="py-2 px-2 text-right">Unitário</th>
+                        <th className="py-2 px-2 text-right">Subtotal</th>
+                        <th className="py-2 px-2 text-center w-10">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-100">
+                      {composicao.map((item, idx) => {
+                        const sub = (item.qtd || 1) * (item.custo_unitario || 0)
+                        return (
+                          <tr key={idx} className="hover:bg-neutral-50/50">
+                            <td className="py-2 px-3">
+                              <span className="font-medium text-neutral-800">{item.descricao}</span>
+                              {item.fornecedor_nome && (
+                                <span className="block text-[10px] text-muted-foreground">
+                                  Fornecedor: {item.fornecedor_nome}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2 px-2 text-center">{item.qtd}</td>
+                            <td className="py-2 px-2 text-right font-mono">
+                              {formatCurrency(item.custo_unitario)}
+                            </td>
+                            <td className="py-2 px-2 text-right font-semibold font-mono text-neutral-800">
+                              {formatCurrency(sub)}
+                            </td>
+                            <td className="py-2 px-2 text-center">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-red-500 hover:bg-red-50"
+                                onClick={() => removerLinhaComposicao(idx)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-xs text-neutral-400 italic text-center py-2">
+                  Nenhum item adicional inserido na composição (opcional).
+                </p>
+              )}
             </div>
 
             {/* Imagem do Combo */}
@@ -725,36 +902,21 @@ export function ComboDialog({
               </div>
             </div>
 
-            {/* Embalagem e Etiqueta adicionais */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-border pt-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Embalagem Adicional do Combo (R$)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={custoEmbalagem}
-                  onChange={(e) => setCustoEmbalagem(parseFloat(e.target.value) || 0)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Etiqueta (R$)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={custoEtiqueta}
-                  onChange={(e) => setCustoEtiqueta(parseFloat(e.target.value) || 0)}
-                />
-              </div>
-            </div>
-
-            {/* Resumo do custo final */}
+            {/* Resumo do custo final (Campos legados de embalagem/etiqueta removidos da UI; entram na Composição por Linhas) */}
             <div className="p-3 rounded-xl bg-secondary/30 border border-border flex items-center justify-between">
               <div>
                 <span className="font-bold text-xs text-foreground block">
                   Custo Base Final Estimado
                 </span>
                 <span className="text-[11px] text-muted-foreground">
-                  Σ(Custo × Qtd) + embalagem + etiqueta
+                  Componentes ({formatCurrency(somaCustosComponentes)}) + Composição por Linhas (
+                  {formatCurrency(calculoTotais.custoComposicao)})
+                  {(custoEmbalagemLegado > 0 || custoEtiquetaLegado > 0) && (
+                    <span className="block text-[10px] text-amber-700 font-mono mt-0.5">
+                      * Inclui legado: Emb {formatCurrency(calculoTotais.custoEmbalagemEfetivo)} |
+                      Eti {formatCurrency(calculoTotais.custoEtiquetaEfetivo)}
+                    </span>
+                  )}
                 </span>
               </div>
               <span className="text-base font-bold font-mono text-primary">
