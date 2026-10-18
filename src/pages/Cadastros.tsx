@@ -145,9 +145,9 @@ export default function Cadastros() {
       icon: Truck,
     },
     {
-      to: '/insumos',
-      label: 'Insumos & Serviços',
-      description: 'Catálogo de insumos, embalagens e costura com rastreabilidade',
+      to: '/composicao-produtos?aba=base',
+      label: 'Insumos (Produtos Base)',
+      description: 'Catálogo de insumos, embalagens, etiquetas e serviços de custo',
       icon: Package,
     },
   ]

@@ -68,6 +68,7 @@ export type ProdutoBaseTipo =
 export interface ProdutoBaseRecord extends RecordModel {
   nome: string
   tipo: ProdutoBaseTipo
+  categoria?: string
   fornecedor: string
   sku?: string
   ncm?: string
@@ -86,6 +87,7 @@ export interface ProdutoBaseRecord extends RecordModel {
   observacoes?: string
   expand?: {
     fornecedor?: Fornecedor
+    categoria?: InsumoCategoriaRecord
   }
 }
 

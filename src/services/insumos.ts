@@ -173,7 +173,7 @@ export const insumosService = {
   },
 
   // -------------------------------------------------------------
-  // Insumos
+  // Insumos (Unificado com produtos_base — nenhuma escrita na coleção legada)
   // -------------------------------------------------------------
   async listInsumos(filtro?: {
     tipo?: InsumoTipo
@@ -182,30 +182,48 @@ export const insumosService = {
     busca?: string
   }): Promise<InsumoRecord[]> {
     const parts: string[] = []
-    if (filtro?.tipo) parts.push(`tipo="${filtro.tipo}"`)
-    if (filtro?.categoriaId) parts.push(`categoria="${filtro.categoriaId}"`)
-    if (filtro?.apenasAtivos) parts.push('ativo=true')
+    if (filtro?.tipo) {
+      if (filtro.tipo === 'servico') {
+        parts.push(`tipo = "servico"`)
+      } else {
+        parts.push(`tipo != "revenda" && tipo != "servico"`)
+      }
+    }
+    if (filtro?.categoriaId) parts.push(`categoria = "${filtro.categoriaId}"`)
+    if (filtro?.apenasAtivos) parts.push('ativo = true')
     if (filtro?.busca && filtro.busca.trim()) {
       const q = filtro.busca.trim().replace(/"/g, '')
-      parts.push(`(nome ~ "${q}" || observacoes ~ "${q}")`)
+      parts.push(`(nome ~ "${q}" || observacoes ~ "${q}" || sku ~ "${q}")`)
     }
 
     const { withRetry } = await import('@/lib/pocketbase/retry')
-    return withRetry(
+    const list = await withRetry(
       () =>
-        pb.collection('insumos').getFullList<InsumoRecord>({
+        pb.collection('produtos_base').getFullList<any>({
           filter: parts.length > 0 ? parts.join(' && ') : undefined,
           sort: 'nome',
           expand: 'categoria,fornecedor',
         }),
       { label: 'insumosService.listInsumos' },
     )
+
+    // Converte ProdutoBaseRecord para InsumoRecord compatível
+    return list.map((pbRec) => ({
+      ...pbRec,
+      valor_unitario: pbRec.custo_unitario ?? 0,
+      tipo: pbRec.tipo === 'servico' ? 'servico' : 'insumo',
+    })) as InsumoRecord[]
   },
 
   async getInsumo(id: string): Promise<InsumoRecord> {
-    return pb.collection('insumos').getOne<InsumoRecord>(id, {
+    const pbRec = await pb.collection('produtos_base').getOne<any>(id, {
       expand: 'categoria,fornecedor',
     })
+    return {
+      ...pbRec,
+      valor_unitario: pbRec.custo_unitario ?? 0,
+      tipo: pbRec.tipo === 'servico' ? 'servico' : 'insumo',
+    } as InsumoRecord
   },
 
   async createInsumo(data: {
@@ -222,10 +240,40 @@ export const insumosService = {
     observacoes?: string
     ativo?: boolean
   }): Promise<InsumoRecord> {
-    return pb.collection('insumos').create<InsumoRecord>({
-      ...data,
+    // Grava EXCLUSIVAMENTE em produtos_base
+    let fallbackFornId = data.fornecedor
+    if (!fallbackFornId) {
+      try {
+        const primeiroForn = await pb.collection('fornecedores').getList(1, 1, { sort: 'created' })
+        if (primeiroForn.items.length > 0) {
+          fallbackFornId = primeiroForn.items[0].id
+        }
+      } catch {
+        /* intentionally ignored */
+      }
+    }
+
+    const payloadPb = {
+      nome: data.nome.trim(),
+      tipo: data.tipo === 'servico' ? 'servico' : 'insumo',
+      categoria: data.categoria || undefined,
+      fornecedor: fallbackFornId || '',
+      unidade: data.unidade || 'un',
+      custo_unitario: Number(data.valor_unitario) || 0,
+      dimensao_tipo: data.dimensao_tipo || 'nenhuma',
+      dimensao_largura_cm: Number(data.dimensao_largura_cm) || 0,
+      dimensao_altura_cm: Number(data.dimensao_altura_cm) || 0,
+      dimensao_comprimento_cm: Number(data.dimensao_comprimento_cm) || 0,
+      observacoes: data.observacoes || '',
       ativo: data.ativo ?? true,
-    })
+    }
+
+    const created = await pb.collection('produtos_base').create<any>(payloadPb)
+    return {
+      ...created,
+      valor_unitario: created.custo_unitario ?? 0,
+      tipo: created.tipo === 'servico' ? 'servico' : 'insumo',
+    } as InsumoRecord
   },
 
   async updateInsumo(
@@ -245,10 +293,33 @@ export const insumosService = {
       ativo?: boolean
     }>,
   ): Promise<InsumoRecord> {
-    return pb.collection('insumos').update<InsumoRecord>(id, data)
+    const payloadPb: Record<string, any> = {}
+    if (data.nome !== undefined) payloadPb.nome = data.nome
+    if (data.tipo !== undefined) payloadPb.tipo = data.tipo === 'servico' ? 'servico' : 'insumo'
+    if (data.categoria !== undefined) payloadPb.categoria = data.categoria || null
+    if (data.fornecedor !== undefined) payloadPb.fornecedor = data.fornecedor
+    if (data.unidade !== undefined) payloadPb.unidade = data.unidade
+    if (data.valor_unitario !== undefined)
+      payloadPb.custo_unitario = Number(data.valor_unitario) || 0
+    if (data.dimensao_tipo !== undefined) payloadPb.dimensao_tipo = data.dimensao_tipo
+    if (data.dimensao_largura_cm !== undefined)
+      payloadPb.dimensao_largura_cm = Number(data.dimensao_largura_cm) || 0
+    if (data.dimensao_altura_cm !== undefined)
+      payloadPb.dimensao_altura_cm = Number(data.dimensao_altura_cm) || 0
+    if (data.dimensao_comprimento_cm !== undefined)
+      payloadPb.dimensao_comprimento_cm = Number(data.dimensao_comprimento_cm) || 0
+    if (data.observacoes !== undefined) payloadPb.observacoes = data.observacoes
+    if (data.ativo !== undefined) payloadPb.ativo = data.ativo
+
+    const updated = await pb.collection('produtos_base').update<any>(id, payloadPb)
+    return {
+      ...updated,
+      valor_unitario: updated.custo_unitario ?? 0,
+      tipo: updated.tipo === 'servico' ? 'servico' : 'insumo',
+    } as InsumoRecord
   },
 
   async deleteInsumo(id: string): Promise<boolean> {
-    return pb.collection('insumos').delete(id)
+    return pb.collection('produtos_base').delete(id)
   },
 }

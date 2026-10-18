@@ -104,8 +104,14 @@ export default function App() {
           <Route path="/cadastros/pessoas" element={<Pessoas />} />
           <Route path="/cadastros/empresas" element={<Empresas />} />
           <Route path="/cadastros/fornecedores" element={<Fornecedores />} />
-          <Route path="/cadastros/insumos" element={<Insumos />} />
-          <Route path="/insumos" element={<Insumos />} />
+          <Route
+            path="/cadastros/insumos"
+            element={<Navigate to="/composicao-produtos?aba=base" replace />}
+          />
+          <Route
+            path="/insumos"
+            element={<Navigate to="/composicao-produtos?aba=base" replace />}
+          />
           <Route path="/empresas" element={<Empresas />} />
           <Route path="/pessoas" element={<Pessoas />} />
           <Route path="/fornecedores" element={<Fornecedores />} />

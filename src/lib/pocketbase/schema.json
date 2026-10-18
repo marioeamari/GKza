@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-18T14:07:35.074Z",
+  "generatedAt": "2026-10-18T15:20:25.916Z",
   "collections": [
     {
       "name": "users",
@@ -6788,6 +6788,13 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "categoria",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "insumos_categorias"
         }
       ],
       "indexes": [

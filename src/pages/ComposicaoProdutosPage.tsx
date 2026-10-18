@@ -1,16 +1,16 @@
 import React, { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Package,
   Layers,
   Plus,
   Search,
-  Filter,
   Building2,
   Trash2,
   Edit,
+  Tag,
+  Scissors,
   Sparkles,
-  ArrowRight,
-  TrendingUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -25,17 +25,31 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
-import type { ProdutoCompostoRecord, ProdutoBaseRecord, Fornecedor, Empresa } from '@/types/domain'
+import type {
+  ProdutoCompostoRecord,
+  ProdutoBaseRecord,
+  Fornecedor,
+  Empresa,
+  InsumoCategoriaRecord,
+} from '@/types/domain'
 import { produtosCompostosService, produtosBaseService } from '@/services/produtos'
 import { fornecedoresService } from '@/services/fornecedores'
+import { insumosService, formatarDimensaoInsumo } from '@/services/insumos'
 import { formatCurrency } from '@/lib/format'
 import pb from '@/lib/pocketbase/client'
 import { ProdutoCompostoDialog } from '@/components/produtos/ProdutoCompostoDialog'
 import { ProdutoBaseDialog } from '@/components/produtos/ProdutoBaseDialog'
+import { CategoriasInsumoDialog } from '@/components/insumos/CategoriasInsumoDialog'
 
 export default function ComposicaoProdutosPage() {
   const { toast } = useToast()
-  const [abaAtiva, setAbaAtiva] = useState<'compostos' | 'base'>('compostos')
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // Aba inicial: lê do query param 'aba' (ex: /composicao-produtos?aba=base)
+  const paramAba = searchParams.get('aba')
+  const [abaAtiva, setAbaAtiva] = useState<'compostos' | 'base'>(
+    paramAba === 'base' || paramAba === 'insumos' ? 'base' : 'compostos',
+  )
   const [loading, setLoading] = useState(true)
 
   // Dados carregados
@@ -43,11 +57,13 @@ export default function ComposicaoProdutosPage() {
   const [produtosBase, setProdutosBase] = useState<ProdutoBaseRecord[]>([])
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([])
   const [empresas, setEmpresas] = useState<Empresa[]>([])
+  const [categorias, setCategorias] = useState<InsumoCategoriaRecord[]>([])
 
   // Filtros
   const [busca, setBusca] = useState('')
   const [filtroClassificacao, setFiltroClassificacao] = useState<string>('todos')
   const [filtroTipoBase, setFiltroTipoBase] = useState<string>('todos')
+  const [filtroCategoriaBase, setFiltroCategoriaBase] = useState<string>('todas')
   const [filtroEmpresa, setFiltroEmpresa] = useState<string>('todas')
 
   // Modais
@@ -57,20 +73,36 @@ export default function ComposicaoProdutosPage() {
   const [modalBaseAberto, setModalBaseAberto] = useState(false)
   const [baseEditando, setBaseEditando] = useState<ProdutoBaseRecord | null>(null)
 
+  const [modalCategoriasAberto, setModalCategoriasAberto] = useState(false)
+
+  // Sincroniza query param ao mudar a aba
+  const handleTrocarAba = (novaAba: 'compostos' | 'base') => {
+    setAbaAtiva(novaAba)
+    setBusca('')
+    if (novaAba === 'base') {
+      searchParams.set('aba', 'base')
+    } else {
+      searchParams.delete('aba')
+    }
+    setSearchParams(searchParams, { replace: true })
+  }
+
   const carregarDados = async () => {
     try {
       setLoading(true)
-      const [listComp, listBase, listForn, listEmp] = await Promise.all([
+      const [listComp, listBase, listForn, listEmp, listCats] = await Promise.all([
         produtosCompostosService.list(),
         produtosBaseService.list(),
         fornecedoresService.listFornecedores(),
         pb.collection('empresas').getFullList<Empresa>({ sort: 'nome_fantasia' }),
+        insumosService.listCategorias(),
       ])
 
       setProdutosCompostos(listComp)
       setProdutosBase(listBase)
       setFornecedores(listForn)
       setEmpresas(listEmp)
+      setCategorias(listCats)
     } catch (err: any) {
       console.error(err)
       toast({
@@ -105,12 +137,20 @@ export default function ComposicaoProdutosPage() {
   // Filtros de Produtos Base
   const basesFiltradas = produtosBase.filter((b) => {
     if (filtroTipoBase !== 'todos' && b.tipo !== filtroTipoBase) return false
+    if (filtroCategoriaBase !== 'todas' && b.categoria !== filtroCategoriaBase) return false
     if (busca.trim()) {
       const q = busca.toLowerCase()
       const matchNome = (b.nome || '').toLowerCase().includes(q)
       const matchSku = (b.sku || '').toLowerCase().includes(q)
-      const matchForn = (b.expand?.fornecedor?.nome_fantasia || '').toLowerCase().includes(q)
-      if (!matchNome && !matchSku && !matchForn) return false
+      const matchForn = (
+        b.expand?.fornecedor?.nome_fantasia ||
+        b.expand?.fornecedor?.razao_social ||
+        ''
+      )
+        .toLowerCase()
+        .includes(q)
+      const matchCat = (b.expand?.categoria?.nome || '').toLowerCase().includes(q)
+      if (!matchNome && !matchSku && !matchForn && !matchCat) return false
     }
     return true
   })
@@ -154,7 +194,7 @@ export default function ComposicaoProdutosPage() {
 
   return (
     <div className="container mx-auto p-4 md:p-6 space-y-6">
-      {/* Header com identidade visual vigente */}
+      {/* Header com identidade visual */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b pb-4">
         <div>
           <div className="flex items-center gap-2">
@@ -166,8 +206,8 @@ export default function ComposicaoProdutosPage() {
                 Composição de Produtos
               </h1>
               <p className="text-sm text-neutral-500">
-                Catálogo comercial consolidado, formação de custo e espelho para o motor de
-                precificação.
+                Catálogo consolidado de insumos/serviços (Produtos Base) e formação de produtos
+                compostos para precificação.
               </p>
             </div>
           </div>
@@ -186,16 +226,27 @@ export default function ComposicaoProdutosPage() {
               Novo Produto Composto
             </Button>
           ) : (
-            <Button
-              onClick={() => {
-                setBaseEditando(null)
-                setModalBaseAberto(true)
-              }}
-              className="bg-[#DF5830] hover:bg-[#c94d28] text-white shadow-sm gap-1.5"
-            >
-              <Plus className="h-4 w-4" />
-              Novo Produto Base
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setModalCategoriasAberto(true)}
+                className="text-xs h-9 border-neutral-300"
+              >
+                <Tag className="mr-1.5 h-3.5 w-3.5 text-[#DF5830]" />
+                Categorias ({categorias.length})
+              </Button>
+              <Button
+                onClick={() => {
+                  setBaseEditando(null)
+                  setModalBaseAberto(true)
+                }}
+                className="bg-[#DF5830] hover:bg-[#c94d28] text-white shadow-sm gap-1.5 h-9 text-xs"
+              >
+                <Plus className="h-4 w-4" />
+                Novo Produto Base / Insumo
+              </Button>
+            </div>
           )}
         </div>
       </div>
@@ -203,10 +254,7 @@ export default function ComposicaoProdutosPage() {
       {/* Navegação entre Abas */}
       <Tabs
         value={abaAtiva}
-        onValueChange={(v) => {
-          setAbaAtiva(v as 'compostos' | 'base')
-          setBusca('')
-        }}
+        onValueChange={(v) => handleTrocarAba(v as 'compostos' | 'base')}
         className="w-full space-y-4"
       >
         <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4">
@@ -223,7 +271,7 @@ export default function ComposicaoProdutosPage() {
               className="gap-2 data-[state=active]:bg-white data-[state=active]:text-[#DF5830] data-[state=active]:shadow-sm font-medium"
             >
               <Package className="h-4 w-4" />
-              Produtos Base ({produtosBase.length})
+              Produtos Base / Insumos ({produtosBase.length})
             </TabsTrigger>
           </TabsList>
 
@@ -233,7 +281,9 @@ export default function ComposicaoProdutosPage() {
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-neutral-400" />
               <Input
                 placeholder={
-                  abaAtiva === 'compostos' ? 'Buscar produto...' : 'Buscar base ou fornecedor...'
+                  abaAtiva === 'compostos'
+                    ? 'Buscar produto...'
+                    : 'Buscar insumo, base ou fornecedor...'
                 }
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
@@ -271,19 +321,39 @@ export default function ComposicaoProdutosPage() {
             )}
 
             {abaAtiva === 'base' && (
-              <Select value={filtroTipoBase} onValueChange={setFiltroTipoBase}>
-                <SelectTrigger className="w-40 h-9 text-xs bg-white">
-                  <SelectValue placeholder="Tipo de Base" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todos os Tipos</SelectItem>
-                  <SelectItem value="revenda">Revenda</SelectItem>
-                  <SelectItem value="insumo">Insumo</SelectItem>
-                  <SelectItem value="embalagem">Embalagem</SelectItem>
-                  <SelectItem value="etiqueta">Etiqueta</SelectItem>
-                  <SelectItem value="servico">Serviço</SelectItem>
-                </SelectContent>
-              </Select>
+              <>
+                <Select value={filtroTipoBase} onValueChange={setFiltroTipoBase}>
+                  <SelectTrigger className="w-36 h-9 text-xs bg-white">
+                    <SelectValue placeholder="Tipo de Base" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos os Tipos</SelectItem>
+                    <SelectItem value="insumo">Insumo</SelectItem>
+                    <SelectItem value="embalagem">Embalagem</SelectItem>
+                    <SelectItem value="etiqueta">Etiqueta</SelectItem>
+                    <SelectItem value="tecido">Tecido / Malha</SelectItem>
+                    <SelectItem value="servico">Serviço</SelectItem>
+                    <SelectItem value="costura">Costura</SelectItem>
+                    <SelectItem value="pintura">Pintura</SelectItem>
+                    <SelectItem value="revenda">Revenda</SelectItem>
+                    <SelectItem value="outro">Outro</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select value={filtroCategoriaBase} onValueChange={setFiltroCategoriaBase}>
+                  <SelectTrigger className="w-40 h-9 text-xs bg-white">
+                    <SelectValue placeholder="Categoria" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todas">Todas as Categorias</SelectItem>
+                    {categorias.map((cat) => (
+                      <SelectItem key={cat.id} value={cat.id}>
+                        {cat.nome}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </>
             )}
           </div>
         </div>
@@ -452,18 +522,21 @@ export default function ComposicaoProdutosPage() {
           )}
         </TabsContent>
 
-        {/* ABA: PRODUTOS BASE */}
+        {/* ABA: PRODUTOS BASE (Insumos, Embalagens, Etiquetas, Tecidos, Serviços) */}
         <TabsContent value="base" className="m-0 space-y-4">
           {loading ? (
-            <div className="py-12 text-center text-neutral-400">Carregando catálogo de base...</div>
+            <div className="py-12 text-center text-neutral-400">
+              Carregando catálogo de produtos base / insumos...
+            </div>
           ) : basesFiltradas.length === 0 ? (
             <Card className="border-dashed p-8 text-center bg-white">
               <Package className="h-10 w-10 text-neutral-300 mx-auto mb-2" />
               <p className="text-sm font-medium text-neutral-600">
-                Nenhum produto base encontrado.
+                Nenhum produto base ou insumo encontrado.
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Itens de base representam tudo que é comprado ou terceirizado de um fornecedor.
+                Itens de base representam tudo que compõe custo (embalagens, etiquetas, insumos
+                físicos, serviços terceirizados ou produtos de revenda).
               </p>
               <Button
                 variant="outline"
@@ -475,7 +548,7 @@ export default function ComposicaoProdutosPage() {
                 className="mt-4 gap-1.5 text-[#DF5830] border-orange-200 hover:bg-orange-50"
               >
                 <Plus className="h-4 w-4" />
-                Criar Primeiro Produto Base
+                Cadastrar Primeiro Produto Base / Insumo
               </Button>
             </Card>
           ) : (
@@ -483,8 +556,10 @@ export default function ComposicaoProdutosPage() {
               <table className="w-full text-left text-xs">
                 <thead className="bg-neutral-50 text-neutral-600 font-semibold border-b">
                   <tr>
-                    <th className="py-3 px-4">Nome do Item</th>
+                    <th className="py-3 px-4">Nome do Item / Insumo</th>
                     <th className="py-3 px-3">Tipo</th>
+                    <th className="py-3 px-3">Categoria</th>
+                    <th className="py-3 px-3">Dimensões</th>
                     <th className="py-3 px-3">Fornecedor</th>
                     <th className="py-3 px-3">SKU / Cód.</th>
                     <th className="py-3 px-3 text-right">Custo Unitário</th>
@@ -492,58 +567,83 @@ export default function ComposicaoProdutosPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
-                  {basesFiltradas.map((b) => (
-                    <tr key={b.id} className="hover:bg-neutral-50/50 transition-colors">
-                      <td className="py-3 px-4">
-                        <span className="font-semibold text-neutral-800">{b.nome}</span>
-                        {b.origem_colecao && (
-                          <span className="block text-[10px] text-muted-foreground">
-                            Migrado de: {b.origem_colecao}
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3">
-                        <Badge
-                          variant="secondary"
-                          className="capitalize text-[10px] font-normal py-0 px-2"
-                        >
-                          {b.tipo}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-3 font-medium text-neutral-700">
-                        {b.expand?.fornecedor?.nome_fantasia ||
-                          b.expand?.fornecedor?.razao_social ||
-                          '—'}
-                      </td>
-                      <td className="py-3 px-3 font-mono text-neutral-600">{b.sku || '—'}</td>
-                      <td className="py-3 px-3 text-right font-bold text-neutral-900">
-                        {formatCurrency(Number(b.custo_unitario) || 0)} / {b.unidade || 'un'}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-neutral-600 hover:text-neutral-900"
-                            onClick={() => {
-                              setBaseEditando(b)
-                              setModalBaseAberto(true)
-                            }}
+                  {basesFiltradas.map((b) => {
+                    const dimTexto = formatarDimensaoInsumo(b)
+                    const cat = b.expand?.categoria
+                    return (
+                      <tr key={b.id} className="hover:bg-neutral-50/50 transition-colors">
+                        <td className="py-3 px-4">
+                          <span className="font-semibold text-neutral-800 block">{b.nome}</span>
+                          {b.observacoes && (
+                            <span className="text-[10px] text-muted-foreground line-clamp-1">
+                              {b.observacoes}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3">
+                          <Badge
+                            variant="secondary"
+                            className="capitalize text-[10px] font-semibold py-0 px-2"
                           >
-                            <Edit className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-red-500 hover:bg-red-50"
-                            onClick={(e) => handleExcluirBase(b.id, e)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            {b.tipo}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-3">
+                          {cat ? (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] font-normal"
+                              style={{
+                                borderColor: cat.cor ? `${cat.cor}66` : undefined,
+                                color: cat.cor || undefined,
+                              }}
+                            >
+                              {cat.nome}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-[11px]">—</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 font-mono text-[11px] text-neutral-600">
+                          {dimTexto}
+                        </td>
+                        <td className="py-3 px-3 font-medium text-neutral-700">
+                          {b.expand?.fornecedor?.nome_fantasia ||
+                            b.expand?.fornecedor?.razao_social ||
+                            '—'}
+                        </td>
+                        <td className="py-3 px-3 font-mono text-neutral-600">{b.sku || '—'}</td>
+                        <td className="py-3 px-3 text-right font-bold text-neutral-900">
+                          {formatCurrency(Number(b.custo_unitario) || 0)} / {b.unidade || 'un'}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-neutral-600 hover:text-neutral-900"
+                              onClick={() => {
+                                setBaseEditando(b)
+                                setModalBaseAberto(true)
+                              }}
+                              title="Editar Produto Base"
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-red-500 hover:bg-red-50"
+                              onClick={(e) => handleExcluirBase(b.id, e)}
+                              title="Excluir Produto Base"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -569,7 +669,17 @@ export default function ComposicaoProdutosPage() {
           onOpenChange={setModalBaseAberto}
           record={baseEditando}
           fornecedores={fornecedores}
+          categorias={categorias}
           onSuccess={carregarDados}
+          onOpenCategorias={() => setModalCategoriasAberto(true)}
+        />
+      )}
+
+      {modalCategoriasAberto && (
+        <CategoriasInsumoDialog
+          open={modalCategoriasAberto}
+          onOpenChange={setModalCategoriasAberto}
+          onCategoriaUpdated={carregarDados}
         />
       )}
     </div>

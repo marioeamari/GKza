@@ -17,18 +17,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Package, Truck } from 'lucide-react'
+import { Package, Scissors, Truck, Tag, Plus } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import type { ProdutoBaseRecord, ProdutoBaseTipo, Fornecedor } from '@/types/domain'
+import type {
+  ProdutoBaseRecord,
+  ProdutoBaseTipo,
+  Fornecedor,
+  InsumoCategoriaRecord,
+} from '@/types/domain'
 import { produtosBaseService } from '@/services/produtos'
+import { formatarDimensaoInsumo } from '@/services/insumos'
 
-interface ProdutoBaseDialogProps {
+export interface ProdutoBaseDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   record?: ProdutoBaseRecord | null
   fornecedores: Fornecedor[]
+  categorias?: InsumoCategoriaRecord[]
   fornecedorPreSelecionadoId?: string
   onSuccess: () => void
+  onOpenCategorias?: () => void
 }
 
 export function ProdutoBaseDialog({
@@ -36,14 +44,17 @@ export function ProdutoBaseDialog({
   onOpenChange,
   record,
   fornecedores,
+  categorias = [],
   fornecedorPreSelecionadoId,
   onSuccess,
+  onOpenCategorias,
 }: ProdutoBaseDialogProps) {
   const { toast } = useToast()
   const [salvando, setSalvando] = useState(false)
 
   const [nome, setNome] = useState('')
   const [tipo, setTipo] = useState<ProdutoBaseTipo>('insumo')
+  const [categoriaId, setCategoriaId] = useState<string>('')
   const [fornecedorId, setFornecedorId] = useState('')
   const [sku, setSku] = useState('')
   const [ncm, setNcm] = useState('')
@@ -62,6 +73,7 @@ export function ProdutoBaseDialog({
       if (record) {
         setNome(record.nome || '')
         setTipo(record.tipo || 'insumo')
+        setCategoriaId(record.categoria || '')
         setFornecedorId(record.fornecedor || fornecedorPreSelecionadoId || '')
         setSku(record.sku || '')
         setNcm(record.ncm || '')
@@ -77,6 +89,7 @@ export function ProdutoBaseDialog({
       } else {
         setNome('')
         setTipo('insumo')
+        setCategoriaId('')
         setFornecedorId(fornecedorPreSelecionadoId || fornecedores[0]?.id || '')
         setSku('')
         setNcm('')
@@ -97,7 +110,7 @@ export function ProdutoBaseDialog({
     if (!nome.trim()) {
       toast({
         title: 'Nome obrigatório',
-        description: 'Informe o nome do Produto Base.',
+        description: 'Informe o nome do Produto Base / Insumo.',
         variant: 'destructive',
       })
       return
@@ -106,7 +119,7 @@ export function ProdutoBaseDialog({
     if (!fornecedorId) {
       toast({
         title: 'Fornecedor obrigatório',
-        description: 'Cada Produto Base deve estar vinculado a um fornecedor.',
+        description: 'Cada Produto Base / Insumo deve estar vinculado a um fornecedor.',
         variant: 'destructive',
       })
       return
@@ -117,18 +130,19 @@ export function ProdutoBaseDialog({
       const payload: Partial<ProdutoBaseRecord> = {
         nome: nome.trim(),
         tipo,
+        categoria: categoriaId || undefined,
         fornecedor: fornecedorId,
         sku: sku.trim(),
         ncm: ncm.trim(),
         codigo_barras: codigoBarras.trim(),
-        unidade,
-        custo_unitario: custoUnitario,
+        unidade: unidade.trim() || 'un',
+        custo_unitario: Number(custoUnitario) || 0,
         dimensao_tipo: dimensaoTipo,
-        dimensao_comprimento_cm: compCm,
-        dimensao_largura_cm: largCm,
-        dimensao_altura_cm: altCm,
-        peso_g: pesoG,
-        observacoes,
+        dimensao_comprimento_cm: dimensaoTipo === '3d' ? Number(compCm) || 0 : 0,
+        dimensao_largura_cm: dimensaoTipo !== 'nenhuma' ? Number(largCm) || 0 : 0,
+        dimensao_altura_cm: dimensaoTipo !== 'nenhuma' ? Number(altCm) || 0 : 0,
+        peso_g: Number(pesoG) || 0,
+        observacoes: observacoes.trim(),
         ativo: true,
       }
 
@@ -140,7 +154,7 @@ export function ProdutoBaseDialog({
 
       toast({
         title: 'Produto Base salvo',
-        description: 'Item de custo salvo no catálogo unificado.',
+        description: `"${payload.nome}" foi salvo no catálogo unificado de Produtos Base.`,
       })
       onOpenChange(false)
       onSuccess()
@@ -156,67 +170,101 @@ export function ProdutoBaseDialog({
     }
   }
 
+  // Preview formatado usando o helper padrão
+  const previewDimensao = formatarDimensaoInsumo({
+    dimensao_tipo: dimensaoTipo,
+    dimensao_comprimento_cm: compCm,
+    dimensao_largura_cm: largCm,
+    dimensao_altura_cm: altCm,
+  })
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <div className="p-2 rounded-lg bg-orange-50 text-[#DF5830]">
-              <Package className="h-5 w-5" />
+              {tipo === 'servico' ? (
+                <Scissors className="h-5 w-5" />
+              ) : (
+                <Package className="h-5 w-5" />
+              )}
             </div>
             <div>
               <DialogTitle className="text-lg">
-                {record ? 'Editar Produto Base' : 'Novo Produto Base'}
+                {record ? 'Editar Produto Base / Insumo' : 'Novo Produto Base / Insumo'}
               </DialogTitle>
               <p className="text-xs text-muted-foreground">
-                Item elementar que compõe custo (revenda, insumo, embalagem, serviço terceirizado).
+                Item elementar de custo (insumo, embalagem, etiqueta, tecido, revenda ou serviço
+                terceirizado).
               </p>
             </div>
           </div>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          {/* Nome / Descrição */}
           <div className="space-y-1">
             <Label htmlFor="baseNome">Nome / Descrição *</Label>
             <Input
               id="baseNome"
               value={nome}
               onChange={(e) => setNome(e.target.value)}
-              placeholder="Ex: Toalha de Banho Branca ou Saco Plástico 20x30"
+              placeholder="Ex: Etiqueta Couro GKza, Saco Kraft 20x30, Tecido Algodão Egípcio..."
+              className="text-xs"
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          {/* Tipo e Categoria */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label htmlFor="baseTipo">Tipo de Custo *</Label>
+              <Label htmlFor="baseTipo">Tipo de Custo / Insumo *</Label>
               <Select value={tipo} onValueChange={(v) => setTipo(v as ProdutoBaseTipo)}>
-                <SelectTrigger id="baseTipo">
+                <SelectTrigger id="baseTipo" className="text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="revenda">Produto de Revenda</SelectItem>
                   <SelectItem value="insumo">Insumo Geral</SelectItem>
                   <SelectItem value="embalagem">Embalagem</SelectItem>
                   <SelectItem value="etiqueta">Etiqueta</SelectItem>
-                  <SelectItem value="tecido">Tecido</SelectItem>
-                  <SelectItem value="pintura">Pintura</SelectItem>
-                  <SelectItem value="costura">Costura</SelectItem>
+                  <SelectItem value="tecido">Tecido / Malha</SelectItem>
                   <SelectItem value="servico">Serviço Terceirizado</SelectItem>
+                  <SelectItem value="costura">Costura</SelectItem>
+                  <SelectItem value="pintura">Pintura</SelectItem>
+                  <SelectItem value="revenda">Produto de Revenda</SelectItem>
                   <SelectItem value="outro">Outro</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-1">
-              <Label htmlFor="baseFornecedor">Fornecedor *</Label>
-              <Select value={fornecedorId} onValueChange={setFornecedorId}>
-                <SelectTrigger id="baseFornecedor">
-                  <SelectValue placeholder="Selecione o fornecedor..." />
+              <div className="flex items-center justify-between">
+                <Label htmlFor="baseCategoria" className="text-xs flex items-center gap-1">
+                  <Tag className="h-3 w-3 text-muted-foreground" />
+                  Categoria de Insumo
+                </Label>
+                {onOpenCategorias && (
+                  <button
+                    type="button"
+                    onClick={onOpenCategorias}
+                    className="text-[11px] text-[#DF5830] hover:underline font-semibold flex items-center gap-0.5"
+                  >
+                    <Plus className="h-3 w-3" /> Gerenciar
+                  </button>
+                )}
+              </div>
+              <Select
+                value={categoriaId || '__none__'}
+                onValueChange={(v) => setCategoriaId(v === '__none__' ? '' : v)}
+              >
+                <SelectTrigger id="baseCategoria" className="text-xs">
+                  <SelectValue placeholder="Selecione a categoria..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {fornecedores.map((f) => (
-                    <SelectItem key={f.id} value={f.id}>
-                      {f.nome_fantasia || f.razao_social}
+                  <SelectItem value="__none__">Sem categoria definida</SelectItem>
+                  {categorias.map((cat) => (
+                    <SelectItem key={cat.id} value={cat.id}>
+                      {cat.nome}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -224,9 +272,33 @@ export function ProdutoBaseDialog({
             </div>
           </div>
 
+          {/* Fornecedor */}
+          <div className="space-y-1">
+            <Label htmlFor="baseFornecedor" className="text-xs flex items-center gap-1">
+              <Truck className="h-3 w-3 text-muted-foreground" />
+              Fornecedor / Terceirizado de Origem *
+            </Label>
+            <Select value={fornecedorId} onValueChange={setFornecedorId}>
+              <SelectTrigger id="baseFornecedor" className="text-xs">
+                <SelectValue placeholder="Selecione o fornecedor..." />
+              </SelectTrigger>
+              <SelectContent>
+                {fornecedores.map((f) => (
+                  <SelectItem key={f.id} value={f.id}>
+                    {f.nome_fantasia || f.razao_social}
+                    {f.cidade ? ` (${f.cidade}/${f.uf || ''})` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Custo Unitário, Unidade e SKU */}
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1">
-              <Label htmlFor="baseCusto">Custo Unitário (R$)</Label>
+              <Label htmlFor="baseCusto" className="text-xs">
+                Custo Unitário (R$)
+              </Label>
               <Input
                 id="baseCusto"
                 type="number"
@@ -234,42 +306,103 @@ export function ProdutoBaseDialog({
                 min="0"
                 value={custoUnitario}
                 onChange={(e) => setCustoUnitario(Number(e.target.value))}
+                className="text-xs"
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="baseUnidade">Unidade</Label>
+              <Label htmlFor="baseUnidade" className="text-xs">
+                Unidade
+              </Label>
               <Input
                 id="baseUnidade"
                 value={unidade}
                 onChange={(e) => setUnidade(e.target.value)}
                 placeholder="un, m, kg, pct"
+                className="text-xs"
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="baseSku">SKU / Cód. Fornecedor</Label>
+              <Label htmlFor="baseSku" className="text-xs">
+                SKU / Cód. Ref.
+              </Label>
               <Input
                 id="baseSku"
                 value={sku}
                 onChange={(e) => setSku(e.target.value)}
-                placeholder="Ex: FORN-101"
+                placeholder="Ex: ETIQ-101"
+                className="text-xs uppercase"
               />
             </div>
           </div>
 
-          {/* Dimensões */}
+          {/* Dimensões & Formato (2D / 3D) */}
           <div className="p-3 bg-neutral-50 rounded-lg border space-y-2">
             <div className="flex items-center justify-between">
-              <Label className="text-xs font-semibold">Dimensões & Formato</Label>
-              <Select value={dimensaoTipo} onValueChange={(v: any) => setDimensaoTipo(v)}>
-                <SelectTrigger className="w-32 h-7 text-xs bg-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="nenhuma">Nenhuma</SelectItem>
-                  <SelectItem value="2d">2D (L × A)</SelectItem>
-                  <SelectItem value="3d">3D (C × L × A)</SelectItem>
-                </SelectContent>
-              </Select>
+              <div>
+                <Label className="text-xs font-semibold">Dimensões & Formato</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Para embalagens, etiquetas e cortes de tecidos.
+                </p>
+              </div>
+              <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-orange-50 text-[#DF5830] border border-orange-200 shrink-0">
+                {previewDimensao}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <label
+                className={`flex items-center justify-center p-2 rounded-lg border text-xs cursor-pointer transition ${
+                  dimensaoTipo === 'nenhuma'
+                    ? 'border-[#DF5830] bg-orange-50/50 font-bold text-[#DF5830]'
+                    : 'border-border bg-white text-muted-foreground'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="dimensao_tipo"
+                  value="nenhuma"
+                  checked={dimensaoTipo === 'nenhuma'}
+                  onChange={() => setDimensaoTipo('nenhuma')}
+                  className="sr-only"
+                />
+                <span>Sem dimensão</span>
+              </label>
+
+              <label
+                className={`flex items-center justify-center p-2 rounded-lg border text-xs cursor-pointer transition ${
+                  dimensaoTipo === '2d'
+                    ? 'border-[#DF5830] bg-orange-50/50 font-bold text-[#DF5830]'
+                    : 'border-border bg-white text-muted-foreground'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="dimensao_tipo"
+                  value="2d"
+                  checked={dimensaoTipo === '2d'}
+                  onChange={() => setDimensaoTipo('2d')}
+                  className="sr-only"
+                />
+                <span>2D (L × A cm)</span>
+              </label>
+
+              <label
+                className={`flex items-center justify-center p-2 rounded-lg border text-xs cursor-pointer transition ${
+                  dimensaoTipo === '3d'
+                    ? 'border-[#DF5830] bg-orange-50/50 font-bold text-[#DF5830]'
+                    : 'border-border bg-white text-muted-foreground'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="dimensao_tipo"
+                  value="3d"
+                  checked={dimensaoTipo === '3d'}
+                  onChange={() => setDimensaoTipo('3d')}
+                  className="sr-only"
+                />
+                <span>3D (C × L × A cm)</span>
+              </label>
             </div>
 
             {dimensaoTipo !== 'nenhuma' && (
@@ -281,7 +414,7 @@ export function ProdutoBaseDialog({
                       type="number"
                       value={compCm}
                       onChange={(e) => setCompCm(Number(e.target.value))}
-                      className="text-xs h-8 bg-white"
+                      className="text-xs h-8 bg-white font-mono"
                     />
                   </div>
                 )}
@@ -291,7 +424,7 @@ export function ProdutoBaseDialog({
                     type="number"
                     value={largCm}
                     onChange={(e) => setLargCm(Number(e.target.value))}
-                    className="text-xs h-8 bg-white"
+                    className="text-xs h-8 bg-white font-mono"
                   />
                 </div>
                 <div>
@@ -300,27 +433,45 @@ export function ProdutoBaseDialog({
                     type="number"
                     value={altCm}
                     onChange={(e) => setAltCm(Number(e.target.value))}
-                    className="text-xs h-8 bg-white"
+                    className="text-xs h-8 bg-white font-mono"
                   />
                 </div>
               </div>
             )}
           </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="baseObs">Observações</Label>
-            <Textarea
-              id="baseObs"
-              rows={2}
-              value={observacoes}
-              onChange={(e) => setObservacoes(e.target.value)}
-              placeholder="Notas de fornecimento, tabela de descontos ou especificações..."
-              className="text-xs resize-none"
-            />
+          {/* Peso e Observações */}
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="basePeso" className="text-xs">
+                Peso (g)
+              </Label>
+              <Input
+                id="basePeso"
+                type="number"
+                value={pesoG}
+                onChange={(e) => setPesoG(Number(e.target.value))}
+                placeholder="0"
+                className="text-xs"
+              />
+            </div>
+            <div className="sm:col-span-3 space-y-1">
+              <Label htmlFor="baseObs" className="text-xs">
+                Observações
+              </Label>
+              <Textarea
+                id="baseObs"
+                rows={2}
+                value={observacoes}
+                onChange={(e) => setObservacoes(e.target.value)}
+                placeholder="Notas de fornecimento, especificações técnicas..."
+                className="text-xs resize-none"
+              />
+            </div>
           </div>
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter className="gap-2 sm:gap-0 pt-2 border-t">
           <Button
             type="button"
             variant="outline"
