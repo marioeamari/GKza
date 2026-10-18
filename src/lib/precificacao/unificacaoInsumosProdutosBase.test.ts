@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { insumosService, formatarDimensaoInsumo } from '@/services/insumos'
-import { produtosBaseService, produtosCompostosService } from '@/services/produtos'
+import { insumosService } from '@/services/insumos'
+import { produtosBaseService } from '@/services/produtos'
 import pb from '@/lib/pocketbase/client'
 import type { ProdutoBaseRecord } from '@/types/domain'
 
