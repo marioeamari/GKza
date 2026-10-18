@@ -177,6 +177,7 @@ export function calcularCustoTotalKit(params: {
   composicao?: ItemComposicaoCusto[]
   custoEmbalagemLegado?: number
   custoEtiquetaLegado?: number
+  perda_pct?: number
 }): {
   custoComponentes: number
   custoComposicao: number
@@ -191,6 +192,7 @@ export function calcularCustoTotalKit(params: {
     composicao: params.composicao,
     custoEmbalagemLegado: params.custoEmbalagemLegado,
     custoEtiquetaLegado: params.custoEtiquetaLegado,
+    perda_pct: params.perda_pct,
   })
 }
 
@@ -206,6 +208,7 @@ export function calcularCustoTotalConsolidado(params: {
   composicao?: ItemComposicaoCusto[]
   custoEmbalagemLegado?: number
   custoEtiquetaLegado?: number
+  perda_pct?: number
 }): {
   custoComponentes: number
   custoComposicao: number
@@ -216,13 +219,24 @@ export function calcularCustoTotalConsolidado(params: {
   const custoComponentes = Math.max(0, params.custoBaseItens)
 
   let somaLinhas = 0
+  let temPerdaNaLinha = false
   if (Array.isArray(params.composicao)) {
     for (const item of params.composicao) {
       const q = Number(item.qtd) || 0
       const u = Number(item.custo_unitario) || 0
-      const perda = (Number(item.perda_pct) || 0) / 100
+      const perdaItemPct = Number(item.perda_pct) || 0
+      if (perdaItemPct > 0) {
+        temPerdaNaLinha = true
+      }
+      const perda = perdaItemPct / 100
       somaLinhas += q * (1 + perda) * u
     }
+  }
+
+  // Precedência da linha: perda global só incide se nenhuma linha tiver perda própria
+  const perdaGlobalPct = Number(params.perda_pct) || 0
+  if (!temPerdaNaLinha && perdaGlobalPct > 0) {
+    somaLinhas = somaLinhas * (1 + perdaGlobalPct / 100)
   }
 
   const temEmb = temLinhaEmbalagemNaComposicao(params.composicao)

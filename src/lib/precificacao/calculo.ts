@@ -646,9 +646,14 @@ export function calcularCustoBaseProduto(produto: ProdutoCalculoInput): {
   const detalhes: string[] = []
 
   if (produto.tipo === 'fabricacao_propria') {
+    let temPerdaNaLinha = false
     if (produto.composicao && produto.composicao.length > 0) {
       for (const item of produto.composicao) {
-        const perda = (item.perda_pct || 0) / 100
+        const perdaItemPct = Number(item.perda_pct) || 0
+        if (perdaItemPct > 0) {
+          temPerdaNaLinha = true
+        }
+        const perda = perdaItemPct / 100
         const qtdAjustada = item.qtd * (1 + perda)
         const subtotal = qtdAjustada * item.custo_unitario
         custo_direto += subtotal
@@ -657,8 +662,9 @@ export function calcularCustoBaseProduto(produto: ProdutoCalculoInput): {
         )
       }
     }
-    // Perda global se aplicável e não zerada
-    if (produto.perda_pct && produto.perda_pct > 0) {
+    // Regra acordada: perda global só incide quando NENHUMA linha tem perda própria
+    // (precedência estrita da linha sobre a global, sem efeito cascata)
+    if (!temPerdaNaLinha && produto.perda_pct && produto.perda_pct > 0) {
       const fatorPerda = produto.perda_pct / 100
       custo_direto = custo_direto * (1 + fatorPerda)
     }

@@ -19,6 +19,7 @@ export function calcularCustosProdutoComposto(params: {
   composicao?: ItemComposicaoCusto[]
   custo_embalagem?: number
   custo_etiqueta?: number
+  perda_pct?: number
 }): {
   custo_aquisicao: number
   custo_composicao: number
@@ -32,12 +33,17 @@ export function calcularCustosProdutoComposto(params: {
 
   let somaComposicao = 0
   let temLinhaEmbalagem = false
+  let temPerdaNaLinha = false
 
   if (Array.isArray(params.composicao)) {
     for (const item of params.composicao) {
       const q = Number(item.qtd) || 0
       const u = Number(item.custo_unitario) || 0
-      const perda = (Number(item.perda_pct) || 0) / 100
+      const perdaItemPct = Number(item.perda_pct) || 0
+      if (perdaItemPct > 0) {
+        temPerdaNaLinha = true
+      }
+      const perda = perdaItemPct / 100
       somaComposicao += q * (1 + perda) * u
 
       const catCusto = (item.categoria_custo || '').toLowerCase()
@@ -63,11 +69,31 @@ export function calcularCustosProdutoComposto(params: {
   // Se for legado sem linha de embalagem, o campo entra normalmente.
   const embalagemEfetiva = temLinhaEmbalagem ? 0 : Math.max(0, Number(params.custo_embalagem) || 0)
 
+  // Precedência da perda: perda global do produto só incide quando NENHUMA linha tem perda própria
+  const perdaGlobalPct = Number(params.perda_pct) || 0
+  if (!temPerdaNaLinha && perdaGlobalPct > 0) {
+    if (isRevenda) {
+      // Em revenda, se houver composição ela recebe a perda ou a base de aquisição
+      somaComposicao = somaComposicao * (1 + perdaGlobalPct / 100)
+    } else {
+      somaComposicao = somaComposicao * (1 + perdaGlobalPct / 100)
+    }
+  }
+
   const custo_composicao = Math.round((somaComposicao + Number.EPSILON) * 100) / 100
+  let custoDiretoTotal = aquisicao + custo_composicao
+  // Para revenda onde o custo direto é puramente aquisição sem perda na linha mas com perda global:
+  if (
+    isRevenda &&
+    !temPerdaNaLinha &&
+    perdaGlobalPct > 0 &&
+    (!params.composicao || params.composicao.length === 0)
+  ) {
+    custoDiretoTotal = aquisicao * (1 + perdaGlobalPct / 100)
+  }
+
   const custo_total =
-    Math.round(
-      (aquisicao + custo_composicao + embalagemEfetiva + etiqueta + Number.EPSILON) * 100,
-    ) / 100
+    Math.round((custoDiretoTotal + embalagemEfetiva + etiqueta + Number.EPSILON) * 100) / 100
 
   return {
     custo_aquisicao: aquisicao,
@@ -174,6 +200,7 @@ export const produtosCompostosService = {
       composicao: data.composicao,
       custo_embalagem: data.custo_embalagem,
       custo_etiqueta: data.custo_etiqueta,
+      perda_pct: data.perda_pct,
     })
 
     const payload = {
@@ -387,6 +414,7 @@ export const produtosCompostosService = {
       composicao: prod.composicao,
       custo_embalagem: prod.custo_embalagem,
       custo_etiqueta: prod.custo_etiqueta,
+      perda_pct: prod.perda_pct,
     })
 
     const payload: Record<string, any> = {
@@ -396,6 +424,7 @@ export const produtosCompostosService = {
       custo_aquisicao_unitario: Number(prod.custo_aquisicao) || 0,
       custo_adicional_embalagem: custos.custo_embalagem,
       custo_etiqueta: Number(prod.custo_etiqueta) || 0,
+      perda_pct: Number(prod.perda_pct) || 0,
       unidade: prod.unidade || 'un',
       dimensao_comprimento_cm: Number(prod.dimensao_comprimento_cm) || 0,
       dimensao_largura_cm: Number(prod.dimensao_largura_cm) || 0,

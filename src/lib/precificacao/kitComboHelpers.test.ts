@@ -218,5 +218,29 @@ describe('kitComboHelpers - Regras de Composição de Kits e Combos', () => {
       expect(res.custoEtiquetaEfetivo).toBe(0.1)
       expect(res.custoTotal).toBe(20.8) // 20 + 0.70 + 0 + 0.10
     })
+
+    // Caso 4: Kit 5× com perda por linha → 5 × qtd ajustada
+    it('Caso 4: Kit 5x com perda por linha -> 5 x qtd ajustada ou composicao ajustada', () => {
+      // Exemplo Kit de 5 unidades de produto componente a R$ 10 (base = 50) + item de composição com perda 10%
+      const res = calcularCustoTotalKit({
+        custoComponenteUnitario: 10,
+        quantidadeComponente: 5,
+        composicao: [
+          {
+            id: 'C1',
+            codigo: 'C1',
+            descricao: 'Fita adesiva / embalagem',
+            qtd: 2,
+            custo_unitario: 5,
+            categoria_custo: 'insumo',
+            perda_pct: 10, // 2 * 1.10 = 2.2 qtd efetiva -> 2.2 * 5 = 11.00
+          },
+        ],
+      })
+
+      expect(res.custoComponentes).toBe(50)
+      expect(res.custoComposicao).toBeCloseTo(11.0, 2)
+      expect(res.custoTotal).toBeCloseTo(61.0, 2)
+    })
   })
 })

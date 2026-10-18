@@ -64,6 +64,7 @@ export function ProdutoCompostoDialog({
   // Custos e dimensões
   const [custoEmbalagem, setCustoEmbalagem] = useState<number>(0)
   const [custoEtiqueta, setCustoEtiqueta] = useState<number>(0)
+  const [perdaPctGlobal, setPerdaPctGlobal] = useState<number>(0)
   const [composicao, setComposicao] = useState<ItemComposicaoCusto[]>([])
 
   // Dimensões
@@ -75,6 +76,7 @@ export function ProdutoCompostoDialog({
   // Itens de produtos_base para compor (insumos, embalagens, etiquetas, etc.)
   const [insumoSelecionadoId, setInsumoSelecionadoId] = useState<string>('')
   const [qtdInsumo, setQtdInsumo] = useState<number>(1)
+  const [perdaInsumo, setPerdaInsumo] = useState<number>(0)
 
   useEffect(() => {
     if (open) {
@@ -89,6 +91,7 @@ export function ProdutoCompostoDialog({
         setObservacoes(record.observacoes || '')
         setCustoEmbalagem(record.custo_embalagem || 0)
         setCustoEtiqueta(record.custo_etiqueta || 0)
+        setPerdaPctGlobal(record.perda_pct || 0)
         setComposicao(record.composicao || [])
         setPesoG(record.peso_g || 0)
         setCompCm(record.dimensao_comprimento_cm || 0)
@@ -105,12 +108,16 @@ export function ProdutoCompostoDialog({
         setObservacoes('')
         setCustoEmbalagem(0)
         setCustoEtiqueta(0)
+        setPerdaPctGlobal(0)
         setComposicao([])
         setPesoG(0)
         setCompCm(0)
         setLargCm(0)
         setAltCm(0)
       }
+      setInsumoSelecionadoId('')
+      setQtdInsumo(1)
+      setPerdaInsumo(0)
     }
   }, [open, record])
 
@@ -137,18 +144,23 @@ export function ProdutoCompostoDialog({
     classificacao === 'revenda' ? Number(baseOrigemSelecionada?.custo_unitario) || 0 : 0
 
   // Cálculo reativo dos totais
+  const temPerdaNaComposicao = composicao.some((item) => (Number(item.perda_pct) || 0) > 0)
+
   const resumoCustos = calcularCustosProdutoComposto({
     classificacao,
     custo_aquisicao: custoAquisicaoBase,
     composicao,
     custo_embalagem: custoEmbalagem,
     custo_etiqueta: custoEtiqueta,
+    perda_pct: perdaPctGlobal,
   })
 
   const adicionarLinhaComposicao = () => {
     if (!insumoSelecionadoId) return
     const itemBase = produtosBase.find((b) => b.id === insumoSelecionadoId)
     if (!itemBase) return
+
+    const perdaVal = Math.min(100, Math.max(0, Number(perdaInsumo) || 0))
 
     const novaLinha: ItemComposicaoCusto = {
       id: `C${composicao.length}`,
@@ -169,11 +181,23 @@ export function ProdutoCompostoDialog({
       fornecedor_nome: itemBase.expand?.fornecedor?.nome_fantasia || 'Fornecedor',
       insumo_id: itemBase.id,
       insumo_tipo: itemBase.tipo === 'servico' ? 'servico' : 'insumo',
+      perda_pct: perdaVal > 0 ? perdaVal : undefined,
     }
 
     setComposicao([...composicao, novaLinha])
     setInsumoSelecionadoId('')
     setQtdInsumo(1)
+    setPerdaInsumo(0)
+  }
+
+  const handleAtualizarPerdaLinha = (index: number, novaPerda: number) => {
+    const val = Math.min(100, Math.max(0, novaPerda || 0))
+    const novasLinhas = [...composicao]
+    novasLinhas[index] = {
+      ...novasLinhas[index],
+      perda_pct: val > 0 ? val : undefined,
+    }
+    setComposicao(novasLinhas)
   }
 
   const removerLinhaComposicao = (index: number) => {
@@ -221,6 +245,7 @@ export function ProdutoCompostoDialog({
         custo_aquisicao: custoAquisicaoBase,
         custo_embalagem: resumoCustos.custo_embalagem,
         custo_etiqueta: custoEtiqueta,
+        perda_pct: Math.min(100, Math.max(0, Number(perdaPctGlobal) || 0)),
         peso_g: pesoG,
         dimensao_comprimento_cm: compCm,
         dimensao_largura_cm: largCm,
@@ -431,7 +456,7 @@ export function ProdutoCompostoDialog({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="w-24">
+                <div className="w-20">
                   <Input
                     type="number"
                     min="0.01"
@@ -439,6 +464,20 @@ export function ProdutoCompostoDialog({
                     value={qtdInsumo}
                     onChange={(e) => setQtdInsumo(Number(e.target.value))}
                     placeholder="Qtd"
+                    title="Quantidade"
+                    className="text-xs"
+                  />
+                </div>
+                <div className="w-24">
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    value={perdaInsumo || ''}
+                    onChange={(e) => setPerdaInsumo(Number(e.target.value))}
+                    placeholder="Perda %"
+                    title="% de Perda da Linha (ex: 10 para 10%)"
                     className="text-xs"
                   />
                 </div>
@@ -448,7 +487,7 @@ export function ProdutoCompostoDialog({
                   size="sm"
                   onClick={adicionarLinhaComposicao}
                   disabled={!insumoSelecionadoId}
-                  className="gap-1 text-xs border-orange-200 text-orange-700 hover:bg-orange-50"
+                  className="gap-1 text-xs border-orange-200 text-orange-700 hover:bg-orange-50 shrink-0"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Adicionar
@@ -464,6 +503,8 @@ export function ProdutoCompostoDialog({
                     <tr>
                       <th className="py-2 px-3">Item / Origem</th>
                       <th className="py-2 px-2 text-center">Qtd</th>
+                      <th className="py-2 px-2 text-center w-24">Perda (%)</th>
+                      <th className="py-2 px-2 text-center">Qtd Efetiva</th>
                       <th className="py-2 px-2 text-right">Unitário</th>
                       <th className="py-2 px-2 text-right">Subtotal</th>
                       <th className="py-2 px-2 text-center w-10">Ações</th>
@@ -471,7 +512,12 @@ export function ProdutoCompostoDialog({
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
                     {composicao.map((item, idx) => {
-                      const sub = (item.qtd || 1) * (item.custo_unitario || 0)
+                      const perdaPct = Number(item.perda_pct) || 0
+                      const qtdNominal = Number(item.qtd) || 0
+                      const qtdEfetiva = qtdNominal * (1 + perdaPct / 100)
+                      const custoUnit = Number(item.custo_unitario) || 0
+                      const sub = qtdEfetiva * custoUnit
+
                       return (
                         <tr key={idx} className="hover:bg-neutral-50/50">
                           <td className="py-2 px-3">
@@ -482,11 +528,38 @@ export function ProdutoCompostoDialog({
                               </span>
                             )}
                           </td>
-                          <td className="py-2 px-2 text-center">{item.qtd}</td>
-                          <td className="py-2 px-2 text-right">
-                            {formatCurrency(item.custo_unitario)}
+                          <td className="py-2 px-2 text-center font-mono">{qtdNominal}</td>
+                          <td className="py-2 px-2 text-center">
+                            {!readOnly ? (
+                              <Input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.1"
+                                value={item.perda_pct ?? ''}
+                                onChange={(e) =>
+                                  handleAtualizarPerdaLinha(idx, parseFloat(e.target.value) || 0)
+                                }
+                                placeholder="0"
+                                className="h-7 text-xs text-center font-mono w-20 mx-auto"
+                                title="% de Perda desta linha"
+                              />
+                            ) : (
+                              <span className="font-mono text-neutral-700">
+                                {perdaPct > 0 ? `${perdaPct}%` : '0%'}
+                              </span>
+                            )}
                           </td>
-                          <td className="py-2 px-2 text-right font-semibold text-neutral-800">
+                          <td className="py-2 px-2 text-center font-mono font-medium">
+                            {qtdEfetiva.toLocaleString('pt-BR', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 3,
+                            })}
+                          </td>
+                          <td className="py-2 px-2 text-right font-mono">
+                            {formatCurrency(custoUnit)}
+                          </td>
+                          <td className="py-2 px-2 text-right font-semibold text-neutral-800 font-mono">
                             {formatCurrency(sub)}
                           </td>
                           <td className="py-2 px-2 text-center">
@@ -515,6 +588,42 @@ export function ProdutoCompostoDialog({
                 Nenhum item adicional inserido na composição (opcional para revenda).
               </p>
             )}
+
+            {/* Campo % de Perda GLOBAL do Produto Composto */}
+            <div className="pt-2 border-t border-neutral-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-neutral-50/70 p-3 rounded-lg">
+              <div className="space-y-0.5">
+                <Label htmlFor="perdaGlobal" className="text-xs font-semibold text-neutral-800">
+                  % de Perda Global do Produto (Opcional)
+                </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  {temPerdaNaComposicao ? (
+                    <span className="text-amber-700 font-medium">
+                      ⚠ Inativa: há linha(s) com perda própria. A perda informada na linha tem
+                      prioridade e anula a global.
+                    </span>
+                  ) : (
+                    'Incide sobre o custo direto apenas se nenhuma linha da composição tiver perda própria informada.'
+                  )}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Input
+                  id="perdaGlobal"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  disabled={readOnly}
+                  value={perdaPctGlobal || ''}
+                  onChange={(e) => setPerdaPctGlobal(Number(e.target.value))}
+                  placeholder="0"
+                  className={`w-24 text-xs font-mono text-center ${
+                    temPerdaNaComposicao ? 'opacity-60 bg-neutral-100 line-through' : 'bg-white'
+                  }`}
+                />
+                <span className="text-xs text-neutral-600 font-medium">%</span>
+              </div>
+            </div>
           </div>
 
           {/* Card Resumo de Custo Total Consolidado (Campos legados de Embalagem e Etiqueta removidos da UI; entram na Composição por Linhas) */}

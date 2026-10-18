@@ -90,6 +90,7 @@ export function KitDialog({
   const [composicao, setComposicao] = useState<ItemComposicaoCusto[]>([])
   const [insumoSelecionadoId, setInsumoSelecionadoId] = useState<string>('')
   const [qtdInsumo, setQtdInsumo] = useState<number>(1)
+  const [perdaInsumo, setPerdaInsumo] = useState<number>(0)
 
   // Upload próprio de imagem
   const [imagemFile, setImagemFile] = useState<File | null>(null)
@@ -271,6 +272,8 @@ export function KitDialog({
     const itemBase = produtosBaseLista.find((b) => b.id === insumoSelecionadoId)
     if (!itemBase) return
 
+    const perdaVal = Math.min(100, Math.max(0, Number(perdaInsumo) || 0))
+
     const novaLinha: ItemComposicaoCusto = {
       id: `K${composicao.length}`,
       codigo: `K${composicao.length}`,
@@ -290,11 +293,23 @@ export function KitDialog({
       fornecedor_nome: itemBase.expand?.fornecedor?.nome_fantasia || 'Fornecedor',
       insumo_id: itemBase.id,
       insumo_tipo: itemBase.tipo === 'servico' ? 'servico' : 'insumo',
+      perda_pct: perdaVal > 0 ? perdaVal : undefined,
     }
 
     setComposicao([...composicao, novaLinha])
     setInsumoSelecionadoId('')
     setQtdInsumo(1)
+    setPerdaInsumo(0)
+  }
+
+  function handleAtualizarPerdaLinha(index: number, novaPerda: number) {
+    const val = Math.min(100, Math.max(0, novaPerda || 0))
+    const novasLinhas = [...composicao]
+    novasLinhas[index] = {
+      ...novasLinhas[index],
+      perda_pct: val > 0 ? val : undefined,
+    }
+    setComposicao(novasLinhas)
   }
 
   function removerLinhaComposicao(index: number) {
@@ -594,7 +609,7 @@ export function KitDialog({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="w-24">
+                <div className="w-20">
                   <Input
                     type="number"
                     min="0.01"
@@ -602,6 +617,20 @@ export function KitDialog({
                     value={qtdInsumo}
                     onChange={(e) => setQtdInsumo(Number(e.target.value))}
                     placeholder="Qtd"
+                    title="Quantidade"
+                    className="text-xs"
+                  />
+                </div>
+                <div className="w-24">
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    value={perdaInsumo || ''}
+                    onChange={(e) => setPerdaInsumo(Number(e.target.value))}
+                    placeholder="Perda %"
+                    title="% de Perda da Linha (ex: 10 para 10%)"
                     className="text-xs"
                   />
                 </div>
@@ -626,6 +655,8 @@ export function KitDialog({
                       <tr>
                         <th className="py-2 px-3">Item / Origem</th>
                         <th className="py-2 px-2 text-center">Qtd</th>
+                        <th className="py-2 px-2 text-center w-24">Perda (%)</th>
+                        <th className="py-2 px-2 text-center">Qtd Efetiva</th>
                         <th className="py-2 px-2 text-right">Unitário</th>
                         <th className="py-2 px-2 text-right">Subtotal</th>
                         <th className="py-2 px-2 text-center w-10">Ações</th>
@@ -633,7 +664,11 @@ export function KitDialog({
                     </thead>
                     <tbody className="divide-y divide-neutral-100">
                       {composicao.map((item, idx) => {
-                        const sub = (item.qtd || 1) * (item.custo_unitario || 0)
+                        const perdaPct = Number(item.perda_pct) || 0
+                        const qtdNominal = Number(item.qtd) || 0
+                        const qtdEfetiva = qtdNominal * (1 + perdaPct / 100)
+                        const custoUnit = Number(item.custo_unitario) || 0
+                        const sub = qtdEfetiva * custoUnit
                         return (
                           <tr key={idx} className="hover:bg-neutral-50/50">
                             <td className="py-2 px-3">
@@ -644,9 +679,30 @@ export function KitDialog({
                                 </span>
                               )}
                             </td>
-                            <td className="py-2 px-2 text-center">{item.qtd}</td>
+                            <td className="py-2 px-2 text-center font-mono">{qtdNominal}</td>
+                            <td className="py-2 px-2 text-center">
+                              <Input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.1"
+                                value={item.perda_pct ?? ''}
+                                onChange={(e) =>
+                                  handleAtualizarPerdaLinha(idx, parseFloat(e.target.value) || 0)
+                                }
+                                placeholder="0"
+                                className="h-7 text-xs text-center font-mono w-20 mx-auto"
+                                title="% de Perda desta linha"
+                              />
+                            </td>
+                            <td className="py-2 px-2 text-center font-mono font-medium">
+                              {qtdEfetiva.toLocaleString('pt-BR', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 3,
+                              })}
+                            </td>
                             <td className="py-2 px-2 text-right font-mono">
-                              {formatCurrency(item.custo_unitario)}
+                              {formatCurrency(custoUnit)}
                             </td>
                             <td className="py-2 px-2 text-right font-semibold font-mono text-neutral-800">
                               {formatCurrency(sub)}

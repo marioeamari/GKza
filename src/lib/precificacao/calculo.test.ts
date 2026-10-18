@@ -975,4 +975,111 @@ describe('Motor de Cálculo de Precificação - ERP GKza', () => {
       expect(resolvido.usandoFallbackGlobal).toBe(false)
     })
   })
+
+  describe('Regras de % de Perda (perda_pct linha vs global)', () => {
+    // Caso 1: Linha com perda 10% em qtd 1 e custo 10 → subtotal 11,00
+    it('Caso 1: Linha com perda 10% em qtd 1 e custo 10 -> subtotal 11,00', () => {
+      const produto = {
+        sku: 'P_PERDA_LINHA',
+        nome: 'Produto Composto Linha Perda',
+        tipo: 'fabricacao_propria' as const,
+        composicao: [
+          {
+            id: 'c1',
+            codigo: 'C1',
+            descricao: 'Insumo 1',
+            qtd: 1,
+            custo_unitario: 10,
+            unidade: 'un',
+            categoria_custo: 'insumo' as const,
+            perda_pct: 10,
+          },
+        ],
+      }
+      const res = calcularCustoBaseProduto(produto)
+      expect(res.custo_direto).toBeCloseTo(11.0, 2)
+    })
+
+    // Caso 2: Produto com perda global 10% sem perda por linha → custo direto total × 1,10
+    it('Caso 2: Produto com perda global 10% sem perda por linha -> custo direto total x 1,10', () => {
+      const produto = {
+        sku: 'P_PERDA_GLOBAL',
+        nome: 'Produto Composto Global Perda',
+        tipo: 'fabricacao_propria' as const,
+        perda_pct: 10,
+        composicao: [
+          {
+            id: 'c1',
+            codigo: 'C1',
+            descricao: 'Insumo 1',
+            qtd: 1,
+            custo_unitario: 10,
+            unidade: 'un',
+            categoria_custo: 'insumo' as const,
+            perda_pct: 0,
+          },
+        ],
+      }
+      const res = calcularCustoBaseProduto(produto)
+      expect(res.custo_direto).toBeCloseTo(11.0, 2)
+    })
+
+    // Caso 3: Perda da linha vence a global (linha 10% + global 15% → só o 1,10, nunca 1,10×1,15)
+    it('Caso 3: Perda da linha vence a global (linha 10% + global 15% -> so o 1,10, nunca 1,10x1,15)', () => {
+      const produto = {
+        sku: 'P_PRECEDENCIA',
+        nome: 'Produto Precedencia',
+        tipo: 'fabricacao_propria' as const,
+        perda_pct: 15,
+        composicao: [
+          {
+            id: 'c1',
+            codigo: 'C1',
+            descricao: 'Insumo 1',
+            qtd: 1,
+            custo_unitario: 10,
+            unidade: 'un',
+            categoria_custo: 'insumo' as const,
+            perda_pct: 10,
+          },
+        ],
+      }
+      const res = calcularCustoBaseProduto(produto)
+      // Deve ser 10 * (1 + 0.10) = 11.00
+      // NUNCA 11.00 * 1.15 = 12.65
+      expect(res.custo_direto).toBeCloseTo(11.0, 2)
+      expect(res.custo_direto).not.toBeCloseTo(12.65, 2)
+    })
+
+    // Caso 5: Sem perda informada → custo idêntico ao atual (regressão zero)
+    it('Caso 5: Sem perda informada -> custo identico ao original (regressao zero)', () => {
+      const produto = {
+        sku: 'P_SEM_PERDA',
+        nome: 'Produto Sem Perda',
+        tipo: 'fabricacao_propria' as const,
+        composicao: [
+          {
+            id: 'c1',
+            codigo: 'C1',
+            descricao: 'Insumo 1',
+            qtd: 2,
+            custo_unitario: 15,
+            unidade: 'un',
+            categoria_custo: 'insumo' as const,
+          },
+          {
+            id: 'c2',
+            codigo: 'C2',
+            descricao: 'Insumo 2',
+            qtd: 1,
+            custo_unitario: 5,
+            unidade: 'un',
+            categoria_custo: 'insumo' as const,
+          },
+        ],
+      }
+      const res = calcularCustoBaseProduto(produto)
+      expect(res.custo_direto).toBe(35) // 2*15 + 1*5 = 35
+    })
+  })
 })

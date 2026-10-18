@@ -380,4 +380,70 @@ describe('Deduplicação de Produtos Compostos no Sync para Precificação (prec
     )
     expect(res?.status).toBe('ativo')
   })
+
+  it('syncComPrecificacao propaga perda_pct do produto composto para prec_produtos', async () => {
+    const mockProdutoComPerda = {
+      id: 'prod_perda_global_1',
+      nome: 'Produto Com Perda Global',
+      classificacao: 'fabricacao_propria' as const,
+      sku: 'PROD-PERDA-10',
+      custo_aquisicao: 0,
+      custo_composicao: 10,
+      custo_embalagem: 0,
+      custo_etiqueta: 0,
+      perda_pct: 12.5,
+      composicao: [
+        {
+          codigo: 'C0',
+          descricao: 'Matéria-prima',
+          qtd: 1,
+          custo_unitario: 10,
+          categoria_custo: 'insumo',
+        },
+      ],
+      status: 'ativo' as const,
+    }
+
+    const mockPrecItem = {
+      id: 'prec_perda_1',
+      origem_id: 'prod_perda_global_1',
+      sku: 'PROD-PERDA-10',
+      perda_pct: 0,
+    }
+
+    const updateMock = vi.fn().mockImplementation((id: string, payload: any) => {
+      return Promise.resolve({ ...mockPrecItem, ...payload })
+    })
+
+    vi.spyOn(pb, 'collection').mockImplementation((col: string) => {
+      if (col === 'produtos') {
+        return {
+          getOne: vi.fn().mockResolvedValue(mockProdutoComPerda),
+        } as any
+      }
+      if (col === 'prec_produtos') {
+        return {
+          getList: vi.fn().mockImplementation((_p: number, _pp: number, opts: any) => {
+            if (opts?.filter?.includes('origem_id = "prod_perda_global_1"')) {
+              return Promise.resolve({ items: [mockPrecItem] })
+            }
+            return Promise.resolve({ items: [] })
+          }),
+          update: updateMock,
+          create: vi.fn(),
+        } as any
+      }
+      return {} as any
+    })
+
+    const res = await produtosCompostosService.syncComPrecificacao('prod_perda_global_1')
+
+    expect(updateMock).toHaveBeenCalledWith(
+      'prec_perda_1',
+      expect.objectContaining({
+        perda_pct: 12.5,
+      }),
+    )
+    expect(res?.perda_pct).toBe(12.5)
+  })
 })

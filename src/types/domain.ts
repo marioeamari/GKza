@@ -107,6 +107,7 @@ export interface ProdutoCompostoRecord extends RecordModel {
   custo_total?: number
   custo_embalagem?: number
   custo_etiqueta?: number
+  perda_pct?: number
   peso_g?: number
   dimensao_comprimento_cm?: number
   dimensao_largura_cm?: number
