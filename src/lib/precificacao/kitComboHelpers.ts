@@ -65,6 +65,9 @@ export function buildItensPrincipaisOpcoes(params: {
   for (const p of params.produtosCompostos || []) {
     if (params.idAtualParaExcluir && p.id === params.idAtualParaExcluir) continue
 
+    // Produtos compostos inativos (ou sombras órfãs desativadas) NUNCA aparecem nos seletores de Kit/Combo
+    if (p.status === 'inativo') continue
+
     const permitido = isItemPrincipalPermitido({ tipo: p.tipo, origem: 'composto' }, contexto)
     if (!permitido) continue
 

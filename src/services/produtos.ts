@@ -203,7 +203,101 @@ export const produtosCompostosService = {
   },
 
   async delete(id: string): Promise<boolean> {
+    // Ao excluir/desativar um produto composto, sincronizar o registro correspondente
+    // em prec_produtos imediatamente na mesma operação:
+    // Se possuir cenários de precificação aprovados ou vínculos de canal, desativa (status='inativo')
+    // para preservar o histórico e links caso seja recriado depois; caso contrário, remove.
+    try {
+      const precs = await pb.collection('prec_produtos').getList(1, 50, {
+        filter: `origem_id = "${id}"`,
+      })
+      for (const prec of precs.items) {
+        let temAprovadosOuVinculos = false
+        try {
+          const [precsAprovadas, matriz] = await Promise.all([
+            pb.collection('prec_precificacoes').getList(1, 1, {
+              filter: `produto = "${prec.id}" && (status = "aprovada" || preco_aprovado > 0)`,
+            }),
+            pb.collection('prec_matriz_classificacoes').getList(1, 1, {
+              filter: `produto = "${prec.id}"`,
+            }),
+          ])
+          temAprovadosOuVinculos = precsAprovadas.totalItems > 0 || matriz.totalItems > 0
+        } catch (e) {
+          console.warn(
+            '[produtosCompostosService.delete] Erro ao verificar vínculos de precificação:',
+            e,
+          )
+        }
+
+        if (temAprovadosOuVinculos) {
+          if (prec.status !== 'inativo') {
+            await pb.collection('prec_produtos').update(prec.id, { status: 'inativo' })
+          }
+        } else {
+          await pb.collection('prec_produtos').delete(prec.id)
+        }
+      }
+    } catch (e) {
+      console.warn(
+        '[produtosCompostosService.delete] Erro ao tratar prec_produtos correspondente:',
+        e,
+      )
+    }
+
     return pb.collection('produtos').delete(id)
+  },
+
+  /**
+   * Poda registros órfãos em prec_produtos (origem_id sem correspondente em produtos).
+   * Registros com histórico aprovado ou vínculos de canal são desativados (status='inativo');
+   * sem vínculos são removidos. produtos_base de catálogo permanece intocado.
+   */
+  async podarOrfaosPrecificacao(): Promise<{ removidos: number; desativados: number }> {
+    let removidos = 0
+    let desativados = 0
+    try {
+      const precs = await pb.collection('prec_produtos').getFullList({
+        filter: 'origem_id != ""',
+      })
+      if (!precs || precs.length === 0) return { removidos, desativados }
+
+      const produtosVivos = await pb.collection('produtos').getFullList({ fields: 'id' })
+      const idsVivosSet = new Set(produtosVivos.map((p) => p.id))
+
+      for (const prec of precs) {
+        if (!prec.origem_id || idsVivosSet.has(prec.origem_id)) continue
+
+        // É uma sombra órfã: verificar histórico aprovado e vínculos
+        let temAprovadosOuVinculos = false
+        try {
+          const [precsAprovadas, matriz] = await Promise.all([
+            pb.collection('prec_precificacoes').getList(1, 1, {
+              filter: `produto = "${prec.id}" && (status = "aprovada" || preco_aprovado > 0)`,
+            }),
+            pb.collection('prec_matriz_classificacoes').getList(1, 1, {
+              filter: `produto = "${prec.id}"`,
+            }),
+          ])
+          temAprovadosOuVinculos = precsAprovadas.totalItems > 0 || matriz.totalItems > 0
+        } catch {
+          /* intentionally ignored */
+        }
+
+        if (temAprovadosOuVinculos) {
+          if (prec.status !== 'inativo') {
+            await pb.collection('prec_produtos').update(prec.id, { status: 'inativo' })
+            desativados++
+          }
+        } else {
+          await pb.collection('prec_produtos').delete(prec.id)
+          removidos++
+        }
+      }
+    } catch (e) {
+      console.warn('[produtosCompostosService.podarOrfaosPrecificacao] Falha na poda:', e)
+    }
+    return { removidos, desativados }
   },
 
   /**
@@ -215,8 +309,16 @@ export const produtosCompostosService = {
    * 3. fornecedor_produto (quando base_origem veio de fornecedores_produtos)
    * 4. sku exato
    * 5. nome idêntico (quando não há outro match)
+   * Além disso, executa poda preventiva de sombras órfãs.
    */
   async syncComPrecificacao(produtoId: string) {
+    // Poda preventiva de sombras órfãs
+    try {
+      await this.podarOrfaosPrecificacao()
+    } catch (e) {
+      console.warn('[syncComPrecificacao] Falha na poda automática de órfãos:', e)
+    }
+
     const prod = await this.getById(produtoId)
     if (!prod) return null
 

@@ -71,10 +71,23 @@ describe('kitComboHelpers - Regras de Composição de Kits e Combos', () => {
   })
 
   describe('buildItensPrincipaisOpcoes', () => {
-    it('filtra corretamente a lista consolidada para a UI', () => {
+    it('filtra corretamente a lista consolidada para a UI e NÃO lista compostos inativos', () => {
       const compostosMock: Partial<PrecProdutoRecord>[] = [
-        { id: 'c1', nome: 'Toalha Allure Composta', sku: 'ALL-01', tipo: 'fabricacao_propria' },
-        { id: 'c2', nome: 'Pano Copa Composto', sku: 'PC-01', tipo: 'revenda' },
+        {
+          id: 'c1',
+          nome: 'Toalha Allure Composta',
+          sku: 'ALL-01',
+          tipo: 'fabricacao_propria',
+          status: 'ativo',
+        },
+        { id: 'c2', nome: 'Pano Copa Composto', sku: 'PC-01', tipo: 'revenda', status: 'ativo' },
+        {
+          id: 'c3_inativo',
+          nome: 'Produto Excluido Inativo',
+          sku: 'EXC-01',
+          tipo: 'revenda',
+          status: 'inativo',
+        },
       ]
 
       const basesMock: Partial<ProdutoBaseRecord>[] = [
@@ -108,10 +121,11 @@ describe('kitComboHelpers - Regras de Composição de Kits e Combos', () => {
         contexto: 'kit',
       })
 
-      // Apenas c1, c2 e b1 devem aparecer. b2, b3 e b4 NUNCA aparecem como item principal
+      // Apenas c1, c2 e b1 devem aparecer. c3_inativo, b2, b3 e b4 NUNCA aparecem como item principal
       const ids = opcoes.map((o) => o.id)
       expect(ids).toContain('comp_c1')
       expect(ids).toContain('comp_c2')
+      expect(ids).not.toContain('comp_c3_inativo')
       expect(ids).toContain('base_b1')
       expect(ids).not.toContain('base_b2')
       expect(ids).not.toContain('base_b3')

@@ -133,7 +133,7 @@ export default function PrecificacaoProdutos() {
     try {
       setLoading(true)
       const [prods, emps, forns, fornsProds, canaisList, pBaseList] = await Promise.all([
-        precificacaoService.listProdutos(),
+        precificacaoService.listProdutos('status != "inativo"'),
         cadastrosService.listEmpresas(),
         fornecedoresService.listFornecedores(),
         fornecedoresService.listTodosProdutos().catch(() => [] as FornecedorProduto[]),

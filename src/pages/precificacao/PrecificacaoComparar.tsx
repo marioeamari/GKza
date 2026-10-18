@@ -306,7 +306,7 @@ export default function PrecificacaoComparar() {
       try {
         setLoading(true)
         const [prods, chans, mods, txs, tribs, precs] = await Promise.all([
-          precificacaoService.listProdutos(),
+          precificacaoService.listProdutos('status != "inativo"'),
           precificacaoService.listCanais(true),
           precificacaoService.listModalidades(),
           precificacaoService.listTaxas(),

@@ -38,9 +38,12 @@ export const precificacaoService = {
   /**
    * Lista apenas produtos do tipo 'kit' ou 'combo' para Gestão de Kits & Combos (/precificacao/produtos)
    */
-  async listKitsECombos(): Promise<PrecProdutoRecord[]> {
+  async listKitsECombos(apenasAtivos = true): Promise<PrecProdutoRecord[]> {
+    const filter = apenasAtivos
+      ? '(tipo = "kit" || tipo = "combo") && status != "inativo"'
+      : 'tipo = "kit" || tipo = "combo"'
     return pb.collection('prec_produtos').getFullList<PrecProdutoRecord>({
-      filter: 'tipo = "kit" || tipo = "combo"',
+      filter,
       sort: '-created',
       expand: 'empresa,fornecedor,fornecedor_produto',
     })
