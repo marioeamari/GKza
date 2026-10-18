@@ -1,10 +1,14 @@
 import pb from '@/lib/pocketbase/client'
+import { withRetry } from '@/lib/pocketbase/retry'
 import type { Fornecedor, FornecedorProduto } from '@/types/domain'
 
 export const fornecedoresService = {
   // Fornecedores
   listFornecedores: () =>
-    pb.collection<Fornecedor>('fornecedores').getFullList({ sort: 'nome_fantasia' }),
+    withRetry(
+      () => pb.collection<Fornecedor>('fornecedores').getFullList({ sort: 'nome_fantasia' }),
+      { label: 'fornecedoresService.listFornecedores' },
+    ),
 
   getFornecedor: (id: string) => pb.collection<Fornecedor>('fornecedores').getOne(id),
 
@@ -16,10 +20,14 @@ export const fornecedoresService = {
   deleteFornecedor: (id: string) => pb.collection('fornecedores').delete(id),
 
   listFornecedoresPorTipo: (tipo: 'revenda' | 'insumos' | 'servicos') =>
-    pb.collection<Fornecedor>('fornecedores').getFullList({
-      filter: `tipos ~ '${tipo}'`,
-      sort: 'nome_fantasia',
-    }),
+    withRetry(
+      () =>
+        pb.collection<Fornecedor>('fornecedores').getFullList({
+          filter: `tipos ~ '${tipo}'`,
+          sort: 'nome_fantasia',
+        }),
+      { label: 'fornecedoresService.listFornecedoresPorTipo' },
+    ),
 
   // Produtos fornecidos (fornecedores_produtos)
   listProdutosPorFornecedor: (fornecedorId: string) =>

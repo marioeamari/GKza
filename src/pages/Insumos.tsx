@@ -34,6 +34,8 @@ import {
   Layers,
   Sparkles,
   ExternalLink,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react'
 import { InsumoDialog } from '@/components/insumos/InsumoDialog'
 import { CategoriasInsumoDialog } from '@/components/insumos/CategoriasInsumoDialog'
@@ -52,6 +54,13 @@ export default function InsumosPage() {
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Falha de dados auxiliares (resiliência contra oscilações de rede)
+  const [auxiliaresError, setAuxiliaresError] = useState<{
+    categorias?: boolean
+    fornecedores?: boolean
+  } | null>(null)
+  const [tentandoAuxiliares, setTentandoAuxiliares] = useState(false)
+
   // Filtros
   const [busca, setBusca] = useState('')
   const [filtroTipo, setFiltroTipo] = useState<string>('todos')
@@ -67,18 +76,53 @@ export default function InsumosPage() {
   const [insumoParaExcluir, setInsumoParaExcluir] = useState<InsumoRecord | null>(null)
   const [excluindo, setExcluindo] = useState(false)
 
-  // Carregar dados
+  // Carregar dados principais e auxiliares com resiliência a falhas parciais de rede
   const carregarDados = async () => {
     try {
       setLoading(true)
-      const [cats, forn, ins] = await Promise.all([
+      const [catsResult, fornResult, insResult] = await Promise.allSettled([
         insumosService.listCategorias(),
         fornecedoresService.listFornecedores(),
         insumosService.listInsumos(),
       ])
-      setCategorias(cats)
-      setFornecedores(forn)
-      setInsumos(ins)
+
+      const catsFailed = catsResult.status === 'rejected'
+      const fornFailed = fornResult.status === 'rejected'
+      const insFailed = insResult.status === 'rejected'
+
+      if (catsResult.status === 'fulfilled') {
+        setCategorias(catsResult.value)
+      }
+      if (fornResult.status === 'fulfilled') {
+        setFornecedores(fornResult.value)
+      }
+      if (insResult.status === 'fulfilled') {
+        setInsumos(insResult.value)
+      }
+
+      if (catsFailed || fornFailed) {
+        setAuxiliaresError({
+          categorias: catsFailed,
+          fornecedores: fornFailed,
+        })
+      } else {
+        setAuxiliaresError(null)
+      }
+
+      if (insFailed) {
+        toast({
+          variant: 'destructive',
+          title: 'Erro ao carregar insumos',
+          description: 'Não foi possível carregar a lista principal de insumos.',
+        })
+      } else if (catsFailed || fornFailed) {
+        toast({
+          variant: 'default',
+          title: 'Aviso de rede',
+          description:
+            'Algumas listas complementares (categorias ou fornecedores) não puderam ser carregadas. Você pode tentar novamente.',
+        })
+      }
     } catch {
       toast({
         variant: 'destructive',
@@ -87,6 +131,59 @@ export default function InsumosPage() {
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Tentar novamente apenas dados auxiliares que falharam
+  const tentarRecarregarAuxiliares = async () => {
+    if (!auxiliaresError) return
+    try {
+      setTentandoAuxiliares(true)
+      const promises: Promise<any>[] = []
+      const tasks: ('cats' | 'forn')[] = []
+
+      if (auxiliaresError.categorias) {
+        promises.push(insumosService.listCategorias())
+        tasks.push('cats')
+      }
+      if (auxiliaresError.fornecedores) {
+        promises.push(fornecedoresService.listFornecedores())
+        tasks.push('forn')
+      }
+
+      const results = await Promise.allSettled(promises)
+      let nextError = { ...auxiliaresError }
+
+      results.forEach((res, idx) => {
+        const task = tasks[idx]
+        if (res.status === 'fulfilled') {
+          if (task === 'cats') {
+            setCategorias(res.value)
+            delete nextError.categorias
+          } else if (task === 'forn') {
+            setFornecedores(res.value)
+            delete nextError.fornecedores
+          }
+        }
+      })
+
+      if (!nextError.categorias && !nextError.fornecedores) {
+        setAuxiliaresError(null)
+        toast({
+          title: 'Dados sincronizados',
+          description: 'Categorias e fornecedores carregados com sucesso.',
+        })
+      } else {
+        setAuxiliaresError(nextError)
+      }
+    } catch {
+      toast({
+        variant: 'destructive',
+        title: 'Tentativa falhou',
+        description: 'Verifique sua conexão e tente novamente.',
+      })
+    } finally {
+      setTentandoAuxiliares(false)
     }
   }
 
@@ -195,6 +292,37 @@ export default function InsumosPage() {
           </Button>
         </div>
       </div>
+
+      {/* Aviso de resiliência caso listas auxiliares tenham falhado por oscilação de rede */}
+      {auxiliaresError && (auxiliaresError.categorias || auxiliaresError.fornecedores) && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 text-xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+            <span>
+              Alguns dados complementares (
+              {auxiliaresError.categorias && auxiliaresError.fornecedores
+                ? 'categorias e fornecedores'
+                : auxiliaresError.categorias
+                  ? 'categorias'
+                  : 'fornecedores'}
+              ) não puderam ser carregados devido a uma oscilação de rede. O catálogo de insumos
+              continua acessível.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={tentarRecarregarAuxiliares}
+            disabled={tentandoAuxiliares}
+            className="h-8 border-amber-600/30 text-amber-800 hover:bg-amber-600/10 shrink-0 text-xs font-semibold"
+          >
+            <RefreshCw
+              className={`mr-1.5 h-3.5 w-3.5 ${tentandoAuxiliares ? 'animate-spin' : ''}`}
+            />
+            {tentandoAuxiliares ? 'Atualizando...' : 'Tentar novamente'}
+          </Button>
+        </div>
+      )}
 
       {/* Cards de Resumo */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

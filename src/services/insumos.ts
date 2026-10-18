@@ -134,9 +134,14 @@ export const insumosService = {
   // Insumos Categorias
   // -------------------------------------------------------------
   async listCategorias(): Promise<InsumoCategoriaRecord[]> {
-    return pb.collection('insumos_categorias').getFullList<InsumoCategoriaRecord>({
-      sort: 'ordem,nome',
-    })
+    const { withRetry } = await import('@/lib/pocketbase/retry')
+    return withRetry(
+      () =>
+        pb.collection('insumos_categorias').getFullList<InsumoCategoriaRecord>({
+          sort: 'ordem,nome',
+        }),
+      { label: 'insumosService.listCategorias' },
+    )
   },
 
   async createCategoria(data: {
@@ -185,11 +190,16 @@ export const insumosService = {
       parts.push(`(nome ~ "${q}" || observacoes ~ "${q}")`)
     }
 
-    return pb.collection('insumos').getFullList<InsumoRecord>({
-      filter: parts.length > 0 ? parts.join(' && ') : undefined,
-      sort: 'nome',
-      expand: 'categoria,fornecedor',
-    })
+    const { withRetry } = await import('@/lib/pocketbase/retry')
+    return withRetry(
+      () =>
+        pb.collection('insumos').getFullList<InsumoRecord>({
+          filter: parts.length > 0 ? parts.join(' && ') : undefined,
+          sort: 'nome',
+          expand: 'categoria,fornecedor',
+        }),
+      { label: 'insumosService.listInsumos' },
+    )
   },
 
   async getInsumo(id: string): Promise<InsumoRecord> {

@@ -53,6 +53,52 @@ export function isRetryableStatus(status: number): boolean {
   return status === 429 || status === 502 || status === 503 || status === 504
 }
 
+/**
+ * Executa uma função assíncrona com retry automático para erros transientes de rede (ex.: "Failed to fetch")
+ * ou status HTTP 429/5xx, com backoff exponencial.
+ */
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  options?: {
+    maxRetries?: number
+    delays?: number[]
+    label?: string
+  },
+): Promise<T> {
+  const delays = options?.delays ?? DEFAULT_DELAYS
+  const maxRetries = options?.maxRetries ?? delays.length
+  let attempt = 0
+
+  while (true) {
+    try {
+      return await fn()
+    } catch (err: any) {
+      const isNetworkError =
+        err?.name === 'TypeError' ||
+        err?.message?.includes('Failed to fetch') ||
+        err?.message?.includes('NetworkError') ||
+        err?.message?.includes('network') ||
+        err?.status === 0 ||
+        err?.status === undefined
+
+      const status = err?.status ?? err?.response?.status
+      const isRetryable =
+        isNetworkError || (typeof status === 'number' && isRetryableStatus(status))
+
+      if (isRetryable && attempt < maxRetries) {
+        const delay = delays[attempt] ?? delays[delays.length - 1]
+        attempt++
+        console.warn(
+          `[withRetry] ${options?.label || 'Operação'} falhou (tentativa ${attempt}/${maxRetries}): ${err?.message || err}. Tentando novamente em ${delay}ms...`,
+        )
+        await sleep(delay)
+        continue
+      }
+      throw err
+    }
+  }
+}
+
 export function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {

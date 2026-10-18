@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createRetryFetch, parseRetryAfter, isIdempotentMethod, isRetryableStatus } from './retry'
+import {
+  createRetryFetch,
+  parseRetryAfter,
+  isIdempotentMethod,
+  isRetryableStatus,
+  withRetry,
+} from './retry'
 
 describe('PocketBase Retry Utility', () => {
   it('identifica corretamente métodos idempotentes elegíveis para retry', () => {
@@ -182,5 +188,69 @@ describe('PocketBase Retry Utility', () => {
     expect(response.status).toBe(429)
     // Tentativa inicial + 2 retentativas = 3 chamadas
     expect(calls).toBe(3)
+  })
+
+  it('createRetryFetch faz retry em erros de rede ("Failed to fetch") em métodos GET', async () => {
+    let calls = 0
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      calls++
+      if (calls === 1) {
+        throw new TypeError('Failed to fetch')
+      }
+      return new Response(JSON.stringify({ items: [{ id: 'p1', nome: 'Pessoa 1' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const retryFetch = createRetryFetch(mockFetch as unknown as typeof fetch, {
+      delays: [5, 10],
+      maxRetries: 2,
+    })
+
+    const response = await retryFetch(
+      'https://example.com/api/collections/pessoas/records?page=1&perPage=1000',
+      { method: 'GET' },
+    )
+    expect(response.status).toBe(200)
+    expect(calls).toBe(2)
+  })
+
+  it('withRetry reexecuta função que falha com "Failed to fetch" e resolve na tentativa seguinte', async () => {
+    let calls = 0
+    const fakeApi = async () => {
+      calls++
+      if (calls === 1) {
+        throw new TypeError('Failed to fetch')
+      }
+      return [{ id: '1', nome: 'Item Teste' }]
+    }
+
+    const result = await withRetry(fakeApi, {
+      delays: [5, 10],
+      maxRetries: 2,
+      label: 'test.fakeApi',
+    })
+
+    expect(calls).toBe(2)
+    expect(result).toEqual([{ id: '1', nome: 'Item Teste' }])
+  })
+
+  it('withRetry propaga o erro se esgotar as tentativas', async () => {
+    let calls = 0
+    const failingApi = async () => {
+      calls++
+      throw new TypeError('Failed to fetch')
+    }
+
+    await expect(
+      withRetry(failingApi, {
+        delays: [5, 5],
+        maxRetries: 2,
+        label: 'test.failingApi',
+      }),
+    ).rejects.toThrow('Failed to fetch')
+
+    expect(calls).toBe(3) // 1 chamada inicial + 2 retries
   })
 })
