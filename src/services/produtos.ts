@@ -180,7 +180,7 @@ export const produtosCompostosService = {
       ...data,
       custo_aquisicao: custos.custo_aquisicao,
       custo_composicao: custos.custo_composicao,
-      custo_embalagem: custos.custo_embalagem,
+      custo_embalagem: custos.custo_embalagem, // já zerado se composição tiver embalagem
       custo_etiqueta: custos.custo_etiqueta,
       custo_total: custos.custo_total,
     }

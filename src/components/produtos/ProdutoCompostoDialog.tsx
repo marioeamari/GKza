@@ -219,7 +219,7 @@ export function ProdutoCompostoDialog({
         empresas: empresasSelecionadas,
         composicao,
         custo_aquisicao: custoAquisicaoBase,
-        custo_embalagem: custoEmbalagem,
+        custo_embalagem: resumoCustos.custo_embalagem,
         custo_etiqueta: custoEtiqueta,
         peso_g: pesoG,
         dimensao_comprimento_cm: compCm,
