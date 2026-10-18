@@ -1,7 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
-  Calculator,
   Save,
   CheckCircle2,
   AlertTriangle,
@@ -90,7 +89,6 @@ import {
   PrecCanalModalidadeRecord,
   PrecCanalRecord,
   PrecKitRecord,
-  PrecPerfilTributarioRecord,
   PrecPrecificacaoRecord,
   PrecProdutoRecord,
   PrecTaxaRecord,
@@ -189,7 +187,6 @@ export default function PrecificacaoComparar() {
   const [canais, setCanais] = useState<PrecCanalRecord[]>([])
   const [modalidades, setModalidades] = useState<PrecCanalModalidadeRecord[]>([])
   const [taxas, setTaxas] = useState<PrecTaxaRecord[]>([])
-  const [perfisTributarios, setPerfisTributarios] = useState<PrecPerfilTributarioRecord[]>([])
   const [precificacoesExistentes, setPrecificacoesExistentes] = useState<PrecPrecificacaoRecord[]>(
     [],
   )
@@ -277,40 +274,15 @@ export default function PrecificacaoComparar() {
   const [colunaDiffA, setColunaDiffA] = useState<string>('')
   const [colunaDiffB, setColunaDiffB] = useState<string>('')
 
-  // Parâmetros tributários configuráveis na tela (espelho da planilha: DAS 6.95%, ICMS 2.23%)
-  const [aliquotaDas, setAliquotaDas] = useState<number>(6.95)
-  const [aliquotaIcms, setAliquotaIcms] = useState<number>(2.23)
-  const [dasImpostoMes, setDasImpostoMes] = useState<number>(76.5)
-  const [pedidosMes, setPedidosMes] = useState<number>(3000)
-
-  // Rastreamento da fonte das premissas tributárias ('perfil' | 'global' | 'sobrescrito')
-  const [fonteTributos, setFonteTributos] = useState<'perfil' | 'global' | 'sobrescrito'>('global')
-  const [perfilAtivoId, setPerfilAtivoId] = useState<string | null>(null)
-  const [isSobrescritoManualmente, setIsSobrescritoManualmente] = useState<boolean>(false)
-
-  // Valores padrão/originais da fonte atual para restauração
-  const [valoresOrigemFonte, setValoresOrigemFonte] = useState<{
-    aliquotaDas: number
-    aliquotaIcms: number
-    dasImpostoMes: number
-    pedidosMes: number
-  }>({
-    aliquotaDas: 6.95,
-    aliquotaIcms: 2.23,
-    dasImpostoMes: 76.5,
-    pedidosMes: 3000,
-  })
-
   useEffect(() => {
     async function loadData() {
       try {
         setLoading(true)
-        const [prods, chans, mods, txs, tribs, precs] = await Promise.all([
+        const [prods, chans, mods, txs, precs] = await Promise.all([
           precificacaoService.listProdutos('status != "inativo"'),
           precificacaoService.listCanais(true),
           precificacaoService.listModalidades(),
           precificacaoService.listTaxas(),
-          precificacaoService.listPerfisTributarios(),
           precificacaoService.listPrecificacoes(),
         ])
 
@@ -318,7 +290,6 @@ export default function PrecificacaoComparar() {
         setCanais(chans)
         setModalidades(mods)
         setTaxas(txs)
-        setPerfisTributarios(tribs)
         setPrecificacoesExistentes(precs)
 
         // Inicializar produto da URL ou o primeiro disponível
@@ -508,122 +479,6 @@ export default function PrecificacaoComparar() {
 
     return list
   }, [modalidades, canais, taxas])
-
-  // Aplicar perfil tributário correspondente quando mudar o produto selecionado ou os perfis carregados
-  useEffect(() => {
-    if (!selectedProdutoId || !produtoAtual) {
-      // Se não há produto selecionado, manter padrão global caso não sobrescrito
-      return
-    }
-
-    // Helper para verificar se um perfil está dentro da vigência
-    const isPerfilVigente = (perfil: PrecPerfilTributarioRecord): boolean => {
-      if (!perfil.vigencia) return true
-      const vig = perfil.vigencia.trim()
-      if (!vig) return true
-      // Se for formato de data YYYY-MM-DD
-      if (/^\d{4}-\d{2}-\d{2}/.test(vig)) {
-        const vigDate = new Date(vig)
-        if (!isNaN(vigDate.getTime())) {
-          return new Date() <= vigDate
-        }
-      }
-      return true
-    }
-
-    // Precedência de matching:
-    // 1. Perfil específico do produto selecionado
-    // 2. Perfil da empresa do produto selecionado
-    // 3. Perfil de escopo 'operacao' geral
-    const perfisValidos = perfisTributarios.filter(isPerfilVigente)
-    const perfilProduto = perfisValidos.find(
-      (p) => p.escopo === 'produto' && p.produto === selectedProdutoId,
-    )
-    const perfilEmpresa = produtoAtual.empresa
-      ? perfisValidos.find((p) => p.escopo === 'empresa' && p.empresa === produtoAtual.empresa)
-      : null
-    const perfilOperacao = perfisValidos.find((p) => p.escopo === 'operacao')
-
-    const perfilEscolhido = perfilProduto || perfilEmpresa || perfilOperacao
-
-    if (perfilEscolhido) {
-      const novaAliqDas = perfilEscolhido.aliquota_das_pct ?? 6.95
-      const novaAliqIcms = perfilEscolhido.aliquota_icms_pct ?? 2.23
-      const novoDasMes = perfilEscolhido.outros?.das_imposto_total_mes ?? 76.5
-      const novosPedidosMes = perfilEscolhido.outros?.pedidos_estimados_mes ?? 3000
-
-      setPerfilAtivoId(perfilEscolhido.id)
-      setValoresOrigemFonte({
-        aliquotaDas: novaAliqDas,
-        aliquotaIcms: novaAliqIcms,
-        dasImpostoMes: novoDasMes,
-        pedidosMes: novosPedidosMes,
-      })
-      setAliquotaDas(novaAliqDas)
-      setAliquotaIcms(novaAliqIcms)
-      setDasImpostoMes(novoDasMes)
-      setPedidosMes(novosPedidosMes)
-      setFonteTributos('perfil')
-      setIsSobrescritoManualmente(false)
-    } else {
-      // Sem perfil: aplicar padrão global
-      const padraoGlobal = {
-        aliquotaDas: 6.95,
-        aliquotaIcms: 2.23,
-        dasImpostoMes: 76.5,
-        pedidosMes: 3000,
-      }
-      setPerfilAtivoId(null)
-      setValoresOrigemFonte(padraoGlobal)
-      setAliquotaDas(padraoGlobal.aliquotaDas)
-      setAliquotaIcms(padraoGlobal.aliquotaIcms)
-      setDasImpostoMes(padraoGlobal.dasImpostoMes)
-      setPedidosMes(padraoGlobal.pedidosMes)
-      setFonteTributos('global')
-      setIsSobrescritoManualmente(false)
-    }
-  }, [selectedProdutoId, produtoAtual, perfisTributarios])
-
-  // Handlers para edição manual dos tributos
-  const handleAtualizarAliquotaDas = (valor: number) => {
-    setAliquotaDas(valor)
-    setIsSobrescritoManualmente(true)
-    setFonteTributos('sobrescrito')
-  }
-
-  const handleAtualizarAliquotaIcms = (valor: number) => {
-    setAliquotaIcms(valor)
-    setIsSobrescritoManualmente(true)
-    setFonteTributos('sobrescrito')
-  }
-
-  const handleAtualizarDasImpostoMes = (valor: number) => {
-    setDasImpostoMes(valor)
-    setIsSobrescritoManualmente(true)
-    setFonteTributos('sobrescrito')
-  }
-
-  const handleAtualizarPedidosMes = (valor: number) => {
-    setPedidosMes(valor)
-    setIsSobrescritoManualmente(true)
-    setFonteTributos('sobrescrito')
-  }
-
-  // Restaurar fonte (Perfil se houver, ou Global padrão)
-  const handleRestaurarFonteTributos = () => {
-    setAliquotaDas(valoresOrigemFonte.aliquotaDas)
-    setAliquotaIcms(valoresOrigemFonte.aliquotaIcms)
-    setDasImpostoMes(valoresOrigemFonte.dasImpostoMes)
-    setPedidosMes(valoresOrigemFonte.pedidosMes)
-    setIsSobrescritoManualmente(false)
-    setFonteTributos(perfilAtivoId ? 'perfil' : 'global')
-    toast({
-      title: 'Tributos Restaurados',
-      description: perfilAtivoId
-        ? 'Alíquotas restauradas a partir do perfil tributário vigente.'
-        : 'Alíquotas restauradas para os padrões globais da planilha (6,95% / 2,23%).',
-    })
-  }
 
   // Carregar dados salvos das precificações deste produto quando o produto selecionado mudar
   // REGRA DO USUÁRIO: Por padrão, carregar o último card de canal APROVADO (não o rascunho).
@@ -1033,22 +888,9 @@ export default function PrecificacaoComparar() {
           status_conferencia: t.status_conferencia,
         })),
         tributos: (() => {
-          // Se for cenário salvo e tiver alíquotas fixas gravadas nas premissas sem tributos_config
           const tribResolvido = resolverTributosModalidade({
             modalidade: col.modalidade,
             canal,
-            globalFallback: {
-              aliquotaDas,
-              aliquotaIcms,
-              dasImpostoMes,
-              pedidosMes,
-              fonteNome:
-                fonteTributos === 'perfil'
-                  ? 'Perfil'
-                  : fonteTributos === 'sobrescrito'
-                    ? 'Sobrescrito'
-                    : 'Global',
-            },
           })
           return tribResolvido.tributos
         })(),
@@ -1114,10 +956,6 @@ export default function PrecificacaoComparar() {
     descontosPorColuna,
     metaLucroReais,
     metaMargemPct,
-    aliquotaDas,
-    aliquotaIcms,
-    dasImpostoMes,
-    pedidosMes,
   ])
 
   // Encontrar o canal mais rentável (com premissas completas)
@@ -1178,8 +1016,8 @@ export default function PrecificacaoComparar() {
         premissas: {
           preco_venda: dem.preco_anunciado,
           descontos: descontosSalvamento,
-          aliquota_das_pct: dem.aliquota_das_pct ?? aliquotaDas,
-          aliquota_icms_pct: dem.aliquota_icms_pct ?? aliquotaIcms,
+          aliquota_das_pct: dem.aliquota_das_pct ?? 0,
+          aliquota_icms_pct: dem.aliquota_icms_pct ?? 0,
         },
         resultado: dem as unknown as Record<string, unknown>,
         status: aprovar ? 'aprovada' : 'rascunho',
@@ -1793,8 +1631,8 @@ export default function PrecificacaoComparar() {
           </CardContent>
         </Card>
 
-        {/* 2. Linha Inferior: SIMULAÇÃO DE PREÇO e TRIBUTOS E RATEIO lado a lado */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* 2. Linha Inferior: SIMULAÇÃO DE PREÇO */}
+        <div>
           {/* Cartão "SIMULAÇÃO DE PREÇO" */}
           <Card className="border-border bg-white shadow-xs">
             <CardContent className="p-4 sm:p-5 space-y-3.5">
@@ -1883,146 +1721,6 @@ export default function PrecificacaoComparar() {
                       }
                     }}
                   />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Cartão "TRIBUTOS E RATEIO" */}
-          <Card className="border-border bg-white shadow-xs">
-            <CardContent className="p-4 sm:p-5 space-y-3.5">
-              <div className="flex items-center gap-2.5">
-                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <Calculator className="h-4 w-4 text-primary" />
-                </div>
-                <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
-                  Tributos e Rateio
-                </h2>
-              </div>
-
-              <div className="flex flex-wrap items-end gap-2 sm:gap-2.5 pt-0.5">
-                {/* Fonte dos tributos (Perfil, Global, Sobrescrito) */}
-                <div className="space-y-1.5 min-w-[70px]">
-                  <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
-                    Tributos
-                  </Label>
-                  <div className="h-10 flex items-center">
-                    {fonteTributos === 'perfil' && (
-                      <Badge
-                        variant="outline"
-                        className="text-xs h-9 px-2.5 font-bold bg-blue-50/80 text-blue-700 border-blue-200 rounded-lg"
-                      >
-                        Perfil
-                      </Badge>
-                    )}
-                    {fonteTributos === 'global' && (
-                      <Badge
-                        variant="outline"
-                        className="text-xs h-9 px-3 font-bold bg-slate-50/80 text-slate-700 border-slate-200 rounded-lg"
-                      >
-                        Global
-                      </Badge>
-                    )}
-                    {fonteTributos === 'sobrescrito' && (
-                      <div className="flex items-center gap-1">
-                        <Badge
-                          variant="outline"
-                          className="text-xs h-9 px-2 font-bold bg-amber-50/80 text-amber-800 border-amber-300 rounded-lg"
-                        >
-                          Sobrescrito
-                        </Badge>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleRestaurarFonteTributos}
-                          className="h-8 px-1.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-                          title="Restaurar valores da fonte original"
-                        >
-                          <RotateCcw className="h-2.5 w-2.5 mr-0.5" />
-                          Restaurar
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="hidden sm:block h-8 w-px bg-border/60 self-center" />
-
-                {/* DAS (%) */}
-                <div className="w-[72px] space-y-1.5">
-                  <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block truncate">
-                    DAS (%)
-                  </Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    className="h-10 text-xs font-bold text-center bg-secondary/30 border-border px-1"
-                    value={aliquotaDas}
-                    onChange={(e) => handleAtualizarAliquotaDas(parseFloat(e.target.value) || 0)}
-                  />
-                </div>
-
-                {/* ICMS (%) */}
-                <div className="w-[72px] space-y-1.5">
-                  <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block truncate">
-                    ICMS (%)
-                  </Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    className="h-10 text-xs font-bold text-center bg-secondary/30 border-border px-1"
-                    value={aliquotaIcms}
-                    onChange={(e) => handleAtualizarAliquotaIcms(parseFloat(e.target.value) || 0)}
-                  />
-                </div>
-
-                {/* Imposto Fixo Mês (R$) */}
-                <div className="w-[84px] space-y-1.5">
-                  <Label
-                    className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate block"
-                    title="Imposto Fixo do Mês (R$)"
-                  >
-                    Fixo Mês (R$)
-                  </Label>
-                  <Input
-                    type="number"
-                    step="0.50"
-                    className="h-10 text-xs font-bold text-center bg-secondary/30 border-border px-1"
-                    value={dasImpostoMes}
-                    onChange={(e) => handleAtualizarDasImpostoMes(parseFloat(e.target.value) || 0)}
-                  />
-                </div>
-
-                {/* Pedidos / Mês */}
-                <div className="w-[84px] space-y-1.5">
-                  <Label
-                    className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate block"
-                    title="Pedidos estimados por mês para rateio"
-                  >
-                    Pedidos/mês
-                  </Label>
-                  <Input
-                    type="number"
-                    step="10"
-                    className="h-10 text-xs font-bold text-center bg-secondary/30 border-border px-1"
-                    value={pedidosMes}
-                    onChange={(e) => handleAtualizarPedidosMes(parseFloat(e.target.value) || 0)}
-                  />
-                </div>
-
-                <div className="hidden sm:block h-8 w-px bg-border/60 self-center" />
-
-                {/* Rateio por venda informativo */}
-                <div className="space-y-1.5 min-w-[80px]">
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block truncate">
-                    Rateio/venda
-                  </Label>
-                  <div className="h-10 flex items-center justify-center bg-secondary/30 border border-border rounded-md px-2.5">
-                    <span className="text-xs font-mono font-bold text-foreground">
-                      {formatCurrency(pedidosMes > 0 ? dasImpostoMes / pedidosMes : 0)}
-                    </span>
-                  </div>
                 </div>
               </div>
             </CardContent>
@@ -3069,13 +2767,13 @@ export default function PrecificacaoComparar() {
 
                                 <div className="space-y-1 text-[11px] border-t border-slate-800/80 pt-1.5">
                                   <div className="flex justify-between text-slate-400">
-                                    <span>DAS ({dem.aliquota_das_pct ?? aliquotaDas}%):</span>
+                                    <span>DAS ({dem.aliquota_das_pct ?? 0}%):</span>
                                     <span className="font-mono text-slate-200">
                                       {formatCurrency(dem.imposto_das)}
                                     </span>
                                   </div>
                                   <div className="flex justify-between text-slate-400">
-                                    <span>ICMS ({dem.aliquota_icms_pct ?? aliquotaIcms}%):</span>
+                                    <span>ICMS ({dem.aliquota_icms_pct ?? 0}%):</span>
                                     <span className="font-mono text-slate-200">
                                       {formatCurrency(dem.imposto_icms)}
                                     </span>
@@ -3091,7 +2789,7 @@ export default function PrecificacaoComparar() {
                                   {dem.rateio_fixo_imposto_mes > 0 && (
                                     <div className="flex justify-between text-amber-300 pt-0.5 border-t border-slate-800/60">
                                       <span
-                                        title={`R$ ${(dem.das_imposto_total_mes ?? dasImpostoMes).toFixed(2)} / ${dem.pedidos_estimados_mes ?? pedidosMes} pedidos`}
+                                        title={`R$ ${(dem.das_imposto_total_mes ?? 0).toFixed(2)} / ${dem.pedidos_estimados_mes ?? 0} pedidos`}
                                       >
                                         Rateio imposto fixo mensal:
                                       </span>
@@ -3101,12 +2799,6 @@ export default function PrecificacaoComparar() {
                                     </div>
                                   )}
                                 </div>
-
-                                {dem.usando_global_fallback && (
-                                  <div className="p-1.5 rounded bg-amber-950/60 border border-amber-800/70 text-[10px] text-amber-300 leading-tight">
-                                    Modalidade sem régua de tributos — usando global
-                                  </div>
-                                )}
 
                                 <div className="flex justify-between border-t border-slate-800 pt-1.5 font-bold text-slate-100">
                                   <span>Total de tributos (venda):</span>

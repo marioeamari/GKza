@@ -189,7 +189,7 @@ export function resolverTributosModalidade(params: {
   usandoFallbackGlobal: boolean
   regimeTributario?: string
 } {
-  const { modalidade, canal, globalFallback } = params
+  const { modalidade, canal } = params
   const config = modalidade?.tributos_config
   const canalNome = canal?.nome || 'Canal'
   const modNome = modalidade?.nome || 'Modalidade'
@@ -237,25 +237,23 @@ export function resolverTributosModalidade(params: {
     }
   }
 
-  // Fallback para o global
-  const padraoDas = globalFallback?.aliquotaDas ?? 6.95
-  const padraoIcms = globalFallback?.aliquotaIcms ?? 2.23
-  const padraoFixo = globalFallback?.dasImpostoMes ?? 76.5
-  const padraoPedidos = globalFallback?.pedidosMes ?? 3000
-  const nomeGlobal = globalFallback?.fonteNome || 'Global'
+  // Regra Nova: A resolução usa EXCLUSIVAMENTE a régua da modalidade do canal.
+  // Sem régua cadastrada na modalidade = tributo 0 (impostos R$ 0 no demonstrativo, margem sem imposto),
+  // sem buscar valor global nem perfil.
+  const fonteDescricao = 'Sem tributos cadastrados'
 
   return {
     tributos: {
-      aliquota_das_pct: padraoDas,
-      aliquota_icms_pct: padraoIcms,
+      aliquota_das_pct: 0,
+      aliquota_icms_pct: 0,
       outros_impostos_pct: 0,
-      das_imposto_total_mes: padraoFixo,
-      pedidos_estimados_mes: padraoPedidos,
-      nome_fonte: nomeGlobal,
-      usando_global_fallback: true,
+      das_imposto_total_mes: 0,
+      pedidos_estimados_mes: 0,
+      nome_fonte: fonteDescricao,
+      usando_global_fallback: false,
     },
-    fonteDescricao: nomeGlobal,
-    usandoFallbackGlobal: true,
+    fonteDescricao,
+    usandoFallbackGlobal: false,
     regimeTributario: undefined,
   }
 }

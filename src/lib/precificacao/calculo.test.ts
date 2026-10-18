@@ -903,7 +903,7 @@ describe('Motor de Cálculo de Precificação - ERP GKza', () => {
       expect(demMei.margem_liquida_pct).toBeGreaterThan(demSimples.margem_liquida_pct)
     })
 
-    it('modalidade sem configuração cai no fallback global com sinalizador de aviso', () => {
+    it('modalidade sem configuração zera tributos (sem fallback global nem perfil)', () => {
       const modalidadeSemConfig = {
         id: 'mod_antiga',
         nome: 'Sem Config',
@@ -911,6 +911,7 @@ describe('Motor de Cálculo de Precificação - ERP GKza', () => {
       }
       const canal = { id: 'c_site', nome: 'Site' }
 
+      // Mesmo passando globalFallback fictício, a nova regra ignora e retorna tributo 0
       const resolvido = resolverTributosModalidade({
         modalidade: modalidadeSemConfig,
         canal,
@@ -921,14 +922,18 @@ describe('Motor de Cálculo de Precificação - ERP GKza', () => {
         },
       })
 
-      expect(resolvido.usandoFallbackGlobal).toBe(true)
-      expect(resolvido.fonteDescricao).toBe('Global')
-      expect(resolvido.tributos.usando_global_fallback).toBe(true)
+      expect(resolvido.usandoFallbackGlobal).toBe(false)
+      expect(resolvido.fonteDescricao).toBe('Sem tributos cadastrados')
+      expect(resolvido.tributos.aliquota_das_pct).toBe(0)
+      expect(resolvido.tributos.aliquota_icms_pct).toBe(0)
+      expect(resolvido.tributos.das_imposto_total_mes).toBe(0)
+      expect(resolvido.tributos.pedidos_estimados_mes).toBe(0)
+      expect(resolvido.tributos.usando_global_fallback).toBe(false)
 
       const dem = calcularDemonstrativo({
         preco_anunciado: 50,
         produto: {
-          sku: 'P_FALLBACK',
+          sku: 'P_SEM_TRIB',
           nome: 'Produto',
           tipo: 'revenda' as const,
           custo_aquisicao_unitario: 20,
@@ -937,9 +942,37 @@ describe('Motor de Cálculo de Precificação - ERP GKza', () => {
         tributos: resolvido.tributos,
       })
 
-      expect(dem.usando_global_fallback).toBe(true)
-      expect(dem.fonte_tributos).toBe('Global')
-      expect(dem.imposto_das).toBeCloseTo(3.48, 1) // 50 * 6.95% = 3.475 -> 3.48
+      expect(dem.total_tributos).toBe(0)
+      expect(dem.imposto_das).toBe(0)
+      expect(dem.imposto_icms).toBe(0)
+      expect(dem.rateio_fixo_imposto_mes).toBe(0)
+      expect(dem.lucro_liquido).toBe(30) // 50 - 20 (sem imposto, margem pura)
+      expect(dem.margem_liquida_pct).toBe(60) // 30 / 50 = 60%
+      expect(dem.fonte_tributos).toBe('Sem tributos cadastrados')
+      expect(dem.usando_global_fallback).toBe(false)
+    })
+
+    it('régua da modalidade é a única fonte e modalidade com tributos_config desabilitado zera tributos', () => {
+      const modDesabilitada = {
+        id: 'mod_desab',
+        nome: 'Desabilitada',
+        tributos_config: {
+          habilitado: false,
+          aliquota_das_pct: 10,
+          aliquota_icms_pct: 5,
+        },
+      }
+      const canal = { id: 'c_mercado', nome: 'Mercado' }
+
+      const resolvido = resolverTributosModalidade({
+        modalidade: modDesabilitada,
+        canal,
+      })
+
+      expect(resolvido.tributos.aliquota_das_pct).toBe(0)
+      expect(resolvido.tributos.aliquota_icms_pct).toBe(0)
+      expect(resolvido.fonteDescricao).toBe('Sem tributos cadastrados')
+      expect(resolvido.usandoFallbackGlobal).toBe(false)
     })
   })
 })
