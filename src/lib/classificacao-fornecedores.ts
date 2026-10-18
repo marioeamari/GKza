@@ -65,16 +65,20 @@ export function fornecedorCorrespondeTipo(
 }
 
 /**
- * Regra do protocolo (C):
- * O seletor de produtos para precificação deve listar EXCLUSIVAMENTE itens de `fornecedores_produtos`.
- * Itens do catálogo de `insumos` NUNCA entram na lista de produtos de precificação.
+ * Regra acordada do protocolo ERP GKza:
+ * O seletor de produtos para precificação/orçamentos deve listar EXCLUSIVAMENTE PRODUTOS COMPOSTOS
+ * (`produtos` ou registros do motor de precificação sincronizados de produtos compostos).
+ * Itens de `produtos_base` (revenda, insumos, serviços isolados) NUNCA entram no seletor de precificação!
  */
 export function filtrarItensParaSeletorPrecificacao<
-  T extends { _collection?: string; tipo?: string },
+  T extends { _collection?: string; tipo?: string; classificacao?: string },
 >(itens: T[]): T[] {
   return itens.filter((item) => {
-    // Se possui coleção identificada, deve ser fornecedores_produtos
-    if (item._collection && item._collection !== 'fornecedores_produtos') {
+    // Se tiver coleção identificada, NUNCA permite coleções de base/insumo direta
+    if (
+      item._collection &&
+      (item._collection === 'produtos_base' || item._collection === 'insumos')
+    ) {
       return false
     }
     return true
@@ -82,19 +86,16 @@ export function filtrarItensParaSeletorPrecificacao<
 }
 
 /**
- * Regra do protocolo (C):
- * O seletor de insumos da composição deve listar EXCLUSIVAMENTE itens do catálogo `insumos` (insumo/servico).
- * Produtos de revenda ou registros de `fornecedores_produtos` NUNCA entram no seletor de insumos.
+ * Regra acordada de composição:
+ * O seletor de itens para a composição deve listar itens de `produtos_base` (ou catálogo de insumos)
+ * destinados a formar o custo analítico do produto.
  */
 export function filtrarItensParaSeletorComposicao<
   T extends { _collection?: string; tipo?: string },
 >(itens: T[]): T[] {
   return itens.filter((item) => {
-    if (item._collection && item._collection !== 'insumos') {
-      return false
-    }
-    // Produtos de revenda não são insumos de composição
-    if (item.tipo === 'revenda') {
+    // Itens de produtos compostos não entram como linha de produtos_base
+    if (item._collection && item._collection === 'produtos') {
       return false
     }
     return true

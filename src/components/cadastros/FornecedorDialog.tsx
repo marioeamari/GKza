@@ -123,23 +123,16 @@ export function FornecedorDialog({
   const [saving, setSaving] = useState(false)
   const [tab, setTab] = useState<'dados' | 'produtos'>('dados')
 
-  // Produtos fornecidos vinculados
-  const [produtos, setProdutos] = useState<FornecedorProduto[]>([])
-  const [loadingProdutos, setLoadingProdutos] = useState(false)
-  const [produtoDialog, setProdutoDialog] = useState(false)
-  const [editingProduto, setEditingProduto] = useState<FornecedorProduto | null>(null)
-  const [prodForm, setProdForm] = useState(initialProduto)
-  const [prodErrors, setProdErrors] = useState<Record<string, string>>({})
-  const [savingProd, setSavingProd] = useState(false)
-  const [imagemFile, setImagemFile] = useState<File | null>(null)
-  const [imagemPreview, setImagemPreview] = useState<string | null>(null)
-  const [removerImagem, setRemoverImagem] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // Composição analítica de custos / insumos do produto de revenda
-  const [prodComposicao, setProdComposicao] = useState<ItemComposicaoCusto[]>([])
-  const [insumosAtivos, setInsumosAtivos] = useState<InsumoRecord[]>([])
-  const [embalagemEditadaManualmente, setEmbalagemEditadaManualmente] = useState(false)
+  // Listas read-only conforme especificação da reestruturação:
+  // 1. Produtos Base deste fornecedor
+  // 2. Produtos Compostos que contenham algum item de origem dele
+  const [produtosBaseFornecedor, setProdutosBaseFornecedor] = useState<
+    import('@/types/domain').ProdutoBaseRecord[]
+  >([])
+  const [produtosCompostosComOrigem, setProdutosCompostosComOrigem] = useState<
+    import('@/types/domain').ProdutoCompostoRecord[]
+  >([])
+  const [loadingListas, setLoadingListas] = useState(false)
 
   // Tipo de documento (CNPJ ou CPF)
   const [tipoDoc, setTipoDoc] = useState<'cnpj' | 'cpf'>('cnpj')
@@ -171,37 +164,50 @@ export function FornecedorDialog({
           tipos: normalizarTiposFornecedor(record.tipos),
         })
         setTipoDoc(record.cpf && !record.cnpj ? 'cpf' : 'cnpj')
-        carregarProdutos(record.id)
+        carregarListasReadonly(record.id)
       } else {
         setForm(initialFornecedor)
         setTipoDoc('cnpj')
-        setProdutos([])
+        setProdutosBaseFornecedor([])
+        setProdutosCompostosComOrigem([])
       }
       setErrors({})
-
-      // Carregar catálogo de insumos ativos para o seletor isolado de composição
-      insumosService
-        .listInsumos({ apenasAtivos: true })
-        .then((data) => {
-          // Garante filtragem estrita pelo seletor de composição
-          const insumosFiltrados = filtrarItensParaSeletorComposicao(
-            data.map((i) => ({ ...i, _collection: 'insumos' })),
-          ) as unknown as InsumoRecord[]
-          setInsumosAtivos(insumosFiltrados.length > 0 ? insumosFiltrados : data)
-        })
-        .catch(() => {})
     }
   }, [open, record, defaultTab])
 
-  async function carregarProdutos(fornecedorId: string) {
+  async function carregarListasReadonly(fornecedorId: string) {
     try {
-      setLoadingProdutos(true)
-      const data = await fornecedoresService.listProdutosPorFornecedor(fornecedorId)
-      setProdutos(data)
-    } catch {
-      // Ignora erro ao listar produtos
+      setLoadingListas(true)
+      // Carrega produtos_base do fornecedor
+      const { produtosBaseService, produtosCompostosService } = await import('@/services/produtos')
+      const bases = await produtosBaseService.list({ fornecedorId })
+      setProdutosBaseFornecedor(bases)
+
+      // Carrega produtos compostos
+      const compostos = await produtosCompostosService.list()
+      const baseIdsSet = new Set(bases.map((b) => b.id))
+
+      // Filtra compostos que contenham algum item de origem dele:
+      // (a) base_origem seja do fornecedor, OU
+      // (b) alguma linha da composição tenha fornecedor_id igual, ou insumo_id pertencente a baseIdsSet
+      const compostosComOrigem = compostos.filter((c) => {
+        if (c.base_origem && baseIdsSet.has(c.base_origem)) return true
+        if (c.expand?.base_origem?.fornecedor === fornecedorId) return true
+        if (Array.isArray(c.composicao)) {
+          return c.composicao.some(
+            (item) =>
+              item.fornecedor_id === fornecedorId ||
+              (item.insumo_id && baseIdsSet.has(item.insumo_id)),
+          )
+        }
+        return false
+      })
+
+      setProdutosCompostosComOrigem(compostosComOrigem)
+    } catch (err) {
+      console.warn('Erro ao carregar listas do fornecedor:', err)
     } finally {
-      setLoadingProdutos(false)
+      setLoadingListas(false)
     }
   }
 
@@ -294,11 +300,9 @@ export function FornecedorDialog({
       })
       onSaved()
       if (!record?.id) {
-        // Se era novo cadastro, fecha o modal
         onOpenChange(false)
       } else {
-        // Se era edição, recarrega produtos
-        carregarProdutos(saved.id)
+        carregarListasReadonly(saved.id)
       }
     } catch (error) {
       const fields = apiFieldErrors(error)

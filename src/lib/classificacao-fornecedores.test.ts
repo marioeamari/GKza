@@ -70,24 +70,29 @@ describe('Regras de classificação e filtragem de Fornecedores', () => {
 
   describe('filtrarItensParaSeletor (isolamento entre precificação e composição)', () => {
     const itensMistos = [
-      { id: '1', nome: 'Toalha de Banho', _collection: 'fornecedores_produtos', tipo: 'revenda' },
-      { id: '2', nome: 'Fita de Cetim', _collection: 'insumos', tipo: 'insumo' },
-      { id: '3', nome: 'Serviço Estamparia', _collection: 'insumos', tipo: 'servico' },
-      { id: '4', nome: 'Item Desconhecido', _collection: 'outra_colecao', tipo: 'revenda' },
+      { id: '1', nome: 'Produto Composto A', _collection: 'produtos', classificacao: 'revenda' },
+      { id: '2', nome: 'Fita de Cetim', _collection: 'produtos_base', tipo: 'insumo' },
+      { id: '3', nome: 'Serviço Estamparia', _collection: 'produtos_base', tipo: 'servico' },
+      { id: '4', nome: 'Base Revenda Isolada', _collection: 'produtos_base', tipo: 'revenda' },
+      {
+        id: '5',
+        nome: 'Produto Composto B',
+        _collection: 'produtos',
+        classificacao: 'fabricacao_propria',
+      },
     ]
 
-    it('filtrarItensParaSeletorPrecificacao deve listar EXCLUSIVAMENTE itens de fornecedores_produtos', () => {
+    it('filtrarItensParaSeletorPrecificacao deve listar apenas produtos compostos, nunca produtos_base', () => {
       const res = filtrarItensParaSeletorPrecificacao(itensMistos)
-      expect(res).toHaveLength(1)
-      expect(res[0].id).toBe('1')
-      expect(res[0]._collection).toBe('fornecedores_produtos')
+      expect(res).toHaveLength(2)
+      expect(res.map((i) => i.id)).toEqual(['1', '5'])
+      expect(res.every((i) => i._collection !== 'produtos_base')).toBe(true)
     })
 
-    it('filtrarItensParaSeletorComposicao deve listar EXCLUSIVAMENTE itens de insumos (sem revenda)', () => {
+    it('filtrarItensParaSeletorComposicao deve listar itens que não sejam o produto composto em si', () => {
       const res = filtrarItensParaSeletorComposicao(itensMistos)
-      expect(res).toHaveLength(2)
-      expect(res.map((i) => i.id)).toEqual(['2', '3'])
-      expect(res.every((i) => i._collection === 'insumos')).toBe(true)
+      expect(res).toHaveLength(3)
+      expect(res.map((i) => i.id)).toEqual(['2', '3', '4'])
     })
   })
 })

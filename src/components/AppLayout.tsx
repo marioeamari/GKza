@@ -189,6 +189,7 @@ export function AppLayout() {
 
   const precificacaoChildren: SubItem[] = [
     { to: '/precificacao', label: 'Visão Geral & Hub', icon: Layers, end: true },
+    { to: '/composicao-produtos', label: 'Composição de Produtos', icon: Layers },
     { to: '/precificacao/comparar', label: 'Comparador Lado a Lado', icon: Calculator },
     { to: '/precificacao/aprovados', label: 'Cenários & Repositório', icon: BookmarkCheck },
     { to: '/precificacao/dashboard', label: 'Dashboard de Margens', icon: LayoutDashboard },
@@ -240,8 +241,8 @@ export function AppLayout() {
     { to: '/contas', label: 'Contas & Cartões', icon: WalletCards },
     { to: '/dizimos', label: 'Dízimos & Ofertas', icon: HeartHandshake },
     { to: '/categorias', label: 'Classificações', icon: Tags },
+    { to: '/composicao-produtos', label: 'Composição de Produtos', icon: Layers },
     { to: '/marketplaces', label: 'Marketplaces', icon: Store },
-    { to: '/insumos', label: 'Insumos & Serviços', icon: Package },
     { to: '/empresas', label: 'Empresas', icon: Building2 },
     { to: '/pessoas', label: 'Pessoas', icon: CircleUserRound },
     { to: '/fornecedores', label: 'Fornecedores', icon: Truck },
@@ -277,8 +278,8 @@ export function AppLayout() {
     { to: '/contas', label: 'Contas', icon: WalletCards },
     { to: '/dizimos', label: 'Dízimos', icon: HeartHandshake },
     { to: '/categorias', label: 'Categorias', icon: Tags },
+    { to: '/composicao-produtos', label: 'Composição de Produtos', icon: Layers },
     { to: '/marketplaces', label: 'Marketplaces', icon: Store },
-    { to: '/insumos', label: 'Insumos & Serviços', icon: Package },
     { to: '/cadastros', label: 'Cadastros', icon: Building2 },
     { to: '/configuracoes', label: 'Configurações', icon: Settings },
   ]

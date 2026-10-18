@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-18T12:48:37.836Z",
+  "generatedAt": "2026-10-18T14:07:35.074Z",
   "collections": [
     {
       "name": "users",
@@ -6641,6 +6641,317 @@
         "CREATE INDEX idx_insumos_tipo ON insumos (tipo)",
         "CREATE INDEX idx_insumos_fornecedor ON insumos (fornecedor)",
         "CREATE INDEX idx_insumos_ativo ON insumos (ativo)"
+      ]
+    },
+    {
+      "name": "produtos_base",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor' || @request.auth.id != ''"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "tipo",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": [
+            "revenda",
+            "insumo",
+            "servico",
+            "embalagem",
+            "etiqueta",
+            "tecido",
+            "pintura",
+            "costura",
+            "outro"
+          ]
+        },
+        {
+          "name": "fornecedor",
+          "type": "relation",
+          "required": true,
+          "system": false,
+          "collectionRef": "fornecedores"
+        },
+        {
+          "name": "sku",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ncm",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "codigo_barras",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "unidade",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "custo_unitario",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dimensao_tipo",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["nenhuma", "2d", "3d"]
+        },
+        {
+          "name": "dimensao_largura_cm",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dimensao_altura_cm",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dimensao_comprimento_cm",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "peso_g",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "imagem",
+          "type": "file",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "origem_colecao",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "origem_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ativo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_pbase_forn ON produtos_base (fornecedor)",
+        "CREATE INDEX idx_pbase_tipo ON produtos_base (tipo)",
+        "CREATE INDEX idx_pbase_sku ON produtos_base (sku)",
+        "CREATE INDEX idx_pbase_origem ON produtos_base (origem_colecao, origem_id)"
+      ]
+    },
+    {
+      "name": "produtos",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor' || @request.auth.id != ''"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "classificacao",
+          "type": "select",
+          "required": true,
+          "system": false,
+          "selectValues": ["revenda", "fabricacao_propria"]
+        },
+        {
+          "name": "base_origem",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "produtos_base"
+        },
+        {
+          "name": "composicao",
+          "type": "json",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "empresas",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "empresas"
+        },
+        {
+          "name": "sku",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "codigo_barras",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "unidade",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "custo_aquisicao",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "custo_composicao",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "custo_total",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "custo_embalagem",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "custo_etiqueta",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "peso_g",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dimensao_comprimento_cm",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dimensao_largura_cm",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "dimensao_altura_cm",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "imagem",
+          "type": "file",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["ativo", "inativo", "rascunho"]
+        },
+        {
+          "name": "observacoes",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_prod_comp_classif ON produtos (classificacao)",
+        "CREATE INDEX idx_prod_comp_borigem ON produtos (base_origem)",
+        "CREATE INDEX idx_prod_comp_sku ON produtos (sku)",
+        "CREATE INDEX idx_prod_comp_status ON produtos (status)"
       ]
     }
   ]

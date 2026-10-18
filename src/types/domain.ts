@@ -54,6 +54,70 @@ export interface Fornecedor extends RecordModel {
   tipos?: FornecedorTipo[]
 }
 
+export type ProdutoBaseTipo =
+  | 'revenda'
+  | 'insumo'
+  | 'servico'
+  | 'embalagem'
+  | 'etiqueta'
+  | 'tecido'
+  | 'pintura'
+  | 'costura'
+  | 'outro'
+
+export interface ProdutoBaseRecord extends RecordModel {
+  nome: string
+  tipo: ProdutoBaseTipo
+  fornecedor: string
+  sku?: string
+  ncm?: string
+  codigo_barras?: string
+  unidade?: string
+  custo_unitario?: number
+  dimensao_tipo?: 'nenhuma' | '2d' | '3d'
+  dimensao_largura_cm?: number
+  dimensao_altura_cm?: number
+  dimensao_comprimento_cm?: number
+  peso_g?: number
+  imagem?: string
+  origem_colecao?: string
+  origem_id?: string
+  ativo?: boolean
+  observacoes?: string
+  expand?: {
+    fornecedor?: Fornecedor
+  }
+}
+
+export type ProdutoCompostoClassificacao = 'revenda' | 'fabricacao_propria'
+
+export interface ProdutoCompostoRecord extends RecordModel {
+  nome: string
+  classificacao: ProdutoCompostoClassificacao
+  base_origem?: string
+  composicao?: import('@/lib/precificacao/calculo').ItemComposicaoCusto[]
+  empresas?: string[]
+  sku?: string
+  codigo_barras?: string
+  unidade?: string
+  custo_aquisicao?: number
+  custo_composicao?: number
+  custo_total?: number
+  custo_embalagem?: number
+  custo_etiqueta?: number
+  peso_g?: number
+  dimensao_comprimento_cm?: number
+  dimensao_largura_cm?: number
+  dimensao_altura_cm?: number
+  imagem?: string
+  status?: 'ativo' | 'inativo' | 'rascunho'
+  observacoes?: string
+  expand?: {
+    base_origem?: ProdutoBaseRecord
+    empresas?: Empresa[]
+  }
+}
+
 export interface FornecedorProduto extends RecordModel {
   fornecedor: string
   descricao: string
