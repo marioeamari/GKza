@@ -98,7 +98,7 @@ describe('Regras Acordadas do ERP GKza — Reestruturação Produtos/Fornecedore
       },
     ] // Soma = 2*1.5 + 1*2.25 = 5.25
 
-    it('calcula custo_total para revenda somando aquisição base + composição + embalagem + etiqueta', () => {
+    it('calcula custo_total para revenda somando aquisição base + composição + embalagem + etiqueta (quando sem embalagem na composição)', () => {
       const custos = calcularCustosProdutoComposto({
         classificacao: 'revenda',
         custo_aquisicao: 42.5,
@@ -130,6 +130,49 @@ describe('Regras Acordadas do ERP GKza — Reestruturação Produtos/Fornecedore
       expect(custos.custo_etiqueta).toBe(2.0)
       // 0 + 5.25 + 4.00 + 2.00 = 11.25
       expect(custos.custo_total).toBe(11.25)
+    })
+
+    it('REGRA DE OURO CONTRA DUPLA CONTAGEM: caso real Rosto Folha (4,30 + 0,12 + 0,05 = 4,47, NUNCA 4,59)', () => {
+      // Simulação idêntica ao caso do usuário:
+      // Aquisição base = 4.30
+      // Linha 1: Saco Plastico 21x40 (0.12)
+      // Linha 2: Etiqueta de Envio (0.05)
+      // Campo legado custo_embalagem = 0.12 (ou custo_adicional_embalagem)
+      const composicaoRostoFolha: ItemComposicaoCusto[] = [
+        {
+          id: 'C0',
+          codigo: 'C0',
+          descricao: 'Saco Plastico Preto 21x40',
+          categoria_custo: 'insumo',
+          categoria_nome: 'Embalagem',
+          qtd: 1,
+          custo_unitario: 0.12,
+        },
+        {
+          id: 'C1',
+          codigo: 'C1',
+          descricao: 'Etiqueta Envio',
+          categoria_custo: 'insumo',
+          categoria_nome: 'Etiqueta',
+          qtd: 1,
+          custo_unitario: 0.05,
+        },
+      ]
+
+      const custos = calcularCustosProdutoComposto({
+        classificacao: 'revenda',
+        custo_aquisicao: 4.3,
+        composicao: composicaoRostoFolha,
+        custo_embalagem: 0.12, // Campo duplicado/legado
+        custo_etiqueta: 0,
+      })
+
+      expect(custos.custo_aquisicao).toBe(4.3)
+      expect(custos.custo_composicao).toBe(0.17) // 0.12 + 0.05
+      expect(custos.custo_embalagem).toBe(0) // Zerado porque já está na composição
+      // Custo total deve ser exatamente 4.47, NUNCA 4.59
+      expect(custos.custo_total).toBe(4.47)
+      expect(custos.custo_total).not.toBe(4.59)
     })
   })
 

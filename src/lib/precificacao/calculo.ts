@@ -709,7 +709,27 @@ export function calcularCustoBaseProduto(produto: ProdutoCalculoInput): {
     }
   }
 
-  const custo_embalagem = produto.custo_adicional_embalagem || 0
+  // Regra de Dupla Contagem: quando a composição já contém linha de embalagem,
+  // não somar novamente o campo legado custo_adicional_embalagem.
+  const temEmbalagemNaComposicao =
+    Array.isArray(produto.composicao) &&
+    produto.composicao.some((item) => {
+      const catCusto = (item.categoria_custo || '').toLowerCase()
+      const catNome = (item.categoria_nome || '').toLowerCase()
+      const desc = (item.descricao || '').toLowerCase()
+      return (
+        catCusto === 'embalagem' ||
+        catNome === 'embalagem' ||
+        catCusto.includes('embalagem') ||
+        catNome.includes('embalagem') ||
+        desc.includes('saco plastico') ||
+        desc.includes('saco plástico') ||
+        desc.includes('embalagem')
+      )
+    })
+
+  // Se já tem linha de embalagem na composição, o campo legado não é somado novamente
+  const custo_embalagem = temEmbalagemNaComposicao ? 0 : produto.custo_adicional_embalagem || 0
   const custo_etiqueta = produto.custo_etiqueta || 0
   const custo_adicional = 0
   const custo_total = round2(custo_direto + custo_embalagem + custo_etiqueta + custo_adicional)

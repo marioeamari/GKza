@@ -66,6 +66,8 @@ export interface PrecProdutoRecord {
   empresa?: string
   fornecedor?: string
   fornecedor_produto?: string
+  base_origem?: string
+  origem_id?: string
   codigo_barras?: string
   embalagem?: string
   sku_por_canal?: Array<{ canal: string; sku_externo: string }>

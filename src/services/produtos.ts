@@ -28,27 +28,51 @@ export function calcularCustosProdutoComposto(params: {
 } {
   const isRevenda = params.classificacao === 'revenda'
   const aquisicao = isRevenda ? Math.max(0, Number(params.custo_aquisicao) || 0) : 0
-  const embalagem = Math.max(0, Number(params.custo_embalagem) || 0)
   const etiqueta = Math.max(0, Number(params.custo_etiqueta) || 0)
 
   let somaComposicao = 0
+  let temLinhaEmbalagem = false
+
   if (Array.isArray(params.composicao)) {
     for (const item of params.composicao) {
       const q = Number(item.qtd) || 0
       const u = Number(item.custo_unitario) || 0
       const perda = (Number(item.perda_pct) || 0) / 100
       somaComposicao += q * (1 + perda) * u
+
+      const catCusto = (item.categoria_custo || '').toLowerCase()
+      const catNome = (item.categoria_nome || '').toLowerCase()
+      const desc = (item.descricao || '').toLowerCase()
+      if (
+        catCusto === 'embalagem' ||
+        catNome === 'embalagem' ||
+        catCusto.includes('embalagem') ||
+        catNome.includes('embalagem') ||
+        desc.includes('saco plastico') ||
+        desc.includes('saco plástico') ||
+        desc.includes('embalagem')
+      ) {
+        temLinhaEmbalagem = true
+      }
     }
   }
 
+  // Regra contra Dupla Contagem:
+  // Se a composição já inclui linha de categoria Embalagem, o custo_total NÃO deve somar
+  // novamente o campo custo_embalagem (custo_total = custo_aquisicao + custo_composicao + etiqueta).
+  // Se for legado sem linha de embalagem, o campo entra normalmente.
+  const embalagemEfetiva = temLinhaEmbalagem ? 0 : Math.max(0, Number(params.custo_embalagem) || 0)
+
   const custo_composicao = Math.round((somaComposicao + Number.EPSILON) * 100) / 100
   const custo_total =
-    Math.round((aquisicao + custo_composicao + embalagem + etiqueta + Number.EPSILON) * 100) / 100
+    Math.round(
+      (aquisicao + custo_composicao + embalagemEfetiva + etiqueta + Number.EPSILON) * 100,
+    ) / 100
 
   return {
     custo_aquisicao: aquisicao,
     custo_composicao,
-    custo_embalagem: embalagem,
+    custo_embalagem: embalagemEfetiva,
     custo_etiqueta: etiqueta,
     custo_total,
   }
@@ -185,6 +209,12 @@ export const produtosCompostosService = {
   /**
    * Sincroniza o Produto composto com `prec_produtos` (onde a Precificação lê)
    * A precificação SEMPRE lê o Produto Composto (após Composição), NUNCA o produtos_base isolado.
+   * Deduplica por:
+   * 1. origem_id = produtoId
+   * 2. base_origem = prod.base_origem
+   * 3. fornecedor_produto (quando base_origem veio de fornecedores_produtos)
+   * 4. sku exato
+   * 5. nome idêntico (quando não há outro match)
    */
   async syncComPrecificacao(produtoId: string) {
     const prod = await this.getById(produtoId)
@@ -194,23 +224,75 @@ export const produtosCompostosService = {
 
     let precExistente: any = null
     try {
-      // 1. Busca espelho pelo SKU ou por nome correspondente
-      const porSku = await pb.collection('prec_produtos').getList(1, 1, {
-        filter: `sku = "${skuDesejado.replace(/"/g, '\\"')}"`,
+      // 1. Busca por origem_id do produto composto
+      const porOrigem = await pb.collection('prec_produtos').getList(1, 1, {
+        filter: `origem_id = "${prod.id}"`,
       })
-      if (porSku.items.length > 0) {
-        precExistente = porSku.items[0]
+      if (porOrigem.items.length > 0) {
+        precExistente = porOrigem.items[0]
+      }
+
+      // 2. Busca por base_origem do produto composto
+      if (!precExistente && prod.base_origem) {
+        const porBase = await pb.collection('prec_produtos').getList(1, 1, {
+          filter: `base_origem = "${prod.base_origem}"`,
+        })
+        if (porBase.items.length > 0) {
+          precExistente = porBase.items[0]
+        }
+      }
+
+      // 3. Se base_origem veio de fornecedores_produtos, busca por fornecedor_produto (legado)
+      if (
+        !precExistente &&
+        prod.expand?.base_origem?.origem_colecao === 'fornecedores_produtos' &&
+        prod.expand.base_origem.origem_id
+      ) {
+        const porFp = await pb.collection('prec_produtos').getList(1, 1, {
+          filter: `fornecedor_produto = "${prod.expand.base_origem.origem_id}"`,
+        })
+        if (porFp.items.length > 0) {
+          precExistente = porFp.items[0]
+        }
+      }
+
+      // 4. Busca espelho pelo SKU desejado
+      if (!precExistente) {
+        const porSku = await pb.collection('prec_produtos').getList(1, 1, {
+          filter: `sku = "${skuDesejado.replace(/"/g, '\\"')}"`,
+        })
+        if (porSku.items.length > 0) {
+          precExistente = porSku.items[0]
+        }
+      }
+
+      // 5. Busca por nome idêntico
+      if (!precExistente && prod.nome) {
+        const porNome = await pb.collection('prec_produtos').getList(1, 1, {
+          filter: `nome = "${prod.nome.replace(/"/g, '\\"')}"`,
+        })
+        if (porNome.items.length > 0) {
+          precExistente = porNome.items[0]
+        }
       }
     } catch (e) {
-      console.warn('[syncComPrecificacao] Falha na consulta:', e)
+      console.warn('[syncComPrecificacao] Falha na consulta de espelho existente:', e)
     }
+
+    const custos = calcularCustosProdutoComposto({
+      classificacao: prod.classificacao,
+      custo_aquisicao: prod.custo_aquisicao,
+      composicao: prod.composicao,
+      custo_embalagem: prod.custo_embalagem,
+      custo_etiqueta: prod.custo_etiqueta,
+    })
 
     const payload: Record<string, any> = {
       nome: prod.nome,
       tipo: prod.classificacao, // 'revenda' ou 'fabricacao_propria'
       sku: skuDesejado,
       custo_aquisicao_unitario: Number(prod.custo_aquisicao) || 0,
-      custo_adicional_embalagem: Number(prod.custo_embalagem) || 0,
+      custo_adicional_embalagem: custos.custo_embalagem,
       custo_etiqueta: Number(prod.custo_etiqueta) || 0,
       unidade: prod.unidade || 'un',
       dimensao_comprimento_cm: Number(prod.dimensao_comprimento_cm) || 0,
@@ -219,6 +301,11 @@ export const produtosCompostosService = {
       peso_g: Number(prod.peso_g) || 0,
       status: prod.status || 'ativo',
       composicao: prod.composicao || [],
+      origem_id: prod.id,
+    }
+
+    if (prod.base_origem) {
+      payload.base_origem = prod.base_origem
     }
 
     // Se tiver empresa vinculada, preenche a primeira
@@ -229,6 +316,12 @@ export const produtosCompostosService = {
     // Se tiver base_origem com fornecedor, preenche
     if (prod.expand?.base_origem?.fornecedor) {
       payload.fornecedor = prod.expand.base_origem.fornecedor
+    }
+    if (
+      prod.expand?.base_origem?.origem_colecao === 'fornecedores_produtos' &&
+      prod.expand.base_origem.origem_id
+    ) {
+      payload.fornecedor_produto = prod.expand.base_origem.origem_id
     }
 
     let precSalvo: any = null

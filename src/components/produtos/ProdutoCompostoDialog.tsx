@@ -561,8 +561,12 @@ export function ProdutoCompostoDialog({
               </p>
               <span className="text-[10px] text-orange-800">
                 {classificacao === 'revenda'
-                  ? 'Aquisição Base + Composição + Embalagem'
-                  : 'Composição Fabricação + Embalagem'}
+                  ? resumoCustos.custo_embalagem === 0 && custoEmbalagem > 0
+                    ? 'Aquisição Base + Composição (já inclui embalagem)'
+                    : 'Aquisição Base + Composição + Embalagem'
+                  : resumoCustos.custo_embalagem === 0 && custoEmbalagem > 0
+                    ? 'Composição Fabricação (já inclui embalagem)'
+                    : 'Composição Fabricação + Embalagem'}
               </span>
             </div>
           </div>

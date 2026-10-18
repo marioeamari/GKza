@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-18T15:20:25.916Z",
+  "generatedAt": "2026-10-18T16:02:13.322Z",
   "collections": [
     {
       "name": "users",
@@ -3004,12 +3004,27 @@
           "type": "text",
           "required": false,
           "system": false
+        },
+        {
+          "name": "base_origem",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "produtos_base"
+        },
+        {
+          "name": "origem_id",
+          "type": "text",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [
         "CREATE UNIQUE INDEX idx_prec_prod_sku ON prec_produtos (sku)",
         "CREATE INDEX idx_prec_prod_empresa ON prec_produtos (empresa)",
-        "CREATE INDEX idx_prec_prod_status ON prec_produtos (status)"
+        "CREATE INDEX idx_prec_prod_status ON prec_produtos (status)",
+        "CREATE INDEX `idx_prec_prod_borigem` ON `prec_produtos` (base_origem)",
+        "CREATE INDEX `idx_prec_prod_origem_id` ON `prec_produtos` (origem_id)"
       ]
     },
     {

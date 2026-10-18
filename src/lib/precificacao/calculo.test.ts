@@ -68,12 +68,46 @@ describe('Motor de Cálculo de Precificação - ERP GKza', () => {
     expect(custoRevendaCompleto.custo_embalagem).toBe(1.5)
     expect(custoRevendaCompleto.custo_etiqueta).toBe(0.5)
     expect(custoRevendaCompleto.custo_total).toBe(29.0)
-    expect(custoRevendaCompleto.detalhes).toEqual(
+  })
+
+  it('(1d) caso real Rosto Folha: se composição já possui embalagem, custo_total não duplica custo_adicional_embalagem (4.30 + 0.12 + 0.05 = 4.47, nunca 4.59)', () => {
+    const custoRostoFolha = calcularCustoBaseProduto({
+      sku: 'R-Folha',
+      nome: 'Rosto Folha',
+      tipo: 'revenda',
+      custo_aquisicao_unitario: 4.3,
+      custo_adicional_embalagem: 0.12, // legado duplicado
+      custo_etiqueta: 0,
+      composicao: [
+        {
+          codigo: 'C0',
+          descricao: 'Saco Plastico Preto 21x40',
+          qtd: 1,
+          custo_unitario: 0.12,
+          categoria_nome: 'Embalagem',
+          categoria_custo: 'insumo',
+        },
+        {
+          codigo: 'C1',
+          descricao: 'Etiqueta Envio',
+          qtd: 1,
+          custo_unitario: 0.05,
+          categoria_nome: 'Etiqueta',
+          categoria_custo: 'insumo',
+        },
+      ],
+    })
+
+    // Aquisição 4.30 + Composição (0.12 + 0.05 = 0.17). Embalagem legada não duplica!
+    expect(custoRostoFolha.custo_direto).toBe(4.47)
+    expect(custoRostoFolha.custo_embalagem).toBe(0) // Dupla contagem eliminada
+    expect(custoRostoFolha.custo_total).toBe(4.47)
+    expect(custoRostoFolha.custo_total).not.toBe(4.59)
+    expect(custoRostoFolha.detalhes).toEqual(
       expect.arrayContaining([
-        'Aquisição: R$ 20.00',
-        'Composição (Caixa Especial Reforçada): Qtd 1 x R$ 2.50 = R$ 2.50',
-        'Composição (Laço de Fita Cetim): Qtd 2 x R$ 0.75 = R$ 1.50',
-        'Despesa compra (Frete proporcional): R$ 3.00',
+        'Aquisição: R$ 4.30',
+        'Composição (Saco Plastico Preto 21x40): Qtd 1 x R$ 0.12 = R$ 0.12',
+        'Composição (Etiqueta Envio): Qtd 1 x R$ 0.05 = R$ 0.05',
       ]),
     )
   })
