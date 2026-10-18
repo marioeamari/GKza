@@ -486,7 +486,7 @@ export function KitDialog({
                   <Sparkles className="h-3.5 w-3.5" />
                   Produto Base & Quantidade do Kit
                 </span>
-                {produtoBaseSelecionado && (
+                {itemPrincipalSelecionado && (
                   <span className="text-[11px] font-mono text-muted-foreground">
                     Custo un.: {formatCurrency(custoBaseUnitario)}
                   </span>
