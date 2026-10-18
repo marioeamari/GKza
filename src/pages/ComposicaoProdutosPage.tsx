@@ -63,7 +63,7 @@ export default function ComposicaoProdutosPage() {
       const [listComp, listBase, listForn, listEmp] = await Promise.all([
         produtosCompostosService.list(),
         produtosBaseService.list(),
-        fornecedoresService.list(),
+        fornecedoresService.listFornecedores(),
         pb.collection('empresas').getFullList<Empresa>({ sort: 'nome_fantasia' }),
       ])
 

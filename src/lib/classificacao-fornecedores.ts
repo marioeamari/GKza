@@ -42,14 +42,62 @@ export const FORNECEDOR_TIPOS_LISTA: FornecedorTipo[] = ['revenda', 'insumos', '
  * Normaliza os tipos de um fornecedor para um array válido.
  * Se vazio ou ausente, faz fallback seguro para ['revenda'].
  */
-export function normalizarTiposFornecedor(tipos?: string[] | null): FornecedorTipo[] {
-  if (!tipos || !Array.isArray(tipos) || tipos.length === 0) {
+export function normalizarTiposFornecedor(tipos?: string[] | string | null): FornecedorTipo[] {
+  if (!tipos) {
     return ['revenda']
   }
-  const validos = tipos.filter(
-    (t): t is FornecedorTipo => t === 'revenda' || t === 'insumos' || t === 'servicos',
-  )
+
+  let lista: string[] = []
+  if (Array.isArray(tipos)) {
+    lista = tipos
+  } else if (typeof tipos === 'string') {
+    const raw = tipos.trim()
+    if (raw.startsWith('[') && raw.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) lista = parsed.map(String)
+      } catch {
+        lista = raw.split(',')
+      }
+    } else {
+      lista = raw.split(',')
+    }
+  }
+
+  const validos = lista
+    .map((t) => t.trim())
+    .filter((t): t is FornecedorTipo => t === 'revenda' || t === 'insumos' || t === 'servicos')
   return validos.length > 0 ? validos : ['revenda']
+}
+
+export function rotuloTiposFornecedor(tipos?: string[] | string | null): string {
+  const norm = normalizarTiposFornecedor(tipos)
+  return norm.map((t) => FORNECEDOR_TIPO_CONFIG[t]?.label || t).join(', ')
+}
+
+export function fornecedorTemTipo(
+  fornecedor: { tipos?: string[] | string | null },
+  tipo: FornecedorTipo,
+): boolean {
+  return normalizarTiposFornecedor(fornecedor.tipos).includes(tipo)
+}
+
+export function fornecedorOfereceRevenda(fornecedor: {
+  tipos?: string[] | string | null
+}): boolean {
+  return fornecedorTemTipo(fornecedor, 'revenda')
+}
+
+export function fornecedorOfereceInsumos(fornecedor: {
+  tipos?: string[] | string | null
+}): boolean {
+  return fornecedorTemTipo(fornecedor, 'insumos')
+}
+
+export function fornecedorOfereceServicos(fornecedor: {
+  tipos?: string[] | string | null
+}): boolean {
+  return fornecedorTemTipo(fornecedor, 'servicos')
 }
 
 /**
@@ -100,4 +148,122 @@ export function filtrarItensParaSeletorComposicao<
     }
     return true
   })
+}
+
+/**
+ * Regra acordada do protocolo ERP GKza - Ficha do Fornecedor:
+ * Filtra produtos compostos que contenham algum item de origem do fornecedor:
+ * (a) base_origem seja de um produto base pertencente a esse fornecedor, OU
+ * (b) expand.base_origem.fornecedor seja igual ao id do fornecedor, OU
+ * (c) alguma linha da composição analítica referencie fornecedor_id do fornecedor ou insumo_id pertencente aos produtos base dele.
+ */
+export function filtrarProdutosCompostosPorFornecedor<
+  T extends {
+    base_origem?: string
+    expand?: { base_origem?: { fornecedor?: string } }
+    composicao?: Array<{ fornecedor_id?: string; insumo_id?: string }>
+  },
+>(params: {
+  compostos: T[]
+  fornecedorId: string
+  produtosBaseIdsDoFornecedor?: string[] | Set<string>
+}): T[] {
+  const { compostos, fornecedorId, produtosBaseIdsDoFornecedor } = params
+  const baseIdsSet =
+    produtosBaseIdsDoFornecedor instanceof Set
+      ? produtosBaseIdsDoFornecedor
+      : new Set(produtosBaseIdsDoFornecedor || [])
+
+  return compostos.filter((c) => {
+    if (c.base_origem && baseIdsSet.has(c.base_origem)) return true
+    if (c.expand?.base_origem?.fornecedor === fornecedorId) return true
+    if (Array.isArray(c.composicao)) {
+      return c.composicao.some(
+        (item) =>
+          item.fornecedor_id === fornecedorId || (item.insumo_id && baseIdsSet.has(item.insumo_id)),
+      )
+    }
+    return false
+  })
+}
+
+/**
+ * Função pura de transformação do backfill: fornecedores_produtos -> produtos_base (tipo revenda)
+ * Preserva sku, ncm, código de barras, dimensão, peso e custo unitário.
+ */
+export function transformarFornecedorProdutoEmProdutoBase(fp: {
+  id: string
+  descricao?: string
+  fornecedor: string
+  sku_fornecedor?: string
+  ncm?: string
+  codigo_barras?: string
+  unidade?: string
+  preco_custo_unitario?: number | string
+  preco_ultima_compra?: number | string
+  comprimento_cm?: number | string
+  largura_cm?: number | string
+  altura_cm?: number | string
+  peso_g?: number | string
+  ativo?: boolean
+  observacoes?: string
+}) {
+  const custo = Number(fp.preco_custo_unitario) || Number(fp.preco_ultima_compra) || 0
+
+  return {
+    nome: fp.descricao || 'Produto Base Revenda',
+    tipo: 'revenda' as const,
+    fornecedor: fp.fornecedor,
+    sku: fp.sku_fornecedor || '',
+    ncm: fp.ncm || '',
+    codigo_barras: fp.codigo_barras || '',
+    unidade: fp.unidade || 'un',
+    custo_unitario: custo,
+    dimensao_tipo: '3d' as const,
+    dimensao_comprimento_cm: Number(fp.comprimento_cm) || 0,
+    dimensao_largura_cm: Number(fp.largura_cm) || 0,
+    dimensao_altura_cm: Number(fp.altura_cm) || 0,
+    peso_g: Number(fp.peso_g) || 0,
+    origem_colecao: 'fornecedores_produtos',
+    origem_id: fp.id,
+    ativo: fp.ativo !== false,
+    observacoes: fp.observacoes || '',
+  }
+}
+
+/**
+ * Função pura de transformação do backfill: insumos -> produtos_base
+ * Preserva dimensões, unidade, valor unitário e tipo (insumo ou serviço).
+ */
+export function transformarInsumoEmProdutoBase(ins: {
+  id: string
+  nome?: string
+  tipo?: string
+  fornecedor: string
+  unidade?: string
+  valor_unitario?: number | string
+  dimensao_tipo?: string
+  dimensao_comprimento_cm?: number | string
+  dimensao_largura_cm?: number | string
+  dimensao_altura_cm?: number | string
+  ativo?: boolean
+  observacoes?: string
+}) {
+  const tipo = ins.tipo === 'servico' ? ('servico' as const) : ('insumo' as const)
+
+  return {
+    nome: ins.nome || 'Insumo Base',
+    tipo,
+    fornecedor: ins.fornecedor,
+    unidade: ins.unidade || 'un',
+    custo_unitario: Number(ins.valor_unitario) || 0,
+    dimensao_tipo: ins.dimensao_tipo || 'nenhuma',
+    dimensao_comprimento_cm: Number(ins.dimensao_comprimento_cm) || 0,
+    dimensao_largura_cm: Number(ins.dimensao_largura_cm) || 0,
+    dimensao_altura_cm: Number(ins.dimensao_altura_cm) || 0,
+    origem_colecao: 'insumos',
+    origem_id: ins.id,
+    ativo: ins.ativo !== false,
+    observacoes: ins.observacoes || '',
+  }
 }

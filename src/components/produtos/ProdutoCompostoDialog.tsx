@@ -36,6 +36,7 @@ interface ProdutoCompostoDialogProps {
   produtosBase: ProdutoBaseRecord[]
   empresas: Empresa[]
   onSuccess: () => void
+  readOnly?: boolean
 }
 
 export function ProdutoCompostoDialog({
@@ -45,6 +46,7 @@ export function ProdutoCompostoDialog({
   produtosBase,
   empresas,
   onSuccess,
+  readOnly = false,
 }: ProdutoCompostoDialogProps) {
   const { toast } = useToast()
   const [salvando, setSalvando] = useState(false)
@@ -256,7 +258,11 @@ export function ProdutoCompostoDialog({
             </div>
             <div>
               <DialogTitle className="text-lg">
-                {record ? 'Editar Composição do Produto' : 'Novo Produto Composto'}
+                {readOnly
+                  ? `Visualizar Produto: ${record?.nome || ''}`
+                  : record
+                    ? 'Editar Composição do Produto'
+                    : 'Novo Produto Composto'}
               </DialogTitle>
               <p className="text-xs text-muted-foreground">
                 Entidade central de precificação e catálogo comercial, com composição analítica de
@@ -274,6 +280,7 @@ export function ProdutoCompostoDialog({
               <Input
                 id="nome"
                 value={nome}
+                disabled={readOnly}
                 onChange={(e) => setNome(e.target.value)}
                 placeholder="Ex: Toalha de Banho Allure Banhão"
                 className="font-medium"
@@ -284,6 +291,7 @@ export function ProdutoCompostoDialog({
               <Label htmlFor="classificacao">Classificação *</Label>
               <Select
                 value={classificacao}
+                disabled={readOnly}
                 onValueChange={(v) => setClassificacao(v as ProdutoCompostoClassificacao)}
               >
                 <SelectTrigger id="classificacao">
@@ -315,7 +323,11 @@ export function ProdutoCompostoDialog({
                   </span>
                 )}
               </div>
-              <Select value={baseOrigemId} onValueChange={handleSelecionarBaseOrigem}>
+              <Select
+                value={baseOrigemId}
+                disabled={readOnly}
+                onValueChange={handleSelecionarBaseOrigem}
+              >
                 <SelectTrigger id="baseOrigem" className="bg-white">
                   <SelectValue placeholder="Selecione o produto base de origem..." />
                 </SelectTrigger>
@@ -359,12 +371,13 @@ export function ProdutoCompostoDialog({
                   <button
                     key={emp.id}
                     type="button"
+                    disabled={readOnly}
                     onClick={() => toggleEmpresa(emp.id)}
                     className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
                       ativo
                         ? 'bg-orange-600 text-white border-orange-600 shadow-sm'
                         : 'bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-100'
-                    }`}
+                    } ${readOnly ? 'cursor-default' : ''}`}
                   >
                     {emp.nome_fantasia || emp.razao_social}
                   </button>
@@ -398,48 +411,50 @@ export function ProdutoCompostoDialog({
               </div>
             </div>
 
-            {/* Adicionar linha de composição */}
-            <div className="flex flex-col sm:flex-row gap-2 pt-1">
-              <div className="flex-1">
-                <Select value={insumoSelecionadoId} onValueChange={setInsumoSelecionadoId}>
-                  <SelectTrigger className="text-xs">
-                    <SelectValue placeholder="Escolha um item de produtos_base (insumo, embalagem, serviço)..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {produtosBase
-                      .filter((b) => b.tipo !== 'revenda')
-                      .map((b) => (
-                        <SelectItem key={b.id} value={b.id}>
-                          {b.nome} ({b.tipo}) — {b.expand?.fornecedor?.nome_fantasia || 'Forn.'} —{' '}
-                          {formatCurrency(Number(b.custo_unitario) || 0)}/{b.unidade || 'un'}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
+            {/* Adicionar linha de composição (oculto em modo leitura) */}
+            {!readOnly && (
+              <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                <div className="flex-1">
+                  <Select value={insumoSelecionadoId} onValueChange={setInsumoSelecionadoId}>
+                    <SelectTrigger className="text-xs">
+                      <SelectValue placeholder="Escolha um item de produtos_base (insumo, embalagem, serviço)..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {produtosBase
+                        .filter((b) => b.tipo !== 'revenda')
+                        .map((b) => (
+                          <SelectItem key={b.id} value={b.id}>
+                            {b.nome} ({b.tipo}) — {b.expand?.fornecedor?.nome_fantasia || 'Forn.'} —{' '}
+                            {formatCurrency(Number(b.custo_unitario) || 0)}/{b.unidade || 'un'}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="w-24">
+                  <Input
+                    type="number"
+                    min="0.01"
+                    step="0.1"
+                    value={qtdInsumo}
+                    onChange={(e) => setQtdInsumo(Number(e.target.value))}
+                    placeholder="Qtd"
+                    className="text-xs"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={adicionarLinhaComposicao}
+                  disabled={!insumoSelecionadoId}
+                  className="gap-1 text-xs border-orange-200 text-orange-700 hover:bg-orange-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Adicionar
+                </Button>
               </div>
-              <div className="w-24">
-                <Input
-                  type="number"
-                  min="0.01"
-                  step="0.1"
-                  value={qtdInsumo}
-                  onChange={(e) => setQtdInsumo(Number(e.target.value))}
-                  placeholder="Qtd"
-                  className="text-xs"
-                />
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={adicionarLinhaComposicao}
-                disabled={!insumoSelecionadoId}
-                className="gap-1 text-xs border-orange-200 text-orange-700 hover:bg-orange-50"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Adicionar
-              </Button>
-            </div>
+            )}
 
             {/* Tabela de composição */}
             {composicao.length > 0 ? (
@@ -475,15 +490,19 @@ export function ProdutoCompostoDialog({
                             {formatCurrency(sub)}
                           </td>
                           <td className="py-2 px-2 text-center">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-red-500 hover:bg-red-50"
-                              onClick={() => removerLinhaComposicao(idx)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            {!readOnly ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-red-500 hover:bg-red-50"
+                                onClick={() => removerLinhaComposicao(idx)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </td>
                         </tr>
                       )
@@ -507,6 +526,7 @@ export function ProdutoCompostoDialog({
               <Input
                 id="custoEmb"
                 type="number"
+                disabled={readOnly}
                 step="0.01"
                 min="0"
                 value={custoEmbalagem}
@@ -522,6 +542,7 @@ export function ProdutoCompostoDialog({
               <Input
                 id="custoEti"
                 type="number"
+                disabled={readOnly}
                 step="0.01"
                 min="0"
                 value={custoEtiqueta}
@@ -555,6 +576,7 @@ export function ProdutoCompostoDialog({
               <Input
                 id="sku"
                 value={sku}
+                disabled={readOnly}
                 onChange={(e) => setSku(e.target.value)}
                 placeholder="Ex: PROD-ALLURE"
                 className="text-xs uppercase"
@@ -568,6 +590,7 @@ export function ProdutoCompostoDialog({
               <Input
                 id="peso"
                 type="number"
+                disabled={readOnly}
                 value={pesoG}
                 onChange={(e) => setPesoG(Number(e.target.value))}
                 placeholder="200"
@@ -582,18 +605,21 @@ export function ProdutoCompostoDialog({
               <div className="flex gap-1">
                 <Input
                   value={compCm}
+                  disabled={readOnly}
                   onChange={(e) => setCompCm(Number(e.target.value))}
                   placeholder="C"
                   className="text-xs px-1 text-center"
                 />
                 <Input
                   value={largCm}
+                  disabled={readOnly}
                   onChange={(e) => setLargCm(Number(e.target.value))}
                   placeholder="L"
                   className="text-xs px-1 text-center"
                 />
                 <Input
                   value={altCm}
+                  disabled={readOnly}
                   onChange={(e) => setAltCm(Number(e.target.value))}
                   placeholder="A"
                   className="text-xs px-1 text-center"
@@ -605,7 +631,7 @@ export function ProdutoCompostoDialog({
               <Label htmlFor="status" className="text-xs">
                 Status
               </Label>
-              <Select value={status} onValueChange={(v: any) => setStatus(v)}>
+              <Select value={status} disabled={readOnly} onValueChange={(v: any) => setStatus(v)}>
                 <SelectTrigger id="status" className="text-xs">
                   <SelectValue />
                 </SelectTrigger>
@@ -626,6 +652,7 @@ export function ProdutoCompostoDialog({
             <Textarea
               id="obs"
               rows={2}
+              disabled={readOnly}
               value={observacoes}
               onChange={(e) => setObservacoes(e.target.value)}
               placeholder="Notas de expedição, composição de lote ou instruções especiais..."
@@ -641,16 +668,18 @@ export function ProdutoCompostoDialog({
             onClick={() => onOpenChange(false)}
             disabled={salvando}
           >
-            Cancelar
+            {readOnly ? 'Fechar' : 'Cancelar'}
           </Button>
-          <Button
-            type="button"
-            onClick={handleSalvar}
-            disabled={salvando}
-            className="bg-[#DF5830] hover:bg-[#c94d28] text-white"
-          >
-            {salvando ? 'Salvando...' : 'Salvar Produto Composto'}
-          </Button>
+          {!readOnly && (
+            <Button
+              type="button"
+              onClick={handleSalvar}
+              disabled={salvando}
+              className="bg-[#DF5830] hover:bg-[#c94d28] text-white"
+            >
+              {salvando ? 'Salvando...' : 'Salvar Produto Composto'}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
