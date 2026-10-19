@@ -54,6 +54,7 @@ export interface ItemKitConfig {
   produto_id?: string
   nome?: string
   qtd_efetiva: number
+  perda_pct?: number
   custo_unitario?: number
 }
 
@@ -644,9 +645,9 @@ export function calcularCustoBaseProduto(produto: ProdutoCalculoInput): {
 } {
   let custo_direto = 0
   const detalhes: string[] = []
+  let temPerdaNaLinha = false
 
   if (produto.tipo === 'fabricacao_propria') {
-    let temPerdaNaLinha = false
     if (produto.composicao && produto.composicao.length > 0) {
       for (const item of produto.composicao) {
         const perdaItemPct = Number(item.perda_pct) || 0
@@ -696,10 +697,32 @@ export function calcularCustoBaseProduto(produto: ProdutoCalculoInput): {
     const rotuloTipo = produto.tipo === 'combo' ? 'combo' : 'kit'
     if (produto.kit_itens && produto.kit_itens.length > 0) {
       for (const kItem of produto.kit_itens) {
-        const itemCusto = (kItem.custo_unitario || 0) * (kItem.qtd_efetiva || 1)
+        const pItemPct = Number(kItem.perda_pct) || 0
+        if (pItemPct > 0) {
+          temPerdaNaLinha = true
+        }
+        const perda = pItemPct / 100
+        const qEf = (kItem.qtd_efetiva || 1) * (1 + perda)
+        const itemCusto = (kItem.custo_unitario || 0) * qEf
         custo_direto += itemCusto
         detalhes.push(
-          `Item ${rotuloTipo} (${kItem.nome || 'SKU'}): ${kItem.qtd_efetiva} un x R$ ${(kItem.custo_unitario || 0).toFixed(2)} = R$ ${itemCusto.toFixed(2)}`,
+          `Item ${rotuloTipo} (${kItem.nome || 'SKU'}): ${qEf.toLocaleString('pt-BR', { maximumFractionDigits: 3 })} un x R$ ${(kItem.custo_unitario || 0).toFixed(2)} = R$ ${itemCusto.toFixed(2)}`,
+        )
+      }
+    }
+    // Suporte também a composição analítica de insumos/embalagens no kit/combo
+    if (produto.composicao && produto.composicao.length > 0) {
+      for (const item of produto.composicao) {
+        const perdaItemPct = Number(item.perda_pct) || 0
+        if (perdaItemPct > 0) {
+          temPerdaNaLinha = true
+        }
+        const perda = perdaItemPct / 100
+        const qtdAjustada = item.qtd * (1 + perda)
+        const subtotal = qtdAjustada * item.custo_unitario
+        custo_direto += subtotal
+        detalhes.push(
+          `Composição (${item.descricao}): Qtd ${item.qtd} x R$ ${item.custo_unitario.toFixed(2)} = R$ ${subtotal.toFixed(2)}`,
         )
       }
     }
@@ -710,6 +733,11 @@ export function calcularCustoBaseProduto(produto: ProdutoCalculoInput): {
           `Custo adicional ${rotuloTipo} (${cad.descricao}): R$ ${(cad.valor || 0).toFixed(2)}`,
         )
       }
+    }
+    // Perda global de kit/combo: incide sobre custo direto se nenhuma linha tiver perda própria
+    if (!temPerdaNaLinha && produto.perda_pct && produto.perda_pct > 0) {
+      const fatorPerda = produto.perda_pct / 100
+      custo_direto = custo_direto * (1 + fatorPerda)
     }
   }
 

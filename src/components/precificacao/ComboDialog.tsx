@@ -47,6 +47,7 @@ import { apiFieldErrors, apiMessage } from '@/lib/api-error'
 interface ComboLinhaItem {
   produto_id: string
   quantidade: number
+  perda_pct?: number
 }
 
 interface ComboDialogProps {
@@ -93,6 +94,7 @@ export function ComboDialog({
   // Preservação de campos legados (não exibidos na UI; mantidos se já gravados)
   const [custoEmbalagemLegado, setCustoEmbalagemLegado] = useState<number>(0)
   const [custoEtiquetaLegado, setCustoEtiquetaLegado] = useState<number>(0)
+  const [perdaPctGlobal, setPerdaPctGlobal] = useState<number>(0)
 
   // Composição analítica de produtos base (insumos, embalagens, etiquetas, serviços)
   const [composicao, setComposicao] = useState<ItemComposicaoCusto[]>([])
@@ -140,14 +142,22 @@ export function ComboDialog({
   let maxLargura = 0
   let somaAlturas = 0
 
+  let temPerdaNosItensPrincipais = false
+
   const itensCalculados = itens.map((item) => {
     const opt = itensPrincipaisOpcoes.find((p) => p.id === item.produto_id)
     const custoUnit = opt?.custoUnitario || 0
-    const subtotal = custoUnit * (item.quantidade || 1)
+    const perdaItemPct = Number(item.perda_pct) || 0
+    if (perdaItemPct > 0) {
+      temPerdaNosItensPrincipais = true
+    }
+    const qtdNominal = Number(item.quantidade) || 1
+    const qtdEfetiva = qtdNominal * (1 + perdaItemPct / 100)
+    const subtotal = custoUnit * qtdEfetiva
     somaCustosComponentes += subtotal
 
     if (opt) {
-      if (opt.peso_g) somaPesos += opt.peso_g * (item.quantidade || 1)
+      if (opt.peso_g) somaPesos += opt.peso_g * qtdNominal
       if (opt.dimensao_comprimento_cm && opt.dimensao_comprimento_cm > maxComprimento) {
         maxComprimento = opt.dimensao_comprimento_cm
       }
@@ -155,7 +165,7 @@ export function ComboDialog({
         maxLargura = opt.dimensao_largura_cm
       }
       if (opt.dimensao_altura_cm) {
-        somaAlturas += opt.dimensao_altura_cm * (item.quantidade || 1)
+        somaAlturas += opt.dimensao_altura_cm * qtdNominal
       }
     }
 
@@ -163,6 +173,7 @@ export function ComboDialog({
       ...item,
       opcao: opt,
       custoUnit,
+      qtdEfetiva,
       subtotal,
     }
   })
@@ -171,11 +182,23 @@ export function ComboDialog({
   const calculoTotais = useMemo(() => {
     return calcularCustoTotalConsolidado({
       custoBaseItens: somaCustosComponentes,
+      temPerdaNosItensPrincipais,
       composicao,
       custoEmbalagemLegado,
       custoEtiquetaLegado,
+      perda_pct: perdaPctGlobal,
     })
-  }, [somaCustosComponentes, composicao, custoEmbalagemLegado, custoEtiquetaLegado])
+  }, [
+    somaCustosComponentes,
+    temPerdaNosItensPrincipais,
+    composicao,
+    custoEmbalagemLegado,
+    custoEtiquetaLegado,
+    perdaPctGlobal,
+  ])
+
+  const temPerdaPorLinha =
+    temPerdaNosItensPrincipais || composicao.some((c) => (Number(c.perda_pct) || 0) > 0)
 
   const custoTotalEstimado = calculoTotais.custoTotal
 
@@ -195,6 +218,7 @@ export function ComboDialog({
       setAlturaCm(comboParaEditar.dimensao_altura_cm)
       setCustoEmbalagemLegado(comboParaEditar.custo_adicional_embalagem || 0)
       setCustoEtiquetaLegado(comboParaEditar.custo_etiqueta || 0)
+      setPerdaPctGlobal(Number(comboParaEditar.perda_pct) || 0)
       setComposicao(comboParaEditar.composicao || [])
       setImagemFile(null)
       setRemoverImagem(false)
@@ -216,6 +240,7 @@ export function ComboDialog({
                 return {
                   produto_id: opt ? opt.id : `comp_${it.produto_id}`,
                   quantidade: it.qtd_efetiva || 1,
+                  perda_pct: Number(it.perda_pct) || 0,
                 }
               }),
             )
@@ -243,6 +268,7 @@ export function ComboDialog({
       setAlturaCm(undefined)
       setCustoEmbalagemLegado(0)
       setCustoEtiquetaLegado(0)
+      setPerdaPctGlobal(0)
       setComposicao([])
       setInsumoSelecionadoId('')
       setQtdInsumo(1)
@@ -424,6 +450,7 @@ export function ComboDialog({
         composicao,
         custo_adicional_embalagem: calculoTotais.custoEmbalagemEfetivo,
         custo_etiqueta: calculoTotais.custoEtiquetaEfetivo,
+        perda_pct: perdaPctGlobal > 0 ? perdaPctGlobal : undefined,
         empresa: '',
       }
       delete payload.imagem
@@ -466,10 +493,12 @@ export function ComboDialog({
         const opt = itensPrincipaisOpcoes.find((p) => p.id === it.produto_id)
         const rawId = opt?.rawId || it.produto_id.replace(/^(comp_|base_)/, '')
         const custoUnit = opt?.custoUnitario || 0
+        const pLinha = Number(it.perda_pct) || 0
         return {
           produto_id: rawId,
           nome: opt?.nome || 'Produto Componente',
           qtd_efetiva: it.quantidade,
+          perda_pct: pLinha > 0 ? pLinha : undefined,
           custo_unitario: custoUnit,
         }
       })
@@ -601,21 +630,41 @@ export function ComboDialog({
                       </Select>
                     </div>
 
-                    <div className="w-20">
+                    <div className="w-16">
                       <Input
                         type="number"
-                        min="1"
-                        step="1"
+                        min="0.01"
+                        step="any"
                         value={it.quantidade}
                         onChange={(e) =>
                           handleAtualizarLinha(
                             idx,
                             'quantidade',
-                            Math.max(1, parseInt(e.target.value) || 1),
+                            Math.max(0.01, parseFloat(e.target.value) || 1),
                           )
                         }
                         className="h-8 text-xs font-mono text-center"
                         title="Quantidade deste produto no combo"
+                      />
+                    </div>
+
+                    <div className="w-20">
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="any"
+                        value={it.perda_pct ?? ''}
+                        onChange={(e) =>
+                          handleAtualizarLinha(
+                            idx,
+                            'perda_pct',
+                            Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)),
+                          )
+                        }
+                        placeholder="0%"
+                        className="h-8 text-xs font-mono text-center"
+                        title="% de Perda neste produto"
                       />
                     </div>
 
@@ -702,12 +751,12 @@ export function ComboDialog({
                   <Input
                     type="number"
                     min="0.01"
-                    step="0.1"
+                    step="any"
                     value={qtdInsumo}
-                    onChange={(e) => setQtdInsumo(Number(e.target.value))}
+                    onChange={(e) => setQtdInsumo(parseFloat(e.target.value) || 0)}
                     placeholder="Qtd"
                     title="Quantidade"
-                    className="text-xs"
+                    className="text-xs font-mono"
                   />
                 </div>
                 <div className="w-24">
@@ -715,12 +764,12 @@ export function ComboDialog({
                     type="number"
                     min="0"
                     max="100"
-                    step="0.1"
+                    step="any"
                     value={perdaInsumo || ''}
-                    onChange={(e) => setPerdaInsumo(Number(e.target.value))}
+                    onChange={(e) => setPerdaInsumo(parseFloat(e.target.value) || 0)}
                     placeholder="Perda %"
                     title="% de Perda da Linha (ex: 10 para 10%)"
-                    className="text-xs"
+                    className="text-xs font-mono text-center"
                   />
                 </div>
                 <Button
@@ -774,7 +823,7 @@ export function ComboDialog({
                                 type="number"
                                 min="0"
                                 max="100"
-                                step="0.1"
+                                step="any"
                                 value={item.perda_pct ?? ''}
                                 onChange={(e) =>
                                   handleAtualizarPerdaLinha(idx, parseFloat(e.target.value) || 0)
@@ -818,6 +867,46 @@ export function ComboDialog({
                   Nenhum item adicional inserido na composição (opcional).
                 </p>
               )}
+
+              {/* Campo % de Perda GLOBAL do Combo */}
+              <div className="pt-2 border-t border-neutral-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-neutral-50/70 p-3 rounded-lg">
+                <div className="space-y-0.5">
+                  <Label
+                    htmlFor="perdaGlobalCombo"
+                    className="text-xs font-semibold text-neutral-800"
+                  >
+                    % de Perda Global do Combo (Opcional)
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    {temPerdaPorLinha ? (
+                      <span className="text-amber-700 font-medium">
+                        ⚠ Inativa: há linha(s) com perda própria. A perda informada na linha tem
+                        prioridade e anula a global.
+                      </span>
+                    ) : (
+                      'Incide sobre o custo direto total se nenhuma linha (componente ou composição) tiver perda própria informada.'
+                    )}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Input
+                    id="perdaGlobalCombo"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="any"
+                    value={perdaPctGlobal || ''}
+                    onChange={(e) =>
+                      setPerdaPctGlobal(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))
+                    }
+                    placeholder="0"
+                    className={`w-24 text-xs font-mono text-center ${
+                      temPerdaPorLinha ? 'opacity-60 bg-neutral-100 line-through' : 'bg-white'
+                    }`}
+                  />
+                  <span className="text-xs text-neutral-600 font-medium">%</span>
+                </div>
+              </div>
             </div>
 
             {/* Imagem do Combo */}

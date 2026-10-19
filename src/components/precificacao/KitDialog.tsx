@@ -86,6 +86,10 @@ export function KitDialog({
   const [custoEmbalagemLegado, setCustoEmbalagemLegado] = useState<number>(0)
   const [custoEtiquetaLegado, setCustoEtiquetaLegado] = useState<number>(0)
 
+  // Perda do Item Principal e Perda Global do Kit
+  const [perdaItemPrincipal, setPerdaItemPrincipal] = useState<number>(0)
+  const [perdaPctGlobal, setPerdaPctGlobal] = useState<number>(0)
+
   // Composição analítica de produtos base (insumos, embalagens, etiquetas, etc.)
   const [composicao, setComposicao] = useState<ItemComposicaoCusto[]>([])
   const [insumoSelecionadoId, setInsumoSelecionadoId] = useState<string>('')
@@ -126,18 +130,31 @@ export function KitDialog({
 
   const itemPrincipalSelecionado = itensPrincipaisOpcoes.find((p) => p.id === itemPrincipalId)
   const custoBaseUnitario = itemPrincipalSelecionado?.custoUnitario || 0
-  const custoComponentesTotal = custoBaseUnitario * (quantidade || 1)
 
-  // Cálculo auditado do custo total (componentes + linhas analíticas + campos legados retrocompatíveis)
+  // Cálculo auditado do custo total (componentes + linhas analíticas + campos legados retrocompatíveis + perdas)
   const calculoTotais = useMemo(() => {
     return calcularCustoTotalKit({
       custoComponenteUnitario: custoBaseUnitario,
       quantidadeComponente: quantidade,
+      perdaComponente: perdaItemPrincipal,
       composicao,
       custoEmbalagemLegado,
       custoEtiquetaLegado,
+      perda_pct: perdaPctGlobal,
     })
-  }, [custoBaseUnitario, quantidade, composicao, custoEmbalagemLegado, custoEtiquetaLegado])
+  }, [
+    custoBaseUnitario,
+    quantidade,
+    perdaItemPrincipal,
+    composicao,
+    custoEmbalagemLegado,
+    custoEtiquetaLegado,
+    perdaPctGlobal,
+  ])
+
+  const custoComponentesTotal = calculoTotais.custoComponentes
+  const temPerdaPorLinha =
+    perdaItemPrincipal > 0 || composicao.some((c) => (Number(c.perda_pct) || 0) > 0)
 
   const custoFinalEstimado = calculoTotais.custoTotal
 
@@ -157,6 +174,7 @@ export function KitDialog({
       setAlturaCm(kitParaEditar.dimensao_altura_cm)
       setCustoEmbalagemLegado(kitParaEditar.custo_adicional_embalagem || 0)
       setCustoEtiquetaLegado(kitParaEditar.custo_etiqueta || 0)
+      setPerdaPctGlobal(Number(kitParaEditar.perda_pct) || 0)
       setComposicao(kitParaEditar.composicao || [])
       setImagemFile(null)
       setRemoverImagem(false)
@@ -183,8 +201,10 @@ export function KitDialog({
               setItemPrincipalId(`comp_${rawId}`)
             }
             setQuantidade(primeiroItem.qtd_efetiva || kitParaEditar.qtd_por_kit || 2)
+            setPerdaItemPrincipal(Number(primeiroItem.perda_pct) || 0)
           } else {
             setQuantidade(kitParaEditar.qtd_por_kit || 2)
+            setPerdaItemPrincipal(0)
           }
         })
     } else {
@@ -192,6 +212,8 @@ export function KitDialog({
       setItemPrincipalId('')
       setBuscaProdText('')
       setQuantidade(2)
+      setPerdaItemPrincipal(0)
+      setPerdaPctGlobal(0)
       setNome('')
       setSku('')
       setMarca('')
@@ -206,6 +228,7 @@ export function KitDialog({
       setComposicao([])
       setInsumoSelecionadoId('')
       setQtdInsumo(1)
+      setPerdaInsumo(0)
       setImagemFile(null)
       setImagemPreview(null)
       setRemoverImagem(false)
@@ -388,6 +411,7 @@ export function KitDialog({
         custo_adicional_embalagem: calculoTotais.custoEmbalagemEfetivo,
         custo_etiqueta: calculoTotais.custoEtiquetaEfetivo,
         qtd_por_kit: quantidade,
+        perda_pct: perdaPctGlobal > 0 ? perdaPctGlobal : undefined,
         empresa: itemPrincipalSelecionado?.empresa,
       }
       delete payload.imagem
@@ -430,6 +454,7 @@ export function KitDialog({
         produto_id: itemPrincipalSelecionado.rawId,
         nome: itemPrincipalSelecionado.nome,
         qtd_efetiva: quantidade,
+        perda_pct: perdaItemPrincipal > 0 ? perdaItemPrincipal : undefined,
         custo_unitario: custoBaseUnitario,
       }
       await precificacaoService.saveKit(savedRecord.id, [itemKit], [])
@@ -543,26 +568,60 @@ export function KitDialog({
                   </Select>
                 </div>
 
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold">Qtd no Kit *</Label>
-                  <Input
-                    type="number"
-                    min="2"
-                    step="1"
-                    required
-                    value={quantidade}
-                    onChange={(e) => handleQuantidadeChange(parseInt(e.target.value) || 2)}
-                    className="font-bold text-sm bg-white"
-                  />
-                  <span className="text-[10px] text-muted-foreground">Mínimo 2 unidades</span>
+                <div className="grid grid-cols-2 gap-2 sm:w-56">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Qtd no Kit *</Label>
+                    <Input
+                      type="number"
+                      min="0.01"
+                      step="any"
+                      required
+                      value={quantidade}
+                      onChange={(e) => handleQuantidadeChange(parseFloat(e.target.value) || 2)}
+                      className="font-bold text-sm bg-white font-mono"
+                    />
+                    <span className="text-[10px] text-muted-foreground">Mínimo 2 un</span>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Perda (%)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="any"
+                      value={perdaItemPrincipal || ''}
+                      onChange={(e) =>
+                        setPerdaItemPrincipal(
+                          Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)),
+                        )
+                      }
+                      placeholder="0"
+                      title="% de Perda no item principal (ex: 20 para 1 defeituoso em 5)"
+                      className="font-mono text-sm bg-white text-center"
+                    />
+                    <span className="text-[10px] text-muted-foreground">Perda da linha</span>
+                  </div>
                 </div>
               </div>
-              {/* Custo em tempo real */}
+              {/* Custo e Qtd Efetiva em tempo real */}
               {itemPrincipalSelecionado && (
-                <div className="p-2.5 rounded-xl bg-white/80 border border-primary/20 flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">
-                    Custo dos componentes ({quantidade} un × {formatCurrency(custoBaseUnitario)}):
-                  </span>
+                <div className="p-2.5 rounded-xl bg-white/80 border border-primary/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1">
+                  <div className="text-xs text-muted-foreground">
+                    <span>
+                      Custo dos componentes: {quantidade} un
+                      {perdaItemPrincipal > 0 && (
+                        <span className="font-semibold text-neutral-800">
+                          {' '}
+                          (+{perdaItemPrincipal}% perda ={' '}
+                          {calculoTotais.quantidadeEfetiva.toLocaleString('pt-BR', {
+                            maximumFractionDigits: 3,
+                          })}{' '}
+                          un efetivas)
+                        </span>
+                      )}{' '}
+                      × {formatCurrency(custoBaseUnitario)}
+                    </span>
+                  </div>
                   <span className="font-bold font-mono text-primary text-sm">
                     {formatCurrency(custoComponentesTotal)}
                   </span>
@@ -613,12 +672,12 @@ export function KitDialog({
                   <Input
                     type="number"
                     min="0.01"
-                    step="0.1"
+                    step="any"
                     value={qtdInsumo}
-                    onChange={(e) => setQtdInsumo(Number(e.target.value))}
+                    onChange={(e) => setQtdInsumo(parseFloat(e.target.value) || 0)}
                     placeholder="Qtd"
                     title="Quantidade"
-                    className="text-xs"
+                    className="text-xs font-mono"
                   />
                 </div>
                 <div className="w-24">
@@ -626,12 +685,12 @@ export function KitDialog({
                     type="number"
                     min="0"
                     max="100"
-                    step="0.1"
+                    step="any"
                     value={perdaInsumo || ''}
-                    onChange={(e) => setPerdaInsumo(Number(e.target.value))}
+                    onChange={(e) => setPerdaInsumo(parseFloat(e.target.value) || 0)}
                     placeholder="Perda %"
                     title="% de Perda da Linha (ex: 10 para 10%)"
-                    className="text-xs"
+                    className="text-xs font-mono text-center"
                   />
                 </div>
                 <Button
@@ -685,7 +744,7 @@ export function KitDialog({
                                 type="number"
                                 min="0"
                                 max="100"
-                                step="0.1"
+                                step="any"
                                 value={item.perda_pct ?? ''}
                                 onChange={(e) =>
                                   handleAtualizarPerdaLinha(idx, parseFloat(e.target.value) || 0)
@@ -729,6 +788,46 @@ export function KitDialog({
                   Nenhum item adicional inserido na composição (opcional).
                 </p>
               )}
+
+              {/* Campo % de Perda GLOBAL do Kit */}
+              <div className="pt-2 border-t border-neutral-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-neutral-50/70 p-3 rounded-lg">
+                <div className="space-y-0.5">
+                  <Label
+                    htmlFor="perdaGlobalKit"
+                    className="text-xs font-semibold text-neutral-800"
+                  >
+                    % de Perda Global do Kit (Opcional)
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    {temPerdaPorLinha ? (
+                      <span className="text-amber-700 font-medium">
+                        ⚠ Inativa: há linha(s) com perda própria. A perda informada na linha tem
+                        prioridade e anula a global.
+                      </span>
+                    ) : (
+                      'Incide sobre o custo direto total se nenhuma linha (componente ou composição) tiver perda própria informada.'
+                    )}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Input
+                    id="perdaGlobalKit"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="any"
+                    value={perdaPctGlobal || ''}
+                    onChange={(e) =>
+                      setPerdaPctGlobal(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))
+                    }
+                    placeholder="0"
+                    className={`w-24 text-xs font-mono text-center ${
+                      temPerdaPorLinha ? 'opacity-60 bg-neutral-100 line-through' : 'bg-white'
+                    }`}
+                  />
+                  <span className="text-xs text-neutral-600 font-medium">%</span>
+                </div>
+              </div>
             </div>
 
             {/* Imagem do Kit */}

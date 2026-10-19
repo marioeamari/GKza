@@ -174,37 +174,50 @@ export function temLinhaEmbalagemNaComposicao(composicao?: ItemComposicaoCusto[]
 export function calcularCustoTotalKit(params: {
   custoComponenteUnitario: number
   quantidadeComponente: number
+  perdaComponente?: number
   composicao?: ItemComposicaoCusto[]
   custoEmbalagemLegado?: number
   custoEtiquetaLegado?: number
   perda_pct?: number
 }): {
   custoComponentes: number
+  quantidadeEfetiva: number
   custoComposicao: number
   custoEmbalagemEfetivo: number
   custoEtiquetaEfetivo: number
   custoTotal: number
 } {
-  const custoComponentes =
-    Math.max(0, params.custoComponenteUnitario) * Math.max(1, params.quantidadeComponente)
-  return calcularCustoTotalConsolidado({
+  const qNominal = Math.max(0.01, Number(params.quantidadeComponente) || 1)
+  const perdaCompPct = Math.max(0, Number(params.perdaComponente) || 0)
+  const qEfetiva = qNominal * (1 + perdaCompPct / 100)
+  const custoComponentes = Math.max(0, params.custoComponenteUnitario) * qEfetiva
+
+  const res = calcularCustoTotalConsolidado({
     custoBaseItens: custoComponentes,
+    temPerdaNosItensPrincipais: perdaCompPct > 0,
     composicao: params.composicao,
     custoEmbalagemLegado: params.custoEmbalagemLegado,
     custoEtiquetaLegado: params.custoEtiquetaLegado,
     perda_pct: params.perda_pct,
   })
+
+  return {
+    ...res,
+    quantidadeEfetiva: qEfetiva,
+  }
 }
 
 /**
  * Calcula o custo consolidado para Combo ou Kit:
- * = soma dos componentes principais
- * + soma das linhas da composição analítica
+ * = soma dos componentes principais (com perda por linha se houver)
+ * + soma das linhas da composição analítica (com perda por linha se houver)
+ * + perda global sobre o custo direto total (se nenhuma linha tiver perda própria)
  * + custo de embalagem legado (zerado se composição já contiver embalagem)
  * + custo de etiqueta legado
  */
 export function calcularCustoTotalConsolidado(params: {
   custoBaseItens: number
+  temPerdaNosItensPrincipais?: boolean
   composicao?: ItemComposicaoCusto[]
   custoEmbalagemLegado?: number
   custoEtiquetaLegado?: number
@@ -219,24 +232,28 @@ export function calcularCustoTotalConsolidado(params: {
   const custoComponentes = Math.max(0, params.custoBaseItens)
 
   let somaLinhas = 0
-  let temPerdaNaLinha = false
+  let temPerdaNaComposicao = false
   if (Array.isArray(params.composicao)) {
     for (const item of params.composicao) {
       const q = Number(item.qtd) || 0
       const u = Number(item.custo_unitario) || 0
       const perdaItemPct = Number(item.perda_pct) || 0
       if (perdaItemPct > 0) {
-        temPerdaNaLinha = true
+        temPerdaNaComposicao = true
       }
       const perda = perdaItemPct / 100
       somaLinhas += q * (1 + perda) * u
     }
   }
 
-  // Precedência da linha: perda global só incide se nenhuma linha tiver perda própria
+  const temPerdaNaLinha = Boolean(params.temPerdaNosItensPrincipais) || temPerdaNaComposicao
+
+  // Precedência da linha: perda global só incide se NENHUMA linha tiver perda própria.
+  // Aplica sobre o custo direto total (componentes + linhas analíticas).
   const perdaGlobalPct = Number(params.perda_pct) || 0
+  let custoDiretoTotal = custoComponentes + somaLinhas
   if (!temPerdaNaLinha && perdaGlobalPct > 0) {
-    somaLinhas = somaLinhas * (1 + perdaGlobalPct / 100)
+    custoDiretoTotal = custoDiretoTotal * (1 + perdaGlobalPct / 100)
   }
 
   const temEmb = temLinhaEmbalagemNaComposicao(params.composicao)
@@ -246,12 +263,7 @@ export function calcularCustoTotalConsolidado(params: {
   const custoComposicao = Math.round((somaLinhas + Number.EPSILON) * 100) / 100
   const custoTotal =
     Math.round(
-      (custoComponentes +
-        custoComposicao +
-        custoEmbalagemEfetivo +
-        custoEtiquetaEfetivo +
-        Number.EPSILON) *
-        100,
+      (custoDiretoTotal + custoEmbalagemEfetivo + custoEtiquetaEfetivo + Number.EPSILON) * 100,
     ) / 100
 
   return {

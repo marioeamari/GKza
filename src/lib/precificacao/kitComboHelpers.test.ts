@@ -242,5 +242,109 @@ describe('kitComboHelpers - Regras de Composição de Kits e Combos', () => {
       expect(res.custoComposicao).toBeCloseTo(11.0, 2)
       expect(res.custoTotal).toBeCloseTo(61.0, 2)
     })
+
+    // (D) Testes que travam as novas regras solicitadas pelo usuário:
+    // 1. Kit sem perda = custo igual ao atual (regressão zero)
+    it('Regra D1: kit sem perda = custo igual ao atual (regressão zero)', () => {
+      const res = calcularCustoTotalKit({
+        custoComponenteUnitario: 15,
+        quantidadeComponente: 2,
+        composicao: [
+          {
+            id: 'C1',
+            descricao: 'Caixa',
+            qtd: 1,
+            custo_unitario: 3,
+            categoria_custo: 'embalagem',
+          },
+        ],
+      })
+
+      expect(res.custoComponentes).toBe(30)
+      expect(res.quantidadeEfetiva).toBe(2)
+      expect(res.custoComposicao).toBe(3)
+      expect(res.custoTotal).toBe(33)
+    })
+
+    // 2. Kit com perda global 10% sem perda por linha = custo direto × 1,10
+    it('Regra D2: kit com perda global 10% sem perda por linha = custo direto x 1,10', () => {
+      // Componentes: 2 un a R$ 20 = R$ 40
+      // Composição: 1 un a R$ 10 = R$ 10
+      // Custo direto total = 50 -> com perda global 10% = 55
+      const res = calcularCustoTotalKit({
+        custoComponenteUnitario: 20,
+        quantidadeComponente: 2,
+        perdaComponente: 0,
+        composicao: [
+          {
+            id: 'C1',
+            descricao: 'Insumo',
+            qtd: 1,
+            custo_unitario: 10,
+            categoria_custo: 'insumo',
+          },
+        ],
+        perda_pct: 10,
+      })
+
+      expect(res.custoComponentes).toBe(40)
+      expect(res.custoComposicao).toBe(10)
+      expect(res.custoTotal).toBe(55) // 50 * 1.10
+    })
+
+    // 3. Item principal 5 un com perda 20% = 6 un efetivas
+    it('Regra D3: item principal 5 un com perda 20% = 6 un efetivas (ex: 5 panos com 1 defeituoso)', () => {
+      // 5 un * (1 + 20/100) = 6 un efetivas
+      // Unitário R$ 10 -> custo dos componentes = 6 * 10 = 60
+      const res = calcularCustoTotalKit({
+        custoComponenteUnitario: 10,
+        quantidadeComponente: 5,
+        perdaComponente: 20,
+      })
+
+      expect(res.quantidadeEfetiva).toBe(6)
+      expect(res.custoComponentes).toBe(60)
+      expect(res.custoTotal).toBe(60)
+    })
+
+    // 4. Perda da linha vence a perda global (não multiplicar em cascata)
+    it('Regra D4: perda da linha vence a global no kit (não multiplica em cascata)', () => {
+      // Componente principal tem perda 20% (5 un -> 6 un efetivas a R$ 10 = R$ 60)
+      // Perda global de 10% informada no Kit -> DEVE FICAR INATIVA porque a linha tem perda
+      const res = calcularCustoTotalKit({
+        custoComponenteUnitario: 10,
+        quantidadeComponente: 5,
+        perdaComponente: 20,
+        perda_pct: 10, // global deve ser anulada
+      })
+
+      expect(res.quantidadeEfetiva).toBe(6)
+      expect(res.custoComponentes).toBe(60)
+      expect(res.custoTotal).toBe(60) // Se tivesse cascata seria 60 * 1.10 = 66
+    })
+
+    it('Regra D4b: perda na linha da composição analítica anula a perda global do kit', () => {
+      // Componentes: 2 un a R$ 20 = 40 (sem perda)
+      // Composição: 1 un a R$ 10 com 10% de perda = 1.1 * 10 = 11
+      // Perda global de 15% -> deve ser anulada porque a composição tem perda própria
+      const res = calcularCustoTotalKit({
+        custoComponenteUnitario: 20,
+        quantidadeComponente: 2,
+        composicao: [
+          {
+            id: 'C1',
+            descricao: 'Fita',
+            qtd: 1,
+            custo_unitario: 10,
+            perda_pct: 10,
+          },
+        ],
+        perda_pct: 15, // global inativa
+      })
+
+      expect(res.custoComponentes).toBe(40)
+      expect(res.custoComposicao).toBe(11)
+      expect(res.custoTotal).toBe(51) // 40 + 11 (sem cascata de 15%)
+    })
   })
 })

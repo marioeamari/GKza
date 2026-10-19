@@ -1081,5 +1081,66 @@ describe('Motor de Cálculo de Precificação - ERP GKza', () => {
       const res = calcularCustoBaseProduto(produto)
       expect(res.custo_direto).toBe(35) // 2*15 + 1*5 = 35
     })
+
+    // Caso 6: Kit com perda no item principal (5 un com perda 20% = 6 un efetivas)
+    it('Caso 6: Kit com perda no item principal (5 un com perda 20% -> 6 un efetivas)', () => {
+      const kit = {
+        sku: 'KIT-5-PANOS',
+        nome: 'Kit 5 Panos',
+        tipo: 'kit' as const,
+        kit_itens: [
+          {
+            produto_id: 'prod_pano',
+            nome: 'Pano Microfibra',
+            qtd_efetiva: 5,
+            perda_pct: 20, // 5 * 1.20 = 6 un efetivas
+            custo_unitario: 10,
+          },
+        ],
+      }
+      const res = calcularCustoBaseProduto(kit)
+      expect(res.custo_direto).toBe(60) // 6 * 10 = 60
+    })
+
+    // Caso 7: Kit com perda global 10% sem perda por linha
+    it('Caso 7: Kit com perda global 10% sem perda por linha -> custo direto x 1,10', () => {
+      const kit = {
+        sku: 'KIT-2-TOALHAS',
+        nome: 'Kit 2 Toalhas',
+        tipo: 'kit' as const,
+        perda_pct: 10,
+        kit_itens: [
+          {
+            produto_id: 'prod_toalha',
+            nome: 'Toalha',
+            qtd_efetiva: 2,
+            custo_unitario: 25, // 50
+          },
+        ],
+      }
+      const res = calcularCustoBaseProduto(kit)
+      expect(res.custo_direto).toBe(55) // 50 * 1.10 = 55
+    })
+
+    // Caso 8: Kit com perda na linha vence a perda global
+    it('Caso 8: Kit com perda na linha anula a perda global', () => {
+      const kit = {
+        sku: 'KIT-5-PANOS-GLOBAL',
+        nome: 'Kit 5 Panos Global',
+        tipo: 'kit' as const,
+        perda_pct: 15, // global deve ser anulada
+        kit_itens: [
+          {
+            produto_id: 'prod_pano',
+            nome: 'Pano Microfibra',
+            qtd_efetiva: 5,
+            perda_pct: 20, // 6 un a 10 = 60
+            custo_unitario: 10,
+          },
+        ],
+      }
+      const res = calcularCustoBaseProduto(kit)
+      expect(res.custo_direto).toBe(60) // Sem cascata com 15%
+    })
   })
 })

@@ -460,12 +460,12 @@ export function ProdutoCompostoDialog({
                   <Input
                     type="number"
                     min="0.01"
-                    step="0.1"
+                    step="any"
                     value={qtdInsumo}
-                    onChange={(e) => setQtdInsumo(Number(e.target.value))}
+                    onChange={(e) => setQtdInsumo(parseFloat(e.target.value) || 0)}
                     placeholder="Qtd"
                     title="Quantidade"
-                    className="text-xs"
+                    className="text-xs font-mono"
                   />
                 </div>
                 <div className="w-24">
@@ -473,12 +473,12 @@ export function ProdutoCompostoDialog({
                     type="number"
                     min="0"
                     max="100"
-                    step="0.1"
+                    step="any"
                     value={perdaInsumo || ''}
-                    onChange={(e) => setPerdaInsumo(Number(e.target.value))}
+                    onChange={(e) => setPerdaInsumo(parseFloat(e.target.value) || 0)}
                     placeholder="Perda %"
                     title="% de Perda da Linha (ex: 10 para 10%)"
-                    className="text-xs"
+                    className="text-xs font-mono text-center"
                   />
                 </div>
                 <Button
@@ -535,7 +535,7 @@ export function ProdutoCompostoDialog({
                                 type="number"
                                 min="0"
                                 max="100"
-                                step="0.1"
+                                step="any"
                                 value={item.perda_pct ?? ''}
                                 onChange={(e) =>
                                   handleAtualizarPerdaLinha(idx, parseFloat(e.target.value) || 0)
@@ -612,10 +612,12 @@ export function ProdutoCompostoDialog({
                   type="number"
                   min="0"
                   max="100"
-                  step="0.1"
+                  step="any"
                   disabled={readOnly}
                   value={perdaPctGlobal || ''}
-                  onChange={(e) => setPerdaPctGlobal(Number(e.target.value))}
+                  onChange={(e) =>
+                    setPerdaPctGlobal(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))
+                  }
                   placeholder="0"
                   className={`w-24 text-xs font-mono text-center ${
                     temPerdaNaComposicao ? 'opacity-60 bg-neutral-100 line-through' : 'bg-white'
