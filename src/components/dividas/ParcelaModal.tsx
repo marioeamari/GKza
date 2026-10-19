@@ -54,12 +54,20 @@ export function ParcelaModal({
     parcelaParaEditar ? parcelaParaEditar.status : 'pendente',
   )
   const [dataPagamento, setDataPagamento] = useState<string>(
-    parcelaParaEditar?.data_pagamento ? parcelaParaEditar.data_pagamento.slice(0, 10) : '',
+    parcelaParaEditar?.data_pagamento
+      ? parcelaParaEditar.data_pagamento.slice(0, 10)
+      : parcelaParaEditar?.data_vencimento
+        ? parcelaParaEditar.data_vencimento.slice(0, 10)
+        : getLocalDateStr(),
   )
   const [valorPago, setValorPago] = useState<string>(
-    parcelaParaEditar?.valor_pago !== undefined && parcelaParaEditar?.valor_pago !== null
+    parcelaParaEditar?.valor_pago !== undefined &&
+      parcelaParaEditar?.valor_pago !== null &&
+      parcelaParaEditar.valor_pago > 0
       ? String(parcelaParaEditar.valor_pago)
-      : '',
+      : parcelaParaEditar?.valor
+        ? String(parcelaParaEditar.valor)
+        : '',
   )
   const [observacoes, setObservacoes] = useState(parcelaParaEditar?.observacoes || '')
 
@@ -84,7 +92,12 @@ export function ParcelaModal({
           valor: valNum,
           status,
           data_pagamento: status === 'paga' ? dataPagamento || dataVencimento : undefined,
-          valor_pago: status === 'paga' ? (valorPago ? Number(valorPago) : valNum) : undefined,
+          valor_pago:
+            status === 'paga'
+              ? valorPago && Number(valorPago) > 0
+                ? Number(valorPago)
+                : valNum
+              : undefined,
           observacoes: observacoes.trim() || undefined,
         })
         toast({ title: 'Parcela atualizada com sucesso!' })
@@ -96,7 +109,12 @@ export function ParcelaModal({
           valor: valNum,
           status,
           data_pagamento: status === 'paga' ? dataPagamento || dataVencimento : undefined,
-          valor_pago: status === 'paga' ? (valorPago ? Number(valorPago) : valNum) : undefined,
+          valor_pago:
+            status === 'paga'
+              ? valorPago && Number(valorPago) > 0
+                ? Number(valorPago)
+                : valNum
+              : undefined,
           observacoes: observacoes.trim() || undefined,
         })
         toast({ title: 'Parcela adicionada com sucesso!' })

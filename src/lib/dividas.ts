@@ -274,7 +274,11 @@ export function calcularResumoDivida(
   for (const p of parcelasOrdenadas) {
     if (p.status === 'paga') {
       parcelasPagas++
-      const pago = p.valor_pago !== undefined && p.valor_pago !== null ? p.valor_pago : p.valor
+      // Parcela paga deve considerar valor_pago se > 0; se estiver 0 ou nulo, aplica fallback seguro para o valor previsto
+      const pago =
+        p.valor_pago !== undefined && p.valor_pago !== null && p.valor_pago > 0
+          ? p.valor_pago
+          : p.valor
       totalPago += pago
     } else {
       const isAtrasada = p.status === 'atrasada' || p.data_vencimento < hojeIso
@@ -326,7 +330,7 @@ export function calcularCronogramaComSaldo(
 
   for (const p of ordenadas) {
     const abatimento =
-      p.status === 'paga' && p.valor_pago !== undefined && p.valor_pago !== null
+      p.status === 'paga' && p.valor_pago !== undefined && p.valor_pago !== null && p.valor_pago > 0
         ? p.valor_pago
         : p.valor
     saldo = arredondarMoeda(Math.max(0, saldo - abatimento))
@@ -493,7 +497,10 @@ export function calcularPaybackMaquina(
       .filter((p) => p.status === 'paga')
       .reduce(
         (acc, p) =>
-          acc + (p.valor_pago !== undefined && p.valor_pago !== null ? p.valor_pago : p.valor),
+          acc +
+          (p.valor_pago !== undefined && p.valor_pago !== null && p.valor_pago > 0
+            ? p.valor_pago
+            : p.valor),
         0,
       ),
   )
@@ -587,7 +594,10 @@ export function projetarCaixaPorMaquina(
       .filter((p) => p.status === 'paga')
       .reduce(
         (acc, p) =>
-          acc + (p.valor_pago !== undefined && p.valor_pago !== null ? p.valor_pago : p.valor),
+          acc +
+          (p.valor_pago !== undefined && p.valor_pago !== null && p.valor_pago > 0
+            ? p.valor_pago
+            : p.valor),
         0,
       ),
   )
@@ -959,8 +969,13 @@ export function calcularTotalMensalPrevisto(params: {
         const val = arredondarMoeda(p.valor || 0)
         totalParcelasMes += val
 
+        const valorPagoEfetivo =
+          isPaga && p.valor_pago !== undefined && p.valor_pago !== null && p.valor_pago > 0
+            ? p.valor_pago
+            : val
+
         if (isPaga) {
-          totalParcelasPagas += val
+          totalParcelasPagas += valorPagoEfetivo
           countParcelasPagas += 1
         } else {
           totalParcelasAberto += val
@@ -976,7 +991,7 @@ export function calcularTotalMensalPrevisto(params: {
           valor: val,
           status: p.status,
           paga: isPaga,
-          valor_pago: p.valor_pago,
+          valor_pago: isPaga ? valorPagoEfetivo : p.valor_pago,
           data_pagamento: p.data_pagamento,
         })
       }

@@ -26,6 +26,16 @@ import { dividasService } from '@/services/dividas'
 import { toast } from '@/hooks/use-toast'
 import { ParcelaModal } from './ParcelaModal'
 import { RenegociacaoModal } from './RenegociacaoModal'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 interface CronogramaParcelasProps {
   divida: DividaRecord
@@ -41,22 +51,72 @@ export function CronogramaParcelas({ divida, parcelas, onRefresh }: CronogramaPa
 
   const cronogramaComSaldo = calcularCronogramaComSaldo(divida.valor_total, parcelas)
 
+  // Estado para diálogo de confirmação de pagamento manual com data e valor
+  const [parcelaParaPagar, setParcelaParaPagar] = useState<ParcelaRecord | null>(null)
+  const [dataPagamentoManual, setDataPagamentoManual] = useState<string>('')
+  const [valorPagamentoManual, setValorPagamentoManual] = useState<string>('')
+
   // Ação manual de marcar como paga / pendente (isolada do financeiro)
-  const handleAlternarPagamento = async (parcela: ParcelaRecord) => {
-    setProcessandoId(parcela.id)
-    try {
-      const estaPaga = parcela.status === 'paga'
-      await dividasService.marcarPagamentoManual(parcela.id, !estaPaga)
+  const handleIniciarPagamentoOuEstorno = async (parcela: ParcelaRecord) => {
+    const estaPaga = parcela.status === 'paga'
+    if (estaPaga) {
+      // Estorno direto
+      setProcessandoId(parcela.id)
+      try {
+        await dividasService.marcarPagamentoManual(parcela.id, false)
+        toast({
+          title: 'Pagamento estornado',
+          description: `Parcela ${parcela.is_entrada ? 'Entrada' : `#${parcela.numero}`} voltou ao status pendente.`,
+        })
+        onRefresh()
+      } catch (err: any) {
+        toast({
+          title: 'Erro ao estornar',
+          description: err?.message,
+          variant: 'destructive',
+        })
+      } finally {
+        setProcessandoId(null)
+      }
+    } else {
+      // Abre modal de confirmação do pagamento com defaults: data de hoje (ou vencimento se hoje for antes) e valor previsto
+      const hoje = new Date().toISOString().slice(0, 10)
+      const dataSugerida =
+        parcela.data_vencimento <= hoje ? hoje : parcela.data_vencimento.slice(0, 10)
+      setDataPagamentoManual(dataSugerida)
+      setValorPagamentoManual(String(parcela.valor))
+      setParcelaParaPagar(parcela)
+    }
+  }
+
+  const handleConfirmarPagamentoManual = async () => {
+    if (!parcelaParaPagar) return
+    const valorNum = Number(valorPagamentoManual)
+    if (!valorNum || valorNum <= 0) {
       toast({
-        title: estaPaga ? 'Pagamento estornado' : 'Pagamento marcado manualmente',
-        description: estaPaga
-          ? `Parcela #${parcela.numero} voltou ao status pendente.`
-          : `Parcela #${parcela.numero} marcada como paga. Nada baixado no financeiro.`,
+        title: 'Valor inválido',
+        description: 'Informe um valor pago maior que zero.',
+        variant: 'destructive',
       })
+      return
+    }
+
+    setProcessandoId(parcelaParaPagar.id)
+    try {
+      await dividasService.marcarPagamentoManual(parcelaParaPagar.id, true, {
+        data_pagamento: dataPagamentoManual || new Date().toISOString().slice(0, 10),
+        valor_pago: valorNum,
+        valor_previsto: parcelaParaPagar.valor,
+      })
+      toast({
+        title: 'Pagamento marcado manualmente',
+        description: `Parcela ${parcelaParaPagar.is_entrada ? 'Entrada' : `#${parcelaParaPagar.numero}`} marcada como paga (${formatCurrency(valorNum)}). Nada baixado no financeiro.`,
+      })
+      setParcelaParaPagar(null)
       onRefresh()
     } catch (err: any) {
       toast({
-        title: 'Erro ao alterar status',
+        title: 'Erro ao registrar pagamento',
         description: err?.message,
         variant: 'destructive',
       })
@@ -185,7 +245,7 @@ export function CronogramaParcelas({ divida, parcelas, onRefresh }: CronogramaPa
                             <span className="font-medium text-emerald-800">
                               {p.data_pagamento ? formatDate(p.data_pagamento) : 'Pago'}
                             </span>
-                            {p.valor_pago !== undefined && p.valor_pago !== p.valor && (
+                            {p.valor_pago !== undefined && p.valor_pago !== null && (
                               <span className="block text-[10px] text-muted-foreground">
                                 Pago: {formatCurrency(p.valor_pago)}
                               </span>
@@ -206,7 +266,7 @@ export function CronogramaParcelas({ divida, parcelas, onRefresh }: CronogramaPa
                                 size="sm"
                                 variant={isPaga ? 'outline' : 'default'}
                                 disabled={processandoId === p.id}
-                                onClick={() => handleAlternarPagamento(p)}
+                                onClick={() => handleIniciarPagamentoOuEstorno(p)}
                                 className={
                                   isPaga
                                     ? 'h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground'
@@ -290,6 +350,91 @@ export function CronogramaParcelas({ divida, parcelas, onRefresh }: CronogramaPa
           parcelas={parcelas}
           onSuccess={onRefresh}
         />
+      )}
+
+      {/* MODAL CONFIRMAR PAGAMENTO MANUAL */}
+      {parcelaParaPagar && (
+        <Dialog
+          open={Boolean(parcelaParaPagar)}
+          onOpenChange={(open) => !open && setParcelaParaPagar(null)}
+        >
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="text-base font-bold text-foreground">
+                Registrar Pagamento Manual
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                {parcelaParaPagar.is_entrada ? 'Entrada' : `Parcela #${parcelaParaPagar.numero}`} —
+                Vencimento: {formatDate(parcelaParaPagar.data_vencimento)}.
+                <br />
+                <span className="text-muted-foreground">
+                  Sem reflexo no caixa do financeiro (exclusivo deste módulo).
+                </span>
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 py-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="pag-data" className="text-xs font-semibold">
+                  Data do Pagamento *
+                </Label>
+                <Input
+                  id="pag-data"
+                  type="date"
+                  value={dataPagamentoManual}
+                  onChange={(e) => setDataPagamentoManual(e.target.value)}
+                  className="h-9 text-xs"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="pag-valor" className="text-xs font-semibold">
+                  Valor Pago (R$) *
+                </Label>
+                <Input
+                  id="pag-valor"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  placeholder="0,00"
+                  value={valorPagamentoManual}
+                  onChange={(e) => setValorPagamentoManual(e.target.value)}
+                  className="h-9 text-xs font-medium"
+                  required
+                />
+                <span className="text-[11px] text-muted-foreground block">
+                  Previsto:{' '}
+                  <strong className="text-foreground">
+                    {formatCurrency(parcelaParaPagar.valor)}
+                  </strong>
+                </span>
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setParcelaParaPagar(null)}
+                disabled={Boolean(processandoId)}
+                className="text-xs"
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleConfirmarPagamentoManual}
+                disabled={Boolean(processandoId)}
+                className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+              >
+                {processandoId ? 'Gravando...' : 'Confirmar Pagamento'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   )

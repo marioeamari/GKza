@@ -127,13 +127,29 @@ export const dividasService = {
   async marcarPagamentoManual(
     id: string,
     paga: boolean,
-    dados?: { data_pagamento?: string; valor_pago?: number },
+    dados?: { data_pagamento?: string; valor_pago?: number; valor_previsto?: number },
   ): Promise<ParcelaRecord> {
     if (paga) {
+      let valorFinal = dados?.valor_pago
+      // Se não foi explicitamente informado um valor pago positivo, busca o valor previsto
+      if (valorFinal === undefined || valorFinal === null || valorFinal <= 0) {
+        if (dados?.valor_previsto && dados.valor_previsto > 0) {
+          valorFinal = dados.valor_previsto
+        } else {
+          // Fallback seguro: busca o registro atual para pegar o valor previsto
+          try {
+            const atual = await pb.collection('dividas_parcelas').getOne<ParcelaRecord>(id)
+            valorFinal = atual.valor
+          } catch {
+            valorFinal = dados?.valor_previsto || 0
+          }
+        }
+      }
+
       return await pb.collection('dividas_parcelas').update<ParcelaRecord>(id, {
         status: 'paga',
         data_pagamento: dados?.data_pagamento || new Date().toISOString().slice(0, 10),
-        valor_pago: dados?.valor_pago,
+        valor_pago: valorFinal,
       })
     } else {
       return await pb.collection('dividas_parcelas').update<ParcelaRecord>(id, {

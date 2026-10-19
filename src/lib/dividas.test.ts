@@ -976,4 +976,98 @@ describe('Módulo de Dívidas Isolado - Regras e Cálculos Puros', () => {
       expect(res.total_parcelas_mes).toBe(0)
     })
   })
+
+  describe('Bug fix: Parcela paga com valor_pago = 0 ou nulo (resiliência de dados)', () => {
+    const dividaExemplo: DividaRecord = {
+      id: 'div_plotter',
+      nome: 'Impressora Ploter + Guilhotina',
+      credor: 'Eduardo Toalhas',
+      valor_total: 106560.17,
+      data_contratacao: '2026-10-07',
+      status: 'ativa',
+    }
+
+    it('calcularResumoDivida usa fallback do valor previsto se parcela paga tiver valor_pago = 0', () => {
+      const parcelas: ParcelaRecord[] = [
+        {
+          id: 'p_entrada',
+          divida: 'div_plotter',
+          numero: 1,
+          data_vencimento: '2026-10-10',
+          valor: 37000,
+          status: 'paga',
+          data_pagamento: '2026-10-19',
+          valor_pago: 0, // inconsistente do bug report
+          is_entrada: true,
+        },
+        {
+          id: 'p_2',
+          divida: 'div_plotter',
+          numero: 2,
+          data_vencimento: '2026-11-10',
+          valor: 4356.02,
+          status: 'pendente',
+        },
+      ]
+
+      const resumo = calcularResumoDivida(dividaExemplo, parcelas)
+      expect(resumo.parcelas_pagas).toBe(1)
+      expect(resumo.total_pago).toBe(37000)
+      expect(resumo.saldo_devedor).toBe(arredondarMoeda(106560.17 - 37000)) // 69560.17
+      expect(resumo.percentual_quitado).toBe(arredondarMoeda((37000 / 106560.17) * 100))
+    })
+
+    it('calcularCronogramaComSaldo abate o valor previsto se parcela paga tiver valor_pago = 0', () => {
+      const parcelas: ParcelaRecord[] = [
+        {
+          id: 'p_entrada',
+          divida: 'div_plotter',
+          numero: 1,
+          data_vencimento: '2026-10-10',
+          valor: 37000,
+          status: 'paga',
+          valor_pago: 0,
+        },
+      ]
+
+      const cronograma = calcularCronogramaComSaldo(106560.17, parcelas)
+      expect(cronograma[0].saldo_restante_apos).toBe(arredondarMoeda(106560.17 - 37000))
+    })
+
+    it('calcularPaybackMaquina considera o valor previsto se parcela paga tiver valor_pago = 0', () => {
+      const parcelas: ParcelaRecord[] = [
+        {
+          id: 'p_entrada',
+          divida: 'div_plotter',
+          numero: 1,
+          data_vencimento: '2026-10-10',
+          valor: 37000,
+          status: 'paga',
+          valor_pago: 0,
+        },
+      ]
+
+      const payback = calcularPaybackMaquina(dividaExemplo, parcelas, [])
+      expect(payback.total_pago).toBe(37000)
+      expect(payback.saldo_devedor).toBe(arredondarMoeda(106560.17 - 37000))
+    })
+
+    it('projetarCaixaPorMaquina considera o valor previsto no histórico se valor_pago for 0', () => {
+      const parcelas: ParcelaRecord[] = [
+        {
+          id: 'p_entrada',
+          divida: 'div_plotter',
+          numero: 1,
+          data_vencimento: '2026-10-10',
+          valor: 37000,
+          status: 'paga',
+          valor_pago: 0,
+        },
+      ]
+
+      const proj = projetarCaixaPorMaquina(dividaExemplo, parcelas, [], [], '2026-10-20')
+      expect(proj.total_pago_historico).toBe(37000)
+      expect(proj.caixa_atual_disponivel).toBe(-37000)
+    })
+  })
 })
