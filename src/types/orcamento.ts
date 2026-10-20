@@ -27,10 +27,16 @@ export interface OrcamentoPrecoCanalItem {
   preco_sugerido_oficial?: number
   tem_precificacao_oficial?: boolean
   desconto_aplicado?: boolean
+  desconto_pct?: number
+  valor_desconto?: number
+  preco_final?: number
+  alerta_margem?: boolean
   produto_vinculado_id?: string
   produto_vinculado_nome?: string
   produto_vinculado_sku?: string
   precificacao_id?: string
+  modalidade_id?: string
+  modalidade_nome?: string
 }
 
 export interface OrcamentoProdutoVinculadoCanal {
@@ -41,6 +47,8 @@ export interface OrcamentoProdutoVinculadoCanal {
   produto_sku?: string
   preco_aprovado?: number
   precificacao_id?: string
+  modalidade_id?: string
+  modalidade_nome?: string
   status_precificacao?: 'aprovada' | 'desatualizada' | string
   desatualizada?: boolean
 }
@@ -70,6 +78,7 @@ export interface ItemComposicaoOrcamento {
   descricao?: string
   imagem_anexo?: string
   preview_imagem?: string
+  arquivo_imagem?: File
   cor?: string
   quantidade: number
 }

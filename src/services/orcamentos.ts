@@ -449,10 +449,102 @@ export const orcamentosService = {
   },
 
   /**
+   * Agrupa cenários aprovados por Produto + Modalidade garantindo que:
+   * (C) Todas as modalidades referente ao produto aprovado no repositório apareçam
+   * (ex.: BLeve Shopee Half, MEI e S/N como entradas separadas).
+   *
+   * Critérios:
+   * - status 'aprovada' tem prioridade sobre 'desatualizada'
+   * - desempate pelo cenário mais recente
+   * - chave única ${produto_id}__${modalidade_id || 'padrao'} para nunca duplicar
+   */
+  agruparCenariosAprovadosPorProdutoEModalidade(records: any[]): Array<{
+    precificacao_id: string
+    produto_id: string
+    produto_nome: string
+    produto_sku?: string
+    preco_aprovado: number
+    modalidade_id?: string
+    modalidade_nome?: string
+    precificacao_record?: any
+    status_precificacao?: 'aprovada' | 'desatualizada' | string
+    desatualizada?: boolean
+  }> {
+    if (!Array.isArray(records) || records.length === 0) return []
+
+    const parseTime = (val?: string) => (val ? new Date(val).getTime() : 0)
+
+    const ordenados = [...records].sort((a: any, b: any) => {
+      const aAprovada = a.status === 'aprovada' ? 1 : 0
+      const bAprovada = b.status === 'aprovada' ? 1 : 0
+      if (aAprovada !== bAprovada) {
+        return bAprovada - aAprovada
+      }
+      const timeA = Math.max(parseTime(a.aprovado_em), parseTime(a.updated), parseTime(a.created))
+      const timeB = Math.max(parseTime(b.aprovado_em), parseTime(b.updated), parseTime(b.created))
+      return timeB - timeA
+    })
+
+    const mapPorProdutoModalidade = new Map<
+      string,
+      {
+        precificacao_id: string
+        produto_id: string
+        produto_nome: string
+        produto_sku?: string
+        preco_aprovado: number
+        modalidade_id?: string
+        modalidade_nome?: string
+        precificacao_record?: any
+        status_precificacao?: 'aprovada' | 'desatualizada' | string
+        desatualizada?: boolean
+      }
+    >()
+
+    for (const r of ordenados) {
+      const prod =
+        r.expand?.produto || (r.produto && typeof r.produto === 'object' ? r.produto : null)
+      const prodId = prod?.id || (typeof r.produto === 'string' ? r.produto : '')
+      if (!prodId) continue
+
+      const preco = Number(r.preco_aprovado) || 0
+      if (preco <= 0) continue
+
+      const mod =
+        r.expand?.modalidade ||
+        (r.modalidade && typeof r.modalidade === 'object' ? r.modalidade : null)
+      const modId = mod?.id || (typeof r.modalidade === 'string' ? r.modalidade : '') || 'padrao'
+      const modNome = mod?.nome || r.modalidade_nome || ''
+
+      const chave = `${prodId}__${modId}`
+
+      if (!mapPorProdutoModalidade.has(chave)) {
+        const statusPrec = r.status || 'aprovada'
+        const isDesatualizada = statusPrec === 'desatualizada'
+        const prodNome = prod?.nome || prod?.sku || r.produto_nome || 'Produto Sem Nome'
+        const prodSku = prod?.sku || r.produto_sku
+
+        mapPorProdutoModalidade.set(chave, {
+          precificacao_id: r.id,
+          produto_id: prodId,
+          produto_nome: prodNome,
+          produto_sku: prodSku,
+          preco_aprovado: preco,
+          modalidade_id: modId !== 'padrao' ? modId : undefined,
+          modalidade_nome: modNome || undefined,
+          precificacao_record: r,
+          status_precificacao: statusPrec,
+          desatualizada: isDesatualizada,
+        })
+      }
+    }
+
+    return Array.from(mapPorProdutoModalidade.values())
+  },
+
+  /**
    * Busca produtos com cenários precificados do canal alinhado com /precificacao/aprovados.
-   * Considera cenários com preco_aprovado > 0 e status in ('aprovada', 'desatualizada').
-   * Prioriza o cenário com status='aprovada' e, em empate ou condição igual, o mais recente
-   * (-aprovado_em, -updated, -created).
+   * Regra (C): A lista contém TODAS as modalidades referentes ao produto aprovado no repositório.
    */
   async listarProdutosAprovadosPorCanal(canalId: string): Promise<
     Array<{
@@ -461,6 +553,7 @@ export const orcamentosService = {
       produto_nome: string
       produto_sku?: string
       preco_aprovado: number
+      modalidade_id?: string
       modalidade_nome?: string
       precificacao_record?: any
       status_precificacao?: 'aprovada' | 'desatualizada' | string
@@ -475,60 +568,7 @@ export const orcamentosService = {
         expand: 'produto,modalidade',
       })
 
-      // Ordenação rigorosa em memória para garantir prioridade de status='aprovada'
-      // e data mais recente (aprovado_em/updated/created)
-      const parseTime = (val?: string) => (val ? new Date(val).getTime() : 0)
-
-      const ordenados = [...records].sort((a: any, b: any) => {
-        const aAprovada = a.status === 'aprovada' ? 1 : 0
-        const bAprovada = b.status === 'aprovada' ? 1 : 0
-        if (aAprovada !== bAprovada) {
-          return bAprovada - aAprovada // 1 (aprovada) vem antes de 0 (desatualizada)
-        }
-        const timeA = Math.max(parseTime(a.aprovado_em), parseTime(a.updated), parseTime(a.created))
-        const timeB = Math.max(parseTime(b.aprovado_em), parseTime(b.updated), parseTime(b.created))
-        return timeB - timeA
-      })
-
-      const mapPorProduto = new Map<
-        string,
-        {
-          precificacao_id: string
-          produto_id: string
-          produto_nome: string
-          produto_sku?: string
-          preco_aprovado: number
-          modalidade_nome?: string
-          precificacao_record?: any
-          status_precificacao?: 'aprovada' | 'desatualizada' | string
-          desatualizada?: boolean
-        }
-      >()
-
-      for (const r of ordenados) {
-        const prod = (r as any).expand?.produto
-        if (!prod || !prod.id) continue
-        const preco = Number((r as any).preco_aprovado) || 0
-        if (preco <= 0) continue
-
-        if (!mapPorProduto.has(prod.id)) {
-          const statusPrec = (r as any).status || 'aprovada'
-          const isDesatualizada = statusPrec === 'desatualizada'
-          mapPorProduto.set(prod.id, {
-            precificacao_id: (r as any).id,
-            produto_id: prod.id,
-            produto_nome: prod.nome || prod.sku || 'Produto Sem Nome',
-            produto_sku: prod.sku,
-            preco_aprovado: preco,
-            modalidade_nome: (r as any).expand?.modalidade?.nome,
-            precificacao_record: r,
-            status_precificacao: statusPrec,
-            desatualizada: isDesatualizada,
-          })
-        }
-      }
-
-      return Array.from(mapPorProduto.values())
+      return orcamentosService.agruparCenariosAprovadosPorProdutoEModalidade(records)
     } catch (err) {
       console.warn('Erro ao listar produtos aprovados do canal:', err)
       return []

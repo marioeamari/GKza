@@ -176,6 +176,73 @@ export function converterCheioParaUnitario(precoCheio: number, quantidade: numbe
 }
 
 /**
+ * Calcula o desconto percentual individual aplicado sobre o preço do canal do item.
+ * Retorna:
+ * - descontoPct: percentual sanitizado (>= 0)
+ * - valorDescontoTotal: valor em R$ do desconto total sobre o subtotal do item (R$)
+ * - precoFinalTotal: subtotal final com o desconto aplicado (R$)
+ * - precoFinalUnitario: preço unitário final (R$/un)
+ * - alertaMargem: boolean indicando se o preço unitário final ficou abaixo do preco_aprovado oficial
+ */
+export function calcularDescontoIndividualItem(params: {
+  precoUnitario: number
+  quantidade: number
+  precoCheioBase?: number
+  descontoPct?: number
+  precoAprovadoReferencia?: number
+}): {
+  descontoPct: number
+  valorDescontoTotal: number
+  precoFinalTotal: number
+  precoFinalUnitario: number
+  alertaMargem: boolean
+} {
+  const qtd = Math.max(1, Number(params.quantidade) || 1)
+  const unitarioBase = Number(params.precoUnitario) || 0
+  const subtotalBase =
+    params.precoCheioBase !== undefined && Number(params.precoCheioBase) > 0
+      ? Number(params.precoCheioBase)
+      : Math.round(unitarioBase * qtd * 100) / 100
+
+  const pct = Math.max(0, Number(params.descontoPct) || 0)
+
+  if (pct <= 0) {
+    const unitFinal =
+      subtotalBase > 0 && qtd > 0 ? Math.round((subtotalBase / qtd) * 100) / 100 : unitarioBase
+    const alerta =
+      typeof params.precoAprovadoReferencia === 'number' && params.precoAprovadoReferencia > 0
+        ? unitFinal < params.precoAprovadoReferencia - 0.009
+        : false
+
+    return {
+      descontoPct: 0,
+      valorDescontoTotal: 0,
+      precoFinalTotal: subtotalBase,
+      precoFinalUnitario: unitFinal,
+      alertaMargem: alerta,
+    }
+  }
+
+  const valorDesconto = Math.round(((subtotalBase * pct) / 100) * 100) / 100
+  const precoFinal = Math.max(0, Math.round((subtotalBase - valorDesconto) * 100) / 100)
+  const precoFinalUnitario = qtd > 0 ? Math.round((precoFinal / qtd) * 100) / 100 : 0
+
+  // Se o preço final unitário ficar abaixo do preço aprovado do cenário de origem, aciona alerta
+  const alertaMargem =
+    typeof params.precoAprovadoReferencia === 'number' && params.precoAprovadoReferencia > 0
+      ? precoFinalUnitario < params.precoAprovadoReferencia - 0.009
+      : false
+
+  return {
+    descontoPct: pct,
+    valorDescontoTotal: valorDesconto,
+    precoFinalTotal: precoFinal,
+    precoFinalUnitario,
+    alertaMargem,
+  }
+}
+
+/**
  * Normaliza um registro de Orçamento completo vindo da API/banco,
  * garantindo que canais_comparados, expand.canais_comparados, expand.itens e totais_por_canal
  * sejam SEMPRE arrays/objetos válidos.

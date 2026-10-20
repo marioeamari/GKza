@@ -10,8 +10,11 @@ import {
   normalizarOrcamentoRecord,
   converterUnitarioParaCheio,
   converterCheioParaUnitario,
+  calcularDescontoIndividualItem,
   formatarDataBR,
 } from './orcamentoCalculo'
+import { gerarHTMLParaImpressaoPDF } from './orcamentoPdf'
+import { orcamentosService } from '@/services/orcamentos'
 
 describe('Módulo de Orçamentos - Regras de Cálculo e Formatação', () => {
   it('formata moeda no padrão brasileiro R$ X,XX', () => {
@@ -756,6 +759,325 @@ describe('Módulo de Orçamentos - Regras de Cálculo e Formatação', () => {
       }
       expect(itemPersonalizado.composicao[0].imagem_anexo).toBe('foto_brasao.png')
       expect(itemPersonalizado.composicao[0].descricao).toBe('Brasão Dourado')
+    })
+
+    describe('Regra (B) - Desconto Percentual Individual por Linha de Canal do Item', () => {
+      it('orçamento sem desconto = valores atuais (regressão zero)', () => {
+        const canais = [
+          { id: 'c1', nome: 'Shopee' },
+          { id: 'c2', nome: 'Mercado Livre' },
+        ]
+        const itemSemDesconto = {
+          modelo_nome: 'BLeve Toalha',
+          quantidade: 10,
+          precos_canais: {
+            c1: { canal_id: 'c1', canal_nome: 'Shopee', preco_unitario: 20, preco_cheio: 200 },
+            c2: {
+              canal_id: 'c2',
+              canal_nome: 'Mercado Livre',
+              preco_unitario: 25,
+              preco_cheio: 250,
+            },
+          },
+        }
+
+        const totais = calcularTotaisPorCanal(canais, [itemSemDesconto as any])
+        expect(totais.c1.total_itens).toBe(200)
+        expect(totais.c1.total_geral).toBe(200)
+        expect(totais.c2.total_itens).toBe(250)
+        expect(totais.c2.total_geral).toBe(250)
+
+        const descCalc = calcularDescontoIndividualItem({
+          precoUnitario: 20,
+          quantidade: 10,
+          precoCheioBase: 200,
+          descontoPct: 0,
+          precoAprovadoReferencia: 20,
+        })
+        expect(descCalc.descontoPct).toBe(0)
+        expect(descCalc.valorDescontoTotal).toBe(0)
+        expect(descCalc.precoFinalTotal).toBe(200)
+        expect(descCalc.precoFinalUnitario).toBe(20)
+        expect(descCalc.alertaMargem).toBe(false)
+      })
+
+      it('desconto individual em um canal NÃO afeta as outras linhas/canais nem outros itens', () => {
+        const canais = [
+          { id: 'shopee', nome: 'Shopee' },
+          { id: 'site', nome: 'Site' },
+        ]
+        const item1 = {
+          id: 'it1',
+          modelo_nome: 'Toalha Banho',
+          quantidade: 2,
+          precos_canais: {
+            shopee: {
+              canal_id: 'shopee',
+              canal_nome: 'Shopee',
+              preco_unitario: 50,
+              preco_cheio: 100,
+              desconto_pct: 10, // 10% de desconto nesta linha
+              valor_desconto: 10,
+              preco_final: 90,
+            },
+            site: {
+              canal_id: 'site',
+              canal_nome: 'Site',
+              preco_unitario: 50,
+              preco_cheio: 100,
+              // Site NÃO tem desconto
+            },
+          },
+        }
+        const item2 = {
+          id: 'it2',
+          modelo_nome: 'Toalha Rosto',
+          quantidade: 1,
+          precos_canais: {
+            shopee: {
+              canal_id: 'shopee',
+              canal_nome: 'Shopee',
+              preco_unitario: 30,
+              preco_cheio: 30,
+              // Item 2 na Shopee NÃO tem desconto
+            },
+            site: {
+              canal_id: 'site',
+              canal_nome: 'Site',
+              preco_unitario: 30,
+              preco_cheio: 30,
+            },
+          },
+        }
+
+        const totais = calcularTotaisPorCanal(canais, [item1 as any, item2 as any])
+
+        // Shopee: item1 (90 com desconto) + item2 (30 sem desconto) = 120
+        expect(totais.shopee.total_itens).toBe(120)
+        expect(totais.shopee.total_geral).toBe(120)
+
+        // Site: item1 (100 sem desconto) + item2 (30 sem desconto) = 130
+        expect(totais.site.total_itens).toBe(130)
+        expect(totais.site.total_geral).toBe(130)
+      })
+
+      it('calcula desconto % sobre o preço do canal, exibe valor R$ do desconto e preço final', () => {
+        // Ex: preço unitário R$ 40,00 x 5 un = R$ 200,00 base. Desconto de 15%
+        const res = calcularDescontoIndividualItem({
+          precoUnitario: 40,
+          quantidade: 5,
+          precoCheioBase: 200,
+          descontoPct: 15,
+          precoAprovadoReferencia: 38,
+        })
+
+        expect(res.descontoPct).toBe(15)
+        expect(res.valorDescontoTotal).toBe(30) // 15% de 200 = 30
+        expect(res.precoFinalTotal).toBe(170) // 200 - 30 = 170
+        expect(res.precoFinalUnitario).toBe(34) // 170 / 5 = 34
+        // Como precoFinalUnitario (34) < precoAprovadoReferencia (38), alertaMargem = true
+        expect(res.alertaMargem).toBe(true)
+      })
+
+      it('alerta visual de margem fica false se o preço final continuar >= ao preço aprovado', () => {
+        const res = calcularDescontoIndividualItem({
+          precoUnitario: 50,
+          quantidade: 2,
+          precoCheioBase: 100,
+          descontoPct: 5, // 5% de 100 = 5
+          precoAprovadoReferencia: 45, // unitário final = 47.50 >= 45
+        })
+
+        expect(res.descontoPct).toBe(5)
+        expect(res.valorDescontoTotal).toBe(5)
+        expect(res.precoFinalTotal).toBe(95)
+        expect(res.precoFinalUnitario).toBe(47.5)
+        expect(res.alertaMargem).toBe(false)
+      })
+    })
+
+    describe('Regra (C) - Todas as modalidades aprovadas aparecem sem duplicação', () => {
+      it('agruparCenariosAprovadosPorProdutoEModalidade lista todas as modalidades do produto+canal (ex: BLeve Shopee Half, MEI, S/N)', () => {
+        // Simulação dos registros reais do PocketBase para produto BLeve no canal Shopee
+        const cenariosDb = [
+          {
+            id: 'prec_half',
+            canal: 'shopee_id',
+            produto: 'bleve_id',
+            preco_aprovado: 28.5,
+            status: 'aprovada',
+            aprovado_em: '2025-02-01 10:00:00',
+            expand: {
+              produto: { id: 'bleve_id', nome: 'BLeve Toalha', sku: 'BLEVE-01' },
+              modalidade: { id: 'mod_half', nome: 'Half' },
+            },
+          },
+          {
+            id: 'prec_mei',
+            canal: 'shopee_id',
+            produto: 'bleve_id',
+            preco_aprovado: 32.0,
+            status: 'aprovada',
+            aprovado_em: '2025-02-02 11:00:00',
+            expand: {
+              produto: { id: 'bleve_id', nome: 'BLeve Toalha', sku: 'BLEVE-01' },
+              modalidade: { id: 'mod_mei', nome: 'MEI' },
+            },
+          },
+          {
+            id: 'prec_sn',
+            canal: 'shopee_id',
+            produto: 'bleve_id',
+            preco_aprovado: 35.0,
+            status: 'aprovada',
+            aprovado_em: '2025-02-03 12:00:00',
+            expand: {
+              produto: { id: 'bleve_id', nome: 'BLeve Toalha', sku: 'BLEVE-01' },
+              modalidade: { id: 'mod_sn', nome: 'S/N' },
+            },
+          },
+        ]
+
+        const resultado =
+          orcamentosService.agruparCenariosAprovadosPorProdutoEModalidade(cenariosDb)
+
+        expect(resultado.length).toBe(3)
+        const modalidades = resultado.map((r) => r.modalidade_nome)
+        expect(modalidades).toContain('Half')
+        expect(modalidades).toContain('MEI')
+        expect(modalidades).toContain('S/N')
+
+        const precHalf = resultado.find((r) => r.modalidade_nome === 'Half')
+        expect(precHalf?.preco_aprovado).toBe(28.5)
+        expect(precHalf?.modalidade_id).toBe('mod_half')
+
+        const precMei = resultado.find((r) => r.modalidade_nome === 'MEI')
+        expect(precMei?.preco_aprovado).toBe(32.0)
+        expect(precMei?.modalidade_id).toBe('mod_mei')
+
+        const precSn = resultado.find((r) => r.modalidade_nome === 'S/N')
+        expect(precSn?.preco_aprovado).toBe(35.0)
+        expect(precSn?.modalidade_id).toBe('mod_sn')
+      })
+
+      it('modalidades duplicadas nunca aparecem na lista; status aprovada tem prioridade sobre desatualizada', () => {
+        const cenariosComDuplicatas = [
+          // Cenário antigo desatualizado para modalidade MEI
+          {
+            id: 'prec_mei_antiga',
+            canal: 'shopee_id',
+            produto: 'bleve_id',
+            preco_aprovado: 29.0,
+            status: 'desatualizada',
+            aprovado_em: '2025-01-01 10:00:00',
+            expand: {
+              produto: { id: 'bleve_id', nome: 'BLeve Toalha', sku: 'BLEVE-01' },
+              modalidade: { id: 'mod_mei', nome: 'MEI' },
+            },
+          },
+          // Cenário recente aprovado para mesma modalidade MEI
+          {
+            id: 'prec_mei_nova',
+            canal: 'shopee_id',
+            produto: 'bleve_id',
+            preco_aprovado: 32.0,
+            status: 'aprovada',
+            aprovado_em: '2025-02-15 10:00:00',
+            expand: {
+              produto: { id: 'bleve_id', nome: 'BLeve Toalha', sku: 'BLEVE-01' },
+              modalidade: { id: 'mod_mei', nome: 'MEI' },
+            },
+          },
+        ]
+
+        const resultado =
+          orcamentosService.agruparCenariosAprovadosPorProdutoEModalidade(cenariosComDuplicatas)
+
+        // Não pode haver 2 MEI para o mesmo produto
+        expect(resultado.length).toBe(1)
+        expect(resultado[0].precificacao_id).toBe('prec_mei_nova')
+        expect(resultado[0].preco_aprovado).toBe(32.0)
+        expect(resultado[0].status_precificacao).toBe('aprovada')
+        expect(resultado[0].desatualizada).toBe(false)
+      })
+    })
+
+    describe('Regra (A) - Imagens do tema e modelo no PDF e link do cliente', () => {
+      it('PDF renderiza destaque do tema/modelo e imagens nas seções dos itens', () => {
+        const orcamentoMock = {
+          id: 'orc123',
+          codigo: 'ORC-2025-001',
+          cliente_nome: 'Empresa Teste',
+          data_orcamento: '2025-05-10',
+          status: 'aprovado' as const,
+          tema_nome: 'Tema Safari',
+          expand: {
+            tema: {
+              id: 'tema_1',
+              nome: 'Tema Safari',
+              foto: 'safari_header.jpg',
+            },
+            canais_comparados: [{ id: 'c1', nome: 'Shopee' }],
+            itens: [
+              {
+                id: 'it1',
+                orcamento: 'orc123',
+                modelo_nome: 'Kit Safari 30 un',
+                quantidade: 30,
+                foto_url: 'https://img.usecurling.com/p/200/200?q=safari',
+                composicao: [
+                  {
+                    id: 'c1',
+                    tipo: 'cadastrado' as const,
+                    modelo_nome: 'Toalhinha Leão',
+                    tema_nome: 'Safari',
+                    quantidade: 15,
+                    foto_url: 'https://img.usecurling.com/p/200/200?q=lion',
+                  },
+                  {
+                    id: 'c2',
+                    tipo: 'cadastrado' as const,
+                    modelo_nome: 'Toalhinha Girafa',
+                    tema_nome: 'Safari',
+                    quantidade: 15,
+                    foto_url: 'https://img.usecurling.com/p/200/200?q=giraffe',
+                  },
+                ],
+                precos_canais: {
+                  c1: {
+                    canal_id: 'c1',
+                    canal_nome: 'Shopee',
+                    preco_unitario: 10,
+                    preco_cheio: 300,
+                  },
+                },
+                fretes_canais: {},
+              },
+            ],
+          },
+          totais_por_canal: {
+            c1: {
+              canal_id: 'c1',
+              canal_nome: 'Shopee',
+              total_itens: 300,
+              total_fretes: 0,
+              total_geral: 300,
+            },
+          },
+        }
+
+        const html = gerarHTMLParaImpressaoPDF(orcamentoMock as any)
+
+        // Primeira imagem em destaque no cabeçalho do PDF
+        expect(html).toContain('Destaque Tema/Modelo')
+        expect(html).toContain('safari_header.jpg')
+        expect(html).toContain('Tema Selecionado: Tema Safari')
+
+        // Imagens do item e da composição junto à seção do item
+        expect(html).toContain('https://img.usecurling.com/p/200/200?q=safari')
+        expect(html).toContain('https://img.usecurling.com/p/200/200?q=lion')
+        expect(html).toContain('https://img.usecurling.com/p/200/200?q=giraffe')
+      })
     })
   })
 })

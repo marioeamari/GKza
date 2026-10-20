@@ -518,6 +518,30 @@ export default function PrecificacaoOrcamentoDetalhes() {
                                     </span>
                                   ))}
                                 </div>
+
+                                {/* Miniaturas de fotos da composição interna */}
+                                {item.composicao.some((c) => c.foto_url || c.preview_imagem) && (
+                                  <div className="flex items-center gap-1.5 mt-2 pt-1">
+                                    {item.composicao
+                                      .filter((c) => c.foto_url || c.preview_imagem)
+                                      .map((c, cIdx) => (
+                                        <div
+                                          key={cIdx}
+                                          className="relative border border-border/80 rounded overflow-hidden bg-background"
+                                          title={`${c.quantidade}x ${c.modelo_nome || 'Item'}`}
+                                        >
+                                          <img
+                                            src={c.foto_url || c.preview_imagem}
+                                            alt={c.modelo_nome || 'Item'}
+                                            className="w-8 h-8 object-cover"
+                                          />
+                                          <span className="absolute bottom-0 right-0 bg-background/90 text-[8px] font-bold px-0.5">
+                                            {c.quantidade}x
+                                          </span>
+                                        </div>
+                                      ))}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -525,8 +549,19 @@ export default function PrecificacaoOrcamentoDetalhes() {
                       </td>
                       <td className="py-3 px-3 text-center font-bold">{item.quantidade || 1}</td>
                       {canais.map((canal) => {
-                        const precoUnit = item.precos_canais?.[canal.id]?.preco_unitario || 0
-                        const subtotal = Math.round(precoUnit * (item.quantidade || 1) * 100) / 100
+                        const precoObj = item.precos_canais?.[canal.id]
+                        const precoUnit = precoObj?.preco_unitario || 0
+                        const precoCheioGravado = precoObj?.preco_cheio
+                        const subtotalBase =
+                          precoCheioGravado !== undefined && precoCheioGravado > 0
+                            ? precoCheioGravado
+                            : Math.round(precoUnit * (item.quantidade || 1) * 100) / 100
+                        const subtotal =
+                          precoObj?.preco_final !== undefined && Number(precoObj.preco_final) >= 0
+                            ? Number(precoObj.preco_final)
+                            : subtotalBase
+                        const descPct = Number(precoObj?.desconto_pct) || 0
+
                         const freteObj = item.fretes_canais?.[canal.id]
                         const frete = Number(freteObj?.valor_frete) || 0
                         const modoFrete = freteObj?.modo_frete || 'pago_pelo_cliente'
@@ -538,6 +573,11 @@ export default function PrecificacaoOrcamentoDetalhes() {
                             <div className="text-[11px] text-muted-foreground">
                               {formatarMoedaBR(precoUnit)}/un
                             </div>
+                            {descPct > 0 && (
+                              <div className="text-[10px] font-bold text-amber-600 mt-0.5">
+                                {descPct}% off (-{formatarMoedaBR(precoObj?.valor_desconto || 0)})
+                              </div>
+                            )}
                             {modoFrete === 'frete_gratis' ? (
                               <div className="text-[11px] font-semibold text-emerald-600 mt-0.5">
                                 Frete: Grátis
