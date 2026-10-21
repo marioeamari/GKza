@@ -22,6 +22,29 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
     return formatarDataBR(dt)
   }
 
+  // Imagem em destaque do tema/modelo no cabeçalho
+  const temaExpandido = orcamento.expand?.tema
+  const fotoTema = temaExpandido?.foto ? getFileUrl(temaExpandido, temaExpandido.foto) : ''
+  const primeiroItemComFoto = itens.find(
+    (it) =>
+      it.imagem_anexo ||
+      it.foto_url ||
+      (it.expand as any)?.modelo?.foto ||
+      (Array.isArray(it.composicao) && it.composicao.some((c) => c.foto_url || c.imagem_anexo)),
+  )
+  const primeiraFotoItem = primeiroItemComFoto
+    ? primeiroItemComFoto.imagem_anexo
+      ? getFileUrl(primeiroItemComFoto, primeiroItemComFoto.imagem_anexo)
+      : primeiroItemComFoto.foto_url ||
+        ((primeiroItemComFoto.expand as any)?.modelo?.foto
+          ? getFileUrl(
+              (primeiroItemComFoto.expand as any).modelo,
+              (primeiroItemComFoto.expand as any).modelo.foto,
+            )
+          : primeiroItemComFoto.composicao?.find((c) => c.foto_url || c.imagem_anexo)?.foto_url)
+    : ''
+  const imagemDestaqueCabecalho = fotoTema || primeiraFotoItem
+
   const itensRows = itens
     .map((item, idx) => {
       const isPersonalizado = item.tipo_item === 'personalizado'
@@ -31,14 +54,26 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
       const fotoAnexo = item.imagem_anexo ? getFileUrl(item, item.imagem_anexo) : ''
       const imagemExibir = fotoAnexo || item.foto_url || fotoModelo
 
+      // Miniaturas das demais imagens da composição ou modelo
+      const miniaturasComposicao = (Array.isArray(item.composicao) ? item.composicao : [])
+        .map((c) => c.foto_url || (c.imagem_anexo ? getFileUrl(item, c.imagem_anexo) : ''))
+        .filter((url): url is string => Boolean(url && url !== imagemExibir))
+
       const precoCells = canais
         .map((canal) => {
-          const precoUnit = item.precos_canais?.[canal.id]?.preco_unitario || 0
-          const precoCheioGravado = item.precos_canais?.[canal.id]?.preco_cheio
-          const subtotal =
+          const precoObj = item.precos_canais?.[canal.id]
+          const precoUnit = precoObj?.preco_unitario || 0
+          const precoCheioGravado = precoObj?.preco_cheio
+          const subtotalBase =
             precoCheioGravado !== undefined && precoCheioGravado > 0
               ? precoCheioGravado
               : Math.round(precoUnit * item.quantidade * 100) / 100
+          const subtotal =
+            precoObj?.preco_final !== undefined && Number(precoObj.preco_final) >= 0
+              ? Number(precoObj.preco_final)
+              : subtotalBase
+          const descPct = Number(precoObj?.desconto_pct) || 0
+          const valorDesc = Number(precoObj?.valor_desconto) || 0
           const freteObj = item.fretes_canais?.[canal.id]
           const frete = Number(freteObj?.valor_frete) || 0
           const modoFrete = freteObj?.modo_frete || 'pago_pelo_cliente'
@@ -49,10 +84,16 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
             freteHtml = `<div style="font-size: 11px; color: #df5830;">+ Frete: ${formatarMoedaBR(frete)} (pago pelo cliente)</div>`
           }
 
+          let descontoHtml = ''
+          if (descPct > 0) {
+            descontoHtml = `<div style="font-size: 10px; color: #d97706; font-weight: bold;">${descPct}% off (-${formatarMoedaBR(valorDesc)})</div>`
+          }
+
           return `
             <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right; font-size: 13px;">
               <div><strong>${formatarMoedaBR(subtotal)}</strong></div>
               <div style="font-size: 11px; color: #6b7280;">(${formatarMoedaBR(precoUnit)}/un)</div>
+              ${descontoHtml}
               ${freteHtml}
             </td>
           `
@@ -95,14 +136,33 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
                         <span style="font-weight: 600; color: #6b7280; font-size: 10px; text-transform: uppercase;">Composição do Kit:</span>
                         <div style="margin-top: 2px;">
                           ${item.composicao
-                            .map(
-                              (c) =>
-                                `<span style="display: inline-block; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 3px; padding: 1px 5px; font-size: 10px; margin-right: 4px; margin-bottom: 2px;">
-                                  <strong>${c.quantidade}x</strong> ${c.modelo_nome || c.descricao || 'Item'}${c.tema_nome ? ` (${c.tema_nome})` : ''}
-                                </span>`,
-                            )
+                            .map((c) => {
+                              const cFoto =
+                                c.foto_url ||
+                                (c.imagem_anexo ? getFileUrl(item, c.imagem_anexo) : '')
+                              return `
+                                  <span style="display: inline-flex; align-items: center; gap: 4px; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 3px; padding: 1px 5px; font-size: 10px; margin-right: 4px; margin-bottom: 2px;">
+                                    ${cFoto ? `<img src="${cFoto}" alt="${c.modelo_nome || 'Item'}" style="width: 16px; height: 16px; object-fit: cover; border-radius: 2px;" />` : ''}
+                                    <span><strong>${c.quantidade}x</strong> ${c.modelo_nome || c.descricao || 'Item'}${c.tema_nome ? ` (${c.tema_nome})` : ''}</span>
+                                  </span>
+                                `
+                            })
                             .join('')}
                         </div>
+                      </div>`
+                    : ''
+                }
+                ${
+                  miniaturasComposicao.length > 0
+                    ? `<div style="display: flex; gap: 4px; margin-top: 4px; align-items: center;">
+                        <span style="font-size: 9px; color: #6b7280; text-transform: uppercase;">Fotos do Item:</span>
+                        ${miniaturasComposicao
+                          .slice(0, 5)
+                          .map(
+                            (imgUrl) =>
+                              `<img src="${imgUrl}" alt="Foto adicional" style="width: 24px; height: 24px; object-fit: cover; border-radius: 3px; border: 1px solid #e5e7eb;" />`,
+                          )
+                          .join('')}
                       </div>`
                     : ''
                 }
@@ -288,6 +348,21 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
           ${orcamento.validade_data ? `<div class="orc-data" style="color: #df5830; font-weight: bold;">Validade: ${formatarData(orcamento.validade_data)}</div>` : ''}
         </div>
       </div>
+
+      ${
+        imagemDestaqueCabecalho
+          ? `
+        <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 18px; padding: 10px 14px; background: #fff8f6; border: 1px solid #fed7aa; border-radius: 8px;">
+          <img src="${imagemDestaqueCabecalho}" alt="Destaque Tema/Modelo" style="width: 56px; height: 56px; object-fit: cover; border-radius: 6px; border: 1px solid #fdba74; flex-shrink: 0;" />
+          <div>
+            <div style="font-size: 10px; font-weight: bold; text-transform: uppercase; color: #df5830; letter-spacing: 0.5px;">Destaque Tema/Modelo</div>
+            <div style="font-size: 14px; font-weight: bold; color: #111827;">${orcamento.tema_nome ? `Tema Selecionado: ${orcamento.tema_nome}` : orcamento.titulo || 'Tema e Modelo'}</div>
+            ${orcamento.cor ? `<div style="font-size: 11px; color: #4b5563;">Variação / Cor: <strong>${orcamento.cor}</strong></div>` : ''}
+          </div>
+        </div>
+      `
+          : ''
+      }
 
       <div class="grid-info">
         <div class="info-block">

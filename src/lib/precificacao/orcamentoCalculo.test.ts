@@ -1078,6 +1078,66 @@ describe('Módulo de Orçamentos - Regras de Cálculo e Formatação', () => {
         expect(html).toContain('https://img.usecurling.com/p/200/200?q=lion')
         expect(html).toContain('https://img.usecurling.com/p/200/200?q=giraffe')
       })
+
+      it('PDF renderiza destaque do primeiro item quando o orçamento não tem tema_expandido', () => {
+        const orcamentoMock = {
+          id: 'orc999',
+          codigo: 'ORC-2025-999',
+          cliente_nome: 'Cliente Direto',
+          data_orcamento: '2025-05-10',
+          status: 'aprovado' as const,
+          titulo: 'Cotação Direta Toalhas',
+          expand: {
+            canais_comparados: [{ id: 'c1', nome: 'Site' }],
+            itens: [
+              {
+                id: 'it1',
+                orcamento: 'orc999',
+                modelo_nome: 'Toalha Especial',
+                quantidade: 10,
+                foto_url: 'https://img.usecurling.com/p/200/200?q=towel',
+                precos_canais: {
+                  c1: { canal_id: 'c1', preco_unitario: 20, preco_cheio: 200 },
+                },
+                fretes_canais: {},
+              },
+            ],
+          },
+        }
+
+        const html = gerarHTMLParaImpressaoPDF(orcamentoMock as any)
+        expect(html).toContain('Destaque Tema/Modelo')
+        expect(html).toContain('https://img.usecurling.com/p/200/200?q=towel')
+      })
+
+      it('orçamento sem desconto produz valores exatamente iguais aos atuais (regressão zero)', () => {
+        const canais = [{ id: 'shopee', nome: 'Shopee' }]
+        const itemSemDesconto = {
+          id: 'it1',
+          modelo_nome: 'Toalha Normal',
+          quantidade: 5,
+          precos_canais: {
+            shopee: {
+              canal_id: 'shopee',
+              preco_unitario: 24.9,
+              preco_cheio: 124.5,
+              // sem desconto_pct
+            },
+          },
+          fretes_canais: {
+            shopee: {
+              canal_id: 'shopee',
+              valor_frete: 15,
+              modo_frete: 'pago_pelo_cliente',
+            },
+          },
+        }
+
+        const totais = calcularTotaisPorCanal(canais, [itemSemDesconto as any])
+        expect(totais.shopee.total_itens).toBe(124.5)
+        expect(totais.shopee.total_fretes).toBe(15)
+        expect(totais.shopee.total_geral).toBe(139.5)
+      })
     })
   })
 })

@@ -211,7 +211,8 @@ export function calcularDescontoIndividualItem(params: {
       subtotalBase > 0 && qtd > 0 ? Math.round((subtotalBase / qtd) * 100) / 100 : unitarioBase
     const alerta =
       typeof params.precoAprovadoReferencia === 'number' && params.precoAprovadoReferencia > 0
-        ? unitFinal < params.precoAprovadoReferencia - 0.009
+        ? unitFinal < params.precoAprovadoReferencia - 0.009 ||
+          subtotalBase < Math.round(params.precoAprovadoReferencia * qtd * 100) / 100 - 0.009
         : false
 
     return {
@@ -230,7 +231,8 @@ export function calcularDescontoIndividualItem(params: {
   // Se o preço final unitário ficar abaixo do preço aprovado do cenário de origem, aciona alerta
   const alertaMargem =
     typeof params.precoAprovadoReferencia === 'number' && params.precoAprovadoReferencia > 0
-      ? precoFinalUnitario < params.precoAprovadoReferencia - 0.009
+      ? precoFinalUnitario < params.precoAprovadoReferencia - 0.009 ||
+        precoFinal < Math.round(params.precoAprovadoReferencia * qtd * 100) / 100 - 0.009
       : false
 
   return {
@@ -378,10 +380,14 @@ export function calcularTotaisPorCanal(
       const qtd = Number(item.quantidade) || 0
       const precoObj = item.precos_canais?.[canal.id]
       const precoUnit = precoObj?.preco_unitario || 0
-      const subtotalItem =
+      const precoCheioBase =
         precoObj?.preco_cheio !== undefined && Number(precoObj.preco_cheio) > 0
           ? Number(precoObj.preco_cheio)
           : qtd * precoUnit
+      const subtotalItem =
+        precoObj?.preco_final !== undefined && Number(precoObj.preco_final) >= 0
+          ? Number(precoObj.preco_final)
+          : precoCheioBase
 
       const freteObj = item.fretes_canais?.[canal.id]
       const valorFrete = Number(freteObj?.valor_frete) || 0
@@ -460,10 +466,14 @@ export function calcularMontanteConsolidadoPorCanal(params: {
       const qtd = Number(it.quantidade) || 1
       const precoObj = it.precos_canais?.[canal.id]
       const precoUnit = precoObj?.preco_unitario || 0
-      const precoCheio =
+      const precoCheioBase =
         precoObj?.preco_cheio !== undefined && Number(precoObj.preco_cheio) > 0
           ? Number(precoObj.preco_cheio)
           : Math.round(precoUnit * qtd * 100) / 100
+      const precoCheio =
+        precoObj?.preco_final !== undefined && Number(precoObj.preco_final) >= 0
+          ? Number(precoObj.preco_final)
+          : precoCheioBase
 
       const freteObj = it.fretes_canais?.[canal.id]
       const frete = Number(freteObj?.valor_frete) || 0
@@ -639,10 +649,14 @@ export function gerarTextoWhatsappOrcamento(params: {
       const precoObj = item.precos_canais?.[canal.id]
       const precoUnit = precoObj?.preco_unitario || 0
       const precoCheioGravado = precoObj?.preco_cheio
-      const subtotalItem =
+      const subtotalBase =
         precoCheioGravado !== undefined && precoCheioGravado > 0
           ? precoCheioGravado
           : Math.round(qtd * precoUnit * 100) / 100
+      const subtotalItem =
+        precoObj?.preco_final !== undefined && Number(precoObj.preco_final) >= 0
+          ? Number(precoObj.preco_final)
+          : subtotalBase
       const frete = item.fretes_canais?.[canal.id]?.valor_frete || 0
 
       // Linha do item: * 25 unidades Banho R$ 622,50

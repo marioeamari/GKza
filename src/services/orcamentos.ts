@@ -539,7 +539,14 @@ export const orcamentosService = {
       }
     }
 
-    return Array.from(mapPorProdutoModalidade.values())
+    // Ordena por nome do produto e em seguida por modalidade para apresentação limpa e agrupada
+    return Array.from(mapPorProdutoModalidade.values()).sort((a, b) => {
+      const compNome = a.produto_nome.localeCompare(b.produto_nome, 'pt-BR')
+      if (compNome !== 0) return compNome
+      const modA = a.modalidade_nome || ''
+      const modB = b.modalidade_nome || ''
+      return modA.localeCompare(modB, 'pt-BR')
+    })
   },
 
   /**

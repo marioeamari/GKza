@@ -357,6 +357,80 @@ describe('Ajustes no Módulo de Orçamentos - Regras e Integração de Serviços
 
       spyGetFullList.mockRestore()
     })
+
+    it('retorna cada modalidade do canal como uma opção única e selecionável (chave precificacao_id)', async () => {
+      // Simula o caso real do banco: Produto BLeve (lsilkiq8w2apfre) no canal Shopee com modalidades Half, MEI e S/N
+      const mockPrecificacoes = [
+        {
+          id: 'prec_bleve_half',
+          produto: 'lsilkiq8w2apfre',
+          canal: 'nnnk28chx9llzmm',
+          modalidade: 'mod_half',
+          status: 'aprovada',
+          preco_aprovado: 24.9,
+          updated: '2026-04-01T10:00:00.000Z',
+          expand: {
+            produto: { id: 'lsilkiq8w2apfre', nome: 'BLeve', sku: 'BLEVE-01' },
+            modalidade: { id: 'mod_half', nome: 'Half' },
+          },
+        },
+        {
+          id: 'prec_bleve_mei',
+          produto: 'lsilkiq8w2apfre',
+          canal: 'nnnk28chx9llzmm',
+          modalidade: 'mod_mei',
+          status: 'aprovada',
+          preco_aprovado: 24.9,
+          updated: '2026-04-01T11:00:00.000Z',
+          expand: {
+            produto: { id: 'lsilkiq8w2apfre', nome: 'BLeve', sku: 'BLEVE-01' },
+            modalidade: { id: 'mod_mei', nome: 'MEI' },
+          },
+        },
+        {
+          id: 'prec_bleve_sn',
+          produto: 'lsilkiq8w2apfre',
+          canal: 'nnnk28chx9llzmm',
+          modalidade: 'mod_sn',
+          status: 'desatualizada',
+          preco_aprovado: 19.9,
+          updated: '2026-03-15T10:00:00.000Z',
+          expand: {
+            produto: { id: 'lsilkiq8w2apfre', nome: 'BLeve', sku: 'BLEVE-01' },
+            modalidade: { id: 'mod_sn', nome: 'S/N' },
+          },
+        },
+      ]
+
+      const spyGetFullList = vi
+        .spyOn(pb.collection('prec_precificacoes'), 'getFullList')
+        .mockResolvedValueOnce(mockPrecificacoes as any)
+
+      const produtos = await orcamentosService.listarProdutosAprovadosPorCanal('nnnk28chx9llzmm')
+
+      // Devem existir 3 opções distintas para o produto BLeve, uma para cada modalidade
+      expect(produtos).toHaveLength(3)
+
+      const meiOpt = produtos.find((p) => p.modalidade_nome === 'MEI')
+      expect(meiOpt).toBeDefined()
+      expect(meiOpt?.precificacao_id).toBe('prec_bleve_mei')
+      expect(meiOpt?.preco_aprovado).toBe(24.9)
+      expect(meiOpt?.desatualizada).toBe(false)
+
+      const halfOpt = produtos.find((p) => p.modalidade_nome === 'Half')
+      expect(halfOpt).toBeDefined()
+      expect(halfOpt?.precificacao_id).toBe('prec_bleve_half')
+      expect(halfOpt?.preco_aprovado).toBe(24.9)
+
+      const snOpt = produtos.find((p) => p.modalidade_nome === 'S/N')
+      expect(snOpt).toBeDefined()
+      expect(snOpt?.precificacao_id).toBe('prec_bleve_sn')
+      expect(snOpt?.preco_aprovado).toBe(19.9)
+      expect(snOpt?.desatualizada).toBe(true)
+
+      // Teste de desempate: se houver duas 'Half', mantém a mais prioritária/recente
+      spyGetFullList.mockRestore()
+    })
   })
 
   describe('(D) Itens do Orçamento com Composição Interna (Expedição)', () => {

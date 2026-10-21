@@ -331,6 +331,65 @@ export default function PrecificacaoOrcamentoDetalhes() {
         </div>
       </div>
 
+      {/* Destaque do Tema/Modelo no Cabeçalho */}
+      {(() => {
+        const fotoTema = (orcamento.expand as any)?.tema?.foto
+          ? getFileUrl((orcamento.expand as any).tema, (orcamento.expand as any).tema.foto)
+          : ''
+        const primeiroItemFoto = itens.find(
+          (it) =>
+            it.imagem_anexo ||
+            it.foto_url ||
+            (it.expand as any)?.modelo?.foto ||
+            (Array.isArray(it.composicao) &&
+              it.composicao.some((c) => c.foto_url || c.imagem_anexo)),
+        )
+        const fotoItem = primeiroItemFoto
+          ? primeiroItemFoto.imagem_anexo
+            ? getFileUrl(primeiroItemFoto, primeiroItemFoto.imagem_anexo)
+            : primeiroItemFoto.foto_url ||
+              ((primeiroItemFoto.expand as any)?.modelo?.foto
+                ? getFileUrl(
+                    (primeiroItemFoto.expand as any).modelo,
+                    (primeiroItemFoto.expand as any).modelo.foto,
+                  )
+                : primeiroItemFoto.composicao?.find((c) => c.foto_url || c.imagem_anexo)?.foto_url)
+          : ''
+        const imagemDestaque = fotoTema || fotoItem
+
+        if (!imagemDestaque && !orcamento.tema_nome) return null
+
+        return (
+          <Card className="shadow-xs border-primary/20 bg-gradient-to-r from-orange-50/70 to-rose-50/50">
+            <CardContent className="p-4 flex items-center gap-4">
+              {imagemDestaque && (
+                <img
+                  src={imagemDestaque}
+                  alt="Destaque Tema/Modelo"
+                  className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-xl border border-primary/30 shadow-xs shrink-0"
+                />
+              )}
+              <div className="space-y-1">
+                <span className="text-[10px] font-black uppercase tracking-wider text-primary">
+                  Destaque Tema / Modelo
+                </span>
+                <h3 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
+                  {orcamento.tema_nome
+                    ? `Tema: ${orcamento.tema_nome}`
+                    : orcamento.titulo || 'Cotação Personalizada'}
+                </h3>
+                {orcamento.cor && (
+                  <p className="text-xs text-slate-600 font-medium">
+                    Variação / Cor principal:{' '}
+                    <strong className="text-slate-900">{orcamento.cor}</strong>
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )
+      })()}
+
       {/* PAINEL DAS 3 SAÍDAS (WhatsApp, PDF e Link) */}
       <OrcamentoSaidasPanel orcamento={orcamento} onAtualizar={(novo) => setOrcamento(novo)} />
 

@@ -130,6 +130,29 @@ export default function OrcamentoPublicoPage() {
     ? orcamentoNormalizado.expand.itens
     : []
 
+  // Imagem em destaque do tema/modelo no cabeçalho
+  const temaExpandido = orcamentoNormalizado.expand?.tema
+  const fotoTema = temaExpandido?.foto ? getFileUrl(temaExpandido, temaExpandido.foto) : ''
+  const primeiroItemComFoto = itens.find(
+    (it) =>
+      it.imagem_anexo ||
+      it.foto_url ||
+      (it.expand as any)?.modelo?.foto ||
+      (Array.isArray(it.composicao) && it.composicao.some((c) => c.foto_url || c.imagem_anexo)),
+  )
+  const primeiraFotoItem = primeiroItemComFoto
+    ? primeiroItemComFoto.imagem_anexo
+      ? getFileUrl(primeiroItemComFoto, primeiroItemComFoto.imagem_anexo)
+      : primeiroItemComFoto.foto_url ||
+        ((primeiroItemComFoto.expand as any)?.modelo?.foto
+          ? getFileUrl(
+              (primeiroItemComFoto.expand as any).modelo,
+              (primeiroItemComFoto.expand as any).modelo.foto,
+            )
+          : primeiroItemComFoto.composicao?.find((c) => c.foto_url || c.imagem_anexo)?.foto_url)
+    : ''
+  const imagemDestaqueCabecalho = fotoTema || primeiraFotoItem
+
   const formatarData = (dt?: string) => {
     return formatarDataBR(dt)
   }
@@ -187,6 +210,35 @@ export default function OrcamentoPublicoPage() {
             </Button>
           </div>
         </div>
+
+        {/* Destaque da Imagem do Tema/Modelo no Cabeçalho */}
+        {imagemDestaqueCabecalho && (
+          <Card className="shadow-xs border-primary/20 bg-gradient-to-r from-orange-50/70 to-rose-50/50">
+            <CardContent className="p-4 flex items-center gap-4">
+              <img
+                src={imagemDestaqueCabecalho}
+                alt="Destaque Tema/Modelo"
+                className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-xl border border-primary/30 shadow-xs shrink-0"
+              />
+              <div className="space-y-1">
+                <span className="text-[10px] font-black uppercase tracking-wider text-primary">
+                  Destaque Tema / Modelo
+                </span>
+                <h3 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
+                  {orcamento.tema_nome
+                    ? `Tema: ${orcamento.tema_nome}`
+                    : orcamento.titulo || 'Cotação Personalizada'}
+                </h3>
+                {orcamento.cor && (
+                  <p className="text-xs text-slate-600 font-medium">
+                    Variação / Cor principal:{' '}
+                    <strong className="text-slate-900">{orcamento.cor}</strong>
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Informações do Cliente e Validade */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -285,6 +337,16 @@ export default function OrcamentoPublicoPage() {
                     const fotoAnexo = item.imagem_anexo ? getFileUrl(item, item.imagem_anexo) : ''
                     const imagemExibir = fotoAnexo || item.foto_url || fotoModelo
 
+                    // Demais imagens da composição como miniaturas
+                    const miniaturasComposicao = (
+                      Array.isArray(item.composicao) ? item.composicao : []
+                    )
+                      .map(
+                        (c) =>
+                          c.foto_url || (c.imagem_anexo ? getFileUrl(item, c.imagem_anexo) : ''),
+                      )
+                      .filter((url): url is string => Boolean(url && url !== imagemExibir))
+
                     return (
                       <tr key={item.id || idx} className="hover:bg-slate-50/50 transition-colors">
                         <td className="py-3 px-4">
@@ -353,17 +415,48 @@ export default function OrcamentoPublicoPage() {
                                     un):
                                   </span>
                                   <div className="flex flex-wrap gap-1.5">
-                                    {item.composicao.map((comp, cIdx) => (
-                                      <span
-                                        key={comp.id || cIdx}
-                                        className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 font-medium"
-                                      >
-                                        <strong>{comp.quantidade}x</strong>{' '}
-                                        {comp.modelo_nome || comp.descricao || 'Item'}
-                                        {comp.tema_nome ? ` (${comp.tema_nome})` : ''}
-                                      </span>
-                                    ))}
+                                    {item.composicao.map((comp, cIdx) => {
+                                      const cFoto =
+                                        comp.foto_url ||
+                                        (comp.imagem_anexo
+                                          ? getFileUrl(item, comp.imagem_anexo)
+                                          : '')
+                                      return (
+                                        <span
+                                          key={comp.id || cIdx}
+                                          className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 font-medium"
+                                        >
+                                          {cFoto && (
+                                            <img
+                                              src={cFoto}
+                                              alt={comp.modelo_nome || 'Item'}
+                                              className="w-3.5 h-3.5 object-cover rounded-xs"
+                                            />
+                                          )}
+                                          <strong>{comp.quantidade}x</strong>{' '}
+                                          {comp.modelo_nome || comp.descricao || 'Item'}
+                                          {comp.tema_nome ? ` (${comp.tema_nome})` : ''}
+                                        </span>
+                                      )
+                                    })}
                                   </div>
+                                </div>
+                              )}
+
+                              {/* Miniaturas de fotos do modelo / composição */}
+                              {miniaturasComposicao.length > 0 && (
+                                <div className="mt-1.5 flex items-center gap-1">
+                                  <span className="text-[9px] uppercase text-muted-foreground font-semibold">
+                                    Fotos:
+                                  </span>
+                                  {miniaturasComposicao.slice(0, 5).map((imgUrl, mIdx) => (
+                                    <img
+                                      key={mIdx}
+                                      src={imgUrl}
+                                      alt="Miniatura"
+                                      className="w-5 h-5 object-cover rounded-sm border border-slate-200"
+                                    />
+                                  ))}
                                 </div>
                               )}
                             </div>
@@ -373,12 +466,18 @@ export default function OrcamentoPublicoPage() {
                           {item.quantidade || 1}
                         </td>
                         {canais.map((canal) => {
-                          const precoUnit = item.precos_canais?.[canal.id]?.preco_unitario || 0
-                          const precoCheioGravado = item.precos_canais?.[canal.id]?.preco_cheio
-                          const subtotal =
+                          const precoObj = item.precos_canais?.[canal.id]
+                          const precoUnit = precoObj?.preco_unitario || 0
+                          const precoCheioGravado = precoObj?.preco_cheio
+                          const subtotalBase =
                             precoCheioGravado !== undefined && precoCheioGravado > 0
                               ? precoCheioGravado
                               : Math.round(precoUnit * (item.quantidade || 1) * 100) / 100
+                          const subtotal =
+                            precoObj?.preco_final !== undefined && Number(precoObj.preco_final) >= 0
+                              ? Number(precoObj.preco_final)
+                              : subtotalBase
+                          const descPct = Number(precoObj?.desconto_pct) || 0
                           const freteObj = item.fretes_canais?.[canal.id]
                           const frete = Number(freteObj?.valor_frete) || 0
                           const modoFrete = freteObj?.modo_frete || 'pago_pelo_cliente'
@@ -390,6 +489,11 @@ export default function OrcamentoPublicoPage() {
                               <div className="text-[11px] text-muted-foreground">
                                 {formatarMoedaBR(precoUnit)} cada
                               </div>
+                              {descPct > 0 && (
+                                <div className="text-[10px] font-bold text-amber-600 mt-0.5">
+                                  {descPct}% off (-{formatarMoedaBR(precoObj?.valor_desconto || 0)})
+                                </div>
+                              )}
                               {modoFrete === 'frete_gratis' ? (
                                 <div className="text-[11px] font-semibold text-emerald-600 mt-0.5">
                                   Frete: Grátis

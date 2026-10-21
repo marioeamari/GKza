@@ -642,23 +642,27 @@ export default function PrecificacaoOrcamentoForm() {
     })
   }
 
-  // Ao selecionar um Produto Vinculado aprovado para um canal específico no item
+  // Ao selecionar um Produto Vinculado aprovado (por ID de precificação) para um canal específico no item
   const handleSelecionarProdutoVinculadoNoCanal = async (
     index: number,
     canalId: string,
-    produtoId: string,
+    precificacaoOuProdutoId: string,
   ) => {
     const canalObj = canaisDisponiveis.find((c) => c.id === canalId)
     if (!canalObj) return
 
     const prodsCanal = produtosAprovadosPorCanal[canalId] || []
-    const prodAprovado = prodsCanal.find((p) => p.produto_id === produtoId)
+    // Suporta seleção por precificacao_id (preferencial) com fallback para produto_id retroativo
+    const prodAprovado = prodsCanal.find(
+      (p) =>
+        p.precificacao_id === precificacaoOuProdutoId || p.produto_id === precificacaoOuProdutoId,
+    )
 
     // Se houver um produto vinculado selecionado, carrega o produto técnico e congela sua receita técnica
     let receitaCongelada: ItemComposicaoCusto[] | undefined = undefined
-    if (prodAprovado && produtoId && produtoId !== 'none') {
+    if (prodAprovado && precificacaoOuProdutoId && precificacaoOuProdutoId !== 'none') {
       try {
-        const prodCompleto = await precificacaoService.getProduto(produtoId)
+        const prodCompleto = await precificacaoService.getProduto(prodAprovado.produto_id)
         if (prodCompleto?.composicao && prodCompleto.composicao.length > 0) {
           receitaCongelada = congelarSnapshotReceita(prodCompleto.composicao)
         }
@@ -679,10 +683,19 @@ export default function PrecificacaoOrcamentoForm() {
       const produtosCanais = { ...it.produtos_canais }
       const qtd = Number(it.quantidade) || 1
 
-      if (!prodAprovado || produtoId === 'none') {
-        // Remove vínculo desse canal
+      if (!prodAprovado || precificacaoOuProdutoId === 'none') {
+        // Remove vínculo desse canal mantendo o desconto atual recalculado sobre o preço manual
         delete produtosCanais[canalId]
         if (precos[canalId]) {
+          const unit = precos[canalId]?.preco_unitario || 0
+          const cheio = precos[canalId]?.preco_cheio || Math.round(unit * qtd * 100) / 100
+          const descPct = precos[canalId]?.desconto_pct || 0
+          const descCalc = calcularDescontoIndividualItem({
+            subtotalOuPrecoCheio: cheio,
+            descontoPct: descPct,
+            quantidade: qtd,
+          })
+
           precos[canalId] = {
             ...precos[canalId],
             produto_vinculado_id: undefined,
@@ -690,12 +703,24 @@ export default function PrecificacaoOrcamentoForm() {
             produto_vinculado_sku: undefined,
             precificacao_id: undefined,
             tem_precificacao_oficial: false,
+            desconto_pct: descCalc.descontoPct,
+            valor_desconto: descCalc.valorDescontoTotal,
+            preco_final: descCalc.precoFinalTotal,
+            alerta_margem: descCalc.alertaMargem,
+            preco_aprovado_base: undefined,
           }
         }
       } else {
-        // Vincula produto aprovado do canal e puxa preço unitário aprovado
+        // Vincula produto aprovado do canal e puxa preço unitário aprovado daquela modalidade/cenário
         const precoAprovado = prodAprovado.preco_aprovado
         const precoCheio = Math.round(precoAprovado * qtd * 100) / 100
+        const descPct = precos[canalId]?.desconto_pct || 0
+        const descCalc = calcularDescontoIndividualItem({
+          subtotalOuPrecoCheio: precoCheio,
+          descontoPct: descPct,
+          quantidade: qtd,
+          precoAprovadoReferencia: precoAprovado,
+        })
 
         produtosCanais[canalId] = {
           canal_id: canalId,
@@ -705,6 +730,8 @@ export default function PrecificacaoOrcamentoForm() {
           produto_sku: prodAprovado.produto_sku,
           preco_aprovado: precoAprovado,
           precificacao_id: prodAprovado.precificacao_id,
+          modalidade_id: prodAprovado.modalidade_id,
+          modalidade_nome: prodAprovado.modalidade_nome,
           status_precificacao: prodAprovado.status_precificacao,
           desatualizada: prodAprovado.desatualizada,
         }
@@ -716,7 +743,12 @@ export default function PrecificacaoOrcamentoForm() {
           preco_cheio: precoCheio,
           preco_sugerido_oficial: precoAprovado,
           tem_precificacao_oficial: true,
-          desconto_aplicado: false,
+          desconto_aplicado: descPct > 0,
+          desconto_pct: descCalc.descontoPct,
+          valor_desconto: descCalc.valorDescontoTotal,
+          preco_final: descCalc.precoFinalTotal,
+          alerta_margem: descCalc.alertaMargem,
+          preco_aprovado_base: precoAprovado,
           produto_vinculado_id: prodAprovado.produto_id,
           produto_vinculado_nome: prodAprovado.produto_nome,
           produto_vinculado_sku: prodAprovado.produto_sku,
@@ -744,6 +776,47 @@ export default function PrecificacaoOrcamentoForm() {
     })
   }
 
+  // Atualiza Desconto individual em % por canal do item
+  const handleAlterarDescontoCanal = (index: number, canalId: string, descontoPct: number) => {
+    setItens((prev) => {
+      const copy = [...prev]
+      const it = copy[index]
+      if (!it) return prev
+      const precos = { ...it.precos_canais }
+      const precoExistente = precos[canalId]
+      if (!precoExistente) return prev
+
+      const qtd = Number(it.quantidade) || 1
+      const precoCheioBase =
+        precoExistente.preco_cheio !== undefined && Number(precoExistente.preco_cheio) > 0
+          ? Number(precoExistente.preco_cheio)
+          : Math.round((precoExistente.preco_unitario || 0) * qtd * 100) / 100
+      const refAprovado =
+        precoExistente.preco_aprovado_base ||
+        it.produtos_canais?.[canalId]?.preco_aprovado ||
+        precoExistente.preco_sugerido_oficial
+
+      const descCalc = calcularDescontoIndividualItem({
+        subtotalOuPrecoCheio: precoCheioBase,
+        descontoPct,
+        quantidade: qtd,
+        precoAprovadoReferencia: refAprovado,
+      })
+
+      precos[canalId] = {
+        ...precoExistente,
+        desconto_pct: descCalc.descontoPct,
+        valor_desconto: descCalc.valorDescontoTotal,
+        preco_final: descCalc.precoFinalTotal,
+        alerta_margem: descCalc.alertaMargem,
+        desconto_aplicado: descCalc.descontoPct > 0,
+      }
+
+      copy[index] = { ...it, precos_canais: precos }
+      return copy
+    })
+  }
+
   // Preço unitário digitado manualmente => calcula Preço Cheio em tempo real (unitário × quantidade)
   const handleAlterarPrecoUnitarioCanal = (
     index: number,
@@ -760,6 +833,18 @@ export default function PrecificacaoOrcamentoForm() {
       const oficial = precos[canalId]?.preco_sugerido_oficial
       const qtd = Number(it.quantidade) || 1
       const precoCheioCalculado = converterUnitarioParaCheio(valorUnitario, qtd)
+      const descPct = precos[canalId]?.desconto_pct || 0
+      const refAprovado =
+        precos[canalId]?.preco_aprovado_base ||
+        it.produtos_canais?.[canalId]?.preco_aprovado ||
+        oficial
+
+      const descCalc = calcularDescontoIndividualItem({
+        subtotalOuPrecoCheio: precoCheioCalculado,
+        descontoPct: descPct,
+        quantidade: qtd,
+        precoAprovadoReferencia: refAprovado,
+      })
 
       precos[canalId] = {
         canal_id: canalId,
@@ -768,7 +853,12 @@ export default function PrecificacaoOrcamentoForm() {
         preco_cheio: precoCheioCalculado,
         preco_sugerido_oficial: oficial,
         tem_precificacao_oficial: precos[canalId]?.tem_precificacao_oficial ?? false,
-        desconto_aplicado: oficial ? valorUnitario < oficial : false,
+        desconto_aplicado: descCalc.descontoPct > 0,
+        desconto_pct: descCalc.descontoPct,
+        valor_desconto: descCalc.valorDescontoTotal,
+        preco_final: descCalc.precoFinalTotal,
+        alerta_margem: descCalc.alertaMargem,
+        preco_aprovado_base: precos[canalId]?.preco_aprovado_base,
         produto_vinculado_id: precos[canalId]?.produto_vinculado_id,
         produto_vinculado_nome: precos[canalId]?.produto_vinculado_nome,
         produto_vinculado_sku: precos[canalId]?.produto_vinculado_sku,
@@ -792,6 +882,18 @@ export default function PrecificacaoOrcamentoForm() {
       const oficial = precos[canalId]?.preco_sugerido_oficial
       const qtd = Number(it.quantidade) || 1
       const precoUnitarioCalculado = converterCheioParaUnitario(valorCheio, qtd)
+      const descPct = precos[canalId]?.desconto_pct || 0
+      const refAprovado =
+        precos[canalId]?.preco_aprovado_base ||
+        it.produtos_canais?.[canalId]?.preco_aprovado ||
+        oficial
+
+      const descCalc = calcularDescontoIndividualItem({
+        subtotalOuPrecoCheio: valorCheio,
+        descontoPct: descPct,
+        quantidade: qtd,
+        precoAprovadoReferencia: refAprovado,
+      })
 
       precos[canalId] = {
         canal_id: canalId,
@@ -800,7 +902,12 @@ export default function PrecificacaoOrcamentoForm() {
         preco_cheio: valorCheio,
         preco_sugerido_oficial: oficial,
         tem_precificacao_oficial: precos[canalId]?.tem_precificacao_oficial ?? false,
-        desconto_aplicado: oficial ? precoUnitarioCalculado < oficial : false,
+        desconto_aplicado: descCalc.descontoPct > 0,
+        desconto_pct: descCalc.descontoPct,
+        valor_desconto: descCalc.valorDescontoTotal,
+        preco_final: descCalc.precoFinalTotal,
+        alerta_margem: descCalc.alertaMargem,
+        preco_aprovado_base: precos[canalId]?.preco_aprovado_base,
         produto_vinculado_id: precos[canalId]?.produto_vinculado_id,
         produto_vinculado_nome: precos[canalId]?.produto_vinculado_nome,
         produto_vinculado_sku: precos[canalId]?.produto_vinculado_sku,
@@ -812,7 +919,7 @@ export default function PrecificacaoOrcamentoForm() {
     })
   }
 
-  // Quando altera quantidade de um item, recalcula precos cheios com base nos unitários existentes
+  // Quando altera quantidade de um item, recalcula precos cheios e descontos com base nos unitários existentes
   const handleAlterarQuantidadeItem = (index: number, novaQtd: number) => {
     setItens((prev) => {
       const copy = [...prev]
@@ -821,9 +928,28 @@ export default function PrecificacaoOrcamentoForm() {
       const precos = { ...it.precos_canais }
       for (const cId of Object.keys(precos)) {
         const u = precos[cId]?.preco_unitario || 0
+        const novoCheio = Math.round(u * novaQtd * 100) / 100
+        const descPct = precos[cId]?.desconto_pct || 0
+        const refAprovado =
+          precos[cId]?.preco_aprovado_base ||
+          it.produtos_canais?.[cId]?.preco_aprovado ||
+          precos[cId]?.preco_sugerido_oficial
+
+        const descCalc = calcularDescontoIndividualItem({
+          subtotalOuPrecoCheio: novoCheio,
+          descontoPct: descPct,
+          quantidade: novaQtd,
+          precoAprovadoReferencia: refAprovado,
+        })
+
         precos[cId] = {
           ...precos[cId],
-          preco_cheio: Math.round(u * novaQtd * 100) / 100,
+          preco_cheio: novoCheio,
+          desconto_pct: descCalc.descontoPct,
+          valor_desconto: descCalc.valorDescontoTotal,
+          preco_final: descCalc.precoFinalTotal,
+          alerta_margem: descCalc.alertaMargem,
+          desconto_aplicado: descCalc.descontoPct > 0,
         }
       }
       copy[index] = {
@@ -1650,6 +1776,30 @@ export default function PrecificacaoOrcamentoForm() {
                     const frete = freteObj?.valor_frete || 0
 
                     const prodsAprovadosDesteCanal = produtosAprovadosPorCanal[canal.id] || []
+                    const valorSelecionadoPrec =
+                      produtoVinculadoObj?.precificacao_id ||
+                      precoObj?.precificacao_id ||
+                      (produtoVinculadoObj?.produto_id &&
+                      prodsAprovadosDesteCanal.some(
+                        (p) => p.precificacao_id === produtoVinculadoObj.produto_id,
+                      )
+                        ? produtoVinculadoObj.produto_id
+                        : prodsAprovadosDesteCanal.find(
+                            (p) => p.produto_id === produtoVinculadoObj?.produto_id,
+                          )?.precificacao_id) ||
+                      'none'
+
+                    const descPctAtual = Number(precoObj?.desconto_pct) || 0
+                    const valorDescontoAtual = Number(precoObj?.valor_desconto) || 0
+                    const precoFinalAtual =
+                      precoObj?.preco_final !== undefined
+                        ? Number(precoObj.preco_final)
+                        : Math.max(0, Math.round((precoCheio - valorDescontoAtual) * 100) / 100)
+                    const precoFinalUnitario =
+                      item.quantidade > 0
+                        ? Math.round((precoFinalAtual / item.quantidade) * 100) / 100
+                        : 0
+                    const temAlertaMargem = Boolean(precoObj?.alerta_margem)
 
                     return (
                       <div
@@ -1658,9 +1808,16 @@ export default function PrecificacaoOrcamentoForm() {
                       >
                         <div className="flex items-center justify-between font-bold text-foreground">
                           <span className="text-xs font-black">{canal.nome}</span>
-                          <span className="text-primary font-black font-mono">
-                            Subtotal: {formatarMoedaBR(precoCheio)}
-                          </span>
+                          <div className="text-right">
+                            <span className="text-primary font-black font-mono">
+                              Total: {formatarMoedaBR(precoFinalAtual)}
+                            </span>
+                            {descPctAtual > 0 && (
+                              <div className="text-[10px] text-muted-foreground line-through font-mono">
+                                Cheio: {formatarMoedaBR(precoCheio)}
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         {/* Produto Vinculado do Repositório /precificacao/aprovados para este canal */}
@@ -1678,7 +1835,7 @@ export default function PrecificacaoOrcamentoForm() {
                             )}
                           </Label>
                           <Select
-                            value={produtoVinculadoObj?.produto_id || 'none'}
+                            value={valorSelecionadoPrec}
                             onValueChange={(val) =>
                               handleSelecionarProdutoVinculadoNoCanal(index, canal.id, val)
                             }
@@ -1686,17 +1843,25 @@ export default function PrecificacaoOrcamentoForm() {
                             <SelectTrigger className="h-7 text-[11px]">
                               <SelectValue placeholder="Vincular produto aprovado..." />
                             </SelectTrigger>
-                            <SelectContent>
+                            <SelectContent className="max-h-72">
                               <SelectItem value="none">-- Preço Livre (Sem Vínculo) --</SelectItem>
                               {prodsAprovadosDesteCanal.map((p) => {
                                 const isDesat =
                                   p.desatualizada || p.status_precificacao === 'desatualizada'
                                 return (
-                                  <SelectItem key={p.produto_id} value={p.produto_id}>
+                                  <SelectItem key={p.precificacao_id} value={p.precificacao_id}>
                                     <span className="inline-flex items-center gap-1.5 flex-wrap">
-                                      <span>
-                                        {p.produto_nome} {p.produto_sku ? `(${p.produto_sku})` : ''}{' '}
-                                        - {formatarMoedaBR(p.preco_aprovado)}
+                                      <span className="font-semibold">{p.produto_nome}</span>
+                                      {p.produto_sku && (
+                                        <span className="text-[10px] text-muted-foreground">
+                                          ({p.produto_sku})
+                                        </span>
+                                      )}
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded font-bold bg-sky-100 text-sky-800 border border-sky-300">
+                                        {p.modalidade_nome || 'Padrão'}
+                                      </span>
+                                      <span className="font-mono text-emerald-700 font-bold">
+                                        {formatarMoedaBR(p.preco_aprovado)}
                                       </span>
                                       {isDesat && (
                                         <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-100 text-amber-800 border border-amber-300">
@@ -1709,6 +1874,19 @@ export default function PrecificacaoOrcamentoForm() {
                               })}
                             </SelectContent>
                           </Select>
+
+                          {/* Badge da Modalidade selecionada */}
+                          {produtoVinculadoObj?.modalidade_nome && (
+                            <div className="flex items-center gap-1.5 pt-0.5">
+                              <span className="text-[10px] text-muted-foreground">Modalidade:</span>
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] bg-sky-50 text-sky-900 border-sky-300 font-bold px-1.5 py-0"
+                              >
+                                {produtoVinculadoObj.modalidade_nome}
+                              </Badge>
+                            </div>
+                          )}
 
                           {/* Aviso visível quando o produto selecionado está com precificação desatualizada */}
                           {(produtoVinculadoObj?.desatualizada ||
@@ -1734,7 +1912,7 @@ export default function PrecificacaoOrcamentoForm() {
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <Label className="text-[10px] text-muted-foreground block font-medium">
-                              Preço Unit. (R$)
+                              Preço Unit. Base (R$)
                             </Label>
                             <Input
                               type="number"
@@ -1754,7 +1932,7 @@ export default function PrecificacaoOrcamentoForm() {
 
                           <div>
                             <Label className="text-[10px] text-muted-foreground block font-medium">
-                              Preço Cheio (R$)
+                              Preço Cheio Base (R$)
                             </Label>
                             <Input
                               type="number"
@@ -1768,9 +1946,75 @@ export default function PrecificacaoOrcamentoForm() {
                                   parseFloat(e.target.value) || 0,
                                 )
                               }
-                              className="h-7 text-xs font-semibold text-primary font-mono"
+                              className="h-7 text-xs font-semibold text-slate-800 font-mono"
                             />
                           </div>
+                        </div>
+
+                        {/* Campo individual: Desconto (%) por canal */}
+                        <div className="p-2 rounded-md bg-amber-50/50 border border-amber-200/80 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-[10px] font-bold text-amber-950">
+                              Desconto no Canal (%)
+                            </Label>
+                            {descPctAtual > 0 && (
+                              <span className="text-[10px] font-mono font-bold text-amber-800">
+                                -{formatarMoedaBR(valorDescontoAtual)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 items-center">
+                            <div className="relative">
+                              <Input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.5"
+                                placeholder="0"
+                                value={descPctAtual || ''}
+                                onChange={(e) =>
+                                  handleAlterarDescontoCanal(
+                                    index,
+                                    canal.id,
+                                    Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)),
+                                  )
+                                }
+                                className="h-7 text-xs font-bold text-amber-950 pr-6 border-amber-300"
+                              />
+                              <span className="absolute right-2 top-1.5 text-xs font-bold text-amber-700 pointer-events-none">
+                                %
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-[9px] text-muted-foreground uppercase font-bold">
+                                Preço Final
+                              </div>
+                              <div className="text-xs font-black text-emerald-800 font-mono">
+                                {formatarMoedaBR(precoFinalAtual)}
+                              </div>
+                              <div className="text-[10px] text-muted-foreground font-mono">
+                                ({formatarMoedaBR(precoFinalUnitario)}/un)
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Alerta visual amarelo (sem bloqueio) se unitário ficar abaixo do aprovado */}
+                          {temAlertaMargem && (
+                            <div className="flex items-start gap-1 p-1 rounded bg-amber-100/90 border border-amber-400 text-[10px] text-amber-950 font-medium leading-tight">
+                              <span className="shrink-0">⚠️</span>
+                              <span>
+                                Preço final unitário ({formatarMoedaBR(precoFinalUnitario)}) abaixo
+                                do preço aprovado original (
+                                {formatarMoedaBR(
+                                  precoObj?.preco_aprovado_base ||
+                                    produtoVinculadoObj?.preco_aprovado ||
+                                    precoObj?.preco_sugerido_oficial ||
+                                    0,
+                                )}
+                                ).
+                              </span>
+                            </div>
+                          )}
                         </div>
 
                         <div>
@@ -1858,6 +2102,10 @@ export default function PrecificacaoOrcamentoForm() {
                         precoObj?.preco_cheio !== undefined
                           ? precoObj.preco_cheio
                           : Math.round(precoUnit * item.quantidade * 100) / 100
+                      const precoFinalUnitario =
+                        item.quantidade > 0 && precoObj?.preco_final !== undefined
+                          ? Math.round((Number(precoObj.preco_final) / item.quantidade) * 100) / 100
+                          : precoUnit
                       const frete = freteObj?.valor_frete || 0
 
                       const precKey =
@@ -1869,8 +2117,12 @@ export default function PrecificacaoOrcamentoForm() {
                           key={canal.id}
                           canalNome={canal.nome}
                           quantidadeItem={item.quantidade}
-                          precoCheioEditado={precoCheio}
-                          precoUnitarioEditado={precoUnit}
+                          precoCheioEditado={
+                            precoObj?.preco_final !== undefined
+                              ? Number(precoObj.preco_final)
+                              : precoCheio
+                          }
+                          precoUnitarioEditado={precoFinalUnitario}
                           freteItemEditado={frete}
                           modoFreteItem={freteObj?.modo_frete || 'pago_pelo_cliente'}
                           precificacaoAprovadaRecord={precRec}
