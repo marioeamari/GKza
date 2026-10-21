@@ -25,6 +25,7 @@ export interface OrcamentoPrecoCanalItem {
   preco_unitario: number
   preco_cheio?: number
   preco_sugerido_oficial?: number
+  preco_aprovado_base?: number
   tem_precificacao_oficial?: boolean
   desconto_aplicado?: boolean
   desconto_pct?: number

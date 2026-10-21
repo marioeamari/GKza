@@ -2,6 +2,7 @@ export interface KitTema {
   id: string
   nome: string
   descricao?: string
+  foto?: string
   ativo: boolean
   ordem: number
   created?: string

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { orcamentosService } from '@/services/orcamentos'
 import { OrcamentoRecord } from '@/types/orcamento'
+import { KitTema } from '@/types/separacaoKits'
 import {
   formatarMoedaBR,
   formatarDataBR,
@@ -131,13 +132,18 @@ export default function OrcamentoPublicoPage() {
     : []
 
   // Imagem em destaque do tema/modelo no cabeçalho
-  const temaExpandido = orcamentoNormalizado.expand?.tema
-  const fotoTema = temaExpandido?.foto ? getFileUrl(temaExpandido, temaExpandido.foto) : ''
+  const temaExpandido = orcamentoNormalizado.expand?.tema as
+    | (KitTema & { foto?: string })
+    | undefined
+  const fotoTema =
+    temaExpandido && typeof temaExpandido.foto === 'string' && temaExpandido.foto.trim() !== ''
+      ? getFileUrl(temaExpandido, temaExpandido.foto)
+      : ''
   const primeiroItemComFoto = itens.find(
     (it) =>
       it.imagem_anexo ||
       it.foto_url ||
-      (it.expand as any)?.modelo?.foto ||
+      Boolean((it.expand as any)?.modelo?.foto) ||
       (Array.isArray(it.composicao) && it.composicao.some((c) => c.foto_url || c.imagem_anexo)),
   )
   const primeiraFotoItem = primeiroItemComFoto
@@ -149,7 +155,8 @@ export default function OrcamentoPublicoPage() {
               (primeiroItemComFoto.expand as any).modelo,
               (primeiroItemComFoto.expand as any).modelo.foto,
             )
-          : primeiroItemComFoto.composicao?.find((c) => c.foto_url || c.imagem_anexo)?.foto_url)
+          : primeiroItemComFoto.composicao?.find((c) => c.foto_url || c.imagem_anexo)?.foto_url) ||
+        ''
     : ''
   const imagemDestaqueCabecalho = fotoTema || primeiraFotoItem
 

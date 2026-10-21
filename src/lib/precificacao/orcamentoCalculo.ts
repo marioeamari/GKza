@@ -185,9 +185,10 @@ export function converterCheioParaUnitario(precoCheio: number, quantidade: numbe
  * - alertaMargem: boolean indicando se o preço unitário final ficou abaixo do preco_aprovado oficial
  */
 export function calcularDescontoIndividualItem(params: {
-  precoUnitario: number
+  precoUnitario?: number
   quantidade: number
   precoCheioBase?: number
+  subtotalOuPrecoCheio?: number
   descontoPct?: number
   precoAprovadoReferencia?: number
 }): {
@@ -198,10 +199,23 @@ export function calcularDescontoIndividualItem(params: {
   alertaMargem: boolean
 } {
   const qtd = Math.max(1, Number(params.quantidade) || 1)
-  const unitarioBase = Number(params.precoUnitario) || 0
+  const subtotalEntrada =
+    params.subtotalOuPrecoCheio !== undefined
+      ? Number(params.subtotalOuPrecoCheio)
+      : params.precoCheioBase !== undefined
+        ? Number(params.precoCheioBase)
+        : undefined
+
+  const unitarioBase =
+    params.precoUnitario !== undefined
+      ? Number(params.precoUnitario) || 0
+      : subtotalEntrada !== undefined && qtd > 0
+        ? Math.round((subtotalEntrada / qtd) * 100) / 100
+        : 0
+
   const subtotalBase =
-    params.precoCheioBase !== undefined && Number(params.precoCheioBase) > 0
-      ? Number(params.precoCheioBase)
+    subtotalEntrada !== undefined && subtotalEntrada > 0
+      ? subtotalEntrada
       : Math.round(unitarioBase * qtd * 100) / 100
 
   const pct = Math.max(0, Number(params.descontoPct) || 0)

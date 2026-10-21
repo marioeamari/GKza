@@ -48,6 +48,7 @@ import { Pessoa } from '@/types/domain'
 import {
   calcularTotaisPorCanal,
   calcularMontanteConsolidadoPorCanal,
+  calcularDescontoIndividualItem,
   converterCheioParaUnitario,
   converterUnitarioParaCheio,
   formatarMoedaBR,
@@ -115,6 +116,8 @@ export default function PrecificacaoOrcamentoForm() {
         produto_nome: string
         produto_sku?: string
         preco_aprovado: number
+        modalidade_id?: string
+        modalidade_nome?: string
         precificacao_record?: any
         status_precificacao?: string
         desatualizada?: boolean
