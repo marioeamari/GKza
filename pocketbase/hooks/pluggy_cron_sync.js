@@ -1,7 +1,6 @@
 cronAdd('pluggy_sync_hourly', '15 * * * *', () => {
-  const clientId = $os.getenv('PLUGGY_CLIENT_ID') || '54b2a0af-7f3a-415e-8a8f-fa73d0aa6905'
-  const clientSecret =
-    $os.getenv('PLUGGY_CLIENT_SECRET') || 'RCqCZjybNbeJddKQ95JlAvjAbnmhLM0yXClwxpE4QYU'
+  const clientId = $os.getenv('PLUGGY_CLIENT_ID')
+  const clientSecret = $os.getenv('PLUGGY_CLIENT_SECRET')
 
   if (!clientId || !clientSecret) {
     console.log('[PluggyCronSync] Credenciais não configuradas. Encerrando.')

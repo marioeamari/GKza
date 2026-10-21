@@ -12,7 +12,7 @@ routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
     }
   }
 
-  const token = $os.getenv('TELEGRAM_BOT_TOKEN') || '8648870507:AAGZPIM5pyNjbcNfFmzZDgYaC5wuBj0cq8s'
+  const token = $os.getenv('TELEGRAM_BOT_TOKEN')
   if (!token) {
     console.log('TELEGRAM_BOT_TOKEN not configured')
     return e.json(500, { error: 'bot_token_not_configured' })

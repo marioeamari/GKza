@@ -2,8 +2,7 @@ routerAdd(
   'GET',
   '/backend/v1/telegram/status',
   (e) => {
-    const token =
-      $os.getenv('TELEGRAM_BOT_TOKEN') || '8648870507:AAGZPIM5pyNjbcNfFmzZDgYaC5wuBj0cq8s'
+    const token = $os.getenv('TELEGRAM_BOT_TOKEN')
 
     const secret = $os.getenv('TELEGRAM_WEBHOOK_SECRET') || ''
     const instanceUrl =

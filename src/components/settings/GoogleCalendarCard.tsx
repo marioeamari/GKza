@@ -281,13 +281,9 @@ export function GoogleCalendarCard() {
                   </code>
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  No Google Cloud Console (ID de cliente{' '}
-                  <code className="font-mono text-[10px]">
-                    788252458556-ri5fjf39bvn9p96m4akiipk24lbt90hf...
-                  </code>
-                  ), certifique-se de que a URI acima esteja listada exatamente em{' '}
-                  <strong>URIs de redirecionamento autorizados</strong> e que seu e-mail esteja
-                  cadastrado como usuário de teste caso o app esteja em modo de teste.
+                  No Google Cloud Console, certifique-se de que a URI acima esteja listada
+                  exatamente em <strong>URIs de redirecionamento autorizados</strong> e que seu
+                  e-mail esteja cadastrado como usuário de teste caso o app esteja em modo de teste.
                 </p>
               </div>
             </div>

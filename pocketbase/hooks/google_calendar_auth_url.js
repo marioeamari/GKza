@@ -3,9 +3,7 @@ routerAdd(
   '/backend/v1/google/auth-url',
   (e) => {
     const auth = e.auth
-    const clientId =
-      $os.getenv('GOOGLE_CLIENT_ID') ||
-      '788252458556-ri5fjf39bvn9p96m4akiipk24lbt90hf.apps.googleusercontent.com'
+    const clientId = $os.getenv('GOOGLE_CLIENT_ID')
 
     if (!clientId) {
       return e.json(400, {

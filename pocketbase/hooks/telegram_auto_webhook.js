@@ -1,7 +1,7 @@
 onBootstrap((e) => {
   e.next()
 
-  const token = $os.getenv('TELEGRAM_BOT_TOKEN') || '8648870507:AAGZPIM5pyNjbcNfFmzZDgYaC5wuBj0cq8s'
+  const token = $os.getenv('TELEGRAM_BOT_TOKEN')
 
   if (!token) return
 

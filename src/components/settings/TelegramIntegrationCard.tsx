@@ -122,7 +122,6 @@ export function TelegramIntegrationCard() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Telegram-Bot-Api-Secret-Token': 'gkza_telegram_sec_993418',
         },
         body: JSON.stringify(payload),
       })

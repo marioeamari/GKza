@@ -7,14 +7,13 @@ routerAdd(
       return e.json(401, { error: 'Não autenticado' })
     }
 
-    const clientId =
-      $os.getenv('GOOGLE_CLIENT_ID') ||
-      '788252458556-ri5fjf39bvn9p96m4akiipk24lbt90hf.apps.googleusercontent.com'
-    const clientSecret = $os.getenv('GOOGLE_CLIENT_SECRET') || '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'
+    const clientId = $os.getenv('GOOGLE_CLIENT_ID')
+    const clientSecret = $os.getenv('GOOGLE_CLIENT_SECRET')
 
     if (!clientId || !clientSecret) {
       return e.json(400, {
-        error: 'Credenciais OAuth do Google Calendar não configuradas no servidor.',
+        error:
+          'Credenciais OAuth do Google Calendar (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET) não configuradas no servidor.',
         configured: false,
       })
     }

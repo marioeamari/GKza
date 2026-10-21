@@ -1,5 +1,5 @@
 routerAdd('GET', '/backend/v1/telegram/init-webhook', (e) => {
-  const token = $os.getenv('TELEGRAM_BOT_TOKEN') || '8648870507:AAGZPIM5pyNjbcNfFmzZDgYaC5wuBj0cq8s'
+  const token = $os.getenv('TELEGRAM_BOT_TOKEN')
 
   if (!token) {
     return e.json(500, { error: 'TELEGRAM_BOT_TOKEN not configured' })
