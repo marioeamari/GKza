@@ -268,6 +268,7 @@ export const orcamentosService = {
       public_token: publicToken,
       link_publico_ativo: true,
       totais_por_canal: totais,
+      fretes: input.fretes || [],
     }
 
     const createdOrc = await pb.collection('orcamentos').create<OrcamentoRecord>(orcData)
@@ -355,6 +356,7 @@ export const orcamentosService = {
     if (input.cor !== undefined) updateData.cor = input.cor
     if (input.observacoes !== undefined) updateData.observacoes = input.observacoes
     if (totais !== undefined) updateData.totais_por_canal = totais
+    if (input.fretes !== undefined) updateData.fretes = input.fretes
 
     const updatedOrc = await pb.collection('orcamentos').update<OrcamentoRecord>(id, updateData)
 

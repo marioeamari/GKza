@@ -63,6 +63,19 @@ export interface OrcamentoFreteCanalItem {
   modo_frete?: ModoFreteOrcamento
 }
 
+/**
+ * Opção de frete discriminada para cotação ao cliente (ilimitadas)
+ * Requisito: Transportadora (livre), Prazo (livre), Valor do frete (R$),
+ * e cálculo automático do total = produtos do canal/orçamento + frete.
+ */
+export interface OrcamentoFreteOpcao {
+  id?: string
+  transportadora: string
+  prazo: string
+  valor: number
+  observacoes?: string
+}
+
 export type TipoItemOrcamento = 'cadastrado' | 'personalizado'
 
 export type TipoComposicaoItem = 'cadastrado' | 'personalizado'
@@ -140,6 +153,7 @@ export interface OrcamentoRecord {
   public_token?: string
   link_publico_ativo?: boolean
   totais_por_canal?: Record<string, OrcamentoTotalCanal>
+  fretes?: OrcamentoFreteOpcao[]
   created?: string
   updated?: string
   expand?: {
@@ -167,6 +181,7 @@ export interface CreateOrcamentoInput {
   tema_nome?: string
   cor?: string
   observacoes?: string
+  fretes?: OrcamentoFreteOpcao[]
   itens: Array<{
     id?: string
     tipo_item?: TipoItemOrcamento

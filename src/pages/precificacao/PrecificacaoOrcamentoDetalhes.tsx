@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Phone,
   FileText,
+  Truck,
 } from 'lucide-react'
 import { PrecHeader } from '@/components/precificacao/PrecHeader'
 import { orcamentosService } from '@/services/orcamentos'
@@ -457,6 +458,77 @@ export default function PrecificacaoOrcamentoDetalhes() {
           </CardContent>
         </Card>
       </div>
+
+      {/* OPÇÕES DISCRIMINADAS DE FRETE */}
+      {Array.isArray(orcamento.fretes) && orcamento.fretes.length > 0 && (
+        <Card className="shadow-xs border-border/80 overflow-hidden">
+          <CardHeader className="pb-3 border-b border-border/60 bg-muted/20">
+            <div className="flex items-center gap-2">
+              <Truck className="w-4 h-4 text-primary" />
+              <CardTitle className="text-base font-bold text-foreground">
+                Opções de Frete & Envio Discriminadas
+              </CardTitle>
+            </div>
+            <CardDescription className="text-xs mt-0.5">
+              Opções cadastradas para o cliente decidir, com cálculo automático do valor final total
+              (produtos + frete)
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-4 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {orcamento.fretes.map((opcao, opIdx) => {
+                const valorFreteNum = Math.max(0, Number(opcao.valor) || 0)
+                return (
+                  <div
+                    key={opcao.id || opIdx}
+                    className="p-3.5 rounded-xl border border-border/80 bg-background shadow-2xs space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                      <div>
+                        <span className="font-bold text-xs text-foreground block">
+                          Frete {opcao.transportadora || 'Transportadora'}
+                        </span>
+                        {opcao.prazo && (
+                          <span className="text-[11px] text-muted-foreground block">
+                            Prazo: {opcao.prazo}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs font-black text-orange-600 font-mono">
+                        {formatarMoedaBR(valorFreteNum)}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
+                        Total com este frete:
+                      </span>
+                      {canais.map((canal) => {
+                        const totCanal = totais[canal.id]
+                        const subtotalProd = totCanal?.total_itens || 0
+                        const totalComEstaOpcao =
+                          Math.round((subtotalProd + valorFreteNum) * 100) / 100
+
+                        return (
+                          <div
+                            key={canal.id}
+                            className="p-1.5 rounded bg-muted/30 border border-border/50 flex items-center justify-between text-xs"
+                          >
+                            <span className="font-medium text-foreground">{canal.nome}:</span>
+                            <span className="font-bold font-mono text-primary">
+                              {formatarMoedaBR(totalComEstaOpcao)}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* TABELA DE ITENS E TOTAIS COMPARADOS */}
       <Card className="shadow-xs border-border/80 overflow-hidden">

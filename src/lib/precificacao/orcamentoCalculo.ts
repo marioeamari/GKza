@@ -4,6 +4,7 @@ import {
   OrcamentoTotalCanal,
   OrcamentoPrecoCanalItem,
   OrcamentoFreteCanalItem,
+  OrcamentoFreteOpcao,
 } from '@/types/orcamento'
 import { PrecCanalRecord } from '@/types/precificacao'
 
@@ -311,6 +312,35 @@ export function normalizarOrcamentoRecord(raw: any): OrcamentoRecord {
     canaisIdsFinais = Array.from(new Set([...canaisIds, ...chavesTotais]))
   }
 
+  // Normalização de opções de frete (fretes)
+  let fretesNormalizados: OrcamentoFreteOpcao[] = []
+  if (Array.isArray(raw.fretes)) {
+    fretesNormalizados = raw.fretes
+      .filter((f: any) => f && typeof f === 'object')
+      .map((f: any, idx: number) => ({
+        id: String(f.id || `frete_${idx}`),
+        transportadora: String(f.transportadora || ''),
+        prazo: String(f.prazo || ''),
+        valor: Math.max(0, Number(f.valor) || 0),
+        observacoes: f.observacoes ? String(f.observacoes) : undefined,
+      }))
+  } else if (typeof raw.fretes === 'string' && raw.fretes.trim()) {
+    try {
+      const parsed = JSON.parse(raw.fretes)
+      if (Array.isArray(parsed)) {
+        fretesNormalizados = parsed.map((f: any, idx: number) => ({
+          id: String(f.id || `frete_${idx}`),
+          transportadora: String(f.transportadora || ''),
+          prazo: String(f.prazo || ''),
+          valor: Math.max(0, Number(f.valor) || 0),
+          observacoes: f.observacoes ? String(f.observacoes) : undefined,
+        }))
+      }
+    } catch {
+      fretesNormalizados = []
+    }
+  }
+
   // Expand de itens
   const rawExpandItens = raw.expand?.itens
   let itensExpandidos: OrcamentoItemRecord[] = []
@@ -357,6 +387,7 @@ export function normalizarOrcamentoRecord(raw: any): OrcamentoRecord {
     status: raw.status || 'rascunho',
     canais_comparados: canaisIdsFinais,
     totais_por_canal: totais,
+    fretes: fretesNormalizados,
     expand: {
       ...raw.expand,
       canais_comparados:
@@ -428,6 +459,118 @@ export function calcularTotaisPorCanal(
   }
 
   return totais
+}
+
+/**
+ * Calcula a soma dos produtos (subtotais dos itens com descontos) de um canal específico.
+ * Se o canal não possuir precificação específica para algum item, utiliza o preço base.
+ */
+export function calcularSubtotalProdutosCanal(
+  canalId: string,
+  itens: Array<{
+    quantidade: number
+    precos_canais?: Record<string, OrcamentoPrecoCanalItem>
+  }>,
+): number {
+  if (!canalId || !Array.isArray(itens)) return 0
+  let total = 0
+  for (const item of itens) {
+    const qtd = Number(item.quantidade) || 0
+    const precoObj = item.precos_canais?.[canalId]
+    const precoUnit = Number(precoObj?.preco_unitario) || 0
+    const precoCheioBase =
+      precoObj?.preco_cheio !== undefined && Number(precoObj.preco_cheio) > 0
+        ? Number(precoObj.preco_cheio)
+        : qtd * precoUnit
+    const subtotalItem =
+      precoObj?.preco_final !== undefined && Number(precoObj.preco_final) >= 0
+        ? Number(precoObj.preco_final)
+        : precoCheioBase
+    total += subtotalItem
+  }
+  return Math.round(total * 100) / 100
+}
+
+/**
+ * Calcula o total de um item para um canal incluindo o frete do item que o cliente paga.
+ * Valor final que o cliente paga = valor dos produtos daquele canal + frete do item
+ */
+export function calcularTotalItemComFreteCanal(params: {
+  canalId: string
+  quantidade: number
+  precoObj?: OrcamentoPrecoCanalItem
+  freteObj?: OrcamentoFreteCanalItem
+}): {
+  subtotalProdutos: number
+  valorFreteCliente: number
+  totalCliente: number
+} {
+  const qtd = Number(params.quantidade) || 0
+  const precoUnit = Number(params.precoObj?.preco_unitario) || 0
+  const precoCheioBase =
+    params.precoObj?.preco_cheio !== undefined && Number(params.precoObj.preco_cheio) > 0
+      ? Number(params.precoObj.preco_cheio)
+      : qtd * precoUnit
+  const subtotalProdutos =
+    params.precoObj?.preco_final !== undefined && Number(params.precoObj.preco_final) >= 0
+      ? Number(params.precoObj.preco_final)
+      : precoCheioBase
+
+  const frete = Number(params.freteObj?.valor_frete) || 0
+  const modoFrete = params.freteObj?.modo_frete || 'pago_pelo_cliente'
+  const valorFreteCliente = modoFrete === 'pago_pelo_cliente' ? frete : 0
+  const totalCliente = Math.round((subtotalProdutos + valorFreteCliente) * 100) / 100
+
+  return {
+    subtotalProdutos: Math.round(subtotalProdutos * 100) / 100,
+    valorFreteCliente: Math.round(valorFreteCliente * 100) / 100,
+    totalCliente,
+  }
+}
+
+/**
+ * Calcula os totais comparativos de cada opção de frete contra a soma de produtos do canal/orçamento.
+ * Cada opção de frete tem seu próprio total = soma dos produtos + valor do frete daquela opção.
+ * Ex: Frete Sedex — Correios, 2 dias, R$ 30,00 — Total X
+ */
+export function calcularOpcoesFreteComTotais(
+  valorProdutos: number,
+  opcoesFrete?: OrcamentoFreteOpcao[],
+): Array<OrcamentoFreteOpcao & { totalComFrete: number }> {
+  if (!Array.isArray(opcoesFrete)) return []
+  const baseProdutos = Math.max(0, Number(valorProdutos) || 0)
+
+  return opcoesFrete.map((op, idx) => {
+    const valorFrete = Math.max(0, Number(op.valor) || 0)
+    const totalComFrete = Math.round((baseProdutos + valorFrete) * 100) / 100
+    return {
+      id: op.id || `frete_${idx}`,
+      transportadora: op.transportadora || '',
+      prazo: op.prazo || '',
+      valor: valorFrete,
+      observacoes: op.observacoes,
+      totalComFrete,
+    }
+  })
+}
+
+/**
+ * Formata uma opção de frete para exibição discriminada conforme o padrão solicitado:
+ * "Frete {Transportadora} — {Prazo}, {Valor em R$} — Total {Total em R$}"
+ * Ex: "Frete Sedex — Correios, 2 dias, R$ 30,00 — Total R$ 652,50"
+ */
+export function formatarLinhaOpcaoFrete(opcao: OrcamentoFreteOpcao, valorProdutos: number): string {
+  const trans = (opcao.transportadora || '').trim() || 'Transportadora'
+  const prazo = (opcao.prazo || '').trim()
+  const valorFrete = Math.max(0, Number(opcao.valor) || 0)
+  const total = Math.round(((Number(valorProdutos) || 0) + valorFrete) * 100) / 100
+
+  const partesDescricao: string[] = []
+  if (trans) partesDescricao.push(trans)
+  if (prazo) partesDescricao.push(prazo)
+  partesDescricao.push(formatarMoedaBR(valorFrete))
+
+  return `Frete ${partesDescricao.join(' — ')} — Total ${formatarMoedaBR(total)}`
 }
 
 /**
@@ -618,6 +761,8 @@ export function gerarTextoWhatsappOrcamento(params: {
     validade_data,
   } = params
 
+  const fretesOpcoes = (params as any).fretes as OrcamentoFreteOpcao[] | undefined
+
   const canais = Array.isArray(canaisRaw) ? canaisRaw : []
   const itens = Array.isArray(itensRaw) ? itensRaw : []
 
@@ -705,6 +850,22 @@ export function gerarTextoWhatsappOrcamento(params: {
     const totalCanal = totaisCalculados[canal.id]
     const valorTotal = totalCanal?.total_geral ?? 0
     linhas.push(`* Total: ${formatarMoedaBR(valorTotal)}`)
+
+    // Se houver opções de frete discriminadas para o cliente escolher, exibe abaixo do canal
+    if (Array.isArray(fretesOpcoes) && fretesOpcoes.length > 0) {
+      const subtotalProdutosCanal = totalCanal?.total_itens ?? 0
+      linhas.push('')
+      linhas.push('  Opções de Frete:')
+      for (const op of fretesOpcoes) {
+        const trans = op.transportadora || 'Transportadora'
+        const prazo = op.prazo ? ` (${op.prazo})` : ''
+        const vFrete = Number(op.valor) || 0
+        const totOpcao = Math.round((subtotalProdutosCanal + vFrete) * 100) / 100
+        linhas.push(
+          `  • ${trans}${prazo}: ${formatarMoedaBR(vFrete)} — Total: ${formatarMoedaBR(totOpcao)}`,
+        )
+      }
+    }
   }
 
   if (validade_data) {

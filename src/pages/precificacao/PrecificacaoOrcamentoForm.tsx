@@ -36,6 +36,7 @@ import {
   OrcamentoPrecoCanalItem,
   OrcamentoFreteCanalItem,
   OrcamentoProdutoVinculadoCanal,
+  OrcamentoFreteOpcao,
   ClienteOrcamentoRecord,
   StatusOrcamento,
   TipoItemOrcamento,
@@ -52,6 +53,8 @@ import {
   converterCheioParaUnitario,
   converterUnitarioParaCheio,
   formatarMoedaBR,
+  calcularSubtotalProdutosCanal,
+  calcularTotalItemComFreteCanal,
 } from '@/lib/precificacao/orcamentoCalculo'
 import { congelarSnapshotReceita } from '@/services/insumos'
 import type { ItemComposicaoCusto } from '@/lib/precificacao/calculo'
@@ -70,7 +73,15 @@ import {
 } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Upload, Image as ImageIcon, FileText, CheckCircle2, Package, ListTree } from 'lucide-react'
+import {
+  Upload,
+  Image as ImageIcon,
+  FileText,
+  CheckCircle2,
+  Package,
+  ListTree,
+  Truck,
+} from 'lucide-react'
 
 interface FormItemLinha {
   id?: string
@@ -140,6 +151,8 @@ export default function PrecificacaoOrcamentoForm() {
   const [status, setStatus] = useState<StatusOrcamento>('rascunho')
   const [canaisSelecionadosIds, setCanaisSelecionadosIds] = useState<string[]>([])
   const [observacoes, setObservacoes] = useState<string>('')
+  // Opções livres e ilimitadas de frete para o cliente escolher
+  const [opcoesFrete, setOpcoesFrete] = useState<OrcamentoFreteOpcao[]>([])
 
   // Itens do orçamento
   const [itens, setItens] = useState<FormItemLinha[]>([])
@@ -236,6 +249,7 @@ export default function PrecificacaoOrcamentoForm() {
           const orcNormalizado = normalizarOrcamentoRecord(orc)
           setCanaisSelecionadosIds(normalizarCanaisComparadosIds(orcNormalizado.canais_comparados))
           setObservacoes(orcNormalizado.observacoes || '')
+          setOpcoesFrete(orcNormalizado.fretes || [])
 
           const itensOrc = Array.isArray(orcNormalizado.expand?.itens)
             ? orcNormalizado.expand.itens
@@ -1059,6 +1073,35 @@ export default function PrecificacaoOrcamentoForm() {
     return itens.reduce((acc, it) => acc + (Number(it.quantidade) || 0), 0)
   }, [itens])
 
+  // Handlers para opções ilimitadas de frete
+  const handleAdicionarOpcaoFrete = () => {
+    setOpcoesFrete((prev) => [
+      ...prev,
+      {
+        id: 'frete_' + Math.random().toString(36).substring(2, 9),
+        transportadora: '',
+        prazo: '',
+        valor: 0,
+      },
+    ])
+  }
+
+  const handleRemoverOpcaoFrete = (index: number) => {
+    setOpcoesFrete((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleAtualizarOpcaoFrete = (
+    index: number,
+    campo: keyof OrcamentoFreteOpcao,
+    valor: any,
+  ) => {
+    setOpcoesFrete((prev) => {
+      const copy = [...prev]
+      copy[index] = { ...copy[index], [campo]: valor }
+      return copy
+    })
+  }
+
   // Salvar Orçamento
   const handleSalvar = async () => {
     if (!clienteNome.trim()) {
@@ -1126,6 +1169,13 @@ export default function PrecificacaoOrcamentoForm() {
         tema_nome: temaNomeCabecalho || undefined,
         cor: corCabecalho || undefined,
         observacoes: observacoes || undefined,
+        fretes: opcoesFrete.map((f, fIdx) => ({
+          id: f.id || `frete_${fIdx}`,
+          transportadora: f.transportadora || '',
+          prazo: f.prazo || '',
+          valor: Math.max(0, Number(f.valor) || 0),
+          observacoes: f.observacoes || undefined,
+        })),
         itens: itens.map((it, idx) => ({
           id: it.id,
           tipo_item: it.tipo_item,
@@ -2082,11 +2132,43 @@ export default function PrecificacaoOrcamentoForm() {
                             }`}
                           />
                         </div>
+
+                        {/* REQUISITO (A): Abaixo do card do produto referente ao canal de venda,
+                            exibir o VALOR FINAL TOTAL que o cliente vai pagar = produtos + frete */}
+                        {(() => {
+                          const calculoItem = calcularTotalItemComFreteCanal({
+                            canalId: canal.id,
+                            quantidade: item.quantidade,
+                            precoObj,
+                            freteObj,
+                          })
+                          return (
+                            <div className="mt-2.5 pt-2 border-t border-border/80 bg-primary/5 rounded-md p-2 flex items-center justify-between">
+                              <div className="space-y-0.5">
+                                <span className="text-[10px] font-bold text-foreground block uppercase tracking-wider">
+                                  Valor Final Total (Cliente)
+                                </span>
+                                <span className="text-[9px] text-muted-foreground block font-mono">
+                                  {formatarMoedaBR(calculoItem.subtotalProdutos)} (produto)
+                                  {calculoItem.valorFreteCliente > 0
+                                    ? ` + ${formatarMoedaBR(calculoItem.valorFreteCliente)} (frete)`
+                                    : freteObj?.modo_frete === 'frete_gratis'
+                                      ? ' + Frete Grátis'
+                                      : ''}
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-sm font-black text-primary font-mono block">
+                                  {formatarMoedaBR(calculoItem.totalCliente)}
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        })()}
                       </div>
                     )
                   })}
                 </div>
-
                 {/* Linha 4 do item: PAINEL DA DECISÃO DE APROVAÇÃO POR ITEM (Dinâmico para cada canal) */}
                 <div className="pt-2 border-t border-border/50 space-y-3">
                   <div className="flex items-center gap-2">
@@ -2164,6 +2246,178 @@ export default function PrecificacaoOrcamentoForm() {
                   Item Personalizado
                 </Button>
               </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* BLOCO 4: OPÇÕES DISCRIMINADAS DE FRETE (ILIMITADAS, PREENCHIMENTO LIVRE E CÁLCULO AUTOMÁTICO) */}
+      <Card className="shadow-xs border-border/80">
+        <CardHeader className="pb-3 border-b border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <Truck className="w-4 h-4 text-primary" />
+              <CardTitle className="text-base font-bold">
+                4. Opções de Frete para o Cliente Decidir
+              </CardTitle>
+            </div>
+            <CardDescription className="text-xs mt-0.5">
+              Adicione quantas opções de frete desejar (Transportadora, Prazo e Valor). O total com
+              o frete somado aos produtos do orçamento é calculado automaticamente para o cliente
+              comparar.
+            </CardDescription>
+          </div>
+          <Button
+            size="sm"
+            type="button"
+            onClick={handleAdicionarOpcaoFrete}
+            variant="outline"
+            className="text-xs font-bold border-primary/40 text-primary bg-primary/5 hover:bg-primary/10 shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5 mr-1" />+ Adicionar Opção de Frete
+          </Button>
+        </CardHeader>
+        <CardContent className="pt-4 space-y-4">
+          {opcoesFrete.length === 0 ? (
+            <div className="text-center py-6 text-muted-foreground text-xs space-y-2 border-2 border-dashed rounded-xl bg-muted/10">
+              <Truck className="w-6 h-6 mx-auto text-muted-foreground/50" />
+              <p>Nenhuma opção adicional de frete cadastrada ainda.</p>
+              <p className="text-[11px] text-muted-foreground">
+                Exemplo: Sedex (2 dias - R$ 30,00), PAC (5 dias - R$ 20,00), J&L (4 dias - R$
+                25,00)...
+              </p>
+              <Button
+                size="sm"
+                type="button"
+                onClick={handleAdicionarOpcaoFrete}
+                variant="outline"
+                className="text-xs font-semibold"
+              >
+                <Plus className="w-3 h-3 mr-1" />
+                Adicionar Primeira Opção
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {opcoesFrete.map((op, opIdx) => {
+                const valorFreteNum = Math.max(0, Number(op.valor) || 0)
+
+                return (
+                  <div
+                    key={op.id || opIdx}
+                    className="p-3.5 rounded-xl border border-border/80 bg-background shadow-2xs space-y-3"
+                  >
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="h-6 w-6 rounded-full font-bold text-[11px] flex items-center justify-center bg-primary/10 text-primary shrink-0">
+                          {opIdx + 1}
+                        </span>
+                        <span className="text-xs font-bold text-foreground">
+                          Opção {opIdx + 1}: {op.transportadora || 'Transportadora'}
+                          {op.prazo ? ` (${op.prazo})` : ''}
+                        </span>
+                      </div>
+
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        type="button"
+                        onClick={() => handleRemoverOpcaoFrete(opIdx)}
+                        className="h-7 px-2 text-red-500 hover:text-red-700 hover:bg-red-50 self-end md:self-auto text-xs"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-1" />
+                        Remover
+                      </Button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <Label className="text-[10px] font-semibold text-muted-foreground">
+                          Transportadora / Modalidade (livre) *
+                        </Label>
+                        <Input
+                          placeholder="Ex: Correios Sedex, Correios PAC, J&L..."
+                          value={op.transportadora}
+                          onChange={(e) =>
+                            handleAtualizarOpcaoFrete(opIdx, 'transportadora', e.target.value)
+                          }
+                          className="h-8 text-xs font-semibold mt-1"
+                        />
+                      </div>
+
+                      <div>
+                        <Label className="text-[10px] font-semibold text-muted-foreground">
+                          Prazo de Entrega (livre) *
+                        </Label>
+                        <Input
+                          placeholder="Ex: 2 dias, 5 dias úteis, 24 horas..."
+                          value={op.prazo}
+                          onChange={(e) =>
+                            handleAtualizarOpcaoFrete(opIdx, 'prazo', e.target.value)
+                          }
+                          className="h-8 text-xs mt-1"
+                        />
+                      </div>
+
+                      <div>
+                        <Label className="text-[10px] font-semibold text-muted-foreground">
+                          Valor do Frete (R$) *
+                        </Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0,00"
+                          value={op.valor || ''}
+                          onChange={(e) =>
+                            handleAtualizarOpcaoFrete(
+                              opIdx,
+                              'valor',
+                              parseFloat(e.target.value) || 0,
+                            )
+                          }
+                          className="h-8 text-xs font-mono font-bold text-orange-600 mt-1"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Somatória automática do frete com os produtos por canal de venda */}
+                    <div className="pt-2 border-t border-border/50 bg-muted/20 rounded-lg p-2.5">
+                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                        Total Automático do Cliente com esta opção de frete:
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {canaisSelecionados.map((canal) => {
+                          const subtotalProd = calcularSubtotalProdutosCanal(canal.id, itens)
+                          const totalComEstaOpcao =
+                            Math.round((subtotalProd + valorFreteNum) * 100) / 100
+
+                          return (
+                            <div
+                              key={canal.id}
+                              className="p-2 rounded bg-background border border-border/60 flex items-center justify-between text-xs"
+                            >
+                              <div>
+                                <span className="font-bold text-foreground block">
+                                  {canal.nome}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground font-mono">
+                                  {formatarMoedaBR(subtotalProd)} + {formatarMoedaBR(valorFreteNum)}
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <span className="font-black text-primary font-mono text-xs">
+                                  {formatarMoedaBR(totalComEstaOpcao)}
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </CardContent>

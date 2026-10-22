@@ -12,7 +12,12 @@ import {
   converterCheioParaUnitario,
   calcularDescontoIndividualItem,
   formatarDataBR,
+  calcularSubtotalProdutosCanal,
+  calcularTotalItemComFreteCanal,
+  calcularOpcoesFreteComTotais,
+  formatarLinhaOpcaoFrete,
 } from './orcamentoCalculo'
+import { OrcamentoFreteOpcao } from '@/types/orcamento'
 import { gerarHTMLParaImpressaoPDF } from './orcamentoPdf'
 import { orcamentosService } from '@/services/orcamentos'
 
@@ -1137,6 +1142,223 @@ describe('Módulo de Orçamentos - Regras de Cálculo e Formatação', () => {
         expect(totais.shopee.total_itens).toBe(124.5)
         expect(totais.shopee.total_fretes).toBe(15)
         expect(totais.shopee.total_geral).toBe(139.5)
+      })
+    })
+
+    describe('Novas Regras de Frete discriminado & Valor Final Total (Protocolo acordado)', () => {
+      it('calcula o valor final total de um item somando produtos + frete pago pelo cliente', () => {
+        const itemCalc = calcularTotalItemComFreteCanal({
+          canalId: 'site',
+          quantidade: 10,
+          precoObj: {
+            canal_id: 'site',
+            canal_nome: 'Site',
+            preco_unitario: 25,
+            preco_cheio: 250,
+            preco_final: 225, // com 10% desconto
+            desconto_pct: 10,
+          },
+          freteObj: {
+            canal_id: 'site',
+            canal_nome: 'Site',
+            valor_frete: 30,
+            modo_frete: 'pago_pelo_cliente',
+          },
+        })
+
+        expect(itemCalc.subtotalProdutos).toBe(225)
+        expect(itemCalc.valorFreteCliente).toBe(30)
+        expect(itemCalc.totalCliente).toBe(255) // 225 + 30
+      })
+
+      it('não soma o frete ao total do cliente quando for frete_gratis', () => {
+        const itemCalc = calcularTotalItemComFreteCanal({
+          canalId: 'site',
+          quantidade: 10,
+          precoObj: {
+            canal_id: 'site',
+            canal_nome: 'Site',
+            preco_unitario: 25,
+            preco_cheio: 250,
+            preco_final: 250,
+          },
+          freteObj: {
+            canal_id: 'site',
+            canal_nome: 'Site',
+            valor_frete: 30,
+            modo_frete: 'frete_gratis',
+          },
+        })
+
+        expect(itemCalc.subtotalProdutos).toBe(250)
+        expect(itemCalc.valorFreteCliente).toBe(0)
+        expect(itemCalc.totalCliente).toBe(250)
+      })
+
+      it('calcula a soma dos produtos de um canal com múltiplos itens', () => {
+        const itens = [
+          {
+            quantidade: 2,
+            precos_canais: {
+              canal_a: {
+                canal_id: 'canal_a',
+                canal_nome: 'Canal A',
+                preco_unitario: 50,
+                preco_final: 100,
+              },
+            },
+          },
+          {
+            quantidade: 3,
+            precos_canais: {
+              canal_a: {
+                canal_id: 'canal_a',
+                canal_nome: 'Canal A',
+                preco_unitario: 20,
+                preco_final: 60,
+              },
+            },
+          },
+        ]
+        const subtotal = calcularSubtotalProdutosCanal('canal_a', itens)
+        expect(subtotal).toBe(160)
+      })
+
+      it('calcula opções ilimitadas de frete com total automático individual (produtos + frete)', () => {
+        const valorProdutos = 622.5
+        const opcoesFrete: OrcamentoFreteOpcao[] = [
+          { transportadora: 'Correios Sedex', prazo: '2 dias', valor: 30 },
+          { transportadora: 'Correios PAC', prazo: '5 dias', valor: 20 },
+          { transportadora: 'J&L', prazo: '4 dias', valor: 25 },
+        ]
+
+        const resultados = calcularOpcoesFreteComTotais(valorProdutos, opcoesFrete)
+        expect(resultados).toHaveLength(3)
+        expect(resultados[0].totalComFrete).toBe(652.5) // 622.50 + 30
+        expect(resultados[1].totalComFrete).toBe(642.5) // 622.50 + 20
+        expect(resultados[2].totalComFrete).toBe(647.5) // 622.50 + 25
+
+        const linha0 = formatarLinhaOpcaoFrete(opcoesFrete[0], valorProdutos)
+        expect(linha0).toContain('Frete Correios Sedex — 2 dias')
+        expect(linha0).toContain('Total')
+        expect(linha0).toContain('652,50')
+      })
+
+      it('regressão zero: orçamento sem frete mantém total exatamente igual à soma dos produtos', () => {
+        const valorProdutos = 500
+        const resultadosVazios = calcularOpcoesFreteComTotais(valorProdutos, [])
+        expect(resultadosVazios).toHaveLength(0)
+
+        const canais = [{ id: 'site', nome: 'Site' }]
+        const itemSemFrete = {
+          id: 'it1',
+          quantidade: 10,
+          precos_canais: {
+            site: { canal_id: 'site', preco_unitario: 50, preco_cheio: 500 },
+          },
+          fretes_canais: {},
+        }
+        const totais = calcularTotaisPorCanal(canais, [itemSemFrete as any])
+        expect(totais.site.total_itens).toBe(500)
+        expect(totais.site.total_fretes).toBe(0)
+        expect(totais.site.total_geral).toBe(500)
+      })
+
+      it('frete não interfere no desconto/margem do canal', () => {
+        const desconto = calcularDescontoIndividualItem({
+          precoCheioBase: 200,
+          precoUnitario: 20,
+          quantidade: 10,
+          descontoPct: 15,
+        })
+        expect(desconto.valorDescontoTotal).toBe(30)
+        expect(desconto.precoFinalTotal).toBe(170)
+
+        // Adicionar frete não altera preco_final nem valor_desconto
+        const itemCalc = calcularTotalItemComFreteCanal({
+          canalId: 'shopee',
+          quantidade: 10,
+          precoObj: {
+            canal_id: 'shopee',
+            canal_nome: 'Shopee',
+            preco_unitario: 20,
+            preco_cheio: 200,
+            preco_final: desconto.precoFinalTotal,
+            valor_desconto: desconto.valorDescontoTotal,
+            desconto_pct: 15,
+          },
+          freteObj: {
+            canal_id: 'shopee',
+            canal_nome: 'Shopee',
+            valor_frete: 45,
+            modo_frete: 'pago_pelo_cliente',
+          },
+        })
+        expect(itemCalc.subtotalProdutos).toBe(170)
+        expect(itemCalc.valorFreteCliente).toBe(45)
+        expect(itemCalc.totalCliente).toBe(215)
+      })
+
+      it('normalizarOrcamentoRecord deserializa fretes JSON em lista de objetos de frete', () => {
+        const raw = {
+          id: 'orc_test',
+          codigo: 'ORC-001',
+          fretes: [
+            { transportadora: 'Correios Sedex', prazo: '2 dias', valor: '30.00' },
+            { transportadora: 'J&L', prazo: '4 dias', valor: 25 },
+          ],
+        }
+        const normalizado = normalizarOrcamentoRecord(raw)
+        expect(normalizado.fretes).toHaveLength(2)
+        expect(normalizado.fretes![0].transportadora).toBe('Correios Sedex')
+        expect(normalizado.fretes![0].prazo).toBe('2 dias')
+        expect(normalizado.fretes![0].valor).toBe(30)
+        expect(normalizado.fretes![1].valor).toBe(25)
+      })
+
+      it('PDF renderiza a seção de Opções de Frete quando houver fretes cadastrados', () => {
+        const orcamentoMock = {
+          id: 'orc_frete',
+          codigo: 'ORC-2025-FRETE',
+          cliente_nome: 'Cliente Frete',
+          data_orcamento: '2025-05-10',
+          fretes: [
+            { transportadora: 'Correios Sedex', prazo: '2 dias', valor: 30 },
+            { transportadora: 'Correios PAC', prazo: '5 dias', valor: 20 },
+            { transportadora: 'J&L', prazo: '4 dias', valor: 25 },
+          ],
+          expand: {
+            canais_comparados: [{ id: 'site', nome: 'Site' }],
+            itens: [
+              {
+                id: 'it1',
+                modelo_nome: 'Produto A',
+                quantidade: 1,
+                precos_canais: {
+                  site: { canal_id: 'site', preco_unitario: 100, preco_cheio: 100 },
+                },
+              },
+            ],
+          },
+          totais_por_canal: {
+            site: {
+              canal_id: 'site',
+              canal_nome: 'Site',
+              total_itens: 100,
+              total_fretes: 0,
+              total_geral: 100,
+            },
+          },
+        }
+
+        const html = gerarHTMLParaImpressaoPDF(orcamentoMock as any)
+        expect(html).toContain('Opções de Frete & Entrega (Escolha do Cliente)')
+        expect(html).toContain('Frete Correios Sedex (2 dias)')
+        expect(html).toContain('Frete Correios PAC (5 dias)')
+        expect(html).toContain('Frete J&amp;L (4 dias)')
+        expect(html).toContain('R$&nbsp;130,00') // 100 + 30
+        expect(html).toContain('R$&nbsp;120,00') // 100 + 20
+        expect(html).toContain('R$&nbsp;125,00') // 100 + 25
       })
     })
   })

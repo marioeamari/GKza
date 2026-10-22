@@ -11,6 +11,7 @@ import {
   AlertCircle,
   Phone,
   Sparkles,
+  Truck,
 } from 'lucide-react'
 import { orcamentosService } from '@/services/orcamentos'
 import { OrcamentoRecord } from '@/types/orcamento'
@@ -20,6 +21,7 @@ import {
   formatarDataBR,
   normalizarCanaisExpandidos,
   normalizarOrcamentoRecord,
+  calcularSubtotalProdutosCanal,
 } from '@/lib/precificacao/orcamentoCalculo'
 import { imprimirOuBaixarOrcamentoPDF } from '@/lib/precificacao/orcamentoPdf'
 import { getFileUrl } from '@/lib/pocketbase/files'
@@ -549,6 +551,87 @@ export default function OrcamentoPublicoPage() {
             </table>
           </CardContent>
         </Card>
+
+        {/* REQUISITO (C): Opções discriminadas de Frete para o cliente decidir na página pública */}
+        {Array.isArray(orcamento.fretes) && orcamento.fretes.length > 0 && (
+          <Card className="shadow-xs border-slate-200/80 bg-white overflow-hidden">
+            <CardHeader className="border-b border-slate-100 bg-slate-50/50">
+              <div className="flex items-center gap-2">
+                <Truck className="w-4 h-4 text-primary" />
+                <CardTitle className="text-base font-bold text-slate-900">
+                  Opções de Frete & Envio para sua Escolha
+                </CardTitle>
+              </div>
+              <CardDescription className="text-xs">
+                Compare abaixo as opções de transportadora, prazos de entrega e o valor final total
+                (produtos + frete) para você decidir a melhor modalidade:
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-6 space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {orcamento.fretes.map((opcao, opIdx) => {
+                  const valorFreteNum = Math.max(0, Number(opcao.valor) || 0)
+                  return (
+                    <div
+                      key={opcao.id || opIdx}
+                      className="p-4 rounded-xl border border-slate-200/90 bg-slate-50/40 hover:bg-white hover:border-primary/40 transition-all space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2 border-b border-slate-200/70 pb-2">
+                        <div>
+                          <span className="font-extrabold text-sm text-slate-900 block">
+                            Frete {opcao.transportadora || 'Transportadora'}
+                          </span>
+                          {opcao.prazo && (
+                            <span className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                              <Clock className="w-3 h-3 text-slate-400" />
+                              Prazo: {opcao.prazo}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-sm font-black text-orange-600 font-mono shrink-0">
+                          {formatarMoedaBR(valorFreteNum)}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5 pt-1">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                          Valor Final Total (Produtos + Frete):
+                        </span>
+                        {canais.map((canal) => {
+                          const totCanal = totais[canal.id]
+                          const subtotalProd = totCanal?.total_itens || 0
+                          const totalComEstaOpcao =
+                            Math.round((subtotalProd + valorFreteNum) * 100) / 100
+
+                          return (
+                            <div
+                              key={canal.id}
+                              className="p-2 rounded-lg bg-white border border-slate-200/80 flex items-center justify-between text-xs"
+                            >
+                              <div>
+                                <span className="font-semibold text-slate-800 block">
+                                  {canal.nome}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground font-mono">
+                                  {formatarMoedaBR(subtotalProd)} + {formatarMoedaBR(valorFreteNum)}
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <span className="font-black text-primary font-mono text-sm block">
+                                  {formatarMoedaBR(totalComEstaOpcao)}
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Resumo em Cards para Mobile / Destaque */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

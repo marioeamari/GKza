@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-21T11:23:17.978Z",
+  "generatedAt": "2026-10-22T10:58:17.633Z",
   "collections": [
     {
       "name": "users",
@@ -5992,6 +5992,12 @@
           "required": false,
           "system": false,
           "collectionRef": "clientes"
+        },
+        {
+          "name": "fretes",
+          "type": "json",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [

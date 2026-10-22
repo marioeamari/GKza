@@ -204,6 +204,66 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
     `
     })
     .join('')
+
+  // Renderização da seção de Opções Discriminadas de Frete para o cliente escolher
+  const fretesOpcoes = Array.isArray(orcamento.fretes) ? orcamento.fretes : []
+  let secaoFretesHTML = ''
+  if (fretesOpcoes.length > 0) {
+    const linhasOpcoesFrete = fretesOpcoes
+      .map((op, idx) => {
+        const trans = op.transportadora || 'Transportadora'
+        const prazo = op.prazo ? ` (${op.prazo})` : ''
+        const vFrete = Number(op.valor) || 0
+
+        // Totais da opção para cada canal comparado
+        const totaisPorCanalHTML = canais
+          .map((canal) => {
+            const totCanal = totais[canal.id]
+            const subtotalProd = totCanal?.total_itens || 0
+            const totalComFrete = Math.round((subtotalProd + vFrete) * 100) / 100
+            return `
+              <div style="font-size: 12px; margin-top: 3px;">
+                <span style="color: #4b5563;">${canal.nome}:</span> <strong>${formatarMoedaBR(totalComFrete)}</strong>
+                <span style="font-size: 10px; color: #6b7280;">(${formatarMoedaBR(subtotalProd)} produtos + ${formatarMoedaBR(vFrete)} frete)</span>
+              </div>
+            `
+          })
+          .join('')
+
+        return `
+          <div style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 14px; margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px dashed #e5e7eb; padding-bottom: 4px;">
+              <span style="font-size: 13px; font-weight: bold; color: #111827;">
+                ${idx + 1}. Frete ${trans}${prazo}
+              </span>
+              <span style="font-size: 13px; font-weight: 800; color: #df5830;">
+                ${formatarMoedaBR(vFrete)}
+              </span>
+            </div>
+            <div style="margin-top: 6px;">
+              <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: #6b7280; letter-spacing: 0.5px;">
+                Total a pagar com esta opção:
+              </div>
+              ${totaisPorCanalHTML}
+            </div>
+          </div>
+        `
+      })
+      .join('')
+
+    secaoFretesHTML = `
+      <div style="margin-top: 20px; margin-bottom: 20px; background-color: #f9fafb; padding: 14px; border-radius: 8px; border: 1px solid #e5e7eb;">
+        <h3 style="margin: 0 0 10px 0; font-size: 13px; text-transform: uppercase; color: #111827; letter-spacing: 0.5px;">
+          Opções de Frete & Entrega (Escolha do Cliente)
+        </h3>
+        <p style="margin: 0 0 12px 0; font-size: 11px; color: #6b7280;">
+          Confira abaixo as opções de envio disponíveis com prazos, valores de frete e o valor final total (produtos + frete):
+        </p>
+        ${linhasOpcoesFrete}
+      </div>
+    `
+  }
+
   return `
     <!DOCTYPE html>
     <html lang="pt-BR">
@@ -404,6 +464,8 @@ export function gerarHTMLParaImpressaoPDF(orcamentoRaw: OrcamentoRecord): string
           </tr>
         </tfoot>
       </table>
+
+      ${secaoFretesHTML}
 
       ${
         orcamento.observacoes
