@@ -1534,7 +1534,7 @@ describe('despesasService - anti-retroatividade e deduplicação no gerador e si
     expect(mockCreate).not.toHaveBeenCalled()
   })
 
-  it('baixarOcorrencia em cartão com método Crédito calcula competência do ciclo da fatura para a data de pagamento', async () => {
+  it('baixarOcorrencia em cartão preserva competência e vencimento da ocorrência e grava data real de pagamento', async () => {
     const mockContaNuBank: Conta = {
       id: 'cartao_nubank_baixa',
       collectionId: 'contas',
@@ -1552,13 +1552,14 @@ describe('despesasService - anti-retroatividade e deduplicação no gerador e si
 
     const mockOcorrenciaPrevista = {
       id: 'ocorr_amendoim_baixa',
-      competencia: '2026-09',
-      data_vencimento: '2026-09-30 12:00:00.000Z',
+      competencia: '2026-10',
+      data_vencimento: '2026-10-23 12:00:00.000Z',
       valor_previsto: 5,
       status: 'prevista',
       secao: 'cartoes_credito',
       compromisso: {
         id: 'comp_amendoim_baixa',
+        data_inicio: '2026-09-17 00:00:00.000Z',
         metodo_pagamento: 'r9qdfpwfe5143oe', // crédito
       },
     }
@@ -1590,7 +1591,7 @@ describe('despesasService - anti-retroatividade e deduplicação no gerador e si
       return {} as any
     })
 
-    // Baixa realizada em 06/10/2026 (dia <= 16) -> ciclo da fatura 2026-10, vencimento 23/10/2026
+    // Baixa realizada em 06/10/2026
     await despesasService.baixarOcorrencia({
       ocorrenciaId: 'ocorr_amendoim_baixa',
       valorPago: 5,
@@ -1599,19 +1600,201 @@ describe('despesasService - anti-retroatividade e deduplicação no gerador e si
       descricao: 'Amendoim',
     })
 
-    // Verifica que o lançamento financeiro herdou a competência correta (2026-10)
+    // Lançamento financeiro herda a competência da ocorrência (2026-10) e data real digitada (2026-10-06)
     expect(mockCreateLancamento).toHaveBeenCalledTimes(1)
     const lancCall = mockCreateLancamento.mock.calls[0][0]
     expect(lancCall.competencia).toBe('2026-10')
     expect(lancCall.data).toBe('2026-10-06 12:00:00')
 
-    // Verifica que a ocorrência foi atualizada com competência 2026-10 e vencimento 23/10/2026
+    // Ocorrência preserva competência 2026-10, vencimento 2026-10-23 e grava data de pagamento real 2026-10-06
     expect(mockUpdateOcorrencia).toHaveBeenCalledTimes(1)
     const updateCall = mockUpdateOcorrencia.mock.calls[0][1]
     expect(updateCall.status).toBe('paga')
     expect(updateCall.competencia).toBe('2026-10')
-    expect(updateCall.data_vencimento).toBe('2026-10-23T12:00:00.000Z')
+    expect(updateCall.data_vencimento).toBe('2026-10-23 12:00:00.000Z')
     expect(updateCall.data_pagamento).toBe('2026-10-06 12:00:00')
+  })
+
+  it('caso exato do bug: pagar em 17/09/2026 numa ocorrência de competência 2026-10 mantém 2026-10 e 23/10/2026', async () => {
+    const mockContaNuBank: Conta = {
+      id: 'sglo7dfsqvgfsni',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: 'NuBank',
+      tipo: 'cartao',
+      saldo_inicial: 1000,
+      cor: '#4C3A8C',
+      ativa: true,
+      dia_fechamento: 16,
+      dia_vencimento: 23,
+    }
+
+    const mockOcorrenciaOrlando = {
+      id: 'b7r9hwcj5z6j9ne',
+      compromisso: 'bcxu9jxpn8ujwog',
+      conta: 'sglo7dfsqvgfsni',
+      competencia: '2026-10',
+      data_vencimento: '2026-10-23 12:00:00.000Z',
+      valor_previsto: 5,
+      status: 'prevista',
+      secao: 'cartoes_credito',
+    }
+
+    const mockCompromissoOrlando = {
+      id: 'bcxu9jxpn8ujwog',
+      descricao: 'Orlando de Souza',
+      data_inicio: '2026-09-17 00:00:00.000Z',
+      dia_vencimento: 23,
+      conta_padrao: 'sglo7dfsqvgfsni',
+      metodo_pagamento: 'r9qdfpwfe5143oe',
+      modalidade_parcelamento: 'a_vista',
+      regra_repeticao: 'avulso',
+      total_parcelas: 1,
+      parcela_inicial: 1,
+      valor_estimado: 5,
+      secao: 'cartoes_credito',
+    }
+
+    const mockCreateLancamento = vi.fn().mockResolvedValue({ id: 'opiij78htvk48pg' })
+    const mockUpdateOcorrencia = vi.fn().mockResolvedValue({
+      id: 'b7r9hwcj5z6j9ne',
+      status: 'paga',
+      competencia: '2026-10',
+      data_pagamento: '2026-09-17 12:00:00',
+    })
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: vi.fn().mockResolvedValue(mockContaNuBank) } as any
+      }
+      if (name === 'despesas_compromisso') {
+        return { getOne: vi.fn().mockResolvedValue(mockCompromissoOrlando) } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getOne: vi.fn().mockResolvedValue(mockOcorrenciaOrlando),
+          update: mockUpdateOcorrencia,
+          getList: vi.fn().mockResolvedValue({ items: [], totalItems: 0 }),
+        } as any
+      }
+      if (name === 'lancamentos') {
+        return { create: mockCreateLancamento } as any
+      }
+      if (name === 'metodos_pagamento') {
+        return {
+          getOne: vi.fn().mockResolvedValue({
+            id: 'r9qdfpwfe5143oe',
+            codigo: 'credito',
+            nome: 'Crédito',
+            tipo: 'cartao',
+          }),
+        } as any
+      }
+      return {} as any
+    })
+
+    // Usuário digita data real do pagamento: 17/09/2026 (anterior ao vencimento 23/10/2026)
+    await despesasService.baixarOcorrencia({
+      ocorrenciaId: 'b7r9hwcj5z6j9ne',
+      valorPago: 5,
+      dataPagamento: '2026-09-17',
+      contaId: 'sglo7dfsqvgfsni',
+      descricao: 'Orlando de Souza',
+    })
+
+    // Lançamento deve herdar a competência da ocorrência (2026-10), NÃO 2026-09!
+    expect(mockCreateLancamento).toHaveBeenCalledTimes(1)
+    const lancCall = mockCreateLancamento.mock.calls[0][0]
+    expect(lancCall.competencia).toBe('2026-10')
+    expect(lancCall.data).toBe('2026-09-17 12:00:00')
+
+    // Ocorrência deve manter 2026-10 e 23/10/2026, com data_pagamento real = 2026-09-17
+    expect(mockUpdateOcorrencia).toHaveBeenCalledTimes(1)
+    const updateCall = mockUpdateOcorrencia.mock.calls[0][1]
+    expect(updateCall.status).toBe('paga')
+    expect(updateCall.competencia).toBe('2026-10')
+    expect(updateCall.data_vencimento).toBe('2026-10-23 12:00:00.000Z')
+    expect(updateCall.data_pagamento).toBe('2026-09-17 12:00:00')
+    expect(updateCall.valor_pago).toBe(5)
+  })
+
+  it('pagar com data POSTERIOR ao vencimento (ex: 30/10 ou 05/11) também não altera competência nem vencimento de cartão', async () => {
+    const mockContaNuBank: Conta = {
+      id: 'sglo7dfsqvgfsni',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: 'NuBank',
+      tipo: 'cartao',
+      saldo_inicial: 1000,
+      cor: '#4C3A8C',
+      ativa: true,
+      dia_fechamento: 16,
+      dia_vencimento: 23,
+    }
+
+    const mockOcorrencia = {
+      id: 'ocorr_posterior',
+      compromisso: 'comp_post',
+      conta: 'sglo7dfsqvgfsni',
+      competencia: '2026-10',
+      data_vencimento: '2026-10-23 12:00:00.000Z',
+      valor_previsto: 100,
+      status: 'prevista',
+      secao: 'cartoes_credito',
+    }
+
+    const mockCreateLancamento = vi.fn().mockResolvedValue({ id: 'lanc_post' })
+    const mockUpdateOcorrencia = vi
+      .fn()
+      .mockResolvedValue({ id: 'ocorr_posterior', status: 'paga' })
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') return { getOne: vi.fn().mockResolvedValue(mockContaNuBank) } as any
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getOne: vi.fn().mockResolvedValue(mockOcorrencia),
+          update: mockUpdateOcorrencia,
+          getList: vi.fn().mockResolvedValue({ items: [], totalItems: 0 }),
+        } as any
+      }
+      if (name === 'lancamentos') return { create: mockCreateLancamento } as any
+      if (name === 'metodos_pagamento') {
+        return {
+          getOne: vi.fn().mockResolvedValue({
+            id: 'm_cred',
+            codigo: 'credito',
+            nome: 'Crédito',
+            tipo: 'cartao',
+          }),
+        } as any
+      }
+      return {} as any
+    })
+
+    // Pagamento em data POSTERIOR ao vencimento (05/11/2026)
+    await despesasService.baixarOcorrencia({
+      ocorrenciaId: 'ocorr_posterior',
+      valorPago: 100,
+      dataPagamento: '2026-11-05',
+      contaId: 'sglo7dfsqvgfsni',
+      descricao: 'Gasto Posterior',
+    })
+
+    // Competência do lançamento permanece 2026-10
+    const lancCall = mockCreateLancamento.mock.calls[0][0]
+    expect(lancCall.competencia).toBe('2026-10')
+    expect(lancCall.data).toBe('2026-11-05 12:00:00')
+
+    // Ocorrência mantém competência 2026-10 e vencimento 23/10
+    const updateCall = mockUpdateOcorrencia.mock.calls[0][1]
+    expect(updateCall.status).toBe('paga')
+    expect(updateCall.competencia).toBe('2026-10')
+    expect(updateCall.data_vencimento).toBe('2026-10-23 12:00:00.000Z')
+    expect(updateCall.data_pagamento).toBe('2026-11-05 12:00:00')
   })
 
   it('caso de teste esperado: Amendoim compra 17/09/2026 no NuBank (fech 16, venc 23) -> fatura de outubro, venc 23/10/2026', () => {

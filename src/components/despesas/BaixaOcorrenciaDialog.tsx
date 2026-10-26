@@ -65,11 +65,17 @@ export function BaixaOcorrenciaDialog({
   const metodoPagamentoComp = comp?.expand?.metodo_pagamento || comp?.metodo_pagamento
   const metodoEhCredito = isMetodoCredito(metodoPagamentoComp)
   const isContaCartao = selectedContaObj?.tipo === 'cartao' && metodoEhCredito
+
+  // Se a ocorrência já possui competência definida (caso de ocorrência de cartão já classificada pela data de compra),
+  // exibe o ciclo correspondente a ela; caso contrário, calcula pela data de compra do compromisso ou transação
+  const dataRefCompraCartao = comp?.data_inicio ? comp.data_inicio.slice(0, 10) : dataPagamento
   const faturaCiclo =
-    isContaCartao && selectedContaObj && dataPagamento
-      ? calcularFaturaCartao(selectedContaObj, dataPagamento)
+    isContaCartao && selectedContaObj && dataRefCompraCartao
+      ? calcularFaturaCartao(selectedContaObj, dataRefCompraCartao)
       : null
-  const avisoCartao = isContaCartao ? getAvisoFaturaCartao(selectedContaObj, dataPagamento) : null
+  const avisoCartao = isContaCartao
+    ? getAvisoFaturaCartao(selectedContaObj, dataRefCompraCartao)
+    : null
 
   useEffect(() => {
     if (open) {

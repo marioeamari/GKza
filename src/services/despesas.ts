@@ -459,11 +459,12 @@ export const despesasService = {
     const ehMetodoCredito = metodoCompId ? isMetodoCredito(metodoCompId) : true
     const metodoEfetivoEhCredito = Boolean(contaObj) && contaAceitaCred && ehMetodoCredito
 
-    // Determina a data da compra original (prioriza compromisso.data_inicio, cai para params.dataPagamento)
-    const dataCompraBase = compRecord?.data_inicio
-      ? compRecord.data_inicio.slice(0, 10)
-      : params.dataPagamento
-
+    // REGRA DE CARTÃO DE CRÉDITO NO FLUXO DE PAGAMENTO:
+    // 1. Competência e vencimento de despesas em cartão derivam EXCLUSIVAMENTE da data da compra
+    //    (compromisso.data_inicio). Se a ocorrência já possui competência e vencimento definidos,
+    //    o pagamento NUNCA deve alterá-los.
+    // 2. A data_pagamento gravada na ocorrência é a DATA REAL digitada pelo usuário (pode anteceder o vencimento).
+    // 3. O lançamento financeiro herda a competência da ocorrência (competenciaFinal) e usa a data real digitada.
     const numParcela =
       ocorrAtual.numero_parcela && ocorrAtual.numero_parcela > 0
         ? ocorrAtual.numero_parcela
@@ -473,27 +474,34 @@ export const despesasService = {
         ? ocorrAtual.total_parcelas
         : compRecord?.total_parcelas || 1
 
-    // REGRA ÚNICA DE COMPETÊNCIA E VENCIMENTO:
-    // Utiliza calcularCompetenciaEVencimento para garantir consistência total entre compra,
-    // fechamento do cartão, competência e vencimento.
-    const resRegraUnica = calcularCompetenciaEVencimento({
-      dataCompra: dataCompraBase,
-      conta: contaObj,
-      metodoEhCredito: metodoEfetivoEhCredito,
-      diaVencimento: compRecord?.dia_vencimento,
-      numeroParcela: numParcela,
-      totalParcelas: totParcelas,
-    })
+    let competenciaFinal: string
+    let vencimentoFinalIso: string
 
-    const competenciaFinal = resRegraUnica.competencia
-    const vencimentoFinalIso = resRegraUnica.dataVencimentoIso
-    const vencimentoDataStr = resRegraUnica.dataVencimento.slice(0, 10)
+    if (metodoEfetivoEhCredito && ocorrAtual.competencia && ocorrAtual.data_vencimento) {
+      // Se a ocorrência de cartão já tem competência e data_vencimento definidos,
+      // PRESERVA-OS intocados! O fluxo de pagamento nunca recalcula o ciclo da fatura.
+      competenciaFinal = ocorrAtual.competencia
+      vencimentoFinalIso = ocorrAtual.data_vencimento
+    } else {
+      // Determina a data da compra original (prioriza compromisso.data_inicio, cai para ocorrAtual.data_vencimento ou params.dataPagamento)
+      const dataCompraBase = compRecord?.data_inicio
+        ? compRecord.data_inicio.slice(0, 10)
+        : params.dataPagamento
 
-    // Para cartão de crédito: a data_pagamento da ocorrência e a data do lançamento financeiro
-    // devem ser gravadas com o vencimento da fatura da competência do ciclo.
-    const dataEfetivaPagamentoStr = metodoEfetivoEhCredito
-      ? vencimentoDataStr
-      : params.dataPagamento
+      const resRegraUnica = calcularCompetenciaEVencimento({
+        dataCompra: dataCompraBase,
+        conta: contaObj,
+        metodoEhCredito: metodoEfetivoEhCredito,
+        diaVencimento: compRecord?.dia_vencimento,
+        numeroParcela: numParcela,
+        totalParcelas: totParcelas,
+      })
+      competenciaFinal = resRegraUnica.competencia
+      vencimentoFinalIso = resRegraUnica.dataVencimentoIso
+    }
+
+    // A data efetiva do pagamento é SEMPRE a data REAL digitada pelo usuário
+    const dataEfetivaPagamentoStr = params.dataPagamento
 
     // Resolução robusta da categoria obrigatória do lançamento
     const categoriaEfetiva = await despesasService.resolverCategoriaDespesa(
@@ -684,7 +692,7 @@ export const despesasService = {
     const ehMetodoCredito = metodoCompId ? isMetodoCredito(metodoCompId) : true
     const metodoEfetivoEhCredito = Boolean(contaObj) && contaAceitaCred && ehMetodoCredito
 
-    // Data da compra base: se o compromisso possuir data_inicio, usamos como referência de compra
+    // Data da compra base: se o compromisso possuir data_inicio, usamos como referência de compra (NUNCA dataPagamento para cartão)
     const dataCompraBase = compRecord?.data_inicio
       ? compRecord.data_inicio.slice(0, 10)
       : params.dataPagamento
@@ -703,7 +711,6 @@ export const despesasService = {
 
     const competenciaEfetiva = resRegraUnica.competencia
     let vencimentoRegistradoIso = resRegraUnica.dataVencimentoIso
-    const vencimentoDataStr = resRegraUnica.dataVencimento.slice(0, 10)
 
     if (!metodoEfetivoEhCredito && compRecord) {
       const diaComp = compRecord.dia_vencimento || 10
@@ -714,11 +721,8 @@ export const despesasService = {
       vencimentoRegistradoIso = dataVenc.toISOString()
     }
 
-    // Para cartão de crédito: a data_pagamento da ocorrência e a data do lançamento
-    // financeira refletem o vencimento da fatura da competência do ciclo.
-    const dataEfetivaPagamentoStr = metodoEfetivoEhCredito
-      ? vencimentoDataStr
-      : params.dataPagamento
+    // A data efetiva do pagamento é SEMPRE a data REAL digitada pelo usuário
+    const dataEfetivaPagamentoStr = params.dataPagamento
 
     // Resolução robusta da categoria obrigatória do lançamento
     const categoriaEfetiva = await despesasService.resolverCategoriaDespesa(
