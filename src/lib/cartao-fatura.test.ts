@@ -796,5 +796,56 @@ describe('calcularEstadoCicloFatura — Estado Financeiro Puro do Ciclo da Fatur
 
       expect(matchesFiltroPagamento).toBe(true)
     })
+
+    describe('Regra Canônica de Competência e Fechamento no Cartão (Travamento de Regra)', () => {
+      const contaNubank = {
+        id: 'sglo7dfsqvgfsni',
+        nome: 'NuBank',
+        tipo: 'cartao' as const,
+        dia_fechamento: 16,
+        dia_vencimento: 23,
+      } as any
+
+      it('compra 17/09, fechamento 16 -> competência 2026-10, vencimento 23/10/2026', () => {
+        const res = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-17',
+          conta: contaNubank,
+          metodoEhCredito: true,
+        })
+        expect(res.competencia).toBe('2026-10')
+        expect(res.dataVencimento.slice(0, 10)).toBe('2026-10-23')
+        expect(res.dataVencimentoIso).toBe('2026-10-23T12:00:00.000Z')
+      })
+
+      it('compra 15/09 -> fatura que fecha 16/09 (vencimento 23/09, competência 2026-09)', () => {
+        const res = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-15',
+          conta: contaNubank,
+          metodoEhCredito: true,
+        })
+        expect(res.competencia).toBe('2026-09')
+        expect(res.dataVencimento.slice(0, 10)).toBe('2026-09-23')
+      })
+
+      it('compra 16/09 (no dia do fechamento) -> fatura que fecha 16/09 (vencimento 23/09, competência 2026-09)', () => {
+        const res = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-16',
+          conta: contaNubank,
+          metodoEhCredito: true,
+        })
+        expect(res.competencia).toBe('2026-09')
+        expect(res.dataVencimento.slice(0, 10)).toBe('2026-09-23')
+      })
+
+      it('compra 10/10 -> fatura que fecha 16/10 (competência 2026-10, vencimento 23/10)', () => {
+        const res = calcularCompetenciaEVencimento({
+          dataCompra: '2026-10-10',
+          conta: contaNubank,
+          metodoEhCredito: true,
+        })
+        expect(res.competencia).toBe('2026-10')
+        expect(res.dataVencimento.slice(0, 10)).toBe('2026-10-23')
+      })
+    })
   })
 })

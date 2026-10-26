@@ -1455,14 +1455,9 @@ export const despesasService = {
       let compStr = res.competencia
       let dueDateIso = res.dataVencimentoIso
 
-      // Limite inferior no mês/ciclo de criação (anti-retroatividade para novas gerações)
-      if (contaCartaoObj && compromisso.created) {
-        const cicloCreated = calcularFaturaCartao(contaCartaoObj, compromisso.created.slice(0, 10))
-        if (compStr < cicloCreated.competencia) {
-          compStr = cicloCreated.competencia
-          dueDateIso = `${cicloCreated.dataVencimento}T12:00:00.000Z`
-        }
-      } else if (!contaCartaoObj && compromisso.created && compromisso.created.length >= 7) {
+      // REGRA CANÔNICA DE CARTÃO: competência e vencimento derivam EXCLUSIVAMENTE da data da compra.
+      // created nunca ajusta nem desloca a competência de cartão de crédito.
+      if (!contaCartaoObj && compromisso.created && compromisso.created.length >= 7) {
         const compCreated = compromisso.created.slice(0, 7)
         if (compStr < compCreated) {
           compStr = compCreated
@@ -1704,7 +1699,8 @@ export const despesasService = {
     // 4. Regra Mensal Recorrente (contínua até ser encerrada)
     if (contaCartaoObj) {
       // Compromissos recorrentes de cartão de crédito:
-      // O ciclo da fatura inicial é calculado a partir de data_inicio usando a regra única
+      // O ciclo da fatura inicial é calculado a partir de data_inicio usando a regra única canônica.
+      // created nunca desloca a competência inicial do cartão.
       const dataInicioStr = compromisso.data_inicio
         ? compromisso.data_inicio.slice(0, 10)
         : compromisso.created
@@ -1720,13 +1716,6 @@ export const despesasService = {
         totalParcelas: 1,
       })
       let minCompStr = resInicial.competencia
-
-      if (compromisso.created) {
-        const cicloCreated = calcularFaturaCartao(contaCartaoObj, compromisso.created.slice(0, 10))
-        if (cicloCreated.competencia > minCompStr) {
-          minCompStr = cicloCreated.competencia
-        }
-      }
 
       const startCompStr = minCompStr
 

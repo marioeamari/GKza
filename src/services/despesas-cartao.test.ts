@@ -194,6 +194,128 @@ describe('despesasService - gerarOcorrenciasParaCompromisso em cartão', () => {
     expect(payload.valor_previsto).toBe(67.79)
   })
 
+  it('registro criado em 17/10 para compra de 17/09 preserva a fatura da COMPRA (2026-10), sem deslocamento para 2026-11 por compromisso.created', async () => {
+    const mockContaNuBank: Conta = {
+      id: 'sglo7dfsqvgfsni',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: 'NuBank',
+      tipo: 'cartao',
+      saldo_inicial: 0,
+      cor: '#4C3A8C',
+      ativa: true,
+      dia_fechamento: 16,
+      dia_vencimento: 23,
+    }
+
+    const mockCreate = vi.fn().mockResolvedValue({ id: 'ocorr_orlando_test' })
+    const mockGetList = vi.fn().mockResolvedValue({ items: [], totalItems: 0 })
+    const mockGetOneConta = vi.fn().mockResolvedValue(mockContaNuBank)
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: mockGetOneConta } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getList: mockGetList,
+          create: mockCreate,
+        } as any
+      }
+      return {} as any
+    })
+
+    // Caso real relatado: compra realizada em 17/09, mas o registro foi criado em 17/10 (ou 24/10) via Telegram
+    // Fechamento 16, Vencimento 23.
+    // 17/09 > 16/09 => ciclo da fatura da compra é 2026-10, vencimento 23/10/2026.
+    // O created (17/10) NÃO PODE deslocar a competência para 2026-11.
+    const compromissoTelegram: DespesaCompromisso = {
+      id: '35bppxoohbrkxyp',
+      collectionId: 'despesas_compromisso',
+      collectionName: 'despesas_compromisso',
+      created: '2026-10-17T14:30:00.000Z', // Criado em 17/10
+      updated: '2026-10-17T14:30:00.000Z',
+      descricao: 'Orlando de Souza',
+      secao: 'cartoes_credito',
+      regra_repeticao: 'avulso',
+      modalidade_parcelamento: 'a_vista',
+      data_inicio: '2026-09-17 00:00:00.000Z', // Compra em 17/09
+      valor_estimado: 12.0,
+      conta_padrao: 'sglo7dfsqvgfsni',
+      contexto_tipo: 'pessoal',
+      ativo: true,
+    }
+
+    await despesasService.gerarOcorrenciasParaCompromisso(compromissoTelegram)
+
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+    const payload = mockCreate.mock.calls[0][0]
+    expect(payload.competencia).toBe('2026-10')
+    expect(payload.data_vencimento).toBe('2026-10-23T12:00:00.000Z')
+    expect(payload.valor_previsto).toBe(12.0)
+  })
+
+  it('compromisso recorrente no cartão criado em data posterior preserva a competência do ciclo inicial da data de compra', async () => {
+    const mockContaNuBank: Conta = {
+      id: 'sglo7dfsqvgfsni',
+      collectionId: 'contas',
+      collectionName: 'contas',
+      created: '2026-01-01',
+      updated: '2026-01-01',
+      nome: 'NuBank',
+      tipo: 'cartao',
+      saldo_inicial: 0,
+      cor: '#4C3A8C',
+      ativa: true,
+      dia_fechamento: 16,
+      dia_vencimento: 23,
+    }
+
+    const mockCreate = vi.fn().mockResolvedValue({ id: 'ocorr_recorrente_test' })
+    const mockGetList = vi.fn().mockResolvedValue({ items: [], totalItems: 0 })
+    const mockGetOneConta = vi.fn().mockResolvedValue(mockContaNuBank)
+
+    vi.mocked(pb.collection).mockImplementation((name: string) => {
+      if (name === 'contas') {
+        return { getOne: mockGetOneConta } as any
+      }
+      if (name === 'despesas_ocorrencias') {
+        return {
+          getList: mockGetList,
+          create: mockCreate,
+        } as any
+      }
+      return {} as any
+    })
+
+    // Recorrente com data_inicio 17/09 (ciclo 2026-10), criado em 20/10
+    const compromissoRecorrente: DespesaCompromisso = {
+      id: 'comp_recorr_post',
+      collectionId: 'despesas_compromisso',
+      collectionName: 'despesas_compromisso',
+      created: '2026-10-20T10:00:00.000Z',
+      updated: '2026-10-20T10:00:00.000Z',
+      descricao: 'Assinatura Software',
+      secao: 'cartoes_credito',
+      regra_repeticao: 'mensal',
+      modalidade_parcelamento: 'a_vista',
+      data_inicio: '2026-09-17 00:00:00.000Z',
+      valor_estimado: 45.0,
+      conta_padrao: 'sglo7dfsqvgfsni',
+      contexto_tipo: 'pessoal',
+      ativo: true,
+    }
+
+    await despesasService.gerarOcorrenciasParaCompromisso(compromissoRecorrente, ['2026-10'])
+
+    expect(mockCreate).toHaveBeenCalled()
+    const payload = mockCreate.mock.calls[0][0]
+    expect(payload.competencia).toBe('2026-10')
+    expect(payload.data_vencimento).toBe('2026-10-23T12:00:00.000Z')
+  })
+
   it('compra avulsa em cartão antes ou no fechamento permanece na fatura do próprio mês', async () => {
     const mockContaNuBank: Conta = {
       id: 'cartao_nubank_multi',
