@@ -705,3 +705,119 @@ export function ordenarDespesasCreditoPorCompra<T extends DespesaOcorrenciaOrden
     return (a.id || '').localeCompare(b.id || '')
   })
 }
+
+export interface InfoBadgeDizimo {
+  ativo: boolean
+  percentual: number
+  percentualTexto: string
+  classificacao?: string
+  direcionamento?: string
+  rotuloBadge: string
+}
+
+/**
+ * Utilitário de formatação do badge de dízimo para despesas/ocorrências.
+ * Lê percentual (default 100%), classificação ('pessoal'|'empresa'|'prolabore' etc.) e direcionamento (ex: 'Igreja Central').
+ */
+export function formatarBadgeDizimoDespesa(item: {
+  dizimo?: boolean
+  dizimo_ativo?: boolean
+  dizimo_percentual?: number | null
+  dizimo_classificacao?: string | null
+  contexto_tipo?: string | null
+  direcionamento?: string | null
+  dizimo_direcionamento?: string | null
+  tipo_dizimo?: string | null
+  expand?: {
+    compromisso?: any
+    tipo_dizimo?: { nome?: string; [key: string]: any }
+    [key: string]: any
+  }
+}): InfoBadgeDizimo | null {
+  const comp = item?.expand?.compromisso
+  const ativo = Boolean(item?.dizimo ?? item?.dizimo_ativo ?? comp?.dizimo ?? comp?.dizimo_ativo)
+
+  if (!ativo) return null
+
+  const rawPercentual =
+    item?.dizimo_percentual !== undefined && item?.dizimo_percentual !== null
+      ? Number(item.dizimo_percentual)
+      : comp?.dizimo_percentual !== undefined && comp?.dizimo_percentual !== null
+        ? Number(comp.dizimo_percentual)
+        : 100
+
+  const percentual = isNaN(rawPercentual) || rawPercentual === 0 ? 100 : rawPercentual
+  const percentualTexto = `Dízimo ${percentual}%`
+
+  const rawClassif =
+    item?.dizimo_classificacao ||
+    comp?.dizimo_classificacao ||
+    item?.contexto_tipo ||
+    comp?.contexto_tipo ||
+    item?.expand?.tipo_dizimo?.nome ||
+    comp?.expand?.tipo_dizimo?.nome
+
+  const classificacao = rawClassif ? String(rawClassif).trim() : undefined
+
+  const rawDirecionamento =
+    item?.direcionamento ||
+    item?.dizimo_direcionamento ||
+    comp?.direcionamento ||
+    comp?.dizimo_direcionamento
+
+  const direcionamento = rawDirecionamento ? String(rawDirecionamento).trim() : undefined
+
+  const partes = [percentualTexto]
+  if (classificacao) {
+    partes.push(classificacao)
+  }
+  if (direcionamento) {
+    partes.push(direcionamento)
+  }
+
+  return {
+    ativo: true,
+    percentual,
+    percentualTexto,
+    classificacao,
+    direcionamento,
+    rotuloBadge: partes.join(' · '),
+  }
+}
+
+/**
+ * Extrai com segurança o nome do método de pagamento da ocorrência ou compromisso.
+ */
+export function extrairNomeMetodoPagamento(item: {
+  metodo_pagamento?: any
+  expand?: {
+    metodo_pagamento?: { nome?: string; [key: string]: any }
+    compromisso?: {
+      metodo_pagamento?: any
+      expand?: {
+        metodo_pagamento?: { nome?: string; [key: string]: any }
+        [key: string]: any
+      }
+      [key: string]: any
+    }
+    [key: string]: any
+  }
+}): string | undefined {
+  const expandMetodo =
+    item?.expand?.metodo_pagamento?.nome ||
+    item?.expand?.compromisso?.expand?.metodo_pagamento?.nome
+
+  if (expandMetodo) return expandMetodo.trim()
+
+  const directObj =
+    typeof item?.metodo_pagamento === 'object' && item?.metodo_pagamento !== null
+      ? item.metodo_pagamento?.nome
+      : typeof item?.expand?.compromisso?.metodo_pagamento === 'object' &&
+          item?.expand?.compromisso?.metodo_pagamento !== null
+        ? item.expand.compromisso.metodo_pagamento?.nome
+        : undefined
+
+  if (directObj) return String(directObj).trim()
+
+  return undefined
+}

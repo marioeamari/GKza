@@ -8,6 +8,8 @@ import {
   alocarPagamentoFaturaFifo,
   ordenarDespesasPorData,
   ordenarDespesasCreditoPorCompra,
+  formatarBadgeDizimoDespesa,
+  extrairNomeMetodoPagamento,
 } from './despesas-pipeline'
 import { calcularCompetenciaEVencimento, calcularFaturaCartao } from './cartao-fatura'
 
@@ -1160,6 +1162,93 @@ describe('despesas-pipeline - Cobertura dos 8 Fluxos do Usuário', () => {
 
       // Garantia canônica: modo vencimento e modo pagamento produzem exatamente os mesmos totais
       expect(totaisModoVencimento).toEqual(totaisModoPagamento)
+    })
+  })
+
+  // --------------------------------------------------------------------------
+  // FLUXO 9: 0.0.272: Triagem de Despesas - persistência de dízimo e método de pagamento
+  // Valida que dízimo gravado na triagem (ativo, percentual, classificação, direcionamento)
+  // e método de pagamento são extraídos e formatados corretamente para exibição na página /despesas.
+  // --------------------------------------------------------------------------
+  describe('0.0.272: Triagem de Despesas - persistência de dízimo e método de pagamento', () => {
+    it('formata badge de dízimo completo: percentual, classificação e direcionamento', () => {
+      const badge = formatarBadgeDizimoDespesa({
+        dizimo: true,
+        dizimo_percentual: 100,
+        dizimo_classificacao: 'empresa',
+        direcionamento: 'Igreja Central',
+      })
+
+      expect(badge).not.toBeNull()
+      expect(badge?.ativo).toBe(true)
+      expect(badge?.percentual).toBe(100)
+      expect(badge?.percentualTexto).toBe('Dízimo 100%')
+      expect(badge?.classificacao).toBe('empresa')
+      expect(badge?.direcionamento).toBe('Igreja Central')
+      expect(badge?.rotuloBadge).toBe('Dízimo 100% · empresa · Igreja Central')
+    })
+
+    it('formata badge com dizimo_ativo booleano, percentual parcial e fallback de compromisso expandido', () => {
+      const badge = formatarBadgeDizimoDespesa({
+        expand: {
+          compromisso: {
+            dizimo_ativo: true,
+            dizimo_percentual: 50,
+            contexto_tipo: 'pessoal',
+            dizimo_direcionamento: 'Missões África',
+          },
+        },
+      })
+
+      expect(badge).not.toBeNull()
+      expect(badge?.ativo).toBe(true)
+      expect(badge?.percentual).toBe(50)
+      expect(badge?.rotuloBadge).toBe('Dízimo 50% · pessoal · Missões África')
+    })
+
+    it('retorna null se dízimo não estiver ativo', () => {
+      const badge = formatarBadgeDizimoDespesa({
+        dizimo: false,
+        dizimo_percentual: 100,
+      })
+
+      expect(badge).toBeNull()
+    })
+
+    it('usa fallback de 100% quando dízimo ativo mas percentual omitido ou zero', () => {
+      const badge = formatarBadgeDizimoDespesa({
+        dizimo: true,
+        direcionamento: 'Igreja Local',
+      })
+
+      expect(badge).not.toBeNull()
+      expect(badge?.percentual).toBe(100)
+      expect(badge?.rotuloBadge).toBe('Dízimo 100% · Igreja Local')
+    })
+
+    it('extrai nome do método de pagamento da ocorrência ou compromisso expandido', () => {
+      const metodoOcorr = extrairNomeMetodoPagamento({
+        expand: {
+          metodo_pagamento: { id: 'm1', nome: 'Pix NuBank' },
+        },
+      })
+      expect(metodoOcorr).toBe('Pix NuBank')
+
+      const metodoComp = extrairNomeMetodoPagamento({
+        expand: {
+          compromisso: {
+            expand: {
+              metodo_pagamento: { id: 'm2', nome: 'Boleto Sicred' },
+            },
+          },
+        },
+      })
+      expect(metodoComp).toBe('Boleto Sicred')
+
+      const metodoObjetoDireto = extrairNomeMetodoPagamento({
+        metodo_pagamento: { id: 'm3', nome: 'Cartão C6' },
+      })
+      expect(metodoObjetoDireto).toBe('Cartão C6')
     })
   })
 })

@@ -99,6 +99,8 @@ import {
   prepararDuplicacaoCompromisso,
   ordenarDespesasPorData,
   ordenarDespesasCreditoPorCompra,
+  formatarBadgeDizimoDespesa,
+  extrairNomeMetodoPagamento,
 } from '@/lib/despesas-pipeline'
 import { cadastrosService } from '@/services/cadastros'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -166,6 +168,12 @@ function CompromissoAnualRow({
   const categoria = compromisso.expand?.categoria
   const contaPadrao = ocorrenciaMes?.expand?.conta || compromisso.expand?.conta_padrao
   const metodoPagCompromisso = compromisso.expand?.metodo_pagamento
+  const metodoPagNome =
+    extrairNomeMetodoPagamento(ocorrenciaMes || compromisso) ||
+    metodoPagCompromisso?.nome ||
+    compromisso.expand?.metodo_pagamento?.nome
+  const badgeDizimo = formatarBadgeDizimoDespesa(ocorrenciaMes || compromisso)
+
   const metodoEhCreditoCompromisso = isMetodoCredito(metodoPagCompromisso)
   const isCartaoCompromisso =
     (contaPadrao?.tipo === 'cartao' || compromisso.secao === 'cartoes_credito') &&
@@ -253,6 +261,25 @@ function CompromissoAnualRow({
               <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 {categoria.nome}
               </span>
+            )}
+
+            {/* Método de Pagamento */}
+            {metodoPagNome && (
+              <span className="rounded bg-secondary/80 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
+                {metodoPagNome}
+              </span>
+            )}
+
+            {/* Badge Dízimo com Percentual, Classificação e Direcionamento */}
+            {badgeDizimo && (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-semibold flex items-center gap-1 border-[#DF5830]/30 bg-[#DF5830]/10 text-[#DF5830] hover:bg-[#DF5830]/15"
+                title={`Dízimo: ${badgeDizimo.percentualTexto}${badgeDizimo.classificacao ? ` · Classificação: ${badgeDizimo.classificacao}` : ''}${badgeDizimo.direcionamento ? ` · Direcionamento: ${badgeDizimo.direcionamento}` : ''}`}
+              >
+                <HeartHandshake className="h-3 w-3 shrink-0 text-[#DF5830]" />
+                <span>{badgeDizimo.rotuloBadge}</span>
+              </Badge>
             )}
 
             {/* Status no ciclo atual */}
@@ -3154,6 +3181,11 @@ function OcorrenciaRow({
   const tag = comp?.expand?.tag // Destino da despesa / Centro de custo
   const categoria = comp?.expand?.categoria // Finalidade
   const metodoPag = comp?.expand?.metodo_pagamento
+  const metodoPagNome =
+    extrairNomeMetodoPagamento(ocorrencia) ||
+    metodoPag?.nome ||
+    comp?.expand?.metodo_pagamento?.nome
+  const badgeDizimo = formatarBadgeDizimoDespesa(ocorrencia)
   const contaPag = ocorrencia.expand?.conta || comp?.expand?.conta_padrao
 
   // Ocorrência só é considerada em atraso se NÃO estiver paga e a data de vencimento for anterior à data REAL de hoje
@@ -3341,20 +3373,32 @@ function OcorrenciaRow({
               </span>
             )}
 
-            {metodoPag && (
+            {metodoPagNome && (
               <span className="rounded bg-secondary/80 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
-                {metodoPag.nome}
+                {metodoPagNome}
               </span>
             )}
 
-            {isDizimo && (
-              <Badge className="bg-amber-500/15 text-amber-800 text-[10px] hover:bg-amber-500/20">
-                <HeartHandshake className="mr-1 h-3 w-3" />
+            {badgeDizimo ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-semibold flex items-center gap-1 border-[#DF5830]/30 bg-[#DF5830]/10 text-[#DF5830] hover:bg-[#DF5830]/15"
+                title={`Dízimo: ${badgeDizimo.percentualTexto}${badgeDizimo.classificacao ? ` · Classificação: ${badgeDizimo.classificacao}` : ''}${badgeDizimo.direcionamento ? ` · Direcionamento: ${badgeDizimo.direcionamento}` : ''}`}
+              >
+                <HeartHandshake className="h-3 w-3 shrink-0 text-[#DF5830]" />
+                <span>{badgeDizimo.rotuloBadge}</span>
+              </Badge>
+            ) : isDizimo ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-semibold flex items-center gap-1 border-[#DF5830]/30 bg-[#DF5830]/10 text-[#DF5830] hover:bg-[#DF5830]/15"
+              >
+                <HeartHandshake className="h-3 w-3 shrink-0 text-[#DF5830]" />
                 {ocorrencia.expand?.tipo_dizimo?.nome ||
                   comp?.expand?.tipo_dizimo?.nome ||
                   'Dízimo: Sim'}
               </Badge>
-            )}
+            ) : null}
 
             {comp?.ativo === false && (
               <Badge
