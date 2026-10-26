@@ -44,6 +44,7 @@ export interface BuildDespesaCanonicaParams {
   contaId: string
   conta?: CartaoContaParam | null
   metodoEhCredito?: boolean
+  metodo_pagamento?: string
   categoriaId?: string
   fornecedor?: string
   titularTipo?: TitularTipo
@@ -51,6 +52,10 @@ export interface BuildDespesaCanonicaParams {
   titularPessoaId?: string
   observacoes?: string
   origemTexto?: string
+  dizimo?: boolean
+  tipo_dizimo?: string
+  dizimo_percentual?: number
+  direcionamento?: string
 }
 
 export interface DespesaCanonicaPayloads {
@@ -124,6 +129,18 @@ export function buildDespesaAvulsaCanonica(
       ? `${params.origemTexto} (competência ${compVenc.competencia})`
       : `Despesa avulsa (competência ${compVenc.competencia})`)
 
+  const dizimoAtivo = params.dizimo ?? false
+  const dizimoPercentualFinal =
+    params.dizimo_percentual !== undefined ? params.dizimo_percentual : dizimoAtivo ? 100 : 0
+  const tipoDizimoFinal = dizimoAtivo && params.tipo_dizimo ? params.tipo_dizimo : ''
+  const direcionamentoFinal = params.direcionamento?.trim() || ''
+  const metodoPagamentoFinal =
+    params.metodo_pagamento !== undefined && params.metodo_pagamento !== null
+      ? params.metodo_pagamento
+      : ehCredito
+        ? 'r9qdfpwfe5143oe'
+        : ''
+
   const compromisso: Partial<DespesaCompromisso> = {
     descricao: params.descricao.trim(),
     fornecedor: params.fornecedor?.trim() || '',
@@ -139,15 +156,17 @@ export function buildDespesaAvulsaCanonica(
     regra_vencimento_texto: 'Único',
     data_inicio: `${dataCompraStr} 00:00:00.000Z`,
     conta_padrao: params.contaId,
-    metodo_pagamento: ehCredito ? 'r9qdfpwfe5143oe' : '',
+    metodo_pagamento: metodoPagamentoFinal,
     titular_tipo: titularTipo,
     titular_pessoa: pessoaId,
     titular_empresa: empresaId,
     contexto_tipo: titularTipo === 'cnpj' ? 'empresa' : 'pessoal',
     empresa: empresaId,
     pessoa: pessoaId,
-    dizimo: false,
-    dizimo_percentual: 0,
+    dizimo: dizimoAtivo,
+    tipo_dizimo: tipoDizimoFinal,
+    dizimo_percentual: dizimoPercentualFinal,
+    direcionamento: direcionamentoFinal,
     ativo: true,
     precisa_revisao: false,
     observacoes: obs,
@@ -168,8 +187,10 @@ export function buildDespesaAvulsaCanonica(
     valor_estimado_original: Number(params.valor),
     valor_ajustado_manualmente: false,
     status: 'paga',
-    dizimo: false,
-    dizimo_percentual: 0,
+    dizimo: dizimoAtivo,
+    tipo_dizimo: tipoDizimoFinal || undefined,
+    dizimo_percentual: dizimoPercentualFinal,
+    direcionamento: direcionamentoFinal || undefined,
     observacoes: obs,
   }
 

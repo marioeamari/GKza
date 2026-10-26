@@ -168,6 +168,8 @@ export function TriagemPendenteDialog({
     link_pagamento: '',
     dizimo: false,
     tipo_dizimo: '',
+    dizimo_percentual: 0,
+    direcionamento: '',
     ativo: true,
     observacoes: '',
   })
@@ -282,7 +284,9 @@ export function TriagemPendenteDialog({
       pessoa_responsavel: '',
       link_pagamento: '',
       dizimo: false,
-      tipo_dizimo: '',
+      tipo_dizimo: defaultDizimoTipo,
+      dizimo_percentual: 0,
+      direcionamento: '',
       ativo: true,
       observacoes: item.comprovante_texto
         ? `Extraído do comprovante Telegram: ${item.comprovante_texto.slice(0, 200)}`
@@ -789,6 +793,13 @@ export function TriagemPendenteDialog({
         link_pagamento: despForm.link_pagamento || undefined,
         dizimo: despForm.dizimo,
         tipo_dizimo: despForm.dizimo && despForm.tipo_dizimo ? despForm.tipo_dizimo : undefined,
+        dizimo_percentual:
+          despForm.dizimo_percentual !== undefined
+            ? despForm.dizimo_percentual
+            : despForm.dizimo
+              ? 100
+              : 0,
+        direcionamento: despForm.direcionamento?.trim() || undefined,
         ativo: despForm.ativo,
         observacoes: despForm.observacoes || undefined,
       }
@@ -1935,43 +1946,156 @@ export function TriagemPendenteDialog({
                 )}
 
                 {/* Dízimo / Ofertas */}
-                <div className="rounded-xl border border-border bg-secondary/20 p-2.5 space-y-2">
+                <div className="rounded-xl border border-border bg-secondary/20 p-3 space-y-3">
                   <div className="flex items-center justify-between">
-                    <div>
-                      <Label className="font-bold text-xs text-foreground">
-                        Dízimo / Oferta ministerial
+                    <div className="space-y-0.5">
+                      <Label className="text-sm font-bold text-foreground">
+                        Dízimo sobre esta despesa
                       </Label>
-                      <p className="text-[11px] text-muted-foreground">
-                        Marque se for dízimo ou oferta e desejar somar no resumo
+                      <p className="text-xs text-muted-foreground">
+                        Define se esta despesa entra no cálculo do dízimo e em qual proporção
                       </p>
                     </div>
                     <Switch
                       checked={despForm.dizimo}
-                      onCheckedChange={(v) => setDespForm((prev) => ({ ...prev, dizimo: v }))}
+                      onCheckedChange={(v) => {
+                        setDespForm((prev) => ({
+                          ...prev,
+                          dizimo: v,
+                          dizimo_percentual: v
+                            ? prev.dizimo_percentual === 0
+                              ? 100
+                              : prev.dizimo_percentual
+                            : 0,
+                        }))
+                      }}
                     />
                   </div>
 
+                  {/* Percentual de dízimo com botões de toque rápido */}
+                  <div className="space-y-2 pt-1 border-t border-border/60">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold text-foreground">
+                        Percentual base de dízimo:{' '}
+                        <span className="text-primary font-bold">
+                          {despForm.dizimo_percentual ?? 100}%
+                        </span>
+                      </Label>
+                      {despForm.dizimo_percentual === 0 ? (
+                        <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                          Não incide dízimo (0%)
+                        </Badge>
+                      ) : despForm.dizimo_percentual === 100 ? (
+                        <Badge
+                          variant="secondary"
+                          className="text-[10px] bg-primary/10 text-primary"
+                        >
+                          Integral (100%)
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="secondary"
+                          className="text-[10px] bg-amber-500/10 text-amber-700"
+                        >
+                          Parcial ({despForm.dizimo_percentual}%)
+                        </Badge>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[100, 75, 50, 25, 0].map((pct) => {
+                        const isSelected = despForm.dizimo_percentual === pct
+                        return (
+                          <Button
+                            key={pct}
+                            type="button"
+                            size="sm"
+                            variant={isSelected ? 'default' : 'outline'}
+                            className={`h-7 px-2.5 text-xs font-semibold rounded-md ${
+                              isSelected
+                                ? 'bg-primary text-primary-foreground shadow-xs'
+                                : 'bg-background hover:bg-secondary/60'
+                            }`}
+                            onClick={() => {
+                              setDespForm((prev) => ({
+                                ...prev,
+                                dizimo_percentual: pct,
+                                dizimo: pct > 0,
+                              }))
+                            }}
+                          >
+                            {pct}%
+                          </Button>
+                        )
+                      })}
+                      <div className="flex items-center gap-1 ml-auto">
+                        <span className="text-xs text-muted-foreground">Custom:</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={despForm.dizimo_percentual ?? 100}
+                          onChange={(e) => {
+                            const val = Math.max(0, Math.min(100, Number(e.target.value) || 0))
+                            setDespForm((prev) => ({
+                              ...prev,
+                              dizimo_percentual: val,
+                              dizimo: val > 0,
+                            }))
+                          }}
+                          className="h-7 w-16 text-xs text-right font-semibold"
+                        />
+                        <span className="text-xs text-muted-foreground">%</span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      {despForm.dizimo_percentual === 0
+                        ? 'Com 0%, as parcelas e ocorrências geradas não entrarão na base do dízimo.'
+                        : `Cada parcela paga contribuirá com ${despForm.dizimo_percentual}% do seu valor na base do dízimo do mês em que for paga.`}
+                    </p>
+                  </div>
+
                   {despForm.dizimo && (
-                    <div className="space-y-1 pt-1">
-                      <Label className="text-xs font-bold">Tipo de Dízimo / Oferta</Label>
-                      <Select
-                        value={despForm.tipo_dizimo || 'none'}
-                        onValueChange={(v) =>
-                          setDespForm((prev) => ({ ...prev, tipo_dizimo: v === 'none' ? '' : v }))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione a classificação" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Padrão</SelectItem>
-                          {tiposDizimo.map((d) => (
-                            <SelectItem key={d.id} value={d.id}>
-                              {d.nome} {d.soma_resumo && '· (Soma no resumo)'}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    <div className="space-y-3 pt-2 border-t border-border/60">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">
+                          Classificação do Dízimo / Oferta ministerial
+                        </Label>
+                        <Select
+                          value={despForm.tipo_dizimo || 'none'}
+                          onValueChange={(v) =>
+                            setDespForm((prev) => ({
+                              ...prev,
+                              tipo_dizimo: v === 'none' ? '' : v,
+                            }))
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione a classificação" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Padrão</SelectItem>
+                            {tiposDizimo.map((d) => (
+                              <SelectItem key={d.id} value={d.id}>
+                                {d.nome} {d.soma_resumo && '· (Soma no resumo)'}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Direcionamento (opcional)</Label>
+                        <Input
+                          value={despForm.direcionamento || ''}
+                          onChange={(e) =>
+                            setDespForm((prev) => ({ ...prev, direcionamento: e.target.value }))
+                          }
+                          placeholder="Ex.: Igreja sede, Ministério de louvor, Bateria, Missões..."
+                        />
+                        <p className="text-[11px] text-muted-foreground">
+                          Indica para onde ou para quem a oferta/dízimo é direcionada.
+                        </p>
+                      </div>
                     </div>
                   )}
                 </div>

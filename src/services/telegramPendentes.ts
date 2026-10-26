@@ -56,6 +56,8 @@ export interface TriagemDespesaInput {
   link_pagamento?: string
   dizimo?: boolean
   tipo_dizimo?: string
+  dizimo_percentual?: number
+  direcionamento?: string
   ativo?: boolean
   observacoes?: string
 }
@@ -228,6 +230,7 @@ export const telegramPendentesService = {
         dataCompra: input.data_inicio,
         contaId: input.conta_padrao || '',
         conta: contaObj,
+        metodo_pagamento: input.metodo_pagamento,
         categoriaId: input.categoria || '',
         fornecedor: input.fornecedor,
         titularTipo,
@@ -235,6 +238,10 @@ export const telegramPendentesService = {
         titularPessoaId: input.titular_pessoa || input.pessoa,
         observacoes: input.observacoes,
         origemTexto: 'Triagem de despesa',
+        dizimo: input.dizimo,
+        tipo_dizimo: input.tipo_dizimo,
+        dizimo_percentual: input.dizimo_percentual,
+        direcionamento: input.direcionamento,
       })
 
       // 1. Cria compromisso avulso
@@ -322,6 +329,9 @@ export const telegramPendentesService = {
       dizimo: input.dizimo || false,
       tipo_dizimo:
         input.dizimo && input.tipo_dizimo ? input.tipo_dizimo : (null as unknown as string),
+      dizimo_percentual:
+        input.dizimo_percentual !== undefined ? input.dizimo_percentual : input.dizimo ? 100 : 0,
+      direcionamento: input.direcionamento?.trim() || (null as unknown as string),
       ativo: input.ativo !== false,
       observacoes: input.observacoes || (null as unknown as string),
     }
@@ -377,6 +387,7 @@ export const telegramPendentesService = {
         dataCompra: dataRef,
         contaId: contaCheckId,
         conta: contaObj,
+        metodo_pagamento: despesaInput.metodo_pagamento,
         categoriaId: lancamentoInput.categoria || despesaInput.categoria || '',
         fornecedor: despesaInput.fornecedor,
         titularTipo: titularTipoAmbos,
@@ -386,6 +397,10 @@ export const telegramPendentesService = {
           lancamentoInput.pessoa || despesaInput.pessoa || despesaInput.titular_pessoa,
         observacoes: lancamentoInput.observacoes || despesaInput.observacoes,
         origemTexto: 'Triagem Ambos (lançamento + compromisso)',
+        dizimo: despesaInput.dizimo,
+        tipo_dizimo: despesaInput.tipo_dizimo,
+        dizimo_percentual: despesaInput.dizimo_percentual,
+        direcionamento: despesaInput.direcionamento,
       })
 
       const compromisso = await despesasService.saveCompromisso(canonica.compromisso)
@@ -478,6 +493,13 @@ export const telegramPendentesService = {
         despesaInput.dizimo && despesaInput.tipo_dizimo
           ? despesaInput.tipo_dizimo
           : (null as unknown as string),
+      dizimo_percentual:
+        despesaInput.dizimo_percentual !== undefined
+          ? despesaInput.dizimo_percentual
+          : despesaInput.dizimo
+            ? 100
+            : 0,
+      direcionamento: despesaInput.direcionamento?.trim() || (null as unknown as string),
       ativo: despesaInput.ativo !== false,
       observacoes: despesaInput.observacoes || (null as unknown as string),
     }
