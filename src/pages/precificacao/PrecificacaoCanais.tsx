@@ -494,7 +494,7 @@ export default function PrecificacaoCanais() {
           base_calculo: taxaEditando.base_calculo || 'preco_anunciado',
           tipo_valor: taxaEditando.tipo_valor || 'percentual',
           valor: Number(taxaEditando.valor) || 0,
-          responsavel: taxaEditando.responsavel || 'marketplace',
+          responsavel: taxaEditando.responsavel || 'vendedor',
           tipo_regra: taxaEditando.tipo_regra || 'comissao',
           financiado_por: taxaEditando.financiado_por || 'marketplace',
           status_conferencia: 'conferido', // Criada pelo usuário -> já conferida
@@ -1052,7 +1052,7 @@ export default function PrecificacaoCanais() {
                             base_calculo: 'preco_anunciado',
                             tipo_valor: 'percentual',
                             valor: 0,
-                            responsavel: 'marketplace',
+                            responsavel: 'vendedor',
                             tipo_regra: 'comissao',
                             financiado_por: 'marketplace',
                           })

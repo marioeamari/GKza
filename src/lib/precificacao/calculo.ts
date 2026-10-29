@@ -670,13 +670,55 @@ export function calcularCustoBaseProduto(produto: ProdutoCalculoInput): {
       custo_direto = custo_direto * (1 + fatorPerda)
     }
   } else if (produto.tipo === 'revenda') {
-    custo_direto = produto.custo_aquisicao_unitario || 0
-    detalhes.push(`Aquisição: R$ ${custo_direto.toFixed(2)}`)
+    const custoAquisicao = produto.custo_aquisicao_unitario || 0
+
+    // Detecção de LINHA ESPELHO da compra na composição de revenda:
+    // linha de composição cujo custo_unitario é igual ao custo_aquisicao_unitario com qtd ajustada por perda igual a 1 (qtd*(1+perda/100) === 1)
+    // OU cuja descricao/categoria contenha 'aquisi', 'matéria-prima', 'materia-prima' ou 'compra do produto'
+    const temLinhaEspelhoCompra =
+      Array.isArray(produto.composicao) &&
+      produto.composicao.some((item) => {
+        const desc = (item.descricao || '').toLowerCase()
+        const catCusto = (item.categoria_custo || '').toLowerCase()
+        const catNome = (item.categoria_nome || '').toLowerCase()
+        const perdaLinha = (item.perda_pct || 0) / 100
+        const qtdAjustada = item.qtd * (1 + perdaLinha)
+
+        const matchQtdValor =
+          custoAquisicao > 0 &&
+          Math.abs(item.custo_unitario - custoAquisicao) < 0.001 &&
+          Math.abs(qtdAjustada - 1) < 0.001
+
+        const matchTexto =
+          desc.includes('aquisi') ||
+          desc.includes('matéria-prima') ||
+          desc.includes('materia-prima') ||
+          desc.includes('compra do produto') ||
+          catCusto.includes('aquisi') ||
+          catCusto.includes('matéria-prima') ||
+          catCusto.includes('materia-prima') ||
+          catNome.includes('aquisi') ||
+          catNome.includes('matéria-prima') ||
+          catNome.includes('materia-prima')
+
+        return matchQtdValor || matchTexto
+      })
+
+    if (temLinhaEspelhoCompra) {
+      detalhes.push('Linha espelho da compra detectada — aquisição não somada em dobro')
+    } else {
+      custo_direto = custoAquisicao
+      detalhes.push(`Aquisição: R$ ${custo_direto.toFixed(2)}`)
+    }
 
     // Suporte unificado à composição por linhas de insumos na revenda
     if (produto.composicao && produto.composicao.length > 0) {
       for (const item of produto.composicao) {
-        const perda = (item.perda_pct || 0) / 100
+        const perdaItemPct = Number(item.perda_pct) || 0
+        if (perdaItemPct > 0) {
+          temPerdaNaLinha = true
+        }
+        const perda = perdaItemPct / 100
         const qtdAjustada = item.qtd * (1 + perda)
         const subtotal = qtdAjustada * item.custo_unitario
         custo_direto += subtotal
@@ -692,6 +734,13 @@ export function calcularCustoBaseProduto(produto: ProdutoCalculoInput): {
         custo_direto += desp.valor || 0
         detalhes.push(`Despesa compra (${desp.descricao}): R$ ${(desp.valor || 0).toFixed(2)}`)
       }
+    }
+
+    // Precedência de perda acordada: perda global só incide se nenhuma linha tiver perda própria
+    if (!temPerdaNaLinha && produto.perda_pct && produto.perda_pct > 0) {
+      const fatorPerda = produto.perda_pct / 100
+      custo_direto = custo_direto * (1 + fatorPerda)
+      detalhes.push(`Perda global ${produto.perda_pct}% aplicada`)
     }
   } else if (produto.tipo === 'kit' || produto.tipo === 'combo') {
     const rotuloTipo = produto.tipo === 'combo' ? 'combo' : 'kit'

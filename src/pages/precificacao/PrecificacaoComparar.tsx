@@ -2753,6 +2753,7 @@ export default function PrecificacaoComparar() {
                                 <div className="space-y-1 text-[11px]">
                                   <div className="flex justify-between text-slate-300">
                                     <span>Base de cálculo (NF):</span>
+                                    {/* Regra da base de NF: respeita valor_base_nf da modalidade (ex: Half R$ 9,90) ou fallback para Preço Anunciado líquido de descontos do vendedor */}
                                     <span className="font-mono font-semibold text-white">
                                       {formatCurrency(dem.base_calculo_tributos)}
                                     </span>
