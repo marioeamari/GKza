@@ -11,6 +11,7 @@ import {
   resolverTributosModalidade,
   round2,
   verificarCorrespondenciaCategoria,
+  type ProdutoCalculoInput,
 } from './calculo'
 
 describe('Motor de Cálculo de Precificação - ERP GKza', () => {
@@ -110,6 +111,178 @@ describe('Motor de Cálculo de Precificação - ERP GKza', () => {
         'Composição (Etiqueta Envio): Qtd 1 x R$ 0.05 = R$ 0.05',
       ]),
     )
+  })
+
+  it('(1e) revenda com linha espelho da compra: a composição entra UMA vez só e nunca zera a mercadoria (caso de referência BLeve = 11.15)', () => {
+    // Caso de referência BLeve exatamente como no banco de dados:
+    // tipo: revenda, aquisição: 10, perda_pct: 10, embalagem: 0.10, etiqueta: 0.05
+    // composicao: 1x C0 "Matéria-prima principal" R$ 10,00 (espelho da compra)
+    const custoBLeve = calcularCustoBaseProduto({
+      sku: 'BLeve',
+      nome: 'Toalha Leve de Praia',
+      tipo: 'revenda',
+      custo_aquisicao_unitario: 10.0,
+      perda_pct: 10,
+      custo_adicional_embalagem: 0.1,
+      custo_etiqueta: 0.05,
+      composicao: [
+        {
+          codigo: 'C0',
+          descricao: 'Matéria-prima principal',
+          qtd: 1,
+          custo_unitario: 10.0,
+          categoria_custo: 'material',
+        },
+      ],
+    })
+
+    // Custo direto: composição 10.00 + perda global 10% (1.00) = 11.00
+    // Embalagem: 0.10, Etiqueta: 0.05
+    // Custo total = 11.00 + 0.10 + 0.05 = 11.15 (NUNCA 0.17!)
+    expect(custoBLeve.custo_direto).toBe(11.0)
+    expect(custoBLeve.custo_embalagem).toBe(0.1)
+    expect(custoBLeve.custo_etiqueta).toBe(0.05)
+    expect(custoBLeve.custo_total).toBe(11.15)
+    expect(custoBLeve.custo_total).not.toBe(0.17)
+    expect(custoBLeve.detalhes).toEqual(
+      expect.arrayContaining([
+        'Linha espelho da compra detectada na composição — aquisição unificada pela composição',
+        'Composição (Matéria-prima principal): Qtd 1 x R$ 10.00 = R$ 10.00',
+        'Perda global 10% aplicada',
+      ]),
+    )
+  })
+
+  it('(1f) revenda sem linha espelho: aquisição + linhas adicionais de composição + perda + embalagem + etiqueta', () => {
+    const custoRevendaSemEspelho = calcularCustoBaseProduto({
+      sku: 'REV-SEM-ESPELHO',
+      nome: 'Revenda Camiseta Estampada',
+      tipo: 'revenda',
+      custo_aquisicao_unitario: 25.0,
+      perda_pct: 0,
+      custo_adicional_embalagem: 0.8,
+      custo_etiqueta: 0.2,
+      composicao: [
+        {
+          codigo: 'C1',
+          descricao: 'Tag Promocional Papel Kraft',
+          qtd: 1,
+          custo_unitario: 0.5,
+          categoria_custo: 'insumo',
+        },
+      ],
+    })
+
+    // Aquisição 25.00 + Tag 0.50 = Custo direto 25.50
+    // Embalagem 0.80 + Etiqueta 0.20 = 1.00
+    // Custo total = 26.50
+    expect(custoRevendaSemEspelho.custo_direto).toBe(25.5)
+    expect(custoRevendaSemEspelho.custo_embalagem).toBe(0.8)
+    expect(custoRevendaSemEspelho.custo_etiqueta).toBe(0.2)
+    expect(custoRevendaSemEspelho.custo_total).toBe(26.5)
+    expect(custoRevendaSemEspelho.detalhes).toEqual(
+      expect.arrayContaining([
+        'Aquisição: R$ 25.00',
+        'Composição (Tag Promocional Papel Kraft): Qtd 1 x R$ 0.50 = R$ 0.50',
+      ]),
+    )
+  })
+
+  it('(1g) demonstrativo do produto BLeve no canal Shopee com custo corrigido de 11.15', () => {
+    // Preço anunciado R$ 24,90 no canal Shopee (MEI: 0% DAS, 2% transação + 18% comissão [8 a 79,99] + R$ 4 taxa fixa + R$ 0,50 ADS)
+    // Total taxas Shopee = 2% (0.50) + 18% (4.48) + 4.00 + 0.50 = 9.48
+    // Frete vendedor = 0
+    // Rateio fixo DAS MEI = 76.50 / 3000 = 0.0255 (round4)
+    // Custo do produto = 11.15
+    // Valor a receber = 24.90 - 9.48 = 15.42
+    // Lucro = 15.42 - 11.15 - 0.0255 (round4) = ~1.98
+    // Margem líquida = (1.98 / 24.90) * 100 = ~8% (deixa de ser 52%)
+    // Ponto de equilíbrio = ~R$ 15,48 a 15,50
+    const produtoBLeve: ProdutoCalculoInput = {
+      sku: 'BLeve',
+      nome: 'Toalha Leve de Praia',
+      tipo: 'revenda',
+      custo_aquisicao_unitario: 10.0,
+      perda_pct: 10,
+      custo_adicional_embalagem: 0.1,
+      custo_etiqueta: 0.05,
+      composicao: [
+        {
+          codigo: 'C0',
+          descricao: 'Matéria-prima principal',
+          qtd: 1,
+          custo_unitario: 10.0,
+          categoria_custo: 'material',
+        },
+      ],
+    }
+
+    const taxasShopee = [
+      {
+        id: 'transacao',
+        nome: 'Taxa Transação 2%',
+        base_calculo: 'preco_pago_cliente' as const,
+        tipo_valor: 'percentual' as const,
+        valor: 2.0,
+        responsavel: 'vendedor' as const,
+        tipo_regra: 'transacao' as const,
+        financiado_por: 'marketplace' as const,
+      },
+      {
+        id: 'taxa_fixa',
+        nome: 'Taxa Transação Item',
+        base_calculo: 'preco_pago_cliente' as const,
+        tipo_valor: 'fixo' as const,
+        valor: 4.0,
+        condicao: { faixa_preco_min: 8, faixa_preco_max: 79.99 },
+        responsavel: 'vendedor' as const,
+        tipo_regra: 'transacao' as const,
+        financiado_por: 'marketplace' as const,
+      },
+      {
+        id: 'comissao',
+        nome: 'Comissão Shopee',
+        base_calculo: 'preco_pago_cliente' as const,
+        tipo_valor: 'percentual' as const,
+        valor: 18.0,
+        condicao: { faixa_preco_min: 8, faixa_preco_max: 79.99 },
+        responsavel: 'vendedor' as const,
+        tipo_regra: 'comissao' as const,
+        financiado_por: 'marketplace' as const,
+      },
+      {
+        id: 'ads',
+        nome: 'Recarga Automática ADS',
+        base_calculo: 'preco_pago_cliente' as const,
+        tipo_valor: 'fixo' as const,
+        valor: 0.5,
+        responsavel: 'vendedor' as const,
+        tipo_regra: 'campanha' as const,
+        financiado_por: 'marketplace' as const,
+      },
+    ]
+
+    const demShopee = calcularDemonstrativo({
+      produto: produtoBLeve,
+      preco_anunciado: 24.9,
+      taxas: taxasShopee,
+      tributos: {
+        aliquota_das_pct: 0,
+        aliquota_icms_pct: 0,
+        das_imposto_total_mes: 76.5,
+        pedidos_estimados_mes: 3000,
+      },
+    })
+
+    // 1. Custo total do produto: ~11.15
+    expect(demShopee.custo_total_produto).toBe(11.15)
+    // 2. Lucro do canal Shopee cai para ~R$ 1.98 e margem para ~8% (deixa de ser 52%)
+    expect(demShopee.lucro_liquido).toBeCloseTo(1.98, 1)
+    expect(demShopee.margem_liquida_pct).toBeGreaterThan(7.5)
+    expect(demShopee.margem_liquida_pct).toBeLessThan(8.5)
+    // 3. Ponto de equilíbrio sobe para a casa de R$ 15-16
+    expect(demShopee.ponto_equilibrio).toBeGreaterThanOrEqual(15.0)
+    expect(demShopee.ponto_equilibrio).toBeLessThanOrEqual(16.5)
   })
 
   it('(2) deve calcular kit com múltiplos itens agregados', () => {

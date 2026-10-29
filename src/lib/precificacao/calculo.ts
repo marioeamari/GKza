@@ -704,11 +704,21 @@ export function calcularCustoBaseProduto(produto: ProdutoCalculoInput): {
         return matchQtdValor || matchTexto
       })
 
+    // Regra acordada para revenda: a aquisição e a composição entram exatamente uma vez.
+    // - Se há linha espelho da compra na composição: custo direto é composto pelas linhas da composição
+    //   (a aquisição não é somada à parte para não duplicar com a linha espelho).
+    // - Se não há linha espelho: inicia com a aquisição e soma as linhas adicionais da composição (se houver).
+    // Nunca zera ambos: aquisição OU linha espelho, garantindo custo real da mercadoria.
     if (temLinhaEspelhoCompra) {
-      detalhes.push('Linha espelho da compra detectada — aquisição não somada em dobro')
+      custo_direto = 0
+      detalhes.push(
+        'Linha espelho da compra detectada na composição — aquisição unificada pela composição',
+      )
     } else {
       custo_direto = custoAquisicao
-      detalhes.push(`Aquisição: R$ ${custo_direto.toFixed(2)}`)
+      if (custoAquisicao > 0) {
+        detalhes.push(`Aquisição: R$ ${custoAquisicao.toFixed(2)}`)
+      }
     }
 
     // Suporte unificado à composição por linhas de insumos na revenda
