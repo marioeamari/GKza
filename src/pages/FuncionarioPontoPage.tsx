@@ -17,6 +17,7 @@ import {
   MapPin,
   RefreshCw,
   QrCode,
+  AlertTriangle,
 } from 'lucide-react'
 import { LocalQRCode } from '@/components/LocalQRCode'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -39,6 +40,7 @@ import {
   type FuncionarioPontoRecord,
   type FuncionarioDividaRecord,
   type FuncionarioConfirmacaoRecord,
+  type FuncionarioFolhaRecord,
 } from '@/services/funcionarios'
 import {
   formatarDataExtensoPlanilha,
@@ -46,6 +48,7 @@ import {
   formatarMinutosEmHHMM,
   converterMinutosEmHorasDecimais,
   formatarDataDDMMAAAA,
+  formatarDataDDMM,
 } from '@/lib/funcionarios'
 import { formatCurrency, getLocalDateStr } from '@/lib/format'
 import { normalizarDataPonto } from '@/lib/funcionarios'
@@ -84,10 +87,17 @@ export default function FuncionarioPontoPage() {
   const [submitting, setSubmitting] = useState(false)
   const [mostrarQREstacao, setMostrarQREstacao] = useState(false)
 
-  // Modal de Divergência do Colaborador
+  // Modal de Divergência do Colaborador (dias pontuais)
   const [modalDivergenciaData, setModalDivergenciaData] = useState<string | null>(null)
   const [motivoDivergenciaTexto, setMotivoDivergenciaTexto] = useState('')
   const [salvandoConfirmacao, setSalvandoConfirmacao] = useState(false)
+
+  // Notificação de Pagamento Realizado & Conferência de Folha Paga pelo Colaborador
+  const [folhaPendenteConferencia, setFolhaPendenteConferencia] =
+    useState<FuncionarioFolhaRecord | null>(null)
+  const [salvandoConferenciaFolha, setSalvandoConferenciaFolha] = useState(false)
+  const [modalDivergenciaFolhaAberta, setModalDivergenciaFolhaAberta] = useState(false)
+  const [motivoDivergenciaFolha, setMotivoDivergenciaFolha] = useState('')
 
   // Relógio em tempo real
   useEffect(() => {
@@ -136,6 +146,10 @@ export default function FuncionarioPontoPage() {
       // Carregar dívidas ativas do funcionário
       const divs = await funcionariosService.listarDividas(func.id)
       setDividas(divs.filter((d) => d.ativa))
+
+      // Carregar folha mais recente quitada para conferência de pagamento pelo colaborador
+      const folha = await funcionariosService.buscarFolhaPendenteConferenciaColaborador(func.id)
+      setFolhaPendenteConferencia(folha)
     } catch (err) {
       console.error('Erro ao carregar dados do colaborador:', err)
     }
@@ -305,8 +319,70 @@ export default function FuncionarioPontoPage() {
   const handleTrocarFuncionario = () => {
     localStorage.removeItem(SESSION_STORAGE_KEY)
     setFuncionarioAtual(null)
+    setFolhaPendenteConferencia(null)
     setPinInput('')
     setPontoHoje(null)
+  }
+
+  // Ações de Conferência de Pagamento pelo Colaborador (Regra 4 invertida)
+  const handleConfirmarPagamentoCorreto = async () => {
+    if (!folhaPendenteConferencia || salvandoConferenciaFolha) return
+    setSalvandoConferenciaFolha(true)
+    try {
+      const atualizada = await funcionariosService.confirmarConferenciaFolhaColaborador({
+        folhaId: folhaPendenteConferencia.id,
+        status: 'confirmado',
+      })
+      setFolhaPendenteConferencia(atualizada)
+      toast({
+        title: 'Pagamento confirmado com sucesso!',
+        description: 'Você confirmou que o valor recebido está condizente com os dias trabalhados.',
+      })
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao confirmar pagamento',
+        description: err.message || 'Tente novamente.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSalvandoConferenciaFolha(false)
+    }
+  }
+
+  const handleSalvarDivergenciaPagamento = async () => {
+    if (!folhaPendenteConferencia || salvandoConferenciaFolha) return
+    if (!motivoDivergenciaFolha.trim()) {
+      toast({
+        title: 'Descreva a divergência',
+        description: 'Informe o motivo pelo qual o valor não condiz com os dias trabalhados.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setSalvandoConferenciaFolha(true)
+    try {
+      const atualizada = await funcionariosService.confirmarConferenciaFolhaColaborador({
+        folhaId: folhaPendenteConferencia.id,
+        status: 'divergente',
+        motivoDivergencia: motivoDivergenciaFolha.trim(),
+      })
+      setFolhaPendenteConferencia(atualizada)
+      setModalDivergenciaFolhaAberta(false)
+      setMotivoDivergenciaFolha('')
+      toast({
+        title: 'Divergência de pagamento registrada!',
+        description: 'O administrador foi avisado para avaliar o ajuste na próxima folha aberta.',
+      })
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao registrar divergência',
+        description: err.message || 'Tente novamente.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSalvandoConferenciaFolha(false)
+    }
   }
 
   // Ações de Ponto
@@ -786,6 +862,110 @@ export default function FuncionarioPontoPage() {
               </Button>
             </div>
 
+            {/* CARD / BANNER DE NOTIFICAÇÃO: PAGAMENTO REALIZADO & CONFERÊNCIA (REGRA 4 INVERTIDA) */}
+            {folhaPendenteConferencia && folhaPendenteConferencia.quitada && (
+              <div
+                className={`rounded-xl border p-4 text-xs shadow-xs space-y-3 transition ${
+                  folhaPendenteConferencia.status_conferencia_colaborador === 'confirmado'
+                    ? 'border-emerald-300 bg-emerald-50/70 text-emerald-950'
+                    : folhaPendenteConferencia.status_conferencia_colaborador === 'divergente'
+                      ? 'border-amber-300 bg-amber-50/70 text-amber-950'
+                      : 'border-blue-300 bg-blue-50/80 text-blue-950'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    {folhaPendenteConferencia.status_conferencia_colaborador === 'confirmado' ? (
+                      <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : folhaPendenteConferencia.status_conferencia_colaborador === 'divergente' ? (
+                      <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <DollarSign className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm">
+                          {folhaPendenteConferencia.status_conferencia_colaborador === 'confirmado'
+                            ? 'Pagamento conferido e confirmado'
+                            : folhaPendenteConferencia.status_conferencia_colaborador ===
+                                'divergente'
+                              ? 'Divergência de pagamento sob análise'
+                              : '🔔 Pagamento realizado pelo administrador!'}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] ${
+                            folhaPendenteConferencia.status_conferencia_colaborador === 'confirmado'
+                              ? 'border-emerald-400 bg-emerald-100 text-emerald-900'
+                              : folhaPendenteConferencia.status_conferencia_colaborador ===
+                                  'divergente'
+                                ? 'border-amber-400 bg-amber-100 text-amber-900'
+                                : 'border-blue-400 bg-blue-100 text-blue-900'
+                          }`}
+                        >
+                          {folhaPendenteConferencia.status_conferencia_colaborador === 'confirmado'
+                            ? 'Conferido'
+                            : folhaPendenteConferencia.status_conferencia_colaborador ===
+                                'divergente'
+                              ? 'Divergente'
+                              : 'Aguardando sua conferência'}
+                        </Badge>
+                      </div>
+
+                      <p className="mt-1 text-xs leading-relaxed">
+                        Período:{' '}
+                        <strong>
+                          {formatarDataDDMMAAAA(folhaPendenteConferencia.periodo_inicio)} até{' '}
+                          {formatarDataDDMMAAAA(folhaPendenteConferencia.periodo_fim)}
+                        </strong>{' '}
+                        • Valor Pago:{' '}
+                        <strong className="font-mono text-emerald-700">
+                          {formatCurrency(folhaPendenteConferencia.a_receber)}
+                        </strong>
+                        .
+                      </p>
+
+                      <p className="text-[11px] opacity-90 mt-0.5">
+                        {folhaPendenteConferencia.status_conferencia_colaborador === 'confirmado'
+                          ? `Você confirmou que o valor recebido está condizente com os dias trabalhados em ${formatarDataDDMM(
+                              folhaPendenteConferencia.conferido_colaborador_em || '',
+                            )}.`
+                          : folhaPendenteConferencia.status_conferencia_colaborador === 'divergente'
+                            ? `Divergência apontada: "${folhaPendenteConferencia.motivo_divergencia_colaborador}". O administrador ajustará na próxima folha aberta.`
+                            : 'Confira abaixo se o valor recebido está condizente com os dias trabalhados neste período.'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* BOTÕES DE CONFIRMAÇÃO DO COLABORADOR */}
+                {(!folhaPendenteConferencia.status_conferencia_colaborador ||
+                  folhaPendenteConferencia.status_conferencia_colaborador === 'pendente') && (
+                  <div className="pt-2 border-t border-blue-200/60 flex flex-wrap items-center justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setModalDivergenciaFolhaAberta(true)}
+                      disabled={salvandoConferenciaFolha}
+                      className="h-8 text-xs border-amber-300 text-amber-900 hover:bg-amber-100 font-semibold gap-1"
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                      Valor não condiz (Apontar)
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleConfirmarPagamentoCorreto}
+                      disabled={salvandoConferenciaFolha}
+                      className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1 shadow-2xs"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Valor correto (Confirmar)
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* AVISO CASO FORA DO LOCAL */}
             {!estacaoValida && (
               <div className="rounded-xl border border-amber-300 bg-amber-50 p-3.5 text-xs text-amber-900 flex items-start gap-2.5">
@@ -1162,6 +1342,70 @@ export default function FuncionarioPontoPage() {
               className="bg-[#DF5830] hover:bg-[#c94b26] text-white text-xs font-bold"
             >
               Salvar Apontamento
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL DE DIVERGÊNCIA DO VALOR DA FOLHA PAGA (REGRA 4 INVERTIDA) */}
+      <Dialog
+        open={modalDivergenciaFolhaAberta}
+        onOpenChange={(aberto) => !aberto && setModalDivergenciaFolhaAberta(false)}
+      >
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-gray-900 flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+              Apontar Divergência no Pagamento
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {folhaPendenteConferencia ? (
+                <span>
+                  Período: {formatarDataDDMMAAAA(folhaPendenteConferencia.periodo_inicio)} a{' '}
+                  {formatarDataDDMMAAAA(folhaPendenteConferencia.periodo_fim)} • Valor Pago:{' '}
+                  <strong>{formatCurrency(folhaPendenteConferencia.a_receber)}</strong>
+                </span>
+              ) : (
+                'Descreva a divergência observada no valor pago.'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2 text-xs">
+            <div className="space-y-1.5">
+              <Label className="font-semibold text-gray-800">
+                Por que o valor não está condizente com os dias trabalhados?
+              </Label>
+              <Textarea
+                value={motivoDivergenciaFolha}
+                onChange={(e) => setMotivoDivergenciaFolha(e.target.value)}
+                placeholder="Ex: Recebi R$ 350,00 mas pelos 5 dias trabalhados e horas extras o valor combinado era R$ 420,00..."
+                rows={4}
+                className="text-xs bg-white"
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Seu apontamento será encaminhado ao administrador. Conforme as regras da empresa, o
+              ajuste financeiro correspondente será lançado na folha em aberto.
+            </p>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setModalDivergenciaFolhaAberta(false)}
+              className="text-xs"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSalvarDivergenciaPagamento}
+              disabled={salvandoConferenciaFolha}
+              className="bg-[#DF5830] hover:bg-[#c94b26] text-white text-xs font-bold"
+            >
+              Enviar Divergência
             </Button>
           </DialogFooter>
         </DialogContent>

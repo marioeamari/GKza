@@ -82,6 +82,12 @@ export interface FuncionarioFolhaRecord {
   data_quitacao?: string
   lancamento_id?: string
   observacoes?: string
+  notificacao_pagamento_enviada?: boolean
+  notificacao_pagamento_em?: string
+  status_conferencia_colaborador?: 'pendente' | 'confirmado' | 'divergente'
+  conferido_colaborador_em?: string
+  motivo_divergencia_colaborador?: string
+  dias_pendentes_fechamento?: string[]
   created?: string
   updated?: string
   expand?: {
@@ -565,6 +571,7 @@ export const funcionariosService = {
     dividaSemanal: number
     aReceber: number
     quitada: boolean
+    diasPendentes?: string[]
     observacoes?: string
     gerarLancamentoFinanceiro?: boolean
     contaId?: string
@@ -594,6 +601,7 @@ export const funcionariosService = {
     }
 
     // Criar a folha
+    const agoraIso = new Date().toISOString()
     const folha = await pb.collection('funcionarios_folhas').create<FuncionarioFolhaRecord>({
       funcionario: params.funcionarioId,
       periodo_inicio: params.periodoInicio,
@@ -603,9 +611,13 @@ export const funcionariosService = {
       divida_semanal: params.dividaSemanal,
       a_receber: params.aReceber,
       quitada: params.quitada,
-      data_quitacao: params.quitada ? new Date().toISOString().split('T')[0] : null,
+      data_quitacao: params.quitada ? agoraIso.split('T')[0] : null,
       lancamento_id: lancamentoId,
       observacoes: params.observacoes || '',
+      notificacao_pagamento_enviada: params.quitada,
+      notificacao_pagamento_em: params.quitada ? agoraIso : null,
+      status_conferencia_colaborador: 'pendente',
+      dias_pendentes_fechamento: params.diasPendentes || [],
     })
 
     // Se a folha for quitada, abater o saldo das dívidas envolvidas
@@ -632,5 +644,47 @@ export const funcionariosService = {
     }
 
     return folha
+  },
+
+  async confirmarConferenciaFolhaColaborador(params: {
+    folhaId: string
+    status: 'confirmado' | 'divergente'
+    motivoDivergencia?: string
+  }): Promise<FuncionarioFolhaRecord> {
+    const agoraIso = new Date().toISOString()
+    const payload: Partial<FuncionarioFolhaRecord> = {
+      status_conferencia_colaborador: params.status,
+      conferido_colaborador_em: agoraIso,
+      motivo_divergencia_colaborador: params.motivoDivergencia || '',
+    }
+    return await pb
+      .collection('funcionarios_folhas')
+      .update<FuncionarioFolhaRecord>(params.folhaId, payload)
+  },
+
+  async buscarFolhaPendenteConferenciaColaborador(
+    funcionarioId: string,
+  ): Promise<FuncionarioFolhaRecord | null> {
+    if (!funcionarioId) return null
+    try {
+      // Retorna a folha mais recente quitada que ainda está aguardando conferência do colaborador
+      // ou a última quitada
+      const records = await pb
+        .collection('funcionarios_folhas')
+        .getFullList<FuncionarioFolhaRecord>({
+          filter: `funcionario = "${funcionarioId}" && quitada = true`,
+          sort: '-periodo_fim',
+          limit: 5,
+        })
+
+      // Procura primeiro alguma com status_conferencia_colaborador = 'pendente' ou 'divergente'
+      const pendente = records.find(
+        (f) => !f.status_conferencia_colaborador || f.status_conferencia_colaborador === 'pendente',
+      )
+      return pendente || records[0] || null
+    } catch (err) {
+      console.warn('Erro ao buscar folha para conferência do colaborador:', err)
+      return null
+    }
   },
 }

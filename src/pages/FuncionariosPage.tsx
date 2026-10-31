@@ -605,21 +605,9 @@ export default function FuncionariosPage() {
   const handleConfirmarFechamentoFolha = async () => {
     if (!espelhoFolha || !funcionarioAtual) return
 
-    // Trava de segurança no fechamento: exige todas as confirmações
-    if (!validacaoFechamento.podeFechar) {
-      toast({
-        title: 'Fechamento Bloqueado',
-        description:
-          validacaoFechamento.motivoBloqueio ||
-          'O funcionário precisa confirmar todas as datas trabalhadas antes do fechamento.',
-        variant: 'destructive',
-      })
-      return
-    }
-
     try {
       const usuarioNome = user?.name || user?.email || 'Admin'
-      await funcionariosService.fecharFolha({
+      const novaFolha = await funcionariosService.fecharFolha({
         funcionarioId: funcionarioAtual.id,
         periodoInicio: espelhoFolha.periodoInicio,
         periodoFim: espelhoFolha.periodoFim,
@@ -632,14 +620,15 @@ export default function FuncionariosPage() {
         dividaSemanal: espelhoFolha.totalDescontos,
         aReceber: espelhoFolha.aReceber,
         quitada: true,
+        diasPendentes: validacaoFechamento.diasPendentes,
         gerarLancamentoFinanceiro,
         contaId: selectedContaId,
         usuarioNome,
       })
 
       toast({
-        title: 'Folha fechada e quitada com sucesso!',
-        description: `Período ${formatarDataDDMMAAAA(espelhoFolha.periodoInicio)} a ${formatarDataDDMMAAAA(espelhoFolha.periodoFim)} finalizado e arquivado no Histórico.`,
+        title: 'Pagamento realizado com sucesso!',
+        description: `Folha quitada para ${funcionarioAtual.nome}. Notificação de "Pagamento realizado" enviada ao colaborador para conferência dos valores e dias trabalhados.`,
       })
       setIsFecharFolhaModalOpen(false)
       setDescontosAvulsos([])
@@ -897,19 +886,22 @@ export default function FuncionariosPage() {
                   </Button>
                   <Button
                     onClick={() => setIsFecharFolhaModalOpen(true)}
-                    disabled={!validacaoFechamento.podeFechar || periodoTentativaQuitado}
+                    disabled={periodoTentativaQuitado}
                     title={
-                      validacaoFechamento.motivoBloqueio ||
-                      (periodoTentativaQuitado ? 'Período já quitado' : undefined)
+                      periodoTentativaQuitado
+                        ? 'Período já quitado'
+                        : validacaoFechamento.temPendencias
+                          ? 'Realizar pagamento (colaborador confirmará depois)'
+                          : 'Fechar e pagar folha'
                     }
                     className={`h-10 text-white font-bold gap-1.5 text-xs shadow-xs flex-1 ${
-                      validacaoFechamento.podeFechar && !periodoTentativaQuitado
+                      !periodoTentativaQuitado
                         ? 'bg-emerald-600 hover:bg-emerald-700'
                         : 'bg-gray-400 cursor-not-allowed opacity-75'
                     }`}
                   >
                     <CheckCircle2 className="h-4 w-4" />
-                    Fechar Folha
+                    {validacaoFechamento.temPendencias ? 'Pagar & Notificar' : 'Fechar Folha'}
                   </Button>{' '}
                 </div>
               </div>
@@ -951,11 +943,11 @@ export default function FuncionariosPage() {
                 </div>
               )}
 
-              {/* AVISO DE CONFERÊNCIA DO FUNCIONÁRIO (REGRA 4) */}
+              {/* AVISO DE CONFERÊNCIA DO FUNCIONÁRIO (REGRA 4 INVERTIDA) */}
               {espelhoFolha && (
                 <div className="mt-3 pt-3 border-t border-border/50 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    {validacaoFechamento.podeFechar ? (
+                    {!validacaoFechamento.temPendencias ? (
                       <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 gap-1 text-xs py-1">
                         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
                         Todas as {validacaoFechamento.totalDiasTrabalhados} datas trabalhadas
@@ -967,15 +959,17 @@ export default function FuncionariosPage() {
                         className="bg-amber-50 text-amber-900 border-amber-300 gap-1.5 text-xs py-1"
                       >
                         <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
-                        {validacaoFechamento.motivoBloqueio}
+                        Aguardando confirmação do colaborador (
+                        {validacaoFechamento.totalDiasConfirmados} de{' '}
+                        {validacaoFechamento.totalDiasTrabalhados} confirmados)
                       </Badge>
                     )}
                   </div>
 
-                  {!validacaoFechamento.podeFechar && (
+                  {validacaoFechamento.temPendencias && (
                     <span className="text-[11px] text-muted-foreground">
-                      O botão "Fechar Folha" será habilitado automaticamente quando o colaborador
-                      confirmar os dias pendentes.
+                      O pagamento pode ser realizado agora sem bloqueio; a notificação será enviada
+                      ao colaborador para conferência posterior.
                     </span>
                   )}
                 </div>
@@ -1600,18 +1594,44 @@ export default function FuncionariosPage() {
                           {formatCurrency(f.a_receber)}
                         </td>
                         <td className="py-2.5 px-3 text-center">
-                          {f.quitada ? (
-                            <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white font-semibold text-[10px] gap-1">
-                              ✅ Quitada em {dataQuitacaoCurta || dataQuitacaoFormatada}
-                            </Badge>
-                          ) : (
-                            <Badge
-                              variant="outline"
-                              className="border-amber-300 text-amber-800 bg-amber-50"
-                            >
-                              Em aberto
-                            </Badge>
-                          )}
+                          <div className="flex flex-col items-center gap-1">
+                            {f.quitada ? (
+                              <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white font-semibold text-[10px] gap-1">
+                                ✅ Quitada em {dataQuitacaoCurta || dataQuitacaoFormatada}
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="border-amber-300 text-amber-800 bg-amber-50"
+                              >
+                                Em aberto
+                              </Badge>
+                            )}
+
+                            {f.quitada &&
+                              (f.status_conferencia_colaborador === 'confirmado' ? (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] bg-emerald-50 text-emerald-800 border-emerald-300"
+                                >
+                                  Conferido pelo colaborador
+                                </Badge>
+                              ) : f.status_conferencia_colaborador === 'divergente' ? (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] bg-red-50 text-red-800 border-red-300"
+                                >
+                                  Divergência apontada
+                                </Badge>
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] bg-amber-50 text-amber-800 border-amber-300"
+                                >
+                                  Aguardando confirmação do colaborador
+                                </Badge>
+                              ))}
+                          </div>
                         </td>
                         <td className="py-2.5 px-4 text-center">
                           <div className="flex items-center justify-center gap-1.5">
@@ -2125,9 +2145,23 @@ export default function FuncionariosPage() {
                 Fechar & Quitar Folha de Pagamento
               </DialogTitle>
               <DialogDescription>
-                Confirme os valores da folha calculada. O saldo das dívidas será atualizado.
+                Realize o pagamento da folha calculada. O colaborador receberá notificação imediata
+                para conferir valor x dias trabalhados.
               </DialogDescription>
             </DialogHeader>
+
+            {validacaoFechamento.temPendencias && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900 text-xs flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold">Dias pendentes de confirmação pelo colaborador</p>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    O pagamento não é bloqueado: você pode quitar agora. O colaborador será
+                    notificado para conferir se o valor recebido condiz com os dias trabalhados.
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-3 text-xs">
               <div className="rounded-xl border border-border/80 bg-gray-50/80 p-3.5 space-y-2">

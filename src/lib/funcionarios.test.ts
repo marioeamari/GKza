@@ -17,6 +17,7 @@ import {
   validarPodeRegistrarEntrada,
   validarTokenDiarioEstacao,
   gerarTokenDiarioCriptografico,
+  montarMensagemNotificacaoPagamento,
 } from './funcionarios'
 
 describe('Regras do Módulo de Funcionários (Aritmética Exata da Planilha)', () => {
@@ -460,29 +461,31 @@ describe('Regras do Módulo de Funcionários (Aritmética Exata da Planilha)', (
       })
     })
 
-    describe('TESTE: fechamento bloqueado enquanto houver data não confirmada e liberado com todas confirmadas', () => {
+    describe('TESTE: Pagamento primeiro, confirmação do colaborador depois (sem bloqueio)', () => {
       const pontosDoPeriodo = [
         { data: '2026-10-15', entrada: '08:00', saida: '17:00' },
         { data: '2026-10-16', entrada: '08:00', saida: '17:00' },
         { data: '2026-10-17', entrada: '08:00', saida: '17:00' },
       ]
 
-      it('bloqueia o fechamento quando nenhuma data foi confirmada', () => {
+      it('NÃO bloqueia o fechamento quando nenhuma data foi confirmada (podeFechar = true)', () => {
         const validacao = validarConfirmacoesFechamento({
           pontosTrabalhados: pontosDoPeriodo,
           confirmacoesPorData: {},
         })
 
-        expect(validacao.podeFechar).toBe(false)
+        expect(validacao.podeFechar).toBe(true)
         expect(validacao.totalDiasTrabalhados).toBe(3)
         expect(validacao.totalDiasConfirmados).toBe(0)
+        expect(validacao.temPendencias).toBe(true)
+        expect(validacao.statusBadge).toBe('aguardando_confirmacao_colaborador')
         expect(validacao.diasPendentes).toEqual(['2026-10-15', '2026-10-16', '2026-10-17'])
-        expect(validacao.motivoBloqueio).toBe(
-          'Aguardando confirmação do funcionário — 0 de 3 dias confirmados',
+        expect(validacao.avisoPendencia).toBe(
+          'Aguardando confirmação do colaborador — 0 de 3 dias confirmados',
         )
       })
 
-      it('bloqueia o fechamento com confirmação parcial (ex: 2 de 3 dias)', () => {
+      it('NÃO bloqueia o fechamento com confirmação parcial e gera badge rastreável', () => {
         const validacao = validarConfirmacoesFechamento({
           pontosTrabalhados: pontosDoPeriodo,
           confirmacoesPorData: {
@@ -492,15 +495,17 @@ describe('Regras do Módulo de Funcionários (Aritmética Exata da Planilha)', (
           },
         })
 
-        expect(validacao.podeFechar).toBe(false)
+        expect(validacao.podeFechar).toBe(true)
         expect(validacao.totalDiasConfirmados).toBe(2)
+        expect(validacao.temPendencias).toBe(true)
+        expect(validacao.statusBadge).toBe('aguardando_confirmacao_colaborador')
         expect(validacao.diasPendentes).toEqual(['2026-10-17'])
-        expect(validacao.motivoBloqueio).toBe(
-          'Aguardando confirmação do funcionário — 2 de 3 dias confirmados',
+        expect(validacao.avisoPendencia).toBe(
+          'Aguardando confirmação do colaborador — 2 de 3 dias confirmados',
         )
       })
 
-      it('bloqueia o fechamento se o dia foi marcado com divergência não sanada', () => {
+      it('NÃO bloqueia fechamento mesmo se dia foi marcado com divergência não sanada', () => {
         const validacao = validarConfirmacoesFechamento({
           pontosTrabalhados: pontosDoPeriodo,
           confirmacoesPorData: {
@@ -510,12 +515,14 @@ describe('Regras do Módulo de Funcionários (Aritmética Exata da Planilha)', (
           },
         })
 
-        expect(validacao.podeFechar).toBe(false)
+        expect(validacao.podeFechar).toBe(true)
+        expect(validacao.temPendencias).toBe(true)
         expect(validacao.totalDiasConfirmados).toBe(2)
         expect(validacao.diasPendentes).toEqual(['2026-10-17'])
+        expect(validacao.statusBadge).toBe('aguardando_confirmacao_colaborador')
       })
 
-      it('libera o fechamento quando TODAS as datas trabalhadas foram confirmadas', () => {
+      it('indica status todos_confirmados quando todas as datas trabalhadas foram confirmadas', () => {
         const validacao = validarConfirmacoesFechamento({
           pontosTrabalhados: pontosDoPeriodo,
           confirmacoesPorData: {
@@ -528,8 +535,28 @@ describe('Regras do Módulo de Funcionários (Aritmética Exata da Planilha)', (
         expect(validacao.podeFechar).toBe(true)
         expect(validacao.totalDiasTrabalhados).toBe(3)
         expect(validacao.totalDiasConfirmados).toBe(3)
+        expect(validacao.temPendencias).toBe(false)
+        expect(validacao.statusBadge).toBe('todos_confirmados')
         expect(validacao.diasPendentes).toEqual([])
-        expect(validacao.motivoBloqueio).toBeUndefined()
+        expect(validacao.avisoPendencia).toBeUndefined()
+      })
+
+      it('monta mensagem de notificação de pagamento realizado para o colaborador', () => {
+        const notif = montarMensagemNotificacaoPagamento({
+          nomeFuncionario: 'Lara Silva',
+          periodoInicio: '2026-10-01',
+          periodoFim: '2026-10-07',
+          valorPago: 450.0,
+          totalDiasTrabalhados: 5,
+          temDiasPendentes: true,
+        })
+
+        expect(notif.titulo).toBe('Pagamento realizado')
+        expect(notif.mensagem).toContain('Lara Silva')
+        expect(notif.mensagem).toContain('01/10 a 07/10')
+        expect(notif.mensagem).toContain('R$ 450,00')
+        expect(notif.mensagem).toContain('conferir se o valor está condizente')
+        expect(notif.textoNotificacao).toContain('Há dias trabalhados pendentes de confirmação')
       })
     })
 

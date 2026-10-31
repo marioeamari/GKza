@@ -54,11 +54,14 @@
  *    (3) SEM REABERTURA: folha quitada é IMUTÁVEL. Nenhuma reabertura ou edição retroativa.
  *        Divergências com pagamentos passados viram despesa/vale no período EM ABERTO com descritivo
  *        (ex: "Divergência do período dd/mm–dd/mm").
- *    (4) CONFIRMAÇÃO DO FUNCIONÁRIO NA TELA DE PONTO:
- *        Funcionário confere e confirma cada data trabalhada do período.
- *        Admin só pode fechar a folha quando TODAS as datas trabalhadas estiverem confirmadas.
- *        Se faltar confirmação, botão "Fechar Folha" fica desabilitado com contador explicativo
- *        (ex: "Aguardando confirmação do funcionário — 3 de 5 dias confirmados").
+ *    (4) FLUXO DE PAGAMENTO PRIMEIRO, CONFIRMAÇÃO DO COLABORADOR DEPOIS:
+ *        O fechamento e a baixa do pagamento NÃO ficam bloqueados pela confirmação dos dias pelo funcionário.
+ *        O administrador pode realizar o pagamento mesmo com dias pendentes.
+ *        Ao confirmar o pagamento, o funcionário recebe notificação de "pagamento realizado".
+ *        Após o pagamento, o funcionário confirma no espelho que o valor está condizente com os dias
+ *        trabalhados e com o valor recebido, ou aponta divergência para ajuste.
+ *        A folha paga ainda não confirmada pelo colaborador fica rastreável com badge:
+ *        "Aguardando confirmação do colaborador".
  */
 
 import { getLocalDateStr, dateOnly } from './format'
@@ -119,11 +122,23 @@ export interface ConfirmacaoDataStatus {
 }
 
 export interface ValidacaoFechamentoFolha {
-  podeFechar: boolean
+  podeFechar: boolean // Sempre true para o admin poder realizar o pagamento mesmo com dias pendentes
   totalDiasTrabalhados: number
   totalDiasConfirmados: number
   diasPendentes: string[]
-  motivoBloqueio?: string
+  temPendencias: boolean
+  statusBadge: 'todos_confirmados' | 'aguardando_confirmacao_colaborador' | 'sem_dias'
+  avisoPendencia?: string
+  motivoBloqueio?: string // Mantido para compatibilidade, vazio quando liberado
+}
+
+export type StatusConferenciaColaborador = 'pendente' | 'confirmado' | 'divergente'
+
+export interface ConferenciaPagamentoColaboradorParams {
+  folhaId: string
+  status: 'confirmado' | 'divergente'
+  motivoDivergencia?: string
+  dataHoraIso?: string
 }
 
 export interface EspelhoFolhaCalculado {
@@ -627,10 +642,11 @@ export function calcularProximoPeriodoAberto(
 }
 
 /**
- * Regra (4): Validação de Confirmação do Funcionário.
- * O administrador só pode fechar a folha / realizar o pagamento quando o funcionário tiver confirmado
- * TODAS as datas trabalhadas do período.
- * Retorna contagem e status explicativo.
+ * Regra (4) Atualizada:
+ * O fechamento e a baixa do pagamento NÃO ficam bloqueados pela confirmação dos dias pelo funcionário.
+ * Permite que o admin realize o pagamento mesmo com dias pendentes (podeFechar = true).
+ * Mantém rastreabilidade: identifica dias pendentes e gera status/aviso para exibição de badge
+ * visual ("Aguardando confirmação do colaborador") e envio de notificação.
  */
 export function validarConfirmacoesFechamento(params: {
   pontosTrabalhados: Array<{ data: string; entrada: string; saida?: string }>
@@ -653,6 +669,8 @@ export function validarConfirmacoesFechamento(params: {
       totalDiasTrabalhados: 0,
       totalDiasConfirmados: 0,
       diasPendentes: [],
+      temPendencias: false,
+      statusBadge: 'sem_dias',
     }
   }
 
@@ -669,21 +687,52 @@ export function validarConfirmacoesFechamento(params: {
   }
 
   const totalDiasConfirmados = diasConfirmados.length
-  const podeFechar = totalDiasConfirmados === totalDiasTrabalhados
+  const temPendencias = totalDiasConfirmados < totalDiasTrabalhados
 
-  let motivoBloqueio: string | undefined
-  if (!podeFechar) {
-    motivoBloqueio = `Aguardando confirmação do funcionário — ${totalDiasConfirmados} de ${totalDiasTrabalhados} ${
+  let avisoPendencia: string | undefined
+  if (temPendencias) {
+    avisoPendencia = `Aguardando confirmação do colaborador — ${totalDiasConfirmados} de ${totalDiasTrabalhados} ${
       totalDiasTrabalhados === 1 ? 'dia confirmado' : 'dias confirmados'
     }`
   }
 
   return {
-    podeFechar,
+    podeFechar: true, // Pagamento primeiro: o admin NÃO é bloqueado
     totalDiasTrabalhados,
     totalDiasConfirmados,
     diasPendentes,
-    motivoBloqueio,
+    temPendencias,
+    statusBadge: temPendencias ? 'aguardando_confirmacao_colaborador' : 'todos_confirmados',
+    avisoPendencia,
+  }
+}
+
+/**
+ * Mensagem padronizada da notificação enviada ao colaborador ao confirmar o pagamento da folha.
+ */
+export function montarMensagemNotificacaoPagamento(params: {
+  nomeFuncionario: string
+  periodoInicio: string
+  periodoFim: string
+  valorPago: number
+  totalDiasTrabalhados: number
+  temDiasPendentes: boolean
+}): { titulo: string; mensagem: string; textoNotificacao: string } {
+  const pIni = formatarDataDDMM(params.periodoInicio)
+  const pFim = formatarDataDDMM(params.periodoFim)
+  const valorFmt = `R$ ${params.valorPago.toFixed(2).replace('.', ',')}`
+
+  const titulo = 'Pagamento realizado'
+  const mensagem = `Olá, ${params.nomeFuncionario}! Seu pagamento referente ao período de ${pIni} a ${pFim} no valor de ${valorFmt} foi realizado. Acesse seu espelho de ponto para conferir se o valor está condizente com os dias trabalhados e com o valor recebido.`
+
+  const textoNotificacao = params.temDiasPendentes
+    ? `${mensagem} Há dias trabalhados pendentes de confirmação.`
+    : mensagem
+
+  return {
+    titulo,
+    mensagem,
+    textoNotificacao,
   }
 }
 
