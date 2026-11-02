@@ -330,12 +330,17 @@ export const produtosCompostosService = {
   /**
    * Sincroniza o Produto composto com `prec_produtos` (onde a Precificação lê)
    * A precificação SEMPRE lê o Produto Composto (após Composição), NUNCA o produtos_base isolado.
-   * Deduplica por:
-   * 1. origem_id = produtoId
-   * 2. base_origem = prod.base_origem
-   * 3. fornecedor_produto (quando base_origem veio de fornecedores_produtos)
-   * 4. sku exato
-   * 5. nome idêntico (quando não há outro match)
+   *
+   * Regra de Deduplicação e Adoção de Espelhos:
+   * 1. Primário: origem_id = produtoId (o espelho já pertence a este produto).
+   * 2. Secundários (compatibilidade com legados sem origem_id):
+   *    - base_origem = prod.base_origem
+   *    - fornecedor_produto (quando base_origem veio de fornecedores_produtos)
+   *    - sku exato
+   *    - nome idêntico
+   *    TRAVA ESTRITA: As regras 2 a 5 exigem explicitamente que o espelho seja LEGADO (origem_id = "" ou nulo).
+   *    Jamais adotar nem sobrescrever um espelho cujo origem_id já pertença a outro produto (origem_id != "" && origem_id != prod.id).
+   *    Nesse caso, cria-se um espelho novo com o payload completo.
    * Além disso, executa poda preventiva de sombras órfãs.
    */
   async syncComPrecificacao(produtoId: string) {
@@ -353,7 +358,7 @@ export const produtosCompostosService = {
 
     let precExistente: any = null
     try {
-      // 1. Busca por origem_id do produto composto
+      // 1. Busca primária: por origem_id do próprio produto composto
       const porOrigem = await pb.collection('prec_produtos').getList(1, 1, {
         filter: `origem_id = "${prod.id}"`,
       })
@@ -361,44 +366,46 @@ export const produtosCompostosService = {
         precExistente = porOrigem.items[0]
       }
 
-      // 2. Busca por base_origem do produto composto
+      // Regras secundárias: SOMENTE podem adotar espelhos LEGADOS (origem_id vazio).
+      // Trava contra "roubo de espelho": se outro produto já é dono do espelho, jamais sobrescrever.
+      // 2. Busca por base_origem em espelho legado (origem_id = "")
       if (!precExistente && prod.base_origem) {
         const porBase = await pb.collection('prec_produtos').getList(1, 1, {
-          filter: `base_origem = "${prod.base_origem}"`,
+          filter: `base_origem = "${prod.base_origem}" && (origem_id = "" || origem_id = null)`,
         })
         if (porBase.items.length > 0) {
           precExistente = porBase.items[0]
         }
       }
 
-      // 3. Se base_origem veio de fornecedores_produtos, busca por fornecedor_produto (legado)
+      // 3. Se base_origem veio de fornecedores_produtos, busca por fornecedor_produto em espelho legado
       if (
         !precExistente &&
         prod.expand?.base_origem?.origem_colecao === 'fornecedores_produtos' &&
         prod.expand.base_origem.origem_id
       ) {
         const porFp = await pb.collection('prec_produtos').getList(1, 1, {
-          filter: `fornecedor_produto = "${prod.expand.base_origem.origem_id}"`,
+          filter: `fornecedor_produto = "${prod.expand.base_origem.origem_id}" && (origem_id = "" || origem_id = null)`,
         })
         if (porFp.items.length > 0) {
           precExistente = porFp.items[0]
         }
       }
 
-      // 4. Busca espelho pelo SKU desejado
+      // 4. Busca espelho legado pelo SKU desejado
       if (!precExistente) {
         const porSku = await pb.collection('prec_produtos').getList(1, 1, {
-          filter: `sku = "${skuDesejado.replace(/"/g, '\\"')}"`,
+          filter: `sku = "${skuDesejado.replace(/"/g, '\\"')}" && (origem_id = "" || origem_id = null)`,
         })
         if (porSku.items.length > 0) {
           precExistente = porSku.items[0]
         }
       }
 
-      // 5. Busca por nome idêntico
+      // 5. Busca espelho legado por nome idêntico
       if (!precExistente && prod.nome) {
         const porNome = await pb.collection('prec_produtos').getList(1, 1, {
-          filter: `nome = "${prod.nome.replace(/"/g, '\\"')}"`,
+          filter: `nome = "${prod.nome.replace(/"/g, '\\"')}" && (origem_id = "" || origem_id = null)`,
         })
         if (porNome.items.length > 0) {
           precExistente = porNome.items[0]

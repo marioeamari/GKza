@@ -446,4 +446,433 @@ describe('Deduplicação de Produtos Compostos no Sync para Precificação (prec
     )
     expect(res?.perda_pct).toBe(12.5)
   })
+
+  describe('Trava contra roubo de espelho entre produtos compostos que compartilham a mesma base_origem', () => {
+    it('(a) sync de dois produtos compostos da mesma base_origem produz DOIS espelhos distintos, cada um com o origem_id do próprio produto', async () => {
+      // Dois produtos compostos distintos que apontam para a mesma base_origem
+      const prodA = {
+        id: 'prod_composto_A',
+        nome: 'Toalha A - Básica',
+        classificacao: 'revenda' as const,
+        base_origem: 'base_compartilhada_1',
+        sku: 'SKU-A',
+        custo_aquisicao: 10,
+        custo_composicao: 0.2,
+        custo_embalagem: 0,
+        custo_etiqueta: 0.05,
+        custo_total: 10.25,
+        composicao: [],
+        status: 'ativo' as const,
+      }
+
+      const prodB = {
+        id: 'prod_composto_B',
+        nome: 'Toalha B - Bordada',
+        classificacao: 'revenda' as const,
+        base_origem: 'base_compartilhada_1', // mesma base!
+        sku: 'SKU-B',
+        custo_aquisicao: 10,
+        custo_composicao: 0.5,
+        custo_embalagem: 0,
+        custo_etiqueta: 0.05,
+        custo_total: 10.55,
+        composicao: [],
+        status: 'ativo' as const,
+      }
+
+      // Banco em memória simulando prec_produtos
+      const bancoPrec: any[] = []
+
+      vi.spyOn(pb, 'collection').mockImplementation((col: string) => {
+        if (col === 'produtos') {
+          return {
+            getOne: vi.fn().mockImplementation((id: string) => {
+              if (id === 'prod_composto_A') return Promise.resolve(prodA)
+              if (id === 'prod_composto_B') return Promise.resolve(prodB)
+              return Promise.reject(new Error('not found'))
+            }),
+            getFullList: vi.fn().mockResolvedValue([{ id: prodA.id }, { id: prodB.id }]),
+          } as any
+        }
+        if (col === 'prec_produtos') {
+          return {
+            getFullList: vi.fn().mockResolvedValue(bancoPrec),
+            getList: vi
+              .fn()
+              .mockImplementation((_page: number, _perPage: number, options?: any) => {
+                const filter: string = options?.filter || ''
+
+                // 1. Busca por origem_id
+                const matchOrigem = filter.match(/origem_id = "([^"]+)"/)
+                if (matchOrigem && !filter.includes('origem_id = ""')) {
+                  const idProcurado = matchOrigem[1]
+                  const items = bancoPrec.filter((item) => item.origem_id === idProcurado)
+                  return Promise.resolve({ items })
+                }
+
+                // 2. Busca por base_origem em espelho legado (origem_id = "")
+                const matchBase = filter.match(/base_origem = "([^"]+)"/)
+                if (matchBase && filter.includes('(origem_id = "" || origem_id = null)')) {
+                  const baseId = matchBase[1]
+                  const items = bancoPrec.filter(
+                    (item) =>
+                      item.base_origem === baseId && (!item.origem_id || item.origem_id === ''),
+                  )
+                  return Promise.resolve({ items })
+                }
+
+                // 3. Busca por sku em espelho legado
+                const matchSku = filter.match(/sku = "([^"]+)"/)
+                if (matchSku && filter.includes('(origem_id = "" || origem_id = null)')) {
+                  const sku = matchSku[1]
+                  const items = bancoPrec.filter(
+                    (item) => item.sku === sku && (!item.origem_id || item.origem_id === ''),
+                  )
+                  return Promise.resolve({ items })
+                }
+
+                return Promise.resolve({ items: [] })
+              }),
+            create: vi.fn().mockImplementation((payload: any) => {
+              const rec = { id: `prec_${bancoPrec.length + 1}`, ...payload }
+              bancoPrec.push(rec)
+              return Promise.resolve(rec)
+            }),
+            update: vi.fn().mockImplementation((id: string, payload: any) => {
+              const idx = bancoPrec.findIndex((item) => item.id === id)
+              if (idx >= 0) {
+                bancoPrec[idx] = { ...bancoPrec[idx], ...payload }
+                return Promise.resolve(bancoPrec[idx])
+              }
+              return Promise.resolve({ id, ...payload })
+            }),
+            delete: vi.fn(),
+          } as any
+        }
+        return {} as any
+      })
+
+      // Sync do produto A
+      const espelhoA = await produtosCompostosService.syncComPrecificacao('prod_composto_A')
+      // Sync do produto B
+      const espelhoB = await produtosCompostosService.syncComPrecificacao('prod_composto_B')
+
+      // Devem ser dois espelhos com IDs distintos
+      expect(espelhoA.id).not.toBe(espelhoB.id)
+      expect(bancoPrec).toHaveLength(2)
+
+      // Cada um possui o origem_id do próprio produto
+      expect(espelhoA.origem_id).toBe('prod_composto_A')
+      expect(espelhoB.origem_id).toBe('prod_composto_B')
+      expect(espelhoA.sku).toBe('SKU-A')
+      expect(espelhoB.sku).toBe('SKU-B')
+      expect(espelhoA.nome).toBe('Toalha A - Básica')
+      expect(espelhoB.nome).toBe('Toalha B - Bordada')
+    })
+
+    it('(b) espelho com origem_id de outro produto nunca é adotado nem sobrescrito', async () => {
+      // Produto B tentando sincronizar
+      const prodB = {
+        id: 'prod_B',
+        nome: 'Produto B',
+        classificacao: 'revenda' as const,
+        base_origem: 'base_compartilhada',
+        sku: 'SKU-B',
+        status: 'ativo' as const,
+      }
+
+      // Espelho que pertence ao Produto A (com a mesma base_origem)
+      const espelhoDoProdA = {
+        id: 'prec_produto_A',
+        origem_id: 'prod_A', // Pertence a prod_A!
+        base_origem: 'base_compartilhada',
+        nome: 'Produto A',
+        sku: 'SKU-A',
+      }
+
+      const createMock = vi
+        .fn()
+        .mockImplementation((payload: any) =>
+          Promise.resolve({ id: 'prec_produto_B_novo', ...payload }),
+        )
+      const updateMock = vi.fn()
+
+      vi.spyOn(pb, 'collection').mockImplementation((col: string) => {
+        if (col === 'produtos') {
+          return {
+            getOne: vi.fn().mockResolvedValue(prodB),
+            getFullList: vi.fn().mockResolvedValue([{ id: 'prod_A' }, { id: 'prod_B' }]),
+          } as any
+        }
+        if (col === 'prec_produtos') {
+          return {
+            getFullList: vi.fn().mockResolvedValue([espelhoDoProdA]),
+            getList: vi.fn().mockImplementation((_p: number, _pp: number, opts: any) => {
+              const filter: string = opts?.filter || ''
+              // Busca por origem_id = "prod_B": não existe
+              if (filter.includes('origem_id = "prod_B"')) {
+                return Promise.resolve({ items: [] })
+              }
+              // Busca por base_origem em espelhos legados: não há legados (o que tem pertence a prod_A)
+              if (filter.includes('(origem_id = "" || origem_id = null)')) {
+                return Promise.resolve({ items: [] })
+              }
+              return Promise.resolve({ items: [] })
+            }),
+            create: createMock,
+            update: updateMock,
+            delete: vi.fn(),
+          } as any
+        }
+        return {} as any
+      })
+
+      const res = await produtosCompostosService.syncComPrecificacao('prod_B')
+
+      // O espelho do prod_A NÃO pode ter sido sobrescrito/atualizado
+      expect(updateMock).not.toHaveBeenCalledWith('prec_produto_A', expect.anything())
+      // Um novo espelho deve ter sido criado
+      expect(createMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          origem_id: 'prod_B',
+          nome: 'Produto B',
+          sku: 'SKU-B',
+          base_origem: 'base_compartilhada',
+        }),
+      )
+      expect(res.id).toBe('prec_produto_B_novo')
+    })
+
+    it('(c) espelho legado sem origem_id continua sendo adotado e atualizado (compatibilidade)', async () => {
+      const prodLegado = {
+        id: 'prod_novo_legado',
+        nome: 'Toalha Banho Legada',
+        classificacao: 'revenda' as const,
+        base_origem: 'base_legada_123',
+        sku: 'TB-LEGADA',
+        status: 'ativo' as const,
+      }
+
+      // Espelho existente no banco que veio de migração antiga sem origem_id
+      const espelhoLegadoSemOrigem = {
+        id: 'prec_legado_sem_origem',
+        origem_id: '', // VAZIO = legado
+        base_origem: 'base_legada_123',
+        nome: 'Toalha Banho Legada',
+        sku: 'TB-LEGADA',
+      }
+
+      const updateMock = vi
+        .fn()
+        .mockImplementation((id: string, payload: any) => Promise.resolve({ id, ...payload }))
+      const createMock = vi.fn()
+
+      vi.spyOn(pb, 'collection').mockImplementation((col: string) => {
+        if (col === 'produtos') {
+          return {
+            getOne: vi.fn().mockResolvedValue(prodLegado),
+            getFullList: vi.fn().mockResolvedValue([{ id: 'prod_novo_legado' }]),
+          } as any
+        }
+        if (col === 'prec_produtos') {
+          return {
+            getFullList: vi.fn().mockResolvedValue([espelhoLegadoSemOrigem]),
+            getList: vi.fn().mockImplementation((_p: number, _pp: number, opts: any) => {
+              const filter: string = opts?.filter || ''
+              if (filter.includes('origem_id = "prod_novo_legado"')) {
+                return Promise.resolve({ items: [] })
+              }
+              // Encontra o espelho legado sem dono pela base_origem
+              if (
+                filter.includes('base_origem = "base_legada_123"') &&
+                filter.includes('(origem_id = "" || origem_id = null)')
+              ) {
+                return Promise.resolve({ items: [espelhoLegadoSemOrigem] })
+              }
+              return Promise.resolve({ items: [] })
+            }),
+            create: createMock,
+            update: updateMock,
+            delete: vi.fn(),
+          } as any
+        }
+        return {} as any
+      })
+
+      const res = await produtosCompostosService.syncComPrecificacao('prod_novo_legado')
+
+      // Deve adotar o espelho legado e atualizá-lo com origem_id = 'prod_novo_legado'
+      expect(createMock).not.toHaveBeenCalled()
+      expect(updateMock).toHaveBeenCalledWith(
+        'prec_legado_sem_origem',
+        expect.objectContaining({
+          origem_id: 'prod_novo_legado',
+          sku: 'TB-LEGADA',
+          nome: 'Toalha Banho Legada',
+        }),
+      )
+      expect(res.id).toBe('prec_legado_sem_origem')
+    })
+
+    it('(d) caso de referência real: BPesada-Personalizada e BPesada-Person-Nome (mesma base g1pw2ows7124njb) produzem e mantêm dois espelhos independentes', async () => {
+      // Dados reais do banco
+      const bPesadaPersonalizada = {
+        id: 'jaeqbj9cmmmpbiu',
+        nome: 'BPesada-Personalizada',
+        classificacao: 'revenda' as const,
+        base_origem: 'g1pw2ows7124njb',
+        sku: 'BLeve-person',
+        custo_aquisicao: 12,
+        custo_composicao: 0.19,
+        custo_embalagem: 0,
+        custo_etiqueta: 0,
+        custo_total: 12.19,
+        dimensao_comprimento_cm: 1,
+        dimensao_largura_cm: 30,
+        dimensao_altura_cm: 30,
+        peso_g: 280,
+        perda_pct: 10,
+        status: 'ativo' as const,
+        empresas: ['c8v8eg0errmelt6'],
+        expand: {
+          base_origem: {
+            id: 'g1pw2ows7124njb',
+            fornecedor: 'hm0ebfctv6gnpal',
+          },
+        },
+      }
+
+      const bPesadaPersonNome = {
+        id: 'tfwi29b1526asxr',
+        nome: 'BPesada-Person-Nome',
+        classificacao: 'revenda' as const,
+        base_origem: 'g1pw2ows7124njb',
+        sku: 'BLeve-person-nome',
+        custo_aquisicao: 12,
+        custo_composicao: 0.18,
+        custo_embalagem: 0,
+        custo_etiqueta: 0,
+        custo_total: 12.18,
+        dimensao_comprimento_cm: 30,
+        dimensao_largura_cm: 35,
+        dimensao_altura_cm: 1,
+        peso_g: 280,
+        perda_pct: 3,
+        status: 'ativo' as const,
+        empresas: ['c8v8eg0errmelt6'],
+        expand: {
+          base_origem: {
+            id: 'g1pw2ows7124njb',
+            fornecedor: 'hm0ebfctv6gnpal',
+          },
+        },
+      }
+
+      // Estado inicial do banco: apenas o espelho yi1fmrmowpygv4g que estava com Person-Nome
+      const registrosPrecProdutos: any[] = [
+        {
+          id: 'yi1fmrmowpygv4g',
+          origem_id: 'tfwi29b1526asxr',
+          nome: 'BPesada-Person-Nome',
+          sku: 'BLeve-person-nome',
+          base_origem: 'g1pw2ows7124njb',
+          perda_pct: 3,
+        },
+      ]
+
+      vi.spyOn(pb, 'collection').mockImplementation((col: string) => {
+        if (col === 'produtos') {
+          return {
+            getOne: vi.fn().mockImplementation((id: string) => {
+              if (id === 'jaeqbj9cmmmpbiu') return Promise.resolve(bPesadaPersonalizada)
+              if (id === 'tfwi29b1526asxr') return Promise.resolve(bPesadaPersonNome)
+              return Promise.reject(new Error('not found'))
+            }),
+            getFullList: vi
+              .fn()
+              .mockResolvedValue([{ id: 'jaeqbj9cmmmpbiu' }, { id: 'tfwi29b1526asxr' }]),
+          } as any
+        }
+        if (col === 'prec_produtos') {
+          return {
+            getFullList: vi.fn().mockResolvedValue(registrosPrecProdutos),
+            getList: vi.fn().mockImplementation((_p: number, _pp: number, opts: any) => {
+              const filter: string = opts?.filter || ''
+              // 1. busca por origem_id
+              const matchOrigem = filter.match(/origem_id = "([^"]+)"/)
+              if (matchOrigem && !filter.includes('origem_id = ""')) {
+                const found = registrosPrecProdutos.filter((r) => r.origem_id === matchOrigem[1])
+                return Promise.resolve({ items: found })
+              }
+              // 2. busca por base_origem em espelho legado (origem_id = "")
+              const matchBase = filter.match(/base_origem = "([^"]+)"/)
+              if (matchBase && filter.includes('(origem_id = "" || origem_id = null)')) {
+                const found = registrosPrecProdutos.filter(
+                  (r) => r.base_origem === matchBase[1] && (!r.origem_id || r.origem_id === ''),
+                )
+                return Promise.resolve({ items: found })
+              }
+              // 3. busca por sku em espelho legado
+              const matchSku = filter.match(/sku = "([^"]+)"/)
+              if (matchSku && filter.includes('(origem_id = "" || origem_id = null)')) {
+                const found = registrosPrecProdutos.filter(
+                  (r) => r.sku === matchSku[1] && (!r.origem_id || r.origem_id === ''),
+                )
+                return Promise.resolve({ items: found })
+              }
+              return Promise.resolve({ items: [] })
+            }),
+            create: vi.fn().mockImplementation((payload: any) => {
+              const criado = { id: 'prec_criado_personalizada', ...payload }
+              registrosPrecProdutos.push(criado)
+              return Promise.resolve(criado)
+            }),
+            update: vi.fn().mockImplementation((id: string, payload: any) => {
+              const idx = registrosPrecProdutos.findIndex((r) => r.id === id)
+              if (idx >= 0) {
+                registrosPrecProdutos[idx] = { ...registrosPrecProdutos[idx], ...payload }
+                return Promise.resolve(registrosPrecProdutos[idx])
+              }
+              return Promise.resolve({ id, ...payload })
+            }),
+            delete: vi.fn(),
+          } as any
+        }
+        return {} as any
+      })
+
+      // Sync da BPesada-Personalizada (que antes era 'roubada' ou roubava o espelho de Person-Nome)
+      const resPersonalizada = await produtosCompostosService.syncComPrecificacao('jaeqbj9cmmmpbiu')
+
+      // Sync subsequente da BPesada-Person-Nome
+      const resPersonNome = await produtosCompostosService.syncComPrecificacao('tfwi29b1526asxr')
+
+      // Deve ter criado um espelho novo para a Personalizada, sem tocar nem sobrescrever o da Person-Nome
+      expect(registrosPrecProdutos).toHaveLength(2)
+      expect(resPersonalizada.id).not.toBe(resPersonNome.id)
+
+      // Personalizada com seus dados
+      expect(resPersonalizada.origem_id).toBe('jaeqbj9cmmmpbiu')
+      expect(resPersonalizada.nome).toBe('BPesada-Personalizada')
+      expect(resPersonalizada.sku).toBe('BLeve-person')
+      expect(resPersonalizada.perda_pct).toBe(10)
+
+      // Person-Nome com seus dados
+      expect(resPersonNome.origem_id).toBe('tfwi29b1526asxr')
+      expect(resPersonNome.nome).toBe('BPesada-Person-Nome')
+      expect(resPersonNome.sku).toBe('BLeve-person-nome')
+      expect(resPersonNome.perda_pct).toBe(3)
+
+      // Nenhum ping-pong: sincronizar novamente a Personalizada mantém cada um no seu espelho
+      const resPersonalizadaDeNovo =
+        await produtosCompostosService.syncComPrecificacao('jaeqbj9cmmmpbiu')
+      expect(resPersonalizadaDeNovo.id).toBe(resPersonalizada.id)
+      expect(resPersonalizadaDeNovo.origem_id).toBe('jaeqbj9cmmmpbiu')
+
+      const resPersonNomeDeNovo =
+        await produtosCompostosService.syncComPrecificacao('tfwi29b1526asxr')
+      expect(resPersonNomeDeNovo.id).toBe(resPersonNome.id)
+      expect(resPersonNomeDeNovo.origem_id).toBe('tfwi29b1526asxr')
+    })
+  })
 })
