@@ -31,6 +31,7 @@ import type {
   Fornecedor,
   Empresa,
   InsumoCategoriaRecord,
+  InsumoTipoRecord,
 } from '@/types/domain'
 import { produtosCompostosService, produtosBaseService } from '@/services/produtos'
 import { fornecedoresService } from '@/services/fornecedores'
@@ -40,6 +41,7 @@ import pb from '@/lib/pocketbase/client'
 import { ProdutoCompostoDialog } from '@/components/produtos/ProdutoCompostoDialog'
 import { ProdutoBaseDialog } from '@/components/produtos/ProdutoBaseDialog'
 import { CategoriasInsumoDialog } from '@/components/insumos/CategoriasInsumoDialog'
+import { TiposInsumoDialog } from '@/components/insumos/TiposInsumoDialog'
 
 export default function ComposicaoProdutosPage() {
   const { toast } = useToast()
@@ -58,6 +60,7 @@ export default function ComposicaoProdutosPage() {
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([])
   const [empresas, setEmpresas] = useState<Empresa[]>([])
   const [categorias, setCategorias] = useState<InsumoCategoriaRecord[]>([])
+  const [tiposInsumo, setTiposInsumo] = useState<InsumoTipoRecord[]>([])
 
   // Filtros
   const [busca, setBusca] = useState('')
@@ -74,6 +77,7 @@ export default function ComposicaoProdutosPage() {
   const [baseEditando, setBaseEditando] = useState<ProdutoBaseRecord | null>(null)
 
   const [modalCategoriasAberto, setModalCategoriasAberto] = useState(false)
+  const [modalTiposAberto, setModalTiposAberto] = useState(false)
 
   // Sincroniza query param ao mudar a aba
   const handleTrocarAba = (novaAba: 'compostos' | 'base') => {
@@ -90,12 +94,13 @@ export default function ComposicaoProdutosPage() {
   const carregarDados = async () => {
     try {
       setLoading(true)
-      const [listComp, listBase, listForn, listEmp, listCats] = await Promise.all([
+      const [listComp, listBase, listForn, listEmp, listCats, listTipos] = await Promise.all([
         produtosCompostosService.list(),
         produtosBaseService.list(),
         fornecedoresService.listFornecedores(),
         pb.collection('empresas').getFullList<Empresa>({ sort: 'nome_fantasia' }),
         insumosService.listCategorias(),
+        insumosService.listTipos(),
       ])
 
       setProdutosCompostos(listComp)
@@ -103,6 +108,7 @@ export default function ComposicaoProdutosPage() {
       setFornecedores(listForn)
       setEmpresas(listEmp)
       setCategorias(listCats)
+      setTiposInsumo(listTipos)
     } catch (err: any) {
       console.error(err)
       toast({
@@ -136,7 +142,11 @@ export default function ComposicaoProdutosPage() {
 
   // Filtros de Produtos Base
   const basesFiltradas = produtosBase.filter((b) => {
-    if (filtroTipoBase !== 'todos' && b.tipo !== filtroTipoBase) return false
+    if (filtroTipoBase !== 'todos') {
+      const matchPorRef = b.tipo_ref === filtroTipoBase
+      const matchPorCodigo = b.tipo === filtroTipoBase
+      if (!matchPorRef && !matchPorCodigo) return false
+    }
     if (filtroCategoriaBase !== 'todas' && b.categoria !== filtroCategoriaBase) return false
     if (busca.trim()) {
       const q = busca.toLowerCase()
@@ -227,6 +237,15 @@ export default function ComposicaoProdutosPage() {
             </Button>
           ) : (
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setModalTiposAberto(true)}
+                className="text-xs h-9 border-neutral-300"
+              >
+                <Layers className="mr-1.5 h-3.5 w-3.5 text-[#DF5830]" />
+                Tipos ({tiposInsumo.length})
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -323,20 +342,16 @@ export default function ComposicaoProdutosPage() {
             {abaAtiva === 'base' && (
               <>
                 <Select value={filtroTipoBase} onValueChange={setFiltroTipoBase}>
-                  <SelectTrigger className="w-36 h-9 text-xs bg-white">
+                  <SelectTrigger className="w-40 h-9 text-xs bg-white">
                     <SelectValue placeholder="Tipo de Base" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="todos">Todos os Tipos</SelectItem>
-                    <SelectItem value="insumo">Insumo</SelectItem>
-                    <SelectItem value="embalagem">Embalagem</SelectItem>
-                    <SelectItem value="etiqueta">Etiqueta</SelectItem>
-                    <SelectItem value="tecido">Tecido / Malha</SelectItem>
-                    <SelectItem value="servico">Serviço</SelectItem>
-                    <SelectItem value="costura">Costura</SelectItem>
-                    <SelectItem value="pintura">Pintura</SelectItem>
-                    <SelectItem value="revenda">Revenda</SelectItem>
-                    <SelectItem value="outro">Outro</SelectItem>
+                    {tiposInsumo.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.nome}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
 
@@ -584,8 +599,17 @@ export default function ComposicaoProdutosPage() {
                           <Badge
                             variant="secondary"
                             className="capitalize text-[10px] font-semibold py-0 px-2"
+                            style={
+                              b.expand?.tipo_ref?.cor
+                                ? {
+                                    backgroundColor: `${b.expand.tipo_ref.cor}18`,
+                                    color: b.expand.tipo_ref.cor,
+                                    borderColor: `${b.expand.tipo_ref.cor}44`,
+                                  }
+                                : undefined
+                            }
                           >
-                            {b.tipo}
+                            {b.expand?.tipo_ref?.nome || b.tipo}
                           </Badge>
                         </td>
                         <td className="py-3 px-3">
@@ -670,8 +694,10 @@ export default function ComposicaoProdutosPage() {
           record={baseEditando}
           fornecedores={fornecedores}
           categorias={categorias}
+          tipos={tiposInsumo}
           onSuccess={carregarDados}
           onOpenCategorias={() => setModalCategoriasAberto(true)}
+          onOpenTipos={() => setModalTiposAberto(true)}
         />
       )}
 
@@ -680,6 +706,14 @@ export default function ComposicaoProdutosPage() {
           open={modalCategoriasAberto}
           onOpenChange={setModalCategoriasAberto}
           onCategoriaUpdated={carregarDados}
+        />
+      )}
+
+      {modalTiposAberto && (
+        <TiposInsumoDialog
+          open={modalTiposAberto}
+          onOpenChange={setModalTiposAberto}
+          onTipoUpdated={carregarDados}
         />
       )}
     </div>

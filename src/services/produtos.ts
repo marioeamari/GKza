@@ -108,13 +108,18 @@ export const produtosBaseService = {
   async list(filtro?: {
     fornecedorId?: string
     tipo?: ProdutoBaseTipo
+    tipoRefId?: string
     categoriaId?: string
     apenasAtivos?: boolean
     busca?: string
   }): Promise<ProdutoBaseRecord[]> {
     const parts: string[] = []
     if (filtro?.fornecedorId) parts.push(`fornecedor = "${filtro.fornecedorId}"`)
-    if (filtro?.tipo) parts.push(`tipo = "${filtro.tipo}"`)
+    if (filtro?.tipoRefId) {
+      parts.push(`tipo_ref = "${filtro.tipoRefId}"`)
+    } else if (filtro?.tipo) {
+      parts.push(`tipo = "${filtro.tipo}"`)
+    }
     if (filtro?.categoriaId) parts.push(`categoria = "${filtro.categoriaId}"`)
     if (filtro?.apenasAtivos) parts.push('ativo = true')
     if (filtro?.busca && filtro.busca.trim()) {
@@ -127,7 +132,7 @@ export const produtosBaseService = {
         pb.collection('produtos_base').getFullList<ProdutoBaseRecord>({
           filter: parts.length > 0 ? parts.join(' && ') : undefined,
           sort: 'nome',
-          expand: 'fornecedor,categoria',
+          expand: 'fornecedor,categoria,tipo_ref',
         }),
       { label: 'produtosBaseService.list' },
     )
@@ -135,7 +140,7 @@ export const produtosBaseService = {
 
   async getById(id: string): Promise<ProdutoBaseRecord> {
     return pb.collection('produtos_base').getOne<ProdutoBaseRecord>(id, {
-      expand: 'fornecedor,categoria',
+      expand: 'fornecedor,categoria,tipo_ref',
     })
   },
 

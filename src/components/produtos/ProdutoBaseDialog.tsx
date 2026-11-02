@@ -34,9 +34,11 @@ export interface ProdutoBaseDialogProps {
   record?: ProdutoBaseRecord | null
   fornecedores: Fornecedor[]
   categorias?: InsumoCategoriaRecord[]
+  tipos?: import('@/types/domain').InsumoTipoRecord[]
   fornecedorPreSelecionadoId?: string
   onSuccess: () => void
   onOpenCategorias?: () => void
+  onOpenTipos?: () => void
 }
 
 export function ProdutoBaseDialog({
@@ -45,14 +47,17 @@ export function ProdutoBaseDialog({
   record,
   fornecedores,
   categorias = [],
+  tipos = [],
   fornecedorPreSelecionadoId,
   onSuccess,
   onOpenCategorias,
+  onOpenTipos,
 }: ProdutoBaseDialogProps) {
   const { toast } = useToast()
   const [salvando, setSalvando] = useState(false)
 
   const [nome, setNome] = useState('')
+  const [tipoRefId, setTipoRefId] = useState<string>('')
   const [tipo, setTipo] = useState<ProdutoBaseTipo>('insumo')
   const [categoriaId, setCategoriaId] = useState<string>('')
   const [fornecedorId, setFornecedorId] = useState('')
@@ -72,6 +77,12 @@ export function ProdutoBaseDialog({
     if (open) {
       if (record) {
         setNome(record.nome || '')
+        // Se já tiver tipo_ref, usa; senão tenta encontrar pelo código do tipo legado
+        const idEncontrado =
+          record.tipo_ref ||
+          tipos.find((t) => t.codigo === record.tipo || t.id === record.tipo_ref)?.id ||
+          ''
+        setTipoRefId(idEncontrado)
         setTipo(record.tipo || 'insumo')
         setCategoriaId(record.categoria || '')
         setFornecedorId(record.fornecedor || fornecedorPreSelecionadoId || '')
@@ -88,7 +99,10 @@ export function ProdutoBaseDialog({
         setObservacoes(record.observacoes || '')
       } else {
         setNome('')
-        setTipo('insumo')
+        // Padrão: primeiro tipo da lista ou Insumo Geral
+        const tipoPadrao = tipos.find((t) => t.codigo === 'insumo') || tipos[0]
+        setTipoRefId(tipoPadrao?.id || '')
+        setTipo((tipoPadrao?.codigo as ProdutoBaseTipo) || 'insumo')
         setCategoriaId('')
         setFornecedorId(fornecedorPreSelecionadoId || fornecedores[0]?.id || '')
         setSku('')
@@ -125,11 +139,17 @@ export function ProdutoBaseDialog({
       return
     }
 
+    // Determina o código legado para compatibilidade com filtros e precificação
+    const tipoObj = tipos.find((t) => t.id === tipoRefId)
+    const codigoCompativel: ProdutoBaseTipo =
+      (tipoObj?.codigo as ProdutoBaseTipo) || tipo || 'insumo'
+
     try {
       setSalvando(true)
       const payload: Partial<ProdutoBaseRecord> = {
         nome: nome.trim(),
-        tipo,
+        tipo: codigoCompativel,
+        tipo_ref: tipoRefId || undefined,
         categoria: categoriaId || undefined,
         fornecedor: fornecedorId,
         sku: sku.trim(),
@@ -218,21 +238,47 @@ export function ProdutoBaseDialog({
           {/* Tipo e Categoria */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label htmlFor="baseTipo">Tipo de Custo / Insumo *</Label>
-              <Select value={tipo} onValueChange={(v) => setTipo(v as ProdutoBaseTipo)}>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="baseTipo" className="text-xs flex items-center gap-1">
+                  Tipo de Custo / Insumo *
+                </Label>
+                {onOpenTipos && (
+                  <button
+                    type="button"
+                    onClick={onOpenTipos}
+                    className="text-[11px] text-[#DF5830] hover:underline font-semibold flex items-center gap-0.5"
+                  >
+                    <Plus className="h-3 w-3" /> Gerenciar
+                  </button>
+                )}
+              </div>
+              <Select
+                value={tipoRefId || '__none__'}
+                onValueChange={(v) => {
+                  if (v === '__none__') {
+                    setTipoRefId('')
+                  } else {
+                    setTipoRefId(v)
+                    const selecionado = tipos.find((t) => t.id === v)
+                    if (selecionado?.codigo) {
+                      setTipo(selecionado.codigo as ProdutoBaseTipo)
+                    }
+                  }
+                }}
+              >
                 <SelectTrigger id="baseTipo" className="text-xs">
-                  <SelectValue />
+                  <SelectValue placeholder="Selecione o tipo..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="insumo">Insumo Geral</SelectItem>
-                  <SelectItem value="embalagem">Embalagem</SelectItem>
-                  <SelectItem value="etiqueta">Etiqueta</SelectItem>
-                  <SelectItem value="tecido">Tecido / Malha</SelectItem>
-                  <SelectItem value="servico">Serviço Terceirizado</SelectItem>
-                  <SelectItem value="costura">Costura</SelectItem>
-                  <SelectItem value="pintura">Pintura</SelectItem>
-                  <SelectItem value="revenda">Produto de Revenda</SelectItem>
-                  <SelectItem value="outro">Outro</SelectItem>
+                  {tipos.length === 0 ? (
+                    <SelectItem value="insumo">Insumo Geral</SelectItem>
+                  ) : (
+                    tipos.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.nome}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </div>

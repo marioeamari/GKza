@@ -2,6 +2,7 @@ import pb from '@/lib/pocketbase/client'
 import type {
   InsumoRecord,
   InsumoCategoriaRecord,
+  InsumoTipoRecord,
   InsumoTipo,
   InsumoDimensaoTipo,
 } from '@/types/domain'
@@ -130,6 +131,80 @@ export function congelarSnapshotReceita(
 }
 
 export const insumosService = {
+  // -------------------------------------------------------------
+  // Insumos Tipos de Custo / Insumo
+  // -------------------------------------------------------------
+  async listTipos(): Promise<InsumoTipoRecord[]> {
+    const { withRetry } = await import('@/lib/pocketbase/retry')
+    return withRetry(
+      () =>
+        pb.collection('insumos_tipos').getFullList<InsumoTipoRecord>({
+          sort: 'ordem,nome',
+        }),
+      { label: 'insumosService.listTipos' },
+    )
+  },
+
+  async createTipo(data: {
+    nome: string
+    codigo?: string
+    cor?: string
+    ordem?: number
+    ativo?: boolean
+  }): Promise<InsumoTipoRecord> {
+    const nomeLimpo = data.nome.trim()
+    const codigoLimpo =
+      data.codigo?.trim() ||
+      nomeLimpo
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+
+    return pb.collection('insumos_tipos').create<InsumoTipoRecord>({
+      ...data,
+      nome: nomeLimpo,
+      codigo: codigoLimpo,
+      ativo: data.ativo ?? true,
+    })
+  },
+
+  async updateTipo(
+    id: string,
+    data: Partial<{
+      nome: string
+      codigo?: string
+      cor?: string
+      ordem?: number
+      ativo?: boolean
+    }>,
+  ): Promise<InsumoTipoRecord> {
+    const payload: Record<string, any> = { ...data }
+    if (data.nome !== undefined) payload.nome = data.nome.trim()
+    if (data.codigo !== undefined) payload.codigo = data.codigo.trim()
+    return pb.collection('insumos_tipos').update<InsumoTipoRecord>(id, payload)
+  },
+
+  async countProdutosBaseUsandoTipo(tipoId: string, tipoCodigo?: string): Promise<number> {
+    try {
+      const filters: string[] = [`tipo_ref = "${tipoId}"`]
+      if (tipoCodigo) {
+        filters.push(`tipo = "${tipoCodigo}"`)
+      }
+      const res = await pb.collection('produtos_base').getList(1, 1, {
+        filter: filters.join(' || '),
+      })
+      return res.totalItems
+    } catch {
+      return 0
+    }
+  },
+
+  async deleteTipo(id: string): Promise<boolean> {
+    return pb.collection('insumos_tipos').delete(id)
+  },
+
   // -------------------------------------------------------------
   // Insumos Categorias
   // -------------------------------------------------------------

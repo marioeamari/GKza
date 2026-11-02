@@ -68,6 +68,7 @@ export type ProdutoBaseTipo =
 export interface ProdutoBaseRecord extends RecordModel {
   nome: string
   tipo: ProdutoBaseTipo
+  tipo_ref?: string
   categoria?: string
   fornecedor: string
   sku?: string
@@ -88,6 +89,7 @@ export interface ProdutoBaseRecord extends RecordModel {
   expand?: {
     fornecedor?: Fornecedor
     categoria?: InsumoCategoriaRecord
+    tipo_ref?: InsumoTipoRecord
   }
 }
 
@@ -741,6 +743,14 @@ export interface ResumoCaixaOfertas {
 
 export type InsumoTipo = 'insumo' | 'servico'
 export type InsumoDimensaoTipo = 'nenhuma' | '2d' | '3d'
+
+export interface InsumoTipoRecord extends RecordModel {
+  nome: string
+  codigo?: string
+  cor?: string
+  ordem?: number
+  ativo?: boolean
+}
 
 export interface InsumoCategoriaRecord extends RecordModel {
   nome: string

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-02T12:36:50.395Z",
+  "generatedAt": "2026-11-02T13:35:12.714Z",
   "collections": [
     {
       "name": "users",
@@ -6853,6 +6853,13 @@
           "required": false,
           "system": false,
           "collectionRef": "insumos_categorias"
+        },
+        {
+          "name": "tipo_ref",
+          "type": "relation",
+          "required": false,
+          "system": false,
+          "collectionRef": "insumos_tipos"
         }
       ],
       "indexes": [
@@ -7023,6 +7030,68 @@
         "CREATE INDEX idx_prod_comp_borigem ON produtos (base_origem)",
         "CREATE INDEX idx_prod_comp_sku ON produtos (sku)",
         "CREATE INDEX idx_prod_comp_status ON produtos (status)"
+      ]
+    },
+    {
+      "name": "insumos_tipos",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != ''",
+        "update": "@request.auth.id != ''",
+        "delete": "@request.auth.id != ''"
+      },
+      "fields": [
+        {
+          "name": "nome",
+          "type": "text",
+          "required": true,
+          "system": false
+        },
+        {
+          "name": "codigo",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "cor",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ordem",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "ativo",
+          "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate"]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": ["onCreate", "onUpdate"]
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_insumos_tipos_nome ON insumos_tipos (nome)",
+        "CREATE INDEX idx_insumos_tipos_codigo ON insumos_tipos (codigo)",
+        "CREATE INDEX idx_insumos_tipos_ordem ON insumos_tipos (ordem)"
       ]
     }
   ]
