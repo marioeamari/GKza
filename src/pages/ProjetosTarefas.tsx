@@ -21,8 +21,11 @@ import {
   ArrowDown,
   GripVertical,
   SlidersHorizontal,
+  Check,
+  X,
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { PageHeader } from '@/components/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -53,6 +56,10 @@ import {
   reorderTarefas,
   insertTarefaAt,
   type CriterioOrdenacaoTarefas,
+  addChecklistItemToList,
+  updateChecklistItemTexto,
+  removeChecklistItemFromList,
+  toggleChecklistItemStatus,
 } from '@/lib/projetosTarefasRules'
 import type { Projeto, Tarefa, MetaMeta, TarefaEtapa } from '@/types/domain'
 
@@ -160,12 +167,57 @@ export default function ProjetosTarefas() {
   // Estado para controlar quais tarefas têm checklist expandida internamente
   const [expandedChecklistMap, setExpandedChecklistMap] = useState<Record<string, boolean>>({})
 
+  // Estado para controlar qual tarefa está com o campo de "Adicionar subtarefa rápida" aberto no card
+  const [quickSubtarefaTarefaId, setQuickSubtarefaTarefaId] = useState<string | null>(null)
+  const [quickSubtarefaTexto, setQuickSubtarefaTexto] = useState('')
+
+  // Estado para controlar edição inline de subtarefa no card
+  const [editingCardSubtarefa, setEditingCardSubtarefa] = useState<{
+    tarefaId: string
+    itemId: string
+    texto: string
+  } | null>(null)
+
   const toggleChecklistExpanded = (tarefaId: string, e?: React.MouseEvent) => {
     e?.stopPropagation()
     setExpandedChecklistMap((prev) => ({
       ...prev,
       [tarefaId]: prev[tarefaId] === undefined ? true : !prev[tarefaId],
     }))
+  }
+
+  // Adição rápida de subtarefa diretamente na visualização da tarefa (sem abrir edição)
+  const handleAddSubtarefaRapida = async (tarefaId: string, texto: string) => {
+    if (!can(user?.role, 'writeFinance')) {
+      toast({ title: 'Sem permissão para adicionar subtarefa', variant: 'destructive' })
+      return
+    }
+    const trimmed = texto.trim()
+    if (!trimmed) return
+
+    const currentTarefa = tarefas.find((t) => t.id === tarefaId)
+    if (!currentTarefa) return
+
+    const currentChecklist = currentTarefa.checklist || []
+    const updatedChecklist = addChecklistItemToList(currentChecklist, trimmed)
+
+    // Otimistic update
+    setTarefas((prev) =>
+      prev.map((t) => (t.id === tarefaId ? { ...t, checklist: updatedChecklist } : t)),
+    )
+
+    // Garante que o bloco de checklist esteja expandido para exibir a nova subtarefa
+    setExpandedChecklistMap((prev) => ({ ...prev, [tarefaId]: true }))
+
+    try {
+      await projetosTarefasService.updateTarefa(tarefaId, {
+        checklist: updatedChecklist,
+      })
+      toast({ title: 'Subtarefa adicionada!' })
+    } catch {
+      toast({ title: 'Erro ao adicionar subtarefa', variant: 'destructive' })
+      loadAll()
+    }
   }
 
   // Toggle rápido de item da checklist diretamente no card do Kanban com persistência imediata
@@ -183,9 +235,7 @@ export default function ProjetosTarefas() {
     const currentTarefa = tarefas.find((t) => t.id === tarefaId)
     if (!currentTarefa || !currentTarefa.checklist) return
 
-    const updatedChecklist = currentTarefa.checklist.map((item) =>
-      item.id === itemId ? { ...item, feito: !item.feito } : item,
-    )
+    const updatedChecklist = toggleChecklistItemStatus(currentTarefa.checklist, itemId)
 
     // Otimistic update
     setTarefas((prev) =>
@@ -198,6 +248,66 @@ export default function ProjetosTarefas() {
       })
     } catch {
       toast({ title: 'Erro ao atualizar checklist da tarefa', variant: 'destructive' })
+      loadAll()
+    }
+  }
+
+  // Edição rápida de texto de item existente diretamente no card
+  const handleEditChecklistItemDirect = async (
+    tarefaId: string,
+    itemId: string,
+    novoTexto: string,
+  ) => {
+    if (!can(user?.role, 'writeFinance')) {
+      toast({ title: 'Sem permissão para editar subtarefa', variant: 'destructive' })
+      return
+    }
+    const trimmed = novoTexto.trim()
+    if (!trimmed) return
+
+    const currentTarefa = tarefas.find((t) => t.id === tarefaId)
+    if (!currentTarefa || !currentTarefa.checklist) return
+
+    const updatedChecklist = updateChecklistItemTexto(currentTarefa.checklist, itemId, trimmed)
+
+    setTarefas((prev) =>
+      prev.map((t) => (t.id === tarefaId ? { ...t, checklist: updatedChecklist } : t)),
+    )
+
+    try {
+      await projetosTarefasService.updateTarefa(tarefaId, {
+        checklist: updatedChecklist,
+      })
+      toast({ title: 'Subtarefa atualizada!' })
+    } catch {
+      toast({ title: 'Erro ao salvar alteração da subtarefa', variant: 'destructive' })
+      loadAll()
+    }
+  }
+
+  // Exclusão rápida de item existente diretamente no card
+  const handleDeleteChecklistItemDirect = async (tarefaId: string, itemId: string) => {
+    if (!can(user?.role, 'writeFinance')) {
+      toast({ title: 'Sem permissão para remover subtarefa', variant: 'destructive' })
+      return
+    }
+
+    const currentTarefa = tarefas.find((t) => t.id === tarefaId)
+    if (!currentTarefa || !currentTarefa.checklist) return
+
+    const updatedChecklist = removeChecklistItemFromList(currentTarefa.checklist, itemId)
+
+    setTarefas((prev) =>
+      prev.map((t) => (t.id === tarefaId ? { ...t, checklist: updatedChecklist } : t)),
+    )
+
+    try {
+      await projetosTarefasService.updateTarefa(tarefaId, {
+        checklist: updatedChecklist,
+      })
+      toast({ title: 'Subtarefa removida.' })
+    } catch {
+      toast({ title: 'Erro ao remover subtarefa', variant: 'destructive' })
       loadAll()
     }
   }
@@ -780,28 +890,28 @@ export default function ProjetosTarefas() {
               )}
             </div>
 
-            {/* Checklist com itens marcáveis direto no card */}
-            {totalCheck > 0 && (
-              <div
-                className="pt-2 border-t border-border/50 space-y-1.5"
-                onClick={(e) => e.stopPropagation()}
-              >
+            {/* Bloco de Subtarefas / Checklist com edição inline, exclusão e adição rápida direta */}
+            <div
+              className="pt-2 border-t border-border/50 space-y-1.5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground select-none">
                 <div
-                  className="flex items-center justify-between text-[11px] text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                  className="flex items-center gap-1.5 cursor-pointer hover:text-foreground"
                   onClick={(e) => toggleChecklistExpanded(tarefa.id, e)}
                   title="Expandir/recolher subtarefas"
                 >
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2
-                      className={`h-3.5 w-3.5 ${
-                        feitosCheck === totalCheck ? 'text-emerald-500' : 'text-primary'
-                      }`}
-                    />
-                    <span className="font-medium">
-                      Subtarefas ({feitosCheck}/{totalCheck})
-                    </span>
-                  </div>
-                  <span className="flex items-center text-[10px] text-muted-foreground hover:text-primary">
+                  <CheckCircle2
+                    className={`h-3.5 w-3.5 ${
+                      totalCheck > 0 && feitosCheck === totalCheck
+                        ? 'text-emerald-500'
+                        : 'text-primary'
+                    }`}
+                  />
+                  <span className="font-medium">
+                    Subtarefas {totalCheck > 0 ? `(${feitosCheck}/${totalCheck})` : '(0)'}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground hover:text-primary">
                     {isChecklistExpanded ? (
                       <ChevronUp className="h-3.5 w-3.5" />
                     ) : (
@@ -810,37 +920,223 @@ export default function ProjetosTarefas() {
                   </span>
                 </div>
 
-                {isChecklistExpanded && (
-                  <div className="space-y-1 pl-0.5 pt-0.5">
-                    {tarefa.checklist?.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-start gap-2 text-xs py-0.5 group/item cursor-pointer"
-                        onClick={(e) => handleToggleChecklistItemDirect(tarefa.id, item.id, e)}
-                      >
-                        <Checkbox
-                          checked={item.feito}
-                          className="mt-0.5 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
-                          onCheckedChange={() =>
-                            handleToggleChecklistItemDirect(tarefa.id, item.id)
-                          }
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        <span
-                          className={`text-[11px] leading-tight select-none ${
-                            item.feito
-                              ? 'line-through text-muted-foreground/70'
-                              : 'text-foreground/90 font-normal'
-                          }`}
-                        >
-                          {item.texto}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                {/* Botão para disparar adição rápida de subtarefa sem abrir edição */}
+                {can(user?.role, 'writeFinance') && quickSubtarefaTarefaId !== tarefa.id && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1.5 text-[10px] text-primary hover:bg-primary/10 gap-0.5"
+                    title="Adicionar subtarefa diretamente nesta tarefa"
+                    onClick={() => {
+                      setQuickSubtarefaTarefaId(tarefa.id)
+                      setQuickSubtarefaTexto('')
+                      setExpandedChecklistMap((prev) => ({ ...prev, [tarefa.id]: true }))
+                    }}
+                  >
+                    <Plus className="h-3 w-3" />
+                    <span>Adicionar subtarefa</span>
+                  </Button>
                 )}
               </div>
-            )}
+
+              {/* Input para adição rápida de subtarefa */}
+              {quickSubtarefaTarefaId === tarefa.id && (
+                <div className="flex items-center gap-1.5 p-1.5 rounded-md bg-muted/50 border border-primary/30">
+                  <Input
+                    autoFocus
+                    placeholder="Nova subtarefa..."
+                    value={quickSubtarefaTexto}
+                    onChange={(e) => setQuickSubtarefaTexto(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (quickSubtarefaTexto.trim()) {
+                          handleAddSubtarefaRapida(tarefa.id, quickSubtarefaTexto)
+                          setQuickSubtarefaTexto('')
+                          setQuickSubtarefaTarefaId(null)
+                        }
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault()
+                        setQuickSubtarefaTarefaId(null)
+                        setQuickSubtarefaTexto('')
+                      }
+                    }}
+                    className="h-7 text-xs flex-1 bg-white"
+                  />
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 shrink-0"
+                    title="Salvar subtarefa (Enter)"
+                    onClick={() => {
+                      if (quickSubtarefaTexto.trim()) {
+                        handleAddSubtarefaRapida(tarefa.id, quickSubtarefaTexto)
+                        setQuickSubtarefaTexto('')
+                        setQuickSubtarefaTarefaId(null)
+                      }
+                    }}
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground shrink-0"
+                    title="Cancelar (Esc)"
+                    onClick={() => {
+                      setQuickSubtarefaTarefaId(null)
+                      setQuickSubtarefaTexto('')
+                    }}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )}
+
+              {/* Lista de itens da checklist quando expandida */}
+              {isChecklistExpanded && totalCheck > 0 && (
+                <div className="space-y-1 pl-0.5 pt-0.5">
+                  {tarefa.checklist?.map((item) => {
+                    const isEditingThis =
+                      editingCardSubtarefa?.tarefaId === tarefa.id &&
+                      editingCardSubtarefa?.itemId === item.id
+
+                    if (isEditingThis) {
+                      return (
+                        <div
+                          key={item.id}
+                          className="flex items-center gap-1.5 p-1 rounded-md bg-muted/60 border border-primary/40"
+                        >
+                          <Input
+                            autoFocus
+                            value={editingCardSubtarefa.texto}
+                            onChange={(e) =>
+                              setEditingCardSubtarefa((prev) =>
+                                prev ? { ...prev, texto: e.target.value } : null,
+                              )
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                if (editingCardSubtarefa.texto.trim()) {
+                                  handleEditChecklistItemDirect(
+                                    tarefa.id,
+                                    item.id,
+                                    editingCardSubtarefa.texto,
+                                  )
+                                  setEditingCardSubtarefa(null)
+                                }
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault()
+                                setEditingCardSubtarefa(null)
+                              }
+                            }}
+                            className="h-6 text-xs flex-1 bg-white"
+                          />
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-emerald-600 hover:text-emerald-700 shrink-0"
+                            title="Salvar alteração (Enter)"
+                            onClick={() => {
+                              if (editingCardSubtarefa.texto.trim()) {
+                                handleEditChecklistItemDirect(
+                                  tarefa.id,
+                                  item.id,
+                                  editingCardSubtarefa.texto,
+                                )
+                                setEditingCardSubtarefa(null)
+                              }
+                            }}
+                          >
+                            <Check className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-muted-foreground hover:text-foreground shrink-0"
+                            title="Cancelar (Esc)"
+                            onClick={() => setEditingCardSubtarefa(null)}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )
+                    }
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between gap-1.5 text-xs py-0.5 px-1 rounded hover:bg-muted/40 group/sub"
+                      >
+                        <div
+                          className="flex items-start gap-2 flex-1 min-w-0 cursor-pointer"
+                          onClick={(e) => handleToggleChecklistItemDirect(tarefa.id, item.id, e)}
+                        >
+                          <Checkbox
+                            checked={item.feito}
+                            className="mt-0.5 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                            onCheckedChange={() =>
+                              handleToggleChecklistItemDirect(tarefa.id, item.id)
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <span
+                            className={`text-[11px] leading-tight select-none break-words ${
+                              item.feito
+                                ? 'line-through text-muted-foreground/70'
+                                : 'text-foreground/90 font-normal'
+                            }`}
+                          >
+                            {item.texto}
+                          </span>
+                        </div>
+
+                        {can(user?.role, 'writeFinance') && (
+                          <div className="flex items-center gap-0.5 shrink-0 opacity-70 group-hover/sub:opacity-100 transition-opacity">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 text-muted-foreground hover:text-primary"
+                              title="Editar texto da subtarefa"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setEditingCardSubtarefa({
+                                  tarefaId: tarefa.id,
+                                  itemId: item.id,
+                                  texto: item.texto,
+                                })
+                              }}
+                            >
+                              <Edit2 className="h-2.5 w-2.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 text-muted-foreground hover:text-destructive"
+                              title="Excluir subtarefa"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDeleteChecklistItemDirect(tarefa.id, item.id)
+                              }}
+                            >
+                              <Trash2 className="h-2.5 w-2.5" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
 
             {/* Prazo e responsável */}
             <div className="flex items-center justify-between pt-2 border-t border-border/60 text-[11px] text-muted-foreground">
@@ -1278,10 +1574,85 @@ export default function ProjetosTarefas() {
                       </div>
                       <Progress value={perc} className="h-2" />
                       <div className="flex justify-between text-[11px] text-muted-foreground">
-                        <span>{projTarefas.length} tarefas cadastradas</span>
+                        <button
+                          type="button"
+                          className="hover:underline text-primary cursor-pointer"
+                          onClick={() => {
+                            setSelectedProjetoFilter(proj.id)
+                            setActiveTab('quadro')
+                          }}
+                          title="Filtrar tarefas deste projeto no quadro"
+                        >
+                          {projTarefas.length} tarefas cadastradas
+                        </button>
                         <span>{concluidas} concluídas</span>
                       </div>
                     </div>
+
+                    {/* Resumo de tarefas e subtarefas do projeto */}
+                    {projTarefas.length > 0 && (
+                      <div className="space-y-1.5 pt-1 border-t border-border/50">
+                        <span className="text-[11px] font-semibold text-foreground/80 block">
+                          Tarefas & Subtarefas:
+                        </span>
+                        <div className="max-h-[140px] overflow-y-auto space-y-1 pr-0.5">
+                          {projTarefas.map((t) => {
+                            const subTotal = t.checklist?.length || 0
+                            const subFeitos = t.checklist?.filter((i) => i.feito).length || 0
+                            return (
+                              <div
+                                key={t.id}
+                                className="flex items-center justify-between gap-1 text-[11px] p-1 rounded bg-muted/40 hover:bg-muted/70 transition-colors"
+                              >
+                                <span
+                                  className={`truncate flex-1 ${
+                                    t.etapa === 'concluida'
+                                      ? 'line-through text-muted-foreground'
+                                      : 'text-foreground'
+                                  }`}
+                                  title={t.titulo}
+                                >
+                                  {t.titulo}
+                                </span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {subTotal > 0 && (
+                                    <span
+                                      className="text-[10px] text-muted-foreground"
+                                      title="Subtarefas concluídas / total"
+                                    >
+                                      ({subFeitos}/{subTotal})
+                                    </span>
+                                  )}
+                                  {can(user?.role, 'writeFinance') && (
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-5 px-1 text-[10px] text-primary hover:bg-primary/10 gap-0.5"
+                                      title="Adicionar subtarefa a esta tarefa"
+                                      onClick={() => {
+                                        setSelectedProjetoFilter(proj.id)
+                                        setActiveTab('quadro')
+                                        setQuickSubtarefaTarefaId(t.id)
+                                        setQuickSubtarefaTexto('')
+                                        setExpandedChecklistMap((prev) => ({
+                                          ...prev,
+                                          [t.id]: true,
+                                        }))
+                                        setExpandedTarefaIds((prev) => new Set([...prev, t.id]))
+                                      }}
+                                    >
+                                      <Plus className="h-2.5 w-2.5" />
+                                      <span className="text-[9px]">Subtarefa</span>
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="flex flex-wrap items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border">
                       {proj.prazo ? (

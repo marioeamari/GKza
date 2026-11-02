@@ -43,9 +43,82 @@
  *    - Botão do trigger possui aria-expanded e aria-controls vinculado ao container de conteúdo.
  *    - Navegável por teclado (Enter e Espaço expandem/colapsam; botões ↑/↓ acessíveis).
  *    - Suporta expansão e colapso em lote ("Expandir todas" / "Recolher todas") para agilidade.
+ * 8. SUBTAREFAS RÁPIDAS DIRETAMENTE NA VISUALIZAÇÃO:
+ *    - O usuário pode adicionar subtarefas/itens de checklist a uma tarefa diretamente a partir da visualização da tarefa
+ *      no quadro do projeto, sem precisar entrar em edição do projeto ou abrir o modal de edição de tarefas.
+ *    - A ação insere o novo item no checklist existente da tarefa e persiste imediatamente no PocketBase.
+ * 9. EDIÇÃO DE ITENS DE CHECKLIST EXISTENTES:
+ *    - Tanto no modal de edição da tarefa (TarefaDialog) quanto na gestão de itens, o usuário pode editar o texto de qualquer
+ *      item existente da checklist (via botão de edição com confirmação/cancelamento ou salvamento por Enter),
+ *      mantendo a opção de exclusão e marcação de concluído.
  */
 
-import type { Tarefa, TarefaEtapa, TarefaPrioridade } from '@/types/domain'
+import type { Tarefa, TarefaEtapa, TarefaPrioridade, TarefaChecklistItem } from '@/types/domain'
+
+/**
+ * Cria um novo item de checklist com ID único e texto higienizado.
+ */
+export function createChecklistItem(texto: string, feito = false): TarefaChecklistItem {
+  const trimmed = texto.trim()
+  if (!trimmed) {
+    throw new Error('O texto do item da checklist não pode ser vazio.')
+  }
+  return {
+    id: Math.random().toString(36).substring(2, 9),
+    texto: trimmed,
+    feito,
+  }
+}
+
+/**
+ * Adiciona um novo item de subtarefa/checklist a uma lista existente.
+ */
+export function addChecklistItemToList(
+  checklist: TarefaChecklistItem[] | undefined,
+  texto: string,
+): TarefaChecklistItem[] {
+  const current = checklist || []
+  const newItem = createChecklistItem(texto)
+  return [...current, newItem]
+}
+
+/**
+ * Atualiza o texto de um item existente de checklist mantendo a ordem e o status.
+ */
+export function updateChecklistItemTexto(
+  checklist: TarefaChecklistItem[] | undefined,
+  itemId: string,
+  novoTexto: string,
+): TarefaChecklistItem[] {
+  const trimmed = novoTexto.trim()
+  if (!trimmed) {
+    throw new Error('O texto do item da checklist não pode ser vazio.')
+  }
+  const current = checklist || []
+  return current.map((item) => (item.id === itemId ? { ...item, texto: trimmed } : item))
+}
+
+/**
+ * Remove um item da checklist.
+ */
+export function removeChecklistItemFromList(
+  checklist: TarefaChecklistItem[] | undefined,
+  itemId: string,
+): TarefaChecklistItem[] {
+  const current = checklist || []
+  return current.filter((item) => item.id !== itemId)
+}
+
+/**
+ * Alterna o status (feito / pendente) de um item da checklist.
+ */
+export function toggleChecklistItemStatus(
+  checklist: TarefaChecklistItem[] | undefined,
+  itemId: string,
+): TarefaChecklistItem[] {
+  const current = checklist || []
+  return current.map((item) => (item.id === itemId ? { ...item, feito: !item.feito } : item))
+}
 
 export const STORAGE_EXPANDED_TAREFAS_KEY = 'projetos_tarefas_expanded_ids'
 export const STORAGE_ORDEM_CRITERIO_KEY = 'projetos_tarefas_ordem_criterio'

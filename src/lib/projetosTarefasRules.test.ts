@@ -10,6 +10,11 @@ import {
   sortTarefas,
   reorderTarefas,
   insertTarefaAt,
+  createChecklistItem,
+  addChecklistItemToList,
+  updateChecklistItemTexto,
+  removeChecklistItemFromList,
+  toggleChecklistItemStatus,
   STORAGE_EXPANDED_TAREFAS_KEY,
   STORAGE_ORDEM_CRITERIO_KEY,
   STORAGE_MANUAL_ORDER_KEY,
@@ -304,6 +309,78 @@ describe('Regras de Accordion e Indicadores de Tarefas (/projetos)', () => {
 
       const listaPosRecolhimento = sortTarefas(listaPosExpansao, 'manual', ['t-3', 't-2', 't-1'])
       expect(listaPosRecolhimento.map((t) => t.id)).toEqual(['t-3', 't-2', 't-1'])
+    })
+  })
+
+  describe('Regras de Checklist e Subtarefas (Adição Rápida e Edição)', () => {
+    it('deve criar um novo item de checklist com ID único e texto higienizado', () => {
+      const item = createChecklistItem('  Subtarefa importante  ')
+      expect(item.texto).toBe('Subtarefa importante')
+      expect(item.feito).toBe(false)
+      expect(item.id).toBeTruthy()
+      expect(typeof item.id).toBe('string')
+    })
+
+    it('deve rejeitar texto vazio ao criar item de checklist', () => {
+      expect(() => createChecklistItem('   ')).toThrow(
+        'O texto do item da checklist não pode ser vazio.',
+      )
+    })
+
+    it('deve adicionar um novo item de checklist/subtarefa a uma lista existente', () => {
+      const listaInicial = [{ id: '1', texto: 'Item 1', feito: false }]
+      const listaAtualizada = addChecklistItemToList(listaInicial, 'Item 2')
+
+      expect(listaAtualizada.length).toBe(2)
+      expect(listaAtualizada[0].texto).toBe('Item 1')
+      expect(listaAtualizada[1].texto).toBe('Item 2')
+      expect(listaAtualizada[1].feito).toBe(false)
+    })
+
+    it('deve adicionar item quando a lista inicial for undefined/vazia', () => {
+      const listaAtualizada = addChecklistItemToList(undefined, 'Primeiro item')
+      expect(listaAtualizada.length).toBe(1)
+      expect(listaAtualizada[0].texto).toBe('Primeiro item')
+    })
+
+    it('deve editar o texto de um item existente de checklist mantendo ordem e feito', () => {
+      const lista = [
+        { id: 'item-1', texto: 'Texto antigo', feito: true },
+        { id: 'item-2', texto: 'Outro item', feito: false },
+      ]
+      const atualizada = updateChecklistItemTexto(lista, 'item-1', 'Texto revisado e editado')
+
+      expect(atualizada.length).toBe(2)
+      expect(atualizada[0].id).toBe('item-1')
+      expect(atualizada[0].texto).toBe('Texto revisado e editado')
+      expect(atualizada[0].feito).toBe(true)
+      expect(atualizada[1].texto).toBe('Outro item')
+    })
+
+    it('deve rejeitar edição com texto vazio ou apenas espaços', () => {
+      const lista = [{ id: 'item-1', texto: 'Item', feito: false }]
+      expect(() => updateChecklistItemTexto(lista, 'item-1', '   ')).toThrow(
+        'O texto do item da checklist não pode ser vazio.',
+      )
+    })
+
+    it('deve remover um item da checklist', () => {
+      const lista = [
+        { id: '1', texto: 'A', feito: false },
+        { id: '2', texto: 'B', feito: true },
+      ]
+      const atualizada = removeChecklistItemFromList(lista, '1')
+      expect(atualizada.length).toBe(1)
+      expect(atualizada[0].id).toBe('2')
+    })
+
+    it('deve alternar o status feito de um item da checklist', () => {
+      const lista = [{ id: '1', texto: 'A', feito: false }]
+      const feitoTrue = toggleChecklistItemStatus(lista, '1')
+      expect(feitoTrue[0].feito).toBe(true)
+
+      const feitoFalse = toggleChecklistItemStatus(feitoTrue, '1')
+      expect(feitoFalse[0].feito).toBe(false)
     })
   })
 })

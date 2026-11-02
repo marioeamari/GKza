@@ -23,8 +23,14 @@ import { projetosTarefasService } from '@/services/projetosTarefas'
 import { cadastrosService } from '@/services/cadastros'
 import { usersService } from '@/services/users'
 import { useToast } from '@/hooks/use-toast'
-import { Plus, Trash2, CalendarPlus } from 'lucide-react'
+import { Plus, Trash2, CalendarPlus, Edit2, Check, X } from 'lucide-react'
 import { dateOnly } from '@/lib/format'
+import {
+  createChecklistItem,
+  updateChecklistItemTexto,
+  removeChecklistItemFromList,
+  toggleChecklistItemStatus,
+} from '@/lib/projetosTarefasRules'
 import type {
   Tarefa,
   Projeto,
@@ -72,6 +78,8 @@ export function TarefaDialog({
   // Checklist
   const [checklist, setChecklist] = useState<TarefaChecklistItem[]>([])
   const [novoItemTexto, setNovoItemTexto] = useState('')
+  const [editingItemId, setEditingItemId] = useState<string | null>(null)
+  const [editingItemTexto, setEditingItemTexto] = useState('')
 
   const [loading, setLoading] = useState(false)
   const [projetos, setProjetos] = useState<Projeto[]>([])
@@ -126,26 +134,53 @@ export function TarefaDialog({
         setChecklist([])
       }
       setNovoItemTexto('')
+      setEditingItemId(null)
+      setEditingItemTexto('')
     }
   }, [open, tarefa, defaultProjetoId, defaultEtapa, activeContext])
 
   const handleAddChecklistItem = () => {
     if (!novoItemTexto.trim()) return
-    const item: TarefaChecklistItem = {
-      id: Math.random().toString(36).substring(2, 9),
-      texto: novoItemTexto.trim(),
-      feito: false,
+    try {
+      const item = createChecklistItem(novoItemTexto)
+      setChecklist([...checklist, item])
+      setNovoItemTexto('')
+    } catch {
+      // Ignora texto vazio
     }
-    setChecklist([...checklist, item])
-    setNovoItemTexto('')
+  }
+
+  const handleStartEditItem = (item: TarefaChecklistItem) => {
+    setEditingItemId(item.id)
+    setEditingItemTexto(item.texto)
+  }
+
+  const handleSaveEditItem = (itemId: string) => {
+    if (!editingItemTexto.trim()) return
+    try {
+      setChecklist(updateChecklistItemTexto(checklist, itemId, editingItemTexto))
+      setEditingItemId(null)
+      setEditingItemTexto('')
+    } catch {
+      // Ignora erro de validação
+    }
+  }
+
+  const handleCancelEditItem = () => {
+    setEditingItemId(null)
+    setEditingItemTexto('')
   }
 
   const handleToggleChecklistItem = (id: string) => {
-    setChecklist(checklist.map((item) => (item.id === id ? { ...item, feito: !item.feito } : item)))
+    setChecklist(toggleChecklistItemStatus(checklist, id))
   }
 
   const handleRemoveChecklistItem = (id: string) => {
-    setChecklist(checklist.filter((item) => item.id !== id))
+    if (editingItemId === id) {
+      setEditingItemId(null)
+      setEditingItemTexto('')
+    }
+    setChecklist(removeChecklistItemFromList(checklist, id))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -363,31 +398,112 @@ export function TarefaDialog({
 
           {/* CHECKLIST */}
           <div className="space-y-2 border-t border-border pt-3">
-            <Label className="text-xs font-semibold">Checklist da Tarefa</Label>
-            {checklist.map((item) => (
-              <div key={item.id} className="flex items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    checked={item.feito}
-                    onCheckedChange={() => handleToggleChecklistItem(item.id)}
-                  />
-                  <span className={item.feito ? 'line-through text-muted-foreground' : ''}>
-                    {item.texto}
-                  </span>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                  onClick={() => handleRemoveChecklistItem(item.id)}
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
-            ))}
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold">Checklist da Tarefa</Label>
+              {checklist.length > 0 && (
+                <span className="text-[11px] text-muted-foreground">
+                  {checklist.filter((i) => i.feito).length} de {checklist.length} concluídas
+                </span>
+              )}
+            </div>
 
-            <div className="flex gap-2">
+            <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-0.5">
+              {checklist.map((item) => {
+                const isEditing = editingItemId === item.id
+
+                if (isEditing) {
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex items-center gap-1.5 p-1.5 rounded-md bg-muted/40 border border-primary/40"
+                    >
+                      <Input
+                        autoFocus
+                        value={editingItemTexto}
+                        onChange={(e) => setEditingItemTexto(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            handleSaveEditItem(item.id)
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault()
+                            handleCancelEditItem()
+                          }
+                        }}
+                        className="h-7 text-xs flex-1 bg-white"
+                        placeholder="Editar texto do item..."
+                      />
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 shrink-0"
+                        title="Salvar alteração (Enter)"
+                        onClick={() => handleSaveEditItem(item.id)}
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground shrink-0"
+                        title="Cancelar edição (Esc)"
+                        onClick={handleCancelEditItem}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )
+                }
+
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-2 text-xs p-1 rounded-md hover:bg-muted/30 group transition-colors"
+                  >
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <Checkbox
+                        checked={item.feito}
+                        onCheckedChange={() => handleToggleChecklistItem(item.id)}
+                      />
+                      <span
+                        className={`truncate break-words select-none cursor-pointer ${
+                          item.feito ? 'line-through text-muted-foreground' : 'text-foreground'
+                        }`}
+                        onClick={() => handleToggleChecklistItem(item.id)}
+                      >
+                        {item.texto}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-muted-foreground hover:text-primary"
+                        title="Editar texto do item"
+                        onClick={() => handleStartEditItem(item)}
+                      >
+                        <Edit2 className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                        title="Excluir item"
+                        onClick={() => handleRemoveChecklistItem(item.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="flex gap-2 pt-1">
               <Input
                 placeholder="Adicionar item ao checklist..."
                 value={novoItemTexto}
@@ -404,7 +520,7 @@ export function TarefaDialog({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-8 text-xs"
+                className="h-8 text-xs shrink-0"
                 onClick={handleAddChecklistItem}
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
