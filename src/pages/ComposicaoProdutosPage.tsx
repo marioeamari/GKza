@@ -143,7 +143,7 @@ export default function ComposicaoProdutosPage() {
   // Filtros de Produtos Base
   const basesFiltradas = produtosBase.filter((b) => {
     if (filtroTipoBase !== 'todos') {
-      const matchPorRef = b.tipo_ref === filtroTipoBase
+      const matchPorRef = b.tipo_ref === filtroTipoBase || b.expand?.tipo_ref?.id === filtroTipoBase
       const matchPorCodigo = b.tipo === filtroTipoBase
       if (!matchPorRef && !matchPorCodigo) return false
     }

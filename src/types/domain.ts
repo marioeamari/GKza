@@ -65,6 +65,57 @@ export type ProdutoBaseTipo =
   | 'costura'
   | 'outro'
 
+export const PRODUTO_BASE_TIPOS_PADRAO: readonly ProdutoBaseTipo[] = [
+  'revenda',
+  'insumo',
+  'servico',
+  'embalagem',
+  'etiqueta',
+  'tecido',
+  'pintura',
+  'costura',
+  'outro',
+] as const
+
+/**
+ * Valida e resolve o valor do campo legado 'tipo' de produtos_base:
+ * - Se não houver tipo_ref e nenhum código for fornecido: fallback 'insumo'
+ * - Se o código do tipo selecionado estiver na lista fixa do schema PocketBase: usa o próprio código
+ * - Se for código livre gerado pelo usuário (fora da lista fixa): usa 'outro'
+ * O vínculo real com a entidade persiste no campo relation `tipo_ref`.
+ */
+export function resolverTipoCompativelProdutoBase(params: {
+  tipoRefId?: string | null
+  tipoCodigo?: string | null
+  tipoLegadoAtual?: ProdutoBaseTipo | null
+}): ProdutoBaseTipo {
+  const { tipoRefId, tipoCodigo, tipoLegadoAtual } = params
+
+  // Se não houver tipo_ref informado
+  if (!tipoRefId) {
+    if (tipoCodigo && (PRODUTO_BASE_TIPOS_PADRAO as readonly string[]).includes(tipoCodigo)) {
+      return tipoCodigo as ProdutoBaseTipo
+    }
+    if (
+      tipoLegadoAtual &&
+      (PRODUTO_BASE_TIPOS_PADRAO as readonly string[]).includes(tipoLegadoAtual)
+    ) {
+      return tipoLegadoAtual
+    }
+    return 'insumo'
+  }
+
+  // Com tipo_ref informado:
+  // Se o tipoObj tem código correspondente à lista padrão, usa ele
+  if (tipoCodigo && (PRODUTO_BASE_TIPOS_PADRAO as readonly string[]).includes(tipoCodigo)) {
+    return tipoCodigo as ProdutoBaseTipo
+  }
+
+  // Código livre criado pelo gerenciador (ex: comedouro_pet_chapa, corte_laser, cumbuca_xcm)
+  // PocketBase rejeita no select fixo se for diferente dos 9 valores permitidos -> fallback 'outro'
+  return 'outro'
+}
+
 export interface ProdutoBaseRecord extends RecordModel {
   nome: string
   tipo: ProdutoBaseTipo

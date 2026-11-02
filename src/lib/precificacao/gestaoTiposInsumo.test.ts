@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { insumosService } from '@/services/insumos'
+import {
+  insumosService,
+  PRODUTO_BASE_TIPOS_PADRAO,
+  resolverTipoCompativelProdutoBase,
+} from '@/services/insumos'
 import pb from '@/lib/pocketbase/client'
 
 vi.mock('@/lib/pocketbase/client', () => {
@@ -142,5 +146,85 @@ describe('Regra de Gestão de Tipos de Custo / Insumo (insumos_tipos e produtos_
     const codigosSet = new Set(codigos)
     expect(nomesSet.size).toBe(9)
     expect(codigosSet.size).toBe(9)
+  })
+
+  describe('Regra de compatibilidade do campo legado "tipo" de produtos_base (resolverTipoCompativelProdutoBase)', () => {
+    it('TESTE 7: Código padrão válido coincide com a lista fixa -> mantém o próprio código', () => {
+      // Todos os 9 tipos do schema PocketBase devem retornar exatamente a si mesmos
+      for (const tipoValido of PRODUTO_BASE_TIPOS_PADRAO) {
+        const resultado = resolverTipoCompativelProdutoBase({
+          tipoRefId: `id_${tipoValido}`,
+          tipoCodigo: tipoValido,
+          tipoLegadoAtual: 'outro',
+        })
+        expect(resultado).toBe(tipoValido)
+      }
+    })
+
+    it('TESTE 8: Código livre/fora da lista fixa (criado pelo gerenciador) -> retorna "outro" para não quebrar o select fixo', () => {
+      // Exemplos reais criados pelos usuários no gerenciador
+      const tiposLivres = [
+        { id: 'paoz31bzslict2p', codigo: 'comedouro_pet_chapa' }, // "Chapa Aço"
+        { id: '8w9f9cxaauc6ko3', codigo: 'comedouro_pet_dobra' }, // "Dobra Aço"
+        { id: '2ql6uj7ik9g8d0c', codigo: 'comedoutro_pet_vergalhao' }, // "Ferro Chato"
+        { id: 'hvur2qsyyib2sfd', codigo: 'comedouro_pet_solda' }, // "Mão de Obra"
+        { id: '0cqtgic9rmq7kky', codigo: 'cumbuca_xcm' }, // "Cumbuca"
+        { id: 'bhx3otyilgg83f9', codigo: 'corte_laser' }, // "Corte Laser"
+      ]
+
+      for (const t of tiposLivres) {
+        const resultado = resolverTipoCompativelProdutoBase({
+          tipoRefId: t.id,
+          tipoCodigo: t.codigo,
+        })
+        expect(resultado).toBe('outro')
+      }
+    })
+
+    it('TESTE 9: Sem tipo_ref -> mantém fallback "insumo" quando nenhum código válido for passado', () => {
+      const resVazio = resolverTipoCompativelProdutoBase({
+        tipoRefId: null,
+        tipoCodigo: null,
+      })
+      expect(resVazio).toBe('insumo')
+
+      const resIndefinido = resolverTipoCompativelProdutoBase({})
+      expect(resIndefinido).toBe('insumo')
+
+      // Código livre sem tipo_ref também não é válido no select -> cai em insumo
+      const resCodigoLivreSemRef = resolverTipoCompativelProdutoBase({
+        tipoRefId: null,
+        tipoCodigo: 'corte_laser',
+      })
+      expect(resCodigoLivreSemRef).toBe('insumo')
+    })
+
+    it('TESTE 10: Sem tipo_ref mas com código ou legado padrão válido -> preserva o código padrão', () => {
+      const resServico = resolverTipoCompativelProdutoBase({
+        tipoRefId: null,
+        tipoCodigo: 'servico',
+      })
+      expect(resServico).toBe('servico')
+
+      const resEmbalagemLegada = resolverTipoCompativelProdutoBase({
+        tipoRefId: null,
+        tipoLegadoAtual: 'embalagem',
+      })
+      expect(resEmbalagemLegada).toBe('embalagem')
+    })
+
+    it('TESTE 11: A lista fixa PRODUTO_BASE_TIPOS_PADRAO possui exatamente os 9 valores do select do PocketBase', () => {
+      expect(PRODUTO_BASE_TIPOS_PADRAO).toEqual([
+        'revenda',
+        'insumo',
+        'servico',
+        'embalagem',
+        'etiqueta',
+        'tecido',
+        'pintura',
+        'costura',
+        'outro',
+      ])
+    })
   })
 })

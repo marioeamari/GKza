@@ -25,6 +25,7 @@ import type {
   Fornecedor,
   InsumoCategoriaRecord,
 } from '@/types/domain'
+import { PRODUTO_BASE_TIPOS_PADRAO, resolverTipoCompativelProdutoBase } from '@/types/domain'
 import { produtosBaseService } from '@/services/produtos'
 import { formatarDimensaoInsumo } from '@/services/insumos'
 
@@ -141,8 +142,11 @@ export function ProdutoBaseDialog({
 
     // Determina o código legado para compatibilidade com filtros e precificação
     const tipoObj = tipos.find((t) => t.id === tipoRefId)
-    const codigoCompativel: ProdutoBaseTipo =
-      (tipoObj?.codigo as ProdutoBaseTipo) || tipo || 'insumo'
+    const codigoCompativel: ProdutoBaseTipo = resolverTipoCompativelProdutoBase({
+      tipoRefId: tipoRefId || null,
+      tipoCodigo: tipoObj?.codigo || null,
+      tipoLegadoAtual: tipo || null,
+    })
 
     try {
       setSalvando(true)

@@ -6,6 +6,9 @@ import type {
   ProdutoCompostoRecord,
   ProdutoCompostoClassificacao,
 } from '@/types/domain'
+import { PRODUTO_BASE_TIPOS_PADRAO, resolverTipoCompativelProdutoBase } from '@/types/domain'
+
+export { PRODUTO_BASE_TIPOS_PADRAO, resolverTipoCompativelProdutoBase }
 import type { ItemComposicaoCusto } from '@/lib/precificacao/calculo'
 
 /**
