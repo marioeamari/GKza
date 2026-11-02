@@ -49,23 +49,48 @@
  *    - A ação insere o novo item no checklist existente da tarefa e persiste imediatamente no PocketBase.
  * 9. EDIÇÃO DE ITENS DE CHECKLIST EXISTENTES:
  *    - Tanto no modal de edição da tarefa (TarefaDialog) quanto na gestão de itens, o usuário pode editar o texto de qualquer
- *      item existente da checklist (via botão de edição com confirmação/cancelamento ou salvamento por Enter),
+ *      item existente da checklist (via botão de edição com confirmação/cancelamento ou salvamento por Enter/Ctrl+Enter),
  *      mantendo a opção de exclusão e marcação de concluído.
+ * 10. ITENS MULTI-LINHA DO CHECKLIST E PRESERVAÇÃO DE QUEBRA DE LINHA (Adicionado na 0.0.279):
+ *    - Os campos de adição de novo item de checklist e de edição inline (via lápis) usam textarea auto-expansível em vez de input de 1 linha.
+ *    - Teclado nos campos de checklist:
+ *      * Enter: insere quebra de linha (\n) no texto da subtarefa/checklist.
+ *      * Ctrl+Enter (ou Meta+Enter): atalho rápido de confirmação do item.
+ *      * Esc: cancela a edição inline.
+ *      * Confirmação explícita disponível pelo botão de Adicionar / ícone de check.
+ *    - Persistência e higienização:
+ *      * O texto persiste com as quebras (\n) no array `checklist` da coleção `tarefas`.
+ *      * Textos vazios ou contendo apenas espaços/quebras de linha sem conteúdo são rejeitados.
+ *      * Espaços em branco nas extremidades inicial/final do texto total são higienizados sem perder as quebras internas.
+ *    - Exibição:
+ *      * O texto dos itens do checklist preserva quebras de linha (`whitespace-pre-line break-words`) em todos os lugares:
+ *        modal TarefaDialog, itens no card do Kanban (expandido) e listagem de tarefas na aba Projetos.
+ *      * O mesmo tratamento preserva quebras de linha (`whitespace-pre-line break-words` ou `whitespace-pre-wrap`) para
+ *        a Descrição / Instruções da tarefa quando exibida fora de textarea.
  */
 
 import type { Tarefa, TarefaEtapa, TarefaPrioridade, TarefaChecklistItem } from '@/types/domain'
 
 /**
- * Cria um novo item de checklist com ID único e texto higienizado.
+ * Higieniza o texto do item de checklist preservando quebras de linha internas (\n).
+ * Rejeita textos vazios ou formados apenas por espaços e quebras de linha.
  */
-export function createChecklistItem(texto: string, feito = false): TarefaChecklistItem {
-  const trimmed = texto.trim()
+export function sanitizeChecklistTexto(texto: string): string {
+  const trimmed = (texto || '').trim()
   if (!trimmed) {
     throw new Error('O texto do item da checklist não pode ser vazio.')
   }
+  return trimmed
+}
+
+/**
+ * Cria um novo item de checklist com ID único e texto higienizado preservando quebras de linha.
+ */
+export function createChecklistItem(texto: string, feito = false): TarefaChecklistItem {
+  const sanitized = sanitizeChecklistTexto(texto)
   return {
     id: Math.random().toString(36).substring(2, 9),
-    texto: trimmed,
+    texto: sanitized,
     feito,
   }
 }
@@ -90,12 +115,9 @@ export function updateChecklistItemTexto(
   itemId: string,
   novoTexto: string,
 ): TarefaChecklistItem[] {
-  const trimmed = novoTexto.trim()
-  if (!trimmed) {
-    throw new Error('O texto do item da checklist não pode ser vazio.')
-  }
+  const sanitized = sanitizeChecklistTexto(novoTexto)
   const current = checklist || []
-  return current.map((item) => (item.id === itemId ? { ...item, texto: trimmed } : item))
+  return current.map((item) => (item.id === itemId ? { ...item, texto: sanitized } : item))
 }
 
 /**

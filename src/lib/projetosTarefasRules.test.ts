@@ -10,6 +10,7 @@ import {
   sortTarefas,
   reorderTarefas,
   insertTarefaAt,
+  sanitizeChecklistTexto,
   createChecklistItem,
   addChecklistItemToList,
   updateChecklistItemTexto,
@@ -381,6 +382,60 @@ describe('Regras de Accordion e Indicadores de Tarefas (/projetos)', () => {
 
       const feitoFalse = toggleChecklistItemStatus(feitoTrue, '1')
       expect(feitoFalse[0].feito).toBe(false)
+    })
+
+    describe('Regra de Texto Multi-linha e Preservação de Quebras (\n) no Checklist (0.0.279)', () => {
+      it('deve criar item preservando múltiplas quebras de linha no texto', () => {
+        const textoMultiLinha =
+          'Primeira linha da tarefa\nSegunda linha explicativa\nTerceira linha com detalhes'
+        const item = createChecklistItem(textoMultiLinha)
+
+        expect(item.texto).toBe(textoMultiLinha)
+        expect(item.texto.split('\n').length).toBe(3)
+      })
+
+      it('deve higienizar espaços nas pontas mas manter quebras de linha internas intactas', () => {
+        const textoComEspacos = '   \n  Linha A\n  Linha B com indentação  \nLinha C  \n  '
+        const item = createChecklistItem(textoComEspacos)
+
+        expect(item.texto).toBe('Linha A\n  Linha B com indentação  \nLinha C')
+        expect(item.texto).toContain('\n')
+      })
+
+      it('deve rejeitar texto com apenas quebras de linha e espaços', () => {
+        expect(() => createChecklistItem('\n\n   \n   \t\n')).toThrow(
+          'O texto do item da checklist não pode ser vazio.',
+        )
+        expect(() => sanitizeChecklistTexto('\r\n  \n\t')).toThrow(
+          'O texto do item da checklist não pode ser vazio.',
+        )
+      })
+
+      it('deve atualizar item existente preservando quebras de linha', () => {
+        const lista = [{ id: 'item-1', texto: 'Linha única anterior', feito: false }]
+        const novoTexto = 'Linha 1 modificada\nLinha 2 adicionada\nLinha 3 com instruções'
+        const atualizada = updateChecklistItemTexto(lista, 'item-1', novoTexto)
+
+        expect(atualizada[0].texto).toBe(novoTexto)
+        expect(atualizada[0].texto).toContain('\n')
+      })
+
+      it('deve rejeitar atualização com quebras de linha sem conteúdo real', () => {
+        const lista = [{ id: 'item-1', texto: 'Texto original', feito: false }]
+        expect(() => updateChecklistItemTexto(lista, 'item-1', '\n\n  \n')).toThrow(
+          'O texto do item da checklist não pode ser vazio.',
+        )
+      })
+
+      it('deve adicionar item multi-linha à lista e persistir sem perder nenhuma quebra', () => {
+        const lista = [{ id: '1', texto: 'Item simples', feito: true }]
+        const itemMulti = 'Passo 1: Acessar banco\nPasso 2: Baixar OFX\nPasso 3: Conciliar faturas'
+        const atualizada = addChecklistItemToList(lista, itemMulti)
+
+        expect(atualizada.length).toBe(2)
+        expect(atualizada[1].texto).toBe(itemMulti)
+        expect(atualizada[1].texto.includes('\n')).toBe(true)
+      })
     })
   })
 })

@@ -415,14 +415,15 @@ export function TarefaDialog({
                   return (
                     <div
                       key={item.id}
-                      className="flex items-center gap-1.5 p-1.5 rounded-md bg-muted/40 border border-primary/40"
+                      className="flex items-start gap-1.5 p-1.5 rounded-md bg-muted/40 border border-primary/40"
                     >
-                      <Input
+                      <Textarea
                         autoFocus
+                        rows={2}
                         value={editingItemTexto}
                         onChange={(e) => setEditingItemTexto(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
+                          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                             e.preventDefault()
                             handleSaveEditItem(item.id)
                           } else if (e.key === 'Escape') {
@@ -430,29 +431,31 @@ export function TarefaDialog({
                             handleCancelEditItem()
                           }
                         }}
-                        className="h-7 text-xs flex-1 bg-white"
-                        placeholder="Editar texto do item..."
+                        className="min-h-[52px] text-xs flex-1 bg-white resize-y leading-relaxed py-1.5"
+                        placeholder="Editar texto do item (Enter para quebra, Ctrl+Enter para salvar)..."
                       />
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 shrink-0"
-                        title="Salvar alteração (Enter)"
-                        onClick={() => handleSaveEditItem(item.id)}
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground shrink-0"
-                        title="Cancelar edição (Esc)"
-                        onClick={handleCancelEditItem}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
+                      <div className="flex flex-col gap-1 shrink-0 pt-0.5">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 shrink-0"
+                          title="Salvar alteração (Ctrl+Enter)"
+                          onClick={() => handleSaveEditItem(item.id)}
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground shrink-0"
+                          title="Cancelar edição (Esc)"
+                          onClick={handleCancelEditItem}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
                   )
                 }
@@ -460,15 +463,16 @@ export function TarefaDialog({
                 return (
                   <div
                     key={item.id}
-                    className="flex items-center justify-between gap-2 text-xs p-1 rounded-md hover:bg-muted/30 group transition-colors"
+                    className="flex items-start justify-between gap-2 text-xs p-1 rounded-md hover:bg-muted/30 group transition-colors"
                   >
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <div className="flex items-start gap-2 min-w-0 flex-1 pt-0.5">
                       <Checkbox
                         checked={item.feito}
+                        className="mt-0.5"
                         onCheckedChange={() => handleToggleChecklistItem(item.id)}
                       />
                       <span
-                        className={`truncate break-words select-none cursor-pointer ${
+                        className={`break-words whitespace-pre-line select-none cursor-pointer flex-1 leading-relaxed ${
                           item.feito ? 'line-through text-muted-foreground' : 'text-foreground'
                         }`}
                         onClick={() => handleToggleChecklistItem(item.id)}
@@ -476,7 +480,7 @@ export function TarefaDialog({
                         {item.texto}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity pt-0.5">
                       <Button
                         type="button"
                         variant="ghost"
@@ -503,24 +507,26 @@ export function TarefaDialog({
               })}
             </div>
 
-            <div className="flex gap-2 pt-1">
-              <Input
-                placeholder="Adicionar item ao checklist..."
+            <div className="flex items-start gap-2 pt-1">
+              <Textarea
+                rows={2}
+                placeholder="Adicionar item ao checklist (Enter insere quebra de linha, Ctrl+Enter para adicionar)..."
                 value={novoItemTexto}
                 onChange={(e) => setNovoItemTexto(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                     e.preventDefault()
                     handleAddChecklistItem()
                   }
                 }}
-                className="text-xs h-8"
+                className="text-xs min-h-[46px] resize-y leading-relaxed py-1.5"
               />
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-8 text-xs shrink-0"
+                className="h-9 text-xs shrink-0 self-start"
+                title="Adicionar item (ou Ctrl+Enter)"
                 onClick={handleAddChecklistItem}
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />

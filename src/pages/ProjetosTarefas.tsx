@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { PageHeader } from '@/components/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -940,16 +941,17 @@ export default function ProjetosTarefas() {
                 )}
               </div>
 
-              {/* Input para adição rápida de subtarefa */}
+              {/* Textarea para adição rápida de subtarefa */}
               {quickSubtarefaTarefaId === tarefa.id && (
-                <div className="flex items-center gap-1.5 p-1.5 rounded-md bg-muted/50 border border-primary/30">
-                  <Input
+                <div className="flex items-start gap-1.5 p-1.5 rounded-md bg-muted/50 border border-primary/30">
+                  <Textarea
                     autoFocus
-                    placeholder="Nova subtarefa..."
+                    rows={2}
+                    placeholder="Nova subtarefa (Enter para quebra, Ctrl+Enter para adicionar)..."
                     value={quickSubtarefaTexto}
                     onChange={(e) => setQuickSubtarefaTexto(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
+                      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                         e.preventDefault()
                         if (quickSubtarefaTexto.trim()) {
                           handleAddSubtarefaRapida(tarefa.id, quickSubtarefaTexto)
@@ -962,37 +964,39 @@ export default function ProjetosTarefas() {
                         setQuickSubtarefaTexto('')
                       }
                     }}
-                    className="h-7 text-xs flex-1 bg-white"
+                    className="min-h-[46px] text-xs flex-1 bg-white resize-y leading-relaxed py-1.5"
                   />
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 shrink-0"
-                    title="Salvar subtarefa (Enter)"
-                    onClick={() => {
-                      if (quickSubtarefaTexto.trim()) {
-                        handleAddSubtarefaRapida(tarefa.id, quickSubtarefaTexto)
-                        setQuickSubtarefaTexto('')
+                  <div className="flex flex-col gap-1 shrink-0 pt-0.5">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 shrink-0"
+                      title="Salvar subtarefa (Ctrl+Enter)"
+                      onClick={() => {
+                        if (quickSubtarefaTexto.trim()) {
+                          handleAddSubtarefaRapida(tarefa.id, quickSubtarefaTexto)
+                          setQuickSubtarefaTexto('')
+                          setQuickSubtarefaTarefaId(null)
+                        }
+                      }}
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-muted-foreground hover:text-foreground shrink-0"
+                      title="Cancelar (Esc)"
+                      onClick={() => {
                         setQuickSubtarefaTarefaId(null)
-                      }
-                    }}
-                  >
-                    <Check className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7 text-muted-foreground hover:text-foreground shrink-0"
-                    title="Cancelar (Esc)"
-                    onClick={() => {
-                      setQuickSubtarefaTarefaId(null)
-                      setQuickSubtarefaTexto('')
-                    }}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
+                        setQuickSubtarefaTexto('')
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
               )}
 
@@ -1008,10 +1012,11 @@ export default function ProjetosTarefas() {
                       return (
                         <div
                           key={item.id}
-                          className="flex items-center gap-1.5 p-1 rounded-md bg-muted/60 border border-primary/40"
+                          className="flex items-start gap-1.5 p-1 rounded-md bg-muted/60 border border-primary/40"
                         >
-                          <Input
+                          <Textarea
                             autoFocus
+                            rows={2}
                             value={editingCardSubtarefa.texto}
                             onChange={(e) =>
                               setEditingCardSubtarefa((prev) =>
@@ -1019,7 +1024,7 @@ export default function ProjetosTarefas() {
                               )
                             }
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
+                              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                                 e.preventDefault()
                                 if (editingCardSubtarefa.texto.trim()) {
                                   handleEditChecklistItemDirect(
@@ -1034,37 +1039,39 @@ export default function ProjetosTarefas() {
                                 setEditingCardSubtarefa(null)
                               }
                             }}
-                            className="h-6 text-xs flex-1 bg-white"
+                            className="min-h-[48px] text-xs flex-1 bg-white resize-y leading-relaxed py-1"
                           />
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 text-emerald-600 hover:text-emerald-700 shrink-0"
-                            title="Salvar alteração (Enter)"
-                            onClick={() => {
-                              if (editingCardSubtarefa.texto.trim()) {
-                                handleEditChecklistItemDirect(
-                                  tarefa.id,
-                                  item.id,
-                                  editingCardSubtarefa.texto,
-                                )
-                                setEditingCardSubtarefa(null)
-                              }
-                            }}
-                          >
-                            <Check className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 text-muted-foreground hover:text-foreground shrink-0"
-                            title="Cancelar (Esc)"
-                            onClick={() => setEditingCardSubtarefa(null)}
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
+                          <div className="flex flex-col gap-1 shrink-0 pt-0.5">
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="h-6 w-6 text-emerald-600 hover:text-emerald-700 shrink-0"
+                              title="Salvar alteração (Ctrl+Enter)"
+                              onClick={() => {
+                                if (editingCardSubtarefa.texto.trim()) {
+                                  handleEditChecklistItemDirect(
+                                    tarefa.id,
+                                    item.id,
+                                    editingCardSubtarefa.texto,
+                                  )
+                                  setEditingCardSubtarefa(null)
+                                }
+                              }}
+                            >
+                              <Check className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="h-6 w-6 text-muted-foreground hover:text-foreground shrink-0"
+                              title="Cancelar (Esc)"
+                              onClick={() => setEditingCardSubtarefa(null)}
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
                         </div>
                       )
                     }
@@ -1072,10 +1079,10 @@ export default function ProjetosTarefas() {
                     return (
                       <div
                         key={item.id}
-                        className="flex items-center justify-between gap-1.5 text-xs py-0.5 px-1 rounded hover:bg-muted/40 group/sub"
+                        className="flex items-start justify-between gap-1.5 text-xs py-0.5 px-1 rounded hover:bg-muted/40 group/sub"
                       >
                         <div
-                          className="flex items-start gap-2 flex-1 min-w-0 cursor-pointer"
+                          className="flex items-start gap-2 flex-1 min-w-0 cursor-pointer pt-0.5"
                           onClick={(e) => handleToggleChecklistItemDirect(tarefa.id, item.id, e)}
                         >
                           <Checkbox
@@ -1087,7 +1094,7 @@ export default function ProjetosTarefas() {
                             onClick={(e) => e.stopPropagation()}
                           />
                           <span
-                            className={`text-[11px] leading-tight select-none break-words ${
+                            className={`text-[11px] leading-relaxed select-none break-words whitespace-pre-line flex-1 ${
                               item.feito
                                 ? 'line-through text-muted-foreground/70'
                                 : 'text-foreground/90 font-normal'
