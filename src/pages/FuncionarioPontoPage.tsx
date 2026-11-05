@@ -69,7 +69,7 @@ import {
   type FuncionarioChecklistRecord,
   type FuncionarioChecklistExecucaoRecord,
 } from '@/services/funcionariosChecklists'
-import { formatarPeriodoChecklist } from '@/lib/funcionariosChecklists'
+import { formatarPeriodoChecklist, type ChecklistItemExecucao } from '@/lib/funcionariosChecklists'
 
 const SESSION_STORAGE_KEY = 'gkza_funcionario_session_token'
 
@@ -1236,7 +1236,15 @@ export default function FuncionarioPontoPage() {
                 <CardContent className="space-y-3">
                   {checklistsHoje.map((checklist) => {
                     const execucao = execucoesHoje[checklist.id]
-                    const itens = execucao?.itens || checklist.itens || []
+                    // REGRA: o card renderiza os itens da EXECUÇÃO do dia
+                    // (funcionarios_checklist_execucoes, com marcado_em/horário).
+                    // Itens do TEMPLATE sem execução ainda aparecem como pendentes.
+                    const itens: ChecklistItemExecucao[] = execucao?.itens?.length
+                      ? execucao.itens
+                      : (checklist.itens || []).map((t) => ({
+                          texto: t.texto,
+                          marcado: false,
+                        }))
                     const total = itens.length
                     const marcados = itens.filter((i) => i.marcado).length
                     const concluido = total > 0 && marcados === total
