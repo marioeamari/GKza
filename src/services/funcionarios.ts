@@ -4,6 +4,8 @@ import {
   normalizarDataPonto,
   buildFiltroPontoData,
   validarPodeRegistrarEntrada,
+  validarOrigemPontoPermitida,
+  MSG_BLOQUEIO_FORA_DO_LOCAL,
 } from '@/lib/funcionarios'
 import { getLocalDateStr, dateOnly, toPocketBaseDate } from '@/lib/format'
 
@@ -357,6 +359,10 @@ export const funcionariosService = {
     editadoPor?: string
     observacao?: string
   }): Promise<FuncionarioPontoRecord> {
+    // REGRA: batida de ponto só a partir do escaneamento do QR da estação.
+    // Origem 'fora_do_local' é recusada; lançamento 'admin' permanece permitido.
+    validarOrigemPontoPermitida(params.origem)
+
     const diaAlvo = normalizarDataPonto(params.data || getLocalDateStr())
 
     // Regra anti-duplicidade estrita:
@@ -387,7 +393,13 @@ export const funcionariosService = {
     }
   },
 
-  async registrarSaida(pontoId: string, horaSaida: string): Promise<FuncionarioPontoRecord> {
+  async registrarSaida(
+    pontoId: string,
+    horaSaida: string,
+    origem?: FuncionarioPontoRecord['origem'],
+  ): Promise<FuncionarioPontoRecord> {
+    // REGRA: saída só a partir do escaneamento do QR da estação ('admin' permanece permitido).
+    validarOrigemPontoPermitida(origem)
     return await pb.collection('funcionarios_pontos').update<FuncionarioPontoRecord>(pontoId, {
       saida: horaSaida,
     })
@@ -397,7 +409,10 @@ export const funcionariosService = {
     pontoId: string,
     pausasAtuais: PausaPonto[],
     horaInicioPausa: string,
+    origem?: FuncionarioPontoRecord['origem'],
   ): Promise<FuncionarioPontoRecord> {
+    // REGRA: pausa só a partir do escaneamento do QR da estação ('admin' permanece permitido).
+    validarOrigemPontoPermitida(origem)
     const novasPausas = [...pausasAtuais, { inicio: horaInicioPausa }]
     return await pb.collection('funcionarios_pontos').update<FuncionarioPontoRecord>(pontoId, {
       pausas: novasPausas,
@@ -408,7 +423,10 @@ export const funcionariosService = {
     pontoId: string,
     pausasAtuais: PausaPonto[],
     horaFimPausa: string,
+    origem?: FuncionarioPontoRecord['origem'],
   ): Promise<FuncionarioPontoRecord> {
+    // REGRA: retorno da pausa só a partir do escaneamento do QR da estação ('admin' permitido).
+    validarOrigemPontoPermitida(origem)
     const novasPausas = pausasAtuais.map((p, index) => {
       if (index === pausasAtuais.length - 1 && !p.fim) {
         return { ...p, fim: horaFimPausa }

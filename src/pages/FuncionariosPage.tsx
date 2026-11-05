@@ -1069,8 +1069,9 @@ export default function FuncionariosPage() {
                                   <Badge
                                     variant="outline"
                                     className="text-[9px] text-amber-800 bg-amber-50 border-amber-300"
+                                    title="Batida registrada fora da estação QR (histórico)"
                                   >
-                                    Fora
+                                    Fora do local
                                   </Badge>
                                 )}
                                 {p.editadoPor && (
@@ -2375,12 +2376,24 @@ export default function FuncionariosPage() {
                             <td className="py-2 px-2 text-center font-mono">{p.entrada}</td>
                             <td className="py-2 px-2 text-center font-mono">{p.saida || '—'}</td>
                             <td className="py-2 px-2 text-center">
-                              <Badge variant="outline" className="text-[10px]">
+                              <Badge
+                                variant="outline"
+                                className={
+                                  p.origem === 'fora_do_local'
+                                    ? 'text-[10px] text-amber-800 bg-amber-50 border-amber-300'
+                                    : 'text-[10px]'
+                                }
+                                title={
+                                  p.origem === 'fora_do_local'
+                                    ? 'Batida registrada fora da estação QR (histórico)'
+                                    : undefined
+                                }
+                              >
                                 {p.origem === 'estacao_qr'
                                   ? 'Estação QR'
                                   : p.origem === 'admin'
                                     ? 'Admin'
-                                    : 'Fora'}
+                                    : 'Fora do local'}
                               </Badge>
                             </td>
                             <td className="py-2 px-3 text-right text-muted-foreground">

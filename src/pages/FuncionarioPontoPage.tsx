@@ -49,9 +49,10 @@ import {
   converterMinutosEmHorasDecimais,
   formatarDataDDMMAAAA,
   formatarDataDDMM,
+  normalizarDataPonto,
+  MSG_BLOQUEIO_FORA_DO_LOCAL,
 } from '@/lib/funcionarios'
 import { formatCurrency, getLocalDateStr } from '@/lib/format'
-import { normalizarDataPonto } from '@/lib/funcionarios'
 import {
   Dialog,
   DialogContent,
@@ -98,6 +99,11 @@ export default function FuncionarioPontoPage() {
   const [salvandoConferenciaFolha, setSalvandoConferenciaFolha] = useState(false)
   const [modalDivergenciaFolhaAberta, setModalDivergenciaFolhaAberta] = useState(false)
   const [motivoDivergenciaFolha, setMotivoDivergenciaFolha] = useState('')
+
+  // REGRA: batida de ponto (entrada/saída/pausa/retorno) somente a partir do
+  // escaneamento do QR Code da estação. A sessão vinculada (token_sessao)
+  // continua valendo para confirmar dias trabalhados e conferir o pagamento.
+  const podeBaterPonto = estacaoValida === true
 
   // Relógio em tempo real
   useEffect(() => {
@@ -406,6 +412,15 @@ export default function FuncionarioPontoPage() {
 
   const handleBaterEntrada = async () => {
     if (!funcionarioAtual || submitting) return
+    // REGRA: batida de ponto somente a partir do escaneamento do QR da estação.
+    if (!podeBaterPonto) {
+      toast({
+        title: 'Registro não permitido',
+        description: MSG_BLOQUEIO_FORA_DO_LOCAL,
+        variant: 'destructive',
+      })
+      return
+    }
 
     // Proteção em memória contra duplo-clique se já existir entrada registrada hoje
     if (pontoHoje?.entrada) {
@@ -458,7 +473,11 @@ export default function FuncionarioPontoPage() {
     setSubmitting(true)
     try {
       const horaStr = horaAtualHHMM()
-      const pontoAtualizado = await funcionariosService.registrarSaida(pontoHoje.id, horaStr)
+      const pontoAtualizado = await funcionariosService.registrarSaida(
+        pontoHoje.id,
+        horaStr,
+        pontoHoje.origem,
+      )
       setPontoHoje(pontoAtualizado)
       if (funcionarioAtual) {
         await carregarDadosDoColaborador(funcionarioAtual)
@@ -490,6 +509,7 @@ export default function FuncionarioPontoPage() {
         pontoHoje.id,
         pausasAtuais,
         horaStr,
+        pontoHoje.origem,
       )
       setPontoHoje(pontoAtualizado)
 
@@ -519,6 +539,7 @@ export default function FuncionarioPontoPage() {
         pontoHoje.id,
         pausasAtuais,
         horaStr,
+        pontoHoje.origem,
       )
       setPontoHoje(pontoAtualizado)
 
@@ -966,16 +987,16 @@ export default function FuncionarioPontoPage() {
               </div>
             )}
 
-            {/* AVISO CASO FORA DO LOCAL */}
+            {/* AVISO CASO FORA DO LOCAL — REGRA: batida bloqueada sem estação escaneada */}
             {!estacaoValida && (
               <div className="rounded-xl border border-amber-300 bg-amber-50 p-3.5 text-xs text-amber-900 flex items-start gap-2.5">
                 <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-bold">Atenção: Você não escaneou o QR Code da estação!</p>
+                  <p className="font-bold">Escaneie o QR Code da estação para registrar o ponto.</p>
                   <p className="text-amber-800 mt-0.5">
-                    Seu registro será gravado com o status{' '}
-                    <span className="font-semibold underline">Fora do local</span> para auditoria da
-                    empresa.
+                    Sem o escaneamento do QR Code da estação, os botões de registro ficam
+                    desabilitados. Seu celular vinculado continua valendo para confirmar os dias
+                    trabalhados e conferir o pagamento da folha.
                   </p>
                 </div>
               </div>
@@ -1029,7 +1050,7 @@ export default function FuncionarioPontoPage() {
                 {!pontoHoje ? (
                   <Button
                     onClick={handleBaterEntrada}
-                    disabled={submitting}
+                    disabled={submitting || !podeBaterPonto}
                     className="w-full h-16 text-lg font-bold bg-[#DF5830] hover:bg-[#c94b26] text-white shadow-md gap-2"
                   >
                     {submitting ? (
@@ -1053,7 +1074,7 @@ export default function FuncionarioPontoPage() {
                     {!estaEmPausa ? (
                       <Button
                         onClick={handleIniciarPausa}
-                        disabled={submitting}
+                        disabled={submitting || !podeBaterPonto}
                         variant="outline"
                         className="w-full h-12 text-sm font-bold border-amber-300 text-amber-800 hover:bg-amber-50 gap-2"
                       >
@@ -1063,7 +1084,7 @@ export default function FuncionarioPontoPage() {
                     ) : (
                       <Button
                         onClick={handleRetomarPausa}
-                        disabled={submitting}
+                        disabled={submitting || !podeBaterPonto}
                         className="w-full h-12 text-sm font-bold bg-amber-600 hover:bg-amber-700 text-white gap-2"
                       >
                         <RotateCcw className="h-4 w-4" />
@@ -1074,7 +1095,7 @@ export default function FuncionarioPontoPage() {
                     {/* Botão de Saída */}
                     <Button
                       onClick={handleBaterSaida}
-                      disabled={submitting || estaEmPausa}
+                      disabled={submitting || estaEmPausa || !podeBaterPonto}
                       className="w-full h-16 text-lg font-bold bg-gray-900 hover:bg-black text-white shadow-md gap-2"
                     >
                       <Square className="h-5 w-5" />

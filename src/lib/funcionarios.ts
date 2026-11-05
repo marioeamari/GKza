@@ -301,6 +301,30 @@ export function validarPodeRegistrarEntrada(
 }
 
 /**
+ * REGRA VIGENTE (bloqueio de batida fora da estação):
+ * A batida de ponto (entrada, saída, pausa e retorno) só é permitida a partir do
+ * escaneamento do QR Code da estação — origem 'estacao_qr'. Acesso direto ao
+ * /funcionarios/ponto sem token de estação (mesmo com celular vinculado via
+ * token_sessao) NÃO registra ponto: era gravado como 'fora_do_local' e hoje é
+ * RECUSADO. O lançamento manual do administrador (origem 'admin') permanece
+ * permitido. A sessão vinculada continua valendo para confirmar dias e conferir
+ * o pagamento da folha.
+ */
+export const MSG_BLOQUEIO_FORA_DO_LOCAL = 'Escaneie o QR Code da estação para registrar o ponto.'
+
+export type OrigemPonto = 'estacao_qr' | 'fora_do_local' | 'manual' | 'admin'
+
+export function validarOrigemPontoPermitida(origem: OrigemPonto | null | undefined): {
+  permitido: boolean
+  motivo?: string
+} {
+  if (origem === 'estacao_qr' || origem === 'admin') {
+    return { permitido: true }
+  }
+  return { permitido: false, motivo: MSG_BLOQUEIO_FORA_DO_LOCAL }
+}
+
+/**
  * Calcula o valor da hora a partir da base
  */
 export function calcularValorHoraBase(
