@@ -24,6 +24,8 @@ export interface FuncionarioRecord {
   ativo: boolean
   token_sessao?: string
   pin?: string
+  /** Funções (cargos de checklist) do funcionário — relation multi p/ funcionarios_funcoes. */
+  funcoes?: string[]
   created?: string
   updated?: string
 }

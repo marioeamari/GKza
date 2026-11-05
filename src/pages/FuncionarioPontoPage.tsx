@@ -18,6 +18,7 @@ import {
   RefreshCw,
   QrCode,
   AlertTriangle,
+  ListChecks,
 } from 'lucide-react'
 import { LocalQRCode } from '@/components/LocalQRCode'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -62,6 +63,13 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  funcionariosChecklistsService,
+  type FuncionarioChecklistRecord,
+  type FuncionarioChecklistExecucaoRecord,
+} from '@/services/funcionariosChecklists'
+import { formatarPeriodoChecklist } from '@/lib/funcionariosChecklists'
 
 const SESSION_STORAGE_KEY = 'gkza_funcionario_session_token'
 
@@ -100,6 +108,12 @@ export default function FuncionarioPontoPage() {
   const [modalDivergenciaFolhaAberta, setModalDivergenciaFolhaAberta] = useState(false)
   const [motivoDivergenciaFolha, setMotivoDivergenciaFolha] = useState('')
 
+  // --- CHECKLISTS DO DIA (vinculados às funções do funcionário) ---
+  const [checklistsHoje, setChecklistsHoje] = useState<FuncionarioChecklistRecord[]>([])
+  const [execucoesHoje, setExecucoesHoje] = useState<
+    Record<string, FuncionarioChecklistExecucaoRecord>
+  >({})
+  const [itemMarcando, setItemMarcando] = useState<string | null>(null)
   // REGRA: batida de ponto (entrada/saída/pausa/retorno) somente a partir do
   // escaneamento do QR Code da estação. A sessão vinculada (token_sessao)
   // continua valendo para confirmar dias trabalhados e conferir o pagamento.
@@ -124,11 +138,12 @@ export default function FuncionarioPontoPage() {
       const hojeStr = getLocalDateStr() // Data atual no fuso America/Sao_Paulo
       // Busca ponto de hoje: se houver aberto traz ele; se já foi finalizado traz o último do dia
       const pontoAberto = await funcionariosService.buscarPontoAbertoHoje(func.id, hojeStr)
+      let pontoDoDia: FuncionarioPontoRecord | null = pontoAberto
       if (pontoAberto) {
         setPontoHoje(pontoAberto)
       } else {
-        const ultimoDoDia = await funcionariosService.buscarUltimoPontoDoDia(func.id, hojeStr)
-        setPontoHoje(ultimoDoDia)
+        pontoDoDia = await funcionariosService.buscarUltimoPontoDoDia(func.id, hojeStr)
+        setPontoHoje(pontoDoDia)
       }
 
       // Carregar histórico recente dos últimos 30 dias
@@ -156,6 +171,32 @@ export default function FuncionarioPontoPage() {
       // Carregar folha mais recente quitada para conferência de pagamento pelo colaborador
       const folha = await funcionariosService.buscarFolhaPendenteConferenciaColaborador(func.id)
       setFolhaPendenteConferencia(folha)
+
+      // --- CHECKLIST DO DIA ---
+      // Vigência/janela resolvidas pela hora da ENTRADA do ponto (check-in).
+      const entradaHoje = pontoDoDia?.entrada
+      try {
+        const checklistsDoDia = await funcionariosChecklistsService.checklistsDoDia(
+          func.id,
+          hojeStr,
+          entradaHoje,
+        )
+        setChecklistsHoje(checklistsDoDia)
+
+        // Execuções já existentes para o dia (idempotência por funcionário+checklist+data)
+        const execucoes = await funcionariosChecklistsService.listarExecucoes({
+          funcionarioId: func.id,
+          dataInicio: hojeStr,
+          dataFim: hojeStr,
+        })
+        const mapaExecucoes: Record<string, FuncionarioChecklistExecucaoRecord> = {}
+        for (const exec of execucoes) {
+          mapaExecucoes[exec.checklist] = exec
+        }
+        setExecucoesHoje(mapaExecucoes)
+      } catch (errChecklist) {
+        console.error('Erro ao carregar checklists do dia:', errChecklist)
+      }
     } catch (err) {
       console.error('Erro ao carregar dados do colaborador:', err)
     }
@@ -479,13 +520,29 @@ export default function FuncionarioPontoPage() {
         pontoHoje.origem,
       )
       setPontoHoje(pontoAtualizado)
+
+      // REGRA: saída com itens pendentes de checklist apenas AVISA — nunca bloqueia.
+      let avisoChecklist: string | undefined
       if (funcionarioAtual) {
+        try {
+          const pendentes = await funcionariosChecklistsService.contarItensPendentesDoDia(
+            funcionarioAtual.id,
+            getLocalDateStr(),
+          )
+          if (pendentes > 0) {
+            avisoChecklist = `Atenção: ${pendentes} ${
+              pendentes === 1 ? 'item pendente' : 'itens pendentes'
+            } no checklist do dia.`
+          }
+        } catch (errChecklist) {
+          console.error('Erro ao contar itens pendentes do checklist:', errChecklist)
+        }
         await carregarDadosDoColaborador(funcionarioAtual)
       }
 
       toast({
         title: 'Saída registrada!',
-        description: `Horário de saída: ${horaStr}. Bom descanso!`,
+        description: `Horário de saída: ${horaStr}.${avisoChecklist ? ` ${avisoChecklist}` : ''} Bom descanso!`,
       })
     } catch (err: any) {
       console.error('Erro ao bater saída:', err)
@@ -496,6 +553,57 @@ export default function FuncionarioPontoPage() {
       })
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  // --- CHECKLIST DO DIA: marcar item (exige origem do ponto: estação QR/admin) ---
+  const handleMarcarItemChecklist = async (
+    checklist: FuncionarioChecklistRecord,
+    index: number,
+  ) => {
+    if (!funcionarioAtual) return
+    // REGRA: sem estação QR válida a marcação é RECUSADA com o aviso padrão.
+    if (!podeBaterPonto) {
+      toast({
+        title: 'Marcação não permitida',
+        description: MSG_BLOQUEIO_FORA_DO_LOCAL,
+        variant: 'destructive',
+      })
+      return
+    }
+
+    const chave = `${checklist.id}:${index}`
+    setItemMarcando(chave)
+    try {
+      const hojeStr = getLocalDateStr()
+      // Execução nasce preguiçosamente no primeiro item marcado (idempotente).
+      const execucao = await funcionariosChecklistsService.garantirExecucao(
+        funcionarioAtual.id,
+        checklist,
+        hojeStr,
+      )
+      const atualizada = await funcionariosChecklistsService.marcarItem(
+        execucao.id,
+        execucao.itens,
+        index,
+        'estacao_qr',
+      )
+      setExecucoesHoje((prev) => ({ ...prev, [checklist.id]: atualizada }))
+
+      if (atualizada.itens[index]?.marcado) {
+        toast({
+          title: 'Item marcado',
+          description: `"${checklist.itens[index]?.texto}" às ${atualizada.itens[index].horario}.`,
+        })
+      }
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao marcar item',
+        description: err.message || 'Tente novamente.',
+        variant: 'destructive',
+      })
+    } finally {
+      setItemMarcando(null)
     }
   }
 
@@ -1105,6 +1213,100 @@ export default function FuncionarioPontoPage() {
                 )}{' '}
               </CardContent>
             </Card>
+
+            {/* CHECKLIST DO DIA — vinculado às funções do funcionário */}
+            {funcionarioAtual && checklistsHoje.length > 0 && (
+              <Card className="border border-border/80 bg-white shadow-sm">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base font-bold text-gray-900 flex items-center gap-2">
+                      <ListChecks className="h-5 w-5 text-[#DF5830]" />
+                      Checklist do dia
+                    </CardTitle>
+                    <Badge variant="secondary" className="font-normal text-xs">
+                      {checklistsHoje.length}{' '}
+                      {checklistsHoje.length === 1 ? 'checklist' : 'checklists'}
+                    </Badge>
+                  </div>
+                  <CardDescription>
+                    Marque cada item ao concluí-lo — o horário da marcação fica registrado.
+                    {!podeBaterPonto && ' Escaneie o QR da estação para poder marcar.'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {checklistsHoje.map((checklist) => {
+                    const execucao = execucoesHoje[checklist.id]
+                    const itens = execucao?.itens || checklist.itens || []
+                    const total = itens.length
+                    const marcados = itens.filter((i) => i.marcado).length
+                    const concluido = total > 0 && marcados === total
+
+                    return (
+                      <div
+                        key={checklist.id}
+                        className="rounded-xl border border-border/70 bg-[#FBF9F7] p-3 space-y-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-gray-900 truncate">
+                              {checklist.nome}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {formatarPeriodoChecklist(checklist)}
+                            </p>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] shrink-0 ${
+                              concluido
+                                ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                : marcados > 0
+                                  ? 'border-amber-300 bg-amber-50 text-amber-800'
+                                  : ''
+                            }`}
+                          >
+                            {marcados}/{total}
+                          </Badge>
+                        </div>
+
+                        <div className="space-y-1">
+                          {itens.map((item, idx) => {
+                            const chave = `${checklist.id}:${idx}`
+                            const emMarcacao = itemMarcando === chave
+                            return (
+                              <label
+                                key={idx}
+                                className={`flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm cursor-pointer transition-colors ${
+                                  item.marcado ? 'bg-emerald-50/60' : 'hover:bg-white'
+                                } ${!podeBaterPonto ? 'opacity-60 cursor-not-allowed' : ''}`}
+                              >
+                                <Checkbox
+                                  checked={item.marcado}
+                                  disabled={!podeBaterPonto || emMarcacao || submitting}
+                                  onCheckedChange={() => handleMarcarItemChecklist(checklist, idx)}
+                                />
+                                <span
+                                  className={`flex-1 ${
+                                    item.marcado ? 'line-through text-muted-foreground' : ''
+                                  }`}
+                                >
+                                  {item.texto}
+                                </span>
+                                {item.horario && (
+                                  <span className="text-[10px] font-mono text-muted-foreground">
+                                    {item.horario}
+                                  </span>
+                                )}
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </CardContent>
+              </Card>
+            )}
 
             {/* VISÃO PESSOAL DO EMPREGADO (SOMENTE SEUS DADOS) */}
             <Card className="border border-border/80 bg-white shadow-sm">

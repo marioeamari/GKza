@@ -75,8 +75,24 @@ import {
 } from '@/lib/funcionarios'
 import { formatCurrency, getLocalDateStr } from '@/lib/format'
 import { type FuncionarioConfirmacaoRecord } from '@/services/funcionarios'
-import { Info, CalendarCheck, Eye, History } from 'lucide-react'
+import { Info, CalendarCheck, Eye, History, ListChecks, Pencil, Briefcase } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
+import {
+  funcionariosChecklistsService,
+  type FuncionarioFuncaoRecord,
+  type FuncionarioChecklistRecord,
+  type FuncionarioChecklistExecucaoRecord,
+} from '@/services/funcionariosChecklists'
+import {
+  calcularStatusExecucao,
+  contarItensPendentes,
+  formatarPeriodoChecklist,
+  PERIODOS_CHECKLIST,
+  DIAS_SEMANA_LABELS,
+  STATUS_EXECUCAO_LABELS,
+  type PeriodoChecklist,
+} from '@/lib/funcionariosChecklists'
+import { Checkbox } from '@/components/ui/checkbox'
 
 export default function FuncionariosPage() {
   const { user } = useAuth()
@@ -84,7 +100,7 @@ export default function FuncionariosPage() {
 
   // Tabs principais: folha | funcionarios | dividas | estacoes | historico_folhas
   const [activeTab, setActiveTab] = useState<
-    'folha' | 'funcionarios' | 'dividas' | 'estacoes' | 'folhas'
+    'folha' | 'funcionarios' | 'dividas' | 'estacoes' | 'folhas' | 'checklists'
   >('folha')
 
   // Estado geral
@@ -137,6 +153,7 @@ export default function FuncionariosPage() {
     telefone: '',
     pin: '',
     ativo: true,
+    funcoes: [] as string[],
   })
 
   // Modal Dívidas
@@ -164,6 +181,28 @@ export default function FuncionariosPage() {
 
   // Modal QR Code da Estação para Impressão
   const [selectedEstacaoQR, setSelectedEstacaoQR] = useState<FuncionarioEstacaoRecord | null>(null)
+
+  // --- CHECKLISTS (funções, checklists e histórico de execuções) ---
+  const [funcoes, setFuncoes] = useState<FuncionarioFuncaoRecord[]>([])
+  const [checklists, setChecklists] = useState<FuncionarioChecklistRecord[]>([])
+  const [execucoesChecklist, setExecucoesChecklist] = useState<
+    FuncionarioChecklistExecucaoRecord[]
+  >([])
+  const [novoNomeFuncao, setNovoNomeFuncao] = useState('')
+  const [editingFuncaoId, setEditingFuncaoId] = useState<string | null>(null)
+  const [checklistForm, setChecklistForm] = useState<{
+    nome: string
+    periodo: PeriodoChecklist
+    dia_semana: number
+    dia_mes: number
+    funcoes: string[]
+    itens: { texto: string }[]
+  }>({ nome: '', periodo: 'diario', dia_semana: 1, dia_mes: 1, funcoes: [], itens: [] })
+  const [novoItemTexto, setNovoItemTexto] = useState('')
+  const [editingChecklistId, setEditingChecklistId] = useState<string | null>(null)
+  const [isChecklistModalOpen, setIsChecklistModalOpen] = useState(false)
+  const [salvandoChecklist, setSalvandoChecklist] = useState(false)
+  const [dataExecucoes, setDataExecucoes] = useState<string>(getLocalDateStr())
 
   // Modal Fechamento de Folha
   const [isFecharFolhaModalOpen, setIsFecharFolhaModalOpen] = useState(false)
@@ -387,6 +426,7 @@ export default function FuncionariosPage() {
         telefone: func.telefone || '',
         pin: func.pin || '',
         ativo: func.ativo ?? true,
+        funcoes: func.funcoes || [],
       })
     } else {
       setEditingFuncionario(null)
@@ -403,6 +443,7 @@ export default function FuncionariosPage() {
         telefone: '',
         pin: '',
         ativo: true,
+        funcoes: [],
       })
     }
     setIsFuncionarioModalOpen(true)
@@ -433,6 +474,165 @@ export default function FuncionariosPage() {
     } catch (err: any) {
       toast({
         title: 'Erro ao salvar funcionário',
+        description: err.message,
+        variant: 'destructive',
+      })
+    }
+  }
+
+  // --- CHECKLISTS: carregamento ---
+  const carregarChecklistsAdmin = useCallback(async () => {
+    try {
+      const [funcoesList, checklistsList, execucoesList] = await Promise.all([
+        funcionariosChecklistsService.listarFuncoes(),
+        funcionariosChecklistsService.listarChecklists(),
+        funcionariosChecklistsService.listarExecucoes(),
+      ])
+      setFuncoes(funcoesList)
+      setChecklists(checklistsList)
+      setExecucoesChecklist(execucoesList)
+    } catch (err: any) {
+      console.error('Erro ao carregar checklists:', err)
+      toast({
+        title: 'Erro ao carregar checklists',
+        description: err.message,
+        variant: 'destructive',
+      })
+    }
+  }, [toast])
+
+  useEffect(() => {
+    carregarChecklistsAdmin()
+  }, [carregarChecklistsAdmin])
+
+  // Funcionários que recebem o checklist (via funções em comum)
+  const funcionariosDoChecklist = useCallback(
+    (checklist: FuncionarioChecklistRecord): FuncionarioRecord[] => {
+      const ids = checklist.funcoes || []
+      return funcionarios.filter((f) => (f.funcoes || []).some((fid) => ids.includes(fid)))
+    },
+    [funcionarios],
+  )
+
+  // --- CHECKLISTS: funções ---
+  const handleSalvarFuncao = async () => {
+    if (!novoNomeFuncao.trim()) {
+      toast({
+        title: 'Nome obrigatório',
+        description: 'Informe o nome da função.',
+        variant: 'destructive',
+      })
+      return
+    }
+    try {
+      if (editingFuncaoId) {
+        await funcionariosChecklistsService.atualizarFuncao(editingFuncaoId, novoNomeFuncao)
+        toast({ title: 'Função atualizada!' })
+      } else {
+        await funcionariosChecklistsService.criarFuncao(novoNomeFuncao)
+        toast({ title: 'Função criada!' })
+      }
+      setNovoNomeFuncao('')
+      setEditingFuncaoId(null)
+      await carregarChecklistsAdmin()
+    } catch (err: any) {
+      toast({ title: 'Erro ao salvar função', description: err.message, variant: 'destructive' })
+    }
+  }
+
+  const handleExcluirFuncao = async (id: string) => {
+    if (
+      !confirm('Excluir esta função? Checklists vinculados a ela deixam de atingir funcionários.')
+    )
+      return
+    try {
+      await funcionariosChecklistsService.excluirFuncao(id)
+      toast({ title: 'Função excluída' })
+      await carregarChecklistsAdmin()
+    } catch (err: any) {
+      toast({ title: 'Erro ao excluir função', description: err.message, variant: 'destructive' })
+    }
+  }
+
+  // --- CHECKLISTS: CRUD ---
+  const handleOpenChecklistModal = (checklist?: FuncionarioChecklistRecord) => {
+    if (checklist) {
+      setEditingChecklistId(checklist.id)
+      setChecklistForm({
+        nome: checklist.nome,
+        periodo: checklist.periodo,
+        dia_semana: checklist.dia_semana ?? 1,
+        dia_mes: checklist.dia_mes ?? 1,
+        funcoes: checklist.funcoes || [],
+        itens: (checklist.itens || []).map((i) => ({ texto: i.texto })),
+      })
+    } else {
+      setEditingChecklistId(null)
+      setChecklistForm({
+        nome: '',
+        periodo: 'diario',
+        dia_semana: 1,
+        dia_mes: 1,
+        funcoes: [],
+        itens: [],
+      })
+    }
+    setIsChecklistModalOpen(true)
+  }
+
+  const handleSalvarChecklist = async () => {
+    if (!checklistForm.nome.trim()) {
+      toast({
+        title: 'Dados incompletos',
+        description: 'Informe o nome do checklist.',
+        variant: 'destructive',
+      })
+      return
+    }
+    if (checklistForm.funcoes.length === 0) {
+      toast({
+        title: 'Dados incompletos',
+        description: 'Vincule o checklist a pelo menos uma função.',
+        variant: 'destructive',
+      })
+      return
+    }
+    setSalvandoChecklist(true)
+    try {
+      const dados = {
+        nome: checklistForm.nome.trim(),
+        periodo: checklistForm.periodo,
+        dia_semana: checklistForm.periodo === 'semanal' ? checklistForm.dia_semana : undefined,
+        dia_mes: checklistForm.periodo === 'mensal' ? checklistForm.dia_mes : undefined,
+        itens: checklistForm.itens.filter((i) => i.texto.trim()),
+        funcoes: checklistForm.funcoes,
+      }
+      if (editingChecklistId) {
+        await funcionariosChecklistsService.atualizarChecklist(editingChecklistId, dados)
+        toast({ title: 'Checklist atualizado!' })
+      } else {
+        await funcionariosChecklistsService.criarChecklist(dados as any)
+        toast({ title: 'Checklist criado!' })
+      }
+      setIsChecklistModalOpen(false)
+      await carregarChecklistsAdmin()
+    } catch (err: any) {
+      toast({ title: 'Erro ao salvar checklist', description: err.message, variant: 'destructive' })
+    } finally {
+      setSalvandoChecklist(false)
+    }
+  }
+
+  const handleExcluirChecklist = async (id: string) => {
+    if (!confirm('Excluir este checklist? Execuções existentes ficarão sem o template original.'))
+      return
+    try {
+      await funcionariosChecklistsService.excluirChecklist(id)
+      toast({ title: 'Checklist excluído' })
+      await carregarChecklistsAdmin()
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao excluir checklist',
         description: err.message,
         variant: 'destructive',
       })
@@ -830,6 +1030,10 @@ export default function FuncionariosPage() {
           <TabsTrigger value="folhas" className="gap-2 font-semibold">
             <Receipt className="h-4 w-4" />
             Histórico Fechamentos
+          </TabsTrigger>
+          <TabsTrigger value="checklists" className="gap-2 font-semibold">
+            <ListChecks className="h-4 w-4" />
+            Checklists ({checklists.length})
           </TabsTrigger>
         </TabsList>
 
@@ -1692,9 +1896,267 @@ export default function FuncionariosPage() {
             </div>
           )}
         </TabsContent>
-      </Tabs>
 
-      {/* MODAL 1: CADASTRAR / EDITAR FUNCIONÁRIO */}
+        {/* TAB CHECKLISTS: funções, checklists e histórico de execuções */}
+        <TabsContent value="checklists" className="space-y-6 focus-visible:outline-none">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                <ListChecks className="h-5 w-5 text-[#DF5830]" />
+                Checklists Diários por Função
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Crie funções, monte checklists com itens e períodos e veja quem os recebe. O
+                funcionário executa no check-in do Ponto Eletrônico.
+              </p>
+            </div>
+            <Button
+              onClick={() => handleOpenChecklistModal()}
+              className="bg-[#DF5830] hover:bg-[#c94b26] text-white"
+            >
+              <Plus className="h-4 w-4 mr-1" /> Novo Checklist
+            </Button>
+          </div>
+
+          {/* FUNÇÕES */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-bold flex items-center gap-2">
+                <Briefcase className="h-4 w-4 text-[#DF5830]" /> Funções
+              </CardTitle>
+              <CardDescription>
+                Cargos usados para atribuir checklists aos funcionários.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-2">
+                <Input
+                  value={novoNomeFuncao}
+                  onChange={(e) => setNovoNomeFuncao(e.target.value)}
+                  placeholder={
+                    editingFuncaoId ? 'Editando função...' : 'Nova função (ex: Costureira)'
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleSalvarFuncao()
+                    }
+                  }}
+                />
+                <Button
+                  onClick={handleSalvarFuncao}
+                  className="bg-[#DF5830] hover:bg-[#c94b26] text-white"
+                >
+                  {editingFuncaoId ? 'Salvar' : 'Criar'}
+                </Button>
+                {editingFuncaoId && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditingFuncaoId(null)
+                      setNovoNomeFuncao('')
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                )}
+              </div>
+              {funcoes.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nenhuma função cadastrada.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {funcoes.map((fn) => (
+                    <div
+                      key={fn.id}
+                      className="flex items-center gap-2 rounded-full border border-border bg-[#FBF9F7] pl-3 pr-1 py-1"
+                    >
+                      <span className="text-xs font-semibold text-gray-800">{fn.nome}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => {
+                          setEditingFuncaoId(fn.id)
+                          setNovoNomeFuncao(fn.nome)
+                        }}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-red-600"
+                        onClick={() => handleExcluirFuncao(fn.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* CHECKLISTS */}
+          {checklists.length === 0 ? (
+            <Card>
+              <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                Nenhum checklist criado ainda.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {checklists.map((cl) => {
+                const recebem = funcionariosDoChecklist(cl)
+                return (
+                  <Card key={cl.id}>
+                    <CardHeader className="pb-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <CardTitle className="text-sm font-bold">{cl.nome}</CardTitle>
+                          <CardDescription className="text-xs">
+                            {formatarPeriodoChecklist(cl)} ·{' '}
+                            {(cl.funcoes || [])
+                              .map((id) => funcoes.find((f) => f.id === id)?.nome)
+                              .filter(Boolean)
+                              .join(', ') || 'sem função'}
+                          </CardDescription>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => handleOpenChecklistModal(cl)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-red-600"
+                            onClick={() => handleExcluirChecklist(cl.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <ul className="space-y-1">
+                        {(cl.itens || []).map((item, idx) => (
+                          <li key={idx} className="text-xs text-gray-700 flex items-center gap-2">
+                            <span className="h-1.5 w-1.5 rounded-full bg-[#DF5830] shrink-0" />
+                            {item.texto}
+                          </li>
+                        ))}
+                        {(cl.itens || []).length === 0 && (
+                          <li className="text-xs text-muted-foreground">Sem itens.</li>
+                        )}
+                      </ul>
+                      <div className="pt-1 border-t border-border/50 text-xs text-gray-600">
+                        <span className="font-semibold">Recebem:</span>{' '}
+                        {recebem.length === 0 ? (
+                          <span className="text-muted-foreground">
+                            ninguém (sem funções em comum)
+                          </span>
+                        ) : (
+                          recebem.map((f) => f.nome).join(', ')
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          )}
+
+          {/* HISTÓRICO DE EXECUÇÕES POR FUNCIONÁRIO/DATA */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-bold flex items-center gap-2">
+                <History className="h-4 w-4 text-[#DF5830]" /> Execuções por Funcionário / Data
+              </CardTitle>
+              <CardDescription>
+                Status das execuções dos checklists (badge: concluído, parcial ou não feito).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center gap-2 max-w-xs">
+                <Label className="text-xs font-semibold shrink-0">Data</Label>
+                <Input
+                  type="date"
+                  value={dataExecucoes}
+                  onChange={(e) => setDataExecucoes(e.target.value)}
+                />
+              </div>
+              {(() => {
+                const doDia = execucoesChecklist.filter((ex) => ex.data === dataExecucoes)
+                if (doDia.length === 0) {
+                  return (
+                    <p className="text-sm text-muted-foreground">
+                      Nenhuma execução registrada nesta data.
+                    </p>
+                  )
+                }
+                const porFuncionario = new Map<string, FuncionarioChecklistExecucaoRecord[]>()
+                for (const ex of doDia) {
+                  const lista = porFuncionario.get(ex.funcionario) || []
+                  lista.push(ex)
+                  porFuncionario.set(ex.funcionario, lista)
+                }
+                return (
+                  <div className="space-y-2">
+                    {[...porFuncionario.entries()].map(([funcId, lista]) => {
+                      const nome =
+                        funcionarios.find((f) => f.id === funcId)?.nome || `(${funcId.slice(0, 6)})`
+                      return (
+                        <div
+                          key={funcId}
+                          className="rounded-lg border border-border/60 bg-[#FBF9F7] p-3 space-y-2"
+                        >
+                          <p className="text-xs font-bold text-gray-900">{nome}</p>
+                          <div className="space-y-1.5">
+                            {lista.map((ex) => {
+                              const status = calcularStatusExecucao(ex.itens)
+                              const template = checklists.find((c) => c.id === ex.checklist)
+                              return (
+                                <div
+                                  key={ex.id}
+                                  className="flex items-center justify-between text-xs rounded-md bg-white border border-border/50 px-2.5 py-1.5"
+                                >
+                                  <span className="truncate">
+                                    {template?.nome || '(checklist excluído)'}
+                                    <span className="text-muted-foreground ml-1">
+                                      ({contarItensPendentes(ex.itens)} pendente
+                                      {contarItensPendentes(ex.itens) === 1 ? '' : 's'})
+                                    </span>
+                                  </span>
+                                  <span
+                                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                      status === 'concluido'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : status === 'parcial'
+                                          ? 'bg-amber-100 text-amber-800'
+                                          : 'bg-red-100 text-red-800'
+                                    }`}
+                                  >
+                                    {STATUS_EXECUCAO_LABELS[status]}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
       <Dialog open={isFuncionarioModalOpen} onOpenChange={setIsFuncionarioModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -1828,6 +2290,38 @@ export default function FuncionariosPage() {
               </div>
             </div>
 
+            {/* Funções para checklists (relation multi) */}
+            <div className="space-y-1">
+              <Label className="font-semibold">Funções (para checklists diários)</Label>
+              {funcoes.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground">
+                  Nenhuma função cadastrada — crie na aba Checklists.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-3 pt-1">
+                  {funcoes.map((fn) => (
+                    <label
+                      key={fn.id}
+                      className="flex items-center gap-2 text-xs font-medium text-gray-700 cursor-pointer"
+                    >
+                      <Checkbox
+                        checked={funcForm.funcoes.includes(fn.id)}
+                        onCheckedChange={(c) =>
+                          setFuncForm({
+                            ...funcForm,
+                            funcoes: c
+                              ? [...funcForm.funcoes, fn.id]
+                              : funcForm.funcoes.filter((id) => id !== fn.id),
+                          })
+                        }
+                      />
+                      {fn.nome}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="font-semibold">Chave Pix</Label>
@@ -1862,6 +2356,194 @@ export default function FuncionariosPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL: CADASTRAR / EDITAR CHECKLIST */}
+      <Dialog open={isChecklistModalOpen} onOpenChange={setIsChecklistModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">
+              {editingChecklistId ? 'Editar Checklist' : 'Novo Checklist'}
+            </DialogTitle>
+            <DialogDescription>
+              Defina nome, período (com campos condicionais), itens e as funções que o recebem.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3.5 text-xs">
+            <div className="space-y-1">
+              <Label className="font-semibold">Nome do Checklist</Label>
+              <Input
+                value={checklistForm.nome}
+                onChange={(e) => setChecklistForm({ ...checklistForm, nome: e.target.value })}
+                placeholder="Ex: Abertura da Loja"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="font-semibold">Período</Label>
+              <Select
+                value={checklistForm.periodo}
+                onValueChange={(v: PeriodoChecklist) =>
+                  setChecklistForm({ ...checklistForm, periodo: v })
+                }
+              >
+                <SelectTrigger className="bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PERIODOS_CHECKLIST.map((p) => (
+                    <SelectItem key={p.valor} value={p.valor}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {checklistForm.periodo === 'semanal' && (
+                <Select
+                  value={String(checklistForm.dia_semana)}
+                  onValueChange={(v) =>
+                    setChecklistForm({ ...checklistForm, dia_semana: parseInt(v, 10) })
+                  }
+                >
+                  <SelectTrigger className="bg-white mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DIAS_SEMANA_LABELS.map((label, idx) => (
+                      <SelectItem key={idx} value={String(idx)}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {checklistForm.periodo === 'mensal' && (
+                <Select
+                  value={String(checklistForm.dia_mes)}
+                  onValueChange={(v) =>
+                    setChecklistForm({ ...checklistForm, dia_mes: parseInt(v, 10) })
+                  }
+                >
+                  <SelectTrigger className="bg-white mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                      <SelectItem key={d} value={String(d)}>
+                        Dia {d}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <Label className="font-semibold">Funções que recebem</Label>
+              {funcoes.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground">
+                  Nenhuma função cadastrada — crie funções antes.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-3 pt-1">
+                  {funcoes.map((fn) => (
+                    <label key={fn.id} className="flex items-center gap-2 cursor-pointer">
+                      <Checkbox
+                        checked={checklistForm.funcoes.includes(fn.id)}
+                        onCheckedChange={(c) =>
+                          setChecklistForm({
+                            ...checklistForm,
+                            funcoes: c
+                              ? [...checklistForm.funcoes, fn.id]
+                              : checklistForm.funcoes.filter((id) => id !== fn.id),
+                          })
+                        }
+                      />
+                      {fn.nome}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <Label className="font-semibold">Itens</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={novoItemTexto}
+                  onChange={(e) => setNovoItemTexto(e.target.value)}
+                  placeholder="Ex: Ligar o ar-condicionado"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      if (novoItemTexto.trim()) {
+                        setChecklistForm({
+                          ...checklistForm,
+                          itens: [...checklistForm.itens, { texto: novoItemTexto.trim() }],
+                        })
+                        setNovoItemTexto('')
+                      }
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    if (novoItemTexto.trim()) {
+                      setChecklistForm({
+                        ...checklistForm,
+                        itens: [...checklistForm.itens, { texto: novoItemTexto.trim() }],
+                      })
+                      setNovoItemTexto('')
+                    }
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              <ul className="space-y-1">
+                {checklistForm.itens.map((item, idx) => (
+                  <li
+                    key={idx}
+                    className="flex items-center justify-between rounded-md border border-border/50 bg-[#FBF9F7] px-2.5 py-1.5"
+                  >
+                    <span className="text-xs text-gray-800">{item.texto}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-red-600"
+                      onClick={() =>
+                        setChecklistForm({
+                          ...checklistForm,
+                          itens: checklistForm.itens.filter((_, i) => i !== idx),
+                        })
+                      }
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </li>
+                ))}
+                {checklistForm.itens.length === 0 && (
+                  <li className="text-[11px] text-muted-foreground">Nenhum item adicionado.</li>
+                )}
+              </ul>
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button variant="outline" onClick={() => setIsChecklistModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleSalvarChecklist}
+                disabled={salvandoChecklist}
+                className="bg-[#DF5830] hover:bg-[#c94b26] text-white"
+              >
+                {salvandoChecklist ? <RefreshCw className="h-4 w-4 animate-spin" /> : 'Salvar'}
+              </Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
