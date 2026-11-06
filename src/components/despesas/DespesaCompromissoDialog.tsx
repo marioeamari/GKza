@@ -39,7 +39,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { useAppContext } from '@/contexts/AppContext'
 import { useToast } from '@/hooks/use-toast'
 import { apiMessage } from '@/lib/api-error'
-import { calcularFaturaCartao, getAvisoFaturaCartao } from '@/lib/cartao-fatura'
+import {
+  calcularDataFimParceladoCartao,
+  calcularFaturaCartao,
+  getAvisoFaturaCartao,
+} from '@/lib/cartao-fatura'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { contaAceitaCredito, isMetodoCredito, despesasService } from '@/services/despesas'
 import { financeService } from '@/services/finance'
@@ -576,11 +580,24 @@ export function DespesaCompromissoDialog({
 
     // Calcular data da última parcela
     try {
-      const [y, m] = form.data_inicio.split('-').map((v) => parseInt(v, 10))
-      const mesInicialZero = m - 1
-      const mesFinalZero = mesInicialZero + (parcelasRestantes - 1)
-      const dueDay = form.dia_vencimento || 10
-      const lastDate = despesasService.calcularDataVencimentoNoMes(y, mesFinalZero, dueDay)
+      const isSelectedContaCartao =
+        !!selectedConta && contaAceitaCredito(selectedConta) && !!selectedConta.dia_fechamento
+      let lastDate: Date
+      if (isSelectedContaCartao) {
+        // Cartão: a última parcela vence na fatura do ciclo da última compra (data_inicio + N - 1)
+        const vencFim = calcularDataFimParceladoCartao({
+          conta: selectedConta!,
+          dataCompra: form.data_inicio,
+          totalParcelas: total,
+        })
+        lastDate = new Date(`${vencFim}T12:00:00.000Z`)
+      } else {
+        const [y, m] = form.data_inicio.split('-').map((v) => parseInt(v, 10))
+        const mesInicialZero = m - 1
+        const mesFinalZero = mesInicialZero + (parcelasRestantes - 1)
+        const dueDay = form.dia_vencimento || 10
+        lastDate = despesasService.calcularDataVencimentoNoMes(y, mesFinalZero, dueDay)
+      }
       return {
         total,
         inicial,
@@ -600,6 +617,7 @@ export function DespesaCompromissoDialog({
     form.parcela_inicial,
     form.valor_estimado,
     form.dia_vencimento,
+    selectedConta,
   ])
 
   // Verificação de compatibilidade entre dia de vencimento e data de início

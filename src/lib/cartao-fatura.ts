@@ -379,6 +379,59 @@ export function simularCronogramaParcelas(params: {
  * - Parcela N (N >= 1) avança (N - 1) ciclos a partir do ciclo inicial da parcela 1.
  * - Vencimento da parcela = vencimento da fatura do ciclo correspondente (dia_vencimento da conta).
  */
+/**
+ * REGRA VIGENTE DO CRONOGRAMA DE PARCELAS EM CARTÃO (0.0.286):
+ * O vencimento de cada parcela N é o vencimento da fatura do ciclo da COMPRA da parcela N
+ * (mês da data_inicio + N - 1, ajustado pelo dia_fechamento da conta).
+ * Garantias: a sequência de vencimentos é estritamente crescente — nunca dois vencimentos
+ * iguais e nunca mês pulado; o dia de vencimento é clampado ao último dia do mês.
+ */
+export function gerarCronogramaParcelasCartao(params: {
+  conta: Conta
+  dataCompra: string
+  totalParcelas: number
+}): ParcelaCicloSimulada[] {
+  const { conta, dataCompra } = params
+  const total = Math.max(1, Math.floor(Number(params.totalParcelas) || 1))
+  const cicloInicialComp = calcularFaturaCartao(conta, (dataCompra || '').slice(0, 10)).competencia
+
+  const itens: ParcelaCicloSimulada[] = []
+  let vencAnterior = ''
+  let offsetExtra = 0
+  for (let p = 1; p <= total; p++) {
+    let competencia = adicionarMesesCompetencia(cicloInicialComp, p - 1 + offsetExtra)
+    let dataVencimento = calcularVencimentoFatura(conta, competencia)
+    // Guarda de sanidade: o vencimento da parcela deve ser estritamente posterior ao da anterior
+    while (vencAnterior && dataVencimento <= vencAnterior) {
+      offsetExtra += 1
+      competencia = adicionarMesesCompetencia(cicloInicialComp, p - 1 + offsetExtra)
+      dataVencimento = calcularVencimentoFatura(conta, competencia)
+    }
+    itens.push({
+      numeroParcela: p,
+      totalParcelas: total,
+      competencia,
+      dataVencimento,
+      dataVencimentoIso: `${dataVencimento}T12:00:00.000Z`,
+    })
+    vencAnterior = dataVencimento
+  }
+  return itens
+}
+
+/**
+ * Data de fim de um parcelamento em cartão = vencimento da ÚLTIMA parcela do cronograma
+ * (nunca o mês simples da data de compra, que ignora o ciclo da fatura).
+ */
+export function calcularDataFimParceladoCartao(params: {
+  conta: Conta
+  dataCompra: string
+  totalParcelas: number
+}): string {
+  const cronograma = gerarCronogramaParcelasCartao(params)
+  return cronograma[cronograma.length - 1].dataVencimento
+}
+
 export function calcularCicloParcelaCartao(
   conta: Conta,
   dataCompraStr: string,
@@ -468,16 +521,21 @@ export function calcularCompetenciaEVencimento(params: {
 
   if (ehCredito && conta) {
     // Para cartão de crédito:
-    // Ciclo inicial derivado da data da compra original
-    const cicloInicial = calcularFaturaCartao(conta, cleanDate)
-    const competencia = adicionarMesesCompetencia(cicloInicial.competencia, offsetParcela)
-    const dataVencimento = calcularVencimentoFatura(conta, competencia)
-    const dataVencimentoIso = `${dataVencimento}T12:00:00.000Z`
+    // Cronograma canônico: parcela N = ciclo da fatura da compra da parcela N
+    // (mês da data_inicio + N - 1, ajustado pelo dia_fechamento), sem duplicar
+    // vencimentos nem pular meses na sequência.
+    const total = Math.max(Number(totalParcelas) || 1, numeroParcela)
+    const cronograma = gerarCronogramaParcelasCartao({
+      conta,
+      dataCompra: cleanDate,
+      totalParcelas: total,
+    })
+    const parcela = cronograma[offsetParcela] || cronograma[cronograma.length - 1]
 
     return {
-      competencia,
-      dataVencimento,
-      dataVencimentoIso,
+      competencia: parcela.competencia,
+      dataVencimento: parcela.dataVencimento,
+      dataVencimentoIso: parcela.dataVencimentoIso,
       isCartaoCredito: true,
     }
   }

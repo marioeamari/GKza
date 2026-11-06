@@ -49,7 +49,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useAppContext } from '@/contexts/AppContext'
 import { useToast } from '@/hooks/use-toast'
 import { apiMessage } from '@/lib/api-error'
-import { calcularFaturaCartao } from '@/lib/cartao-fatura'
+import { calcularDataFimParceladoCartao, calcularFaturaCartao } from '@/lib/cartao-fatura'
 
 import { dateOnly, formatCurrency, formatDate, toPocketBaseDate } from '@/lib/format'
 import { getFileUrl } from '@/lib/pocketbase/files'
@@ -509,11 +509,26 @@ export function TriagemPendenteDialog({
     const valorTotalCalculado = valorParcela * total
 
     try {
-      const [y, m] = despForm.data_inicio.split('-').map((v) => parseInt(v, 10))
-      const mesInicialZero = m - 1
-      const mesFinalZero = mesInicialZero + (parcelasRestantes - 1)
-      const dueDay = despForm.dia_vencimento || 10
-      const lastDate = despesasService.calcularDataVencimentoNoMes(y, mesFinalZero, dueDay)
+      const isSelectedDespContaCartao =
+        !!selectedDespConta &&
+        contaAceitaCredito(selectedDespConta) &&
+        !!selectedDespConta.dia_fechamento
+      let lastDate: Date
+      if (isSelectedDespContaCartao) {
+        // Cartão: a última parcela vence na fatura do ciclo da última compra (data_inicio + N - 1)
+        const vencFim = calcularDataFimParceladoCartao({
+          conta: selectedDespConta!,
+          dataCompra: despForm.data_inicio,
+          totalParcelas: total,
+        })
+        lastDate = new Date(`${vencFim}T12:00:00.000Z`)
+      } else {
+        const [y, m] = despForm.data_inicio.split('-').map((v) => parseInt(v, 10))
+        const mesInicialZero = m - 1
+        const mesFinalZero = mesInicialZero + (parcelasRestantes - 1)
+        const dueDay = despForm.dia_vencimento || 10
+        lastDate = despesasService.calcularDataVencimentoNoMes(y, mesFinalZero, dueDay)
+      }
       return {
         total,
         inicial,
@@ -533,6 +548,7 @@ export function TriagemPendenteDialog({
     despForm.parcela_inicial,
     despForm.valor_estimado,
     despForm.dia_vencimento,
+    selectedDespConta,
   ])
 
   // Verificação de compatibilidade entre dia de vencimento e data de início
