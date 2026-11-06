@@ -415,12 +415,9 @@ export const despesasService = {
     descricao: string
     dizimoPercentual?: number
   }) => {
-    // Verifica se a conta escolhida para baixa é do tipo 'cartao'
-    let isCartao = false
     let contaObj: Conta | null = null
     try {
       contaObj = await pb.collection<Conta>('contas').getOne(params.contaId)
-      isCartao = contaObj.tipo === 'cartao'
     } catch {
       /* intentionally ignored */
     }
@@ -459,6 +456,23 @@ export const despesasService = {
     const ehMetodoCredito = metodoCompId ? isMetodoCredito(metodoCompId) : true
     const metodoEfetivoEhCredito = Boolean(contaObj) && contaAceitaCred && ehMetodoCredito
 
+    // REGRA (0.0.291): a ocorrência é de CARTÃO quando o COMPROMISSO é crédito em conta
+    // tipo cartao — INDEPENDENTE da conta escolhida para debitar a baixa (params.contaId).
+    // Pagar uma despesa de cartão debitando em conta bancária/caixa é o caso típico e
+    // NUNCA pode derrubar a guarda de preservação do ciclo da fatura.
+    let contaCartaoCompromisso: Conta | null = null
+    if (compRecord) {
+      try {
+        contaCartaoCompromisso = await despesasService.obterContaCartaoCompromisso({
+          conta_padrao: compRecord.conta_padrao,
+          metodo_pagamento: metodoCompId || undefined,
+        })
+      } catch {
+        /* ignore */
+      }
+    }
+    const ocorrEhCartaoCredito = Boolean(contaCartaoCompromisso)
+
     // REGRA DE CARTÃO DE CRÉDITO NO FLUXO DE PAGAMENTO:
     // 1. Competência e vencimento de despesas em cartão derivam EXCLUSIVAMENTE da data da compra
     //    (compromisso.data_inicio). Se a ocorrência já possui competência e vencimento definidos,
@@ -477,13 +491,33 @@ export const despesasService = {
     let competenciaFinal: string
     let vencimentoFinalIso: string
 
-    if (metodoEfetivoEhCredito && ocorrAtual.competencia && ocorrAtual.data_vencimento) {
-      // Se a ocorrência de cartão já tem competência e data_vencimento definidos,
-      // PRESERVA-OS intocados! O fluxo de pagamento nunca recalcula o ciclo da fatura.
+    // REGRA VIGENTE (0.0.291) — baixa de ocorrência de CARTÃO:
+    // Se a ocorrência JÁ tem competência e data_vencimento, PRESERVA-OS intocados,
+    // independentemente da conta pagadora (o ciclo da fatura deriva EXCLUSIVAMENTE da
+    // data da compra — a data real do pagamento nunca recalcula competência de cartão).
+    // Só quando FALTA competência ou vencimento é que a baixa os preenche, e aí sempre
+    // pelas funções canônicas (calcularCompetenciaEVencimento / calcularCicloParcelaCartao)
+    // usando a CONTA DE CARTÃO DO COMPROMISSO — nunca a conta bancária da baixa.
+    if (ocorrEhCartaoCredito && ocorrAtual.competencia && ocorrAtual.data_vencimento) {
       competenciaFinal = ocorrAtual.competencia
       vencimentoFinalIso = ocorrAtual.data_vencimento
+    } else if (ocorrEhCartaoCredito && contaCartaoCompromisso) {
+      // Backfill canônico: ocorrência de cartão sem competência/vencimento
+      const dataCompraBase = compRecord?.data_inicio
+        ? compRecord.data_inicio.slice(0, 10)
+        : params.dataPagamento
+      const resRegraUnica = calcularCompetenciaEVencimento({
+        dataCompra: dataCompraBase,
+        conta: contaCartaoCompromisso,
+        metodoEhCredito: true,
+        diaVencimento: compRecord?.dia_vencimento,
+        numeroParcela: numParcela,
+        totalParcelas: totParcelas,
+      })
+      competenciaFinal = resRegraUnica.competencia
+      vencimentoFinalIso = resRegraUnica.dataVencimentoIso
     } else {
-      // Determina a data da compra original (prioriza compromisso.data_inicio, cai para ocorrAtual.data_vencimento ou params.dataPagamento)
+      // Não-cartão: mantém a regra retroativa vigente (competência = mês do pagamento real)
       const dataCompraBase = compRecord?.data_inicio
         ? compRecord.data_inicio.slice(0, 10)
         : params.dataPagamento
@@ -499,6 +533,13 @@ export const despesasService = {
       competenciaFinal = resRegraUnica.competencia
       vencimentoFinalIso = resRegraUnica.dataVencimentoIso
     }
+
+    // Escrita de competência/data_vencimento na ocorrência:
+    // - CARTÃO: NUNCA sobrescreve; só PREENCHE quando a ocorrência não os tem.
+    // - NÃO-CARTÃO: mantém a regra retroativa vigente (competência = mês do pagamento real).
+    const ocorrCartaoSemDatas =
+      ocorrEhCartaoCredito && (!ocorrAtual.competencia || !ocorrAtual.data_vencimento)
+    const deveGravarDatasNaOcorrencia = ocorrEhCartaoCredito ? ocorrCartaoSemDatas : true
 
     // A data efetiva do pagamento é SEMPRE a data REAL digitada pelo usuário
     const dataEfetivaPagamentoStr = params.dataPagamento
@@ -604,12 +645,17 @@ export const despesasService = {
       fdOcorr.append('valor_ajustado_manualmente', String(diferencaValor))
       fdOcorr.append('data_pagamento', `${dataEfetivaPagamentoStr} 12:00:00`)
       fdOcorr.append('conta', params.contaId)
+      if (deveGravarDatasNaOcorrencia) {
+        fdOcorr.append('competencia', competenciaFinal)
+        fdOcorr.append('data_vencimento', vencimentoFinalIso)
+      }
       if (params.dizimoPercentual !== undefined) {
         fdOcorr.append('dizimo_percentual', String(params.dizimoPercentual))
       }
       if (lancamentoId) fdOcorr.append('lancamento', lancamentoId)
-      // REGRA: a baixa NUNCA altera competencia nem data_vencimento da ocorrência de cartão
-      // (ciclo da fatura é definido pela data da compra, nunca pela data do pagamento).
+      // REGRA (0.0.291): a baixa de ocorrência de cartão NUNCA sobrescreve competencia nem
+      // data_vencimento — o ciclo da fatura é definido pela data da compra, nunca pelo
+      // pagamento; só preenche quando a ocorrência não os tem (backfill canônico).
       fdOcorr.append('comprovante_pagamento', params.comprovanteArquivo)
 
       ocorr = await pb
@@ -626,8 +672,12 @@ export const despesasService = {
         valor_ajustado_manualmente: diferencaValor,
         data_pagamento: `${dataEfetivaPagamentoStr} 12:00:00`,
         conta: params.contaId,
-        // REGRA: a baixa NUNCA altera competencia nem data_vencimento da ocorrência de
-        // cartão — o ciclo da fatura é definido pela data da compra, nunca pelo pagamento.
+        // REGRA (0.0.291): a baixa de ocorrência de CARTÃO NUNCA sobrescreve competencia
+        // nem data_vencimento (ciclo definido pela data da compra); só PREENCHE quando a
+        // ocorrência não os tem. NÃO-cartão mantém a regra retroativa vigente.
+        ...(deveGravarDatasNaOcorrencia
+          ? { competencia: competenciaFinal, data_vencimento: vencimentoFinalIso }
+          : {}),
         ...(params.dizimoPercentual !== undefined
           ? { dizimo_percentual: params.dizimoPercentual }
           : {}),
@@ -676,11 +726,9 @@ export const despesasService = {
       /* ignore */
     }
 
-    let isCartao = false
     let contaObj: Conta | null = null
     try {
       contaObj = await pb.collection<Conta>('contas').getOne(params.contaId)
-      isCartao = contaObj.tipo === 'cartao'
     } catch {
       /* ignore */
     }
@@ -692,6 +740,22 @@ export const despesasService = {
     const ehMetodoCredito = metodoCompId ? isMetodoCredito(metodoCompId) : true
     const metodoEfetivoEhCredito = Boolean(contaObj) && contaAceitaCred && ehMetodoCredito
 
+    // REGRA (0.0.291): o compromisso é de CARTÃO pelo SEU método e SUA conta (conta_padrao),
+    // nunca pela conta escolhida para debitar o pagamento — pagar despesa de cartão em
+    // conta bancária é o caso típico e não muda o ciclo da fatura.
+    let contaCartaoCompromisso: Conta | null = null
+    if (compRecord) {
+      try {
+        contaCartaoCompromisso = await despesasService.obterContaCartaoCompromisso({
+          conta_padrao: compRecord.conta_padrao,
+          metodo_pagamento: metodoCompId || undefined,
+        })
+      } catch {
+        /* ignore */
+      }
+    }
+    const compromissoEhCartaoCredito = Boolean(contaCartaoCompromisso)
+
     // Data da compra base: se o compromisso possuir data_inicio, usamos como referência de compra (NUNCA dataPagamento para cartão)
     const dataCompraBase = compRecord?.data_inicio
       ? compRecord.data_inicio.slice(0, 10)
@@ -702,8 +766,10 @@ export const despesasService = {
 
     const resRegraUnica = calcularCompetenciaEVencimento({
       dataCompra: dataCompraBase,
-      conta: contaObj,
-      metodoEhCredito: metodoEfetivoEhCredito,
+      // Cartão: ciclo da fatura calculado SEMPRE pela conta de cartão do compromisso
+      // (a conta pagadora pode ser uma bancária — ela não define o ciclo).
+      conta: compromissoEhCartaoCredito ? contaCartaoCompromisso : contaObj,
+      metodoEhCredito: compromissoEhCartaoCredito ? true : metodoEfetivoEhCredito,
       diaVencimento: compRecord?.dia_vencimento,
       numeroParcela: numParcela,
       totalParcelas: totParcelas,
@@ -712,7 +778,11 @@ export const despesasService = {
     const competenciaEfetiva = resRegraUnica.competencia
     let vencimentoRegistradoIso = resRegraUnica.dataVencimentoIso
 
-    if (!metodoEfetivoEhCredito && compRecord) {
+    // REGRA (0.0.291): o ajuste de vencimento pela regra não-cartão (dia_vencimento no mês
+    // da competência) NUNCA se aplica a compromisso de CARTÃO — o vencimento vem do ciclo
+    // da fatura (calculado acima pela conta de cartão do compromisso), mesmo quando o
+    // pagamento é debitado em conta bancária.
+    if (!metodoEfetivoEhCredito && !compromissoEhCartaoCredito && compRecord) {
       const diaComp = compRecord.dia_vencimento || 10
       const [pAnoStr, pMesStr] = competenciaEfetiva.split('-')
       const pAno = parseInt(pAnoStr, 10)
@@ -834,6 +904,15 @@ export const despesasService = {
           ? 'assinaturas_anuais'
           : 'contas_mensais_pix_boleto')
 
+    // REGRA (0.0.291): ao reaproveitar a ocorrência prevista (prevenção de gêmeas) de um
+    // compromisso de CARTÃO, NUNCA sobrescrever competencia/data_vencimento já gravados —
+    // o ciclo da fatura é da data da compra; quando a ocorrência não os tem, o valor
+    // calculado (agora pela conta de cartão do compromisso) é gravado no lugar.
+    const preservarDatasOcorrCartao =
+      compromissoEhCartaoCredito &&
+      !!ocorrenciaPrevistaExistente?.competencia &&
+      !!ocorrenciaPrevistaExistente?.data_vencimento
+
     let ocorrencia: DespesaOcorrencia
     if (ocorrenciaPrevistaExistente) {
       // Reaproveitar ocorrência existente atualizando para 'paga'
@@ -858,8 +937,10 @@ export const despesasService = {
         if (params.direcionamento) fdOcorr.append('direcionamento', params.direcionamento)
         if (params.observacoes) fdOcorr.append('observacoes', params.observacoes)
         fdOcorr.append('lancamento', lancamento.id)
-        fdOcorr.append('competencia', competenciaEfetiva)
-        fdOcorr.append('data_vencimento', vencimentoRegistradoIso)
+        if (!preservarDatasOcorrCartao) {
+          fdOcorr.append('competencia', competenciaEfetiva)
+          fdOcorr.append('data_vencimento', vencimentoRegistradoIso)
+        }
         fdOcorr.append('comprovante_pagamento', params.comprovanteArquivo)
 
         ocorrencia = await pb
@@ -887,8 +968,10 @@ export const despesasService = {
           ...(params.direcionamento ? { direcionamento: params.direcionamento } : {}),
           ...(params.observacoes ? { observacoes: params.observacoes } : {}),
           lancamento: lancamento.id,
-          competencia: competenciaEfetiva,
-          data_vencimento: vencimentoRegistradoIso,
+          // Cartão com datas já gravadas: preserva (nunca sobrescreve o ciclo da fatura)
+          ...(preservarDatasOcorrCartao
+            ? {}
+            : { competencia: competenciaEfetiva, data_vencimento: vencimentoRegistradoIso }),
         }
 
         ocorrencia = await pb
