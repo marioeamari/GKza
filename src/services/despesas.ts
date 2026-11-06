@@ -608,8 +608,8 @@ export const despesasService = {
         fdOcorr.append('dizimo_percentual', String(params.dizimoPercentual))
       }
       if (lancamentoId) fdOcorr.append('lancamento', lancamentoId)
-      fdOcorr.append('competencia', competenciaFinal)
-      fdOcorr.append('data_vencimento', vencimentoFinalIso)
+      // REGRA: a baixa NUNCA altera competencia nem data_vencimento da ocorrência de cartão
+      // (ciclo da fatura é definido pela data da compra, nunca pela data do pagamento).
       fdOcorr.append('comprovante_pagamento', params.comprovanteArquivo)
 
       ocorr = await pb
@@ -626,8 +626,8 @@ export const despesasService = {
         valor_ajustado_manualmente: diferencaValor,
         data_pagamento: `${dataEfetivaPagamentoStr} 12:00:00`,
         conta: params.contaId,
-        competencia: competenciaFinal,
-        data_vencimento: vencimentoFinalIso,
+        // REGRA: a baixa NUNCA altera competencia nem data_vencimento da ocorrência de
+        // cartão — o ciclo da fatura é definido pela data da compra, nunca pelo pagamento.
         ...(params.dizimoPercentual !== undefined
           ? { dizimo_percentual: params.dizimoPercentual }
           : {}),
