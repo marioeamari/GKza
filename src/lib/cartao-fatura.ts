@@ -380,11 +380,17 @@ export function simularCronogramaParcelas(params: {
  * - Vencimento da parcela = vencimento da fatura do ciclo correspondente (dia_vencimento da conta).
  */
 /**
- * REGRA VIGENTE DO CRONOGRAMA DE PARCELAS EM CARTÃO (0.0.286):
+ * REGRA VIGENTE DO CRONOGRAMA DE PARCELAS EM CARTÃO (0.0.286, borda corrigida na 0.0.289):
  * O vencimento de cada parcela N é o vencimento da fatura do ciclo da COMPRA da parcela N
  * (mês da data_inicio + N - 1, ajustado pelo dia_fechamento da conta).
  * Garantias: a sequência de vencimentos é estritamente crescente — nunca dois vencimentos
  * iguais e nunca mês pulado; o dia de vencimento é clampado ao último dia do mês.
+ * Borda 0.0.289 (caso TORO): cada parcela é recomputada INDEPENDENTEMENTE do ciclo da
+ * SUA compra; nenhum ajuste local de sequência se propaga às parcelas seguintes. Antes,
+ * um offsetExtra acumulado na guarda (disparado pela compra da parcela N cair após o
+ * fechamento) deslocava permanentemente as parcelas seguintes, duplicando um mês e
+ * pulando o outro — ex.: TORO 19/09/2026, fech 16, venc 23, 4x produzia
+ * 23/10, 23/10, 23/12, 23/01 em vez de 23/10, 23/11, 23/12, 23/01/2027.
  */
 export function gerarCronogramaParcelasCartao(params: {
   conta: Conta
@@ -393,28 +399,13 @@ export function gerarCronogramaParcelasCartao(params: {
 }): ParcelaCicloSimulada[] {
   const { conta, dataCompra } = params
   const total = Math.max(1, Math.floor(Number(params.totalParcelas) || 1))
-  const cicloInicialComp = calcularFaturaCartao(conta, (dataCompra || '').slice(0, 10)).competencia
 
+  // Cada parcela N = fatura do ciclo da compra da parcela N (data_compra + N - 1,
+  // ajustado pelo fechamento). Como cada compra avança exatamente 1 mês, a série de
+  // vencimentos é estritamente crescente POR CONSTRUÇÃO — nenhuma guarda acumulada.
   const itens: ParcelaCicloSimulada[] = []
-  let vencAnterior = ''
-  let offsetExtra = 0
   for (let p = 1; p <= total; p++) {
-    let competencia = adicionarMesesCompetencia(cicloInicialComp, p - 1 + offsetExtra)
-    let dataVencimento = calcularVencimentoFatura(conta, competencia)
-    // Guarda de sanidade: o vencimento da parcela deve ser estritamente posterior ao da anterior
-    while (vencAnterior && dataVencimento <= vencAnterior) {
-      offsetExtra += 1
-      competencia = adicionarMesesCompetencia(cicloInicialComp, p - 1 + offsetExtra)
-      dataVencimento = calcularVencimentoFatura(conta, competencia)
-    }
-    itens.push({
-      numeroParcela: p,
-      totalParcelas: total,
-      competencia,
-      dataVencimento,
-      dataVencimentoIso: `${dataVencimento}T12:00:00.000Z`,
-    })
-    vencAnterior = dataVencimento
+    itens.push(calcularCicloParcelaCartao(conta, dataCompra, p, total))
   }
   return itens
 }

@@ -921,6 +921,129 @@ describe('calcularEstadoCicloFatura — Estado Financeiro Puro do Ciclo da Fatur
       }
     })
 
+    // ===================================================================
+    // Caso TORO (referência do reparo 0148): compromisso fhlmrrnph6hmbh3
+    // "Conserto TORO - OK/Nov" — compra 19/09/2026, 4x de 356,75, NuBank
+    // fech 16 / venc 23. A compra da parcela 1 (19/09) cai APÓS o
+    // fechamento 16/09 -> fatura de OUTUBRO; a compra da parcela 2
+    // (19/10) cai após o fechamento 16/10 -> fatura de NOVEMBRO.
+    // Série correta: 23/10, 23/11, 23/12, 23/01/2027.
+    // A migração 0147 produzia 23/10, 23/10, 23/12, 23/01 porque o ajuste
+    // local da guarda (offsetExtra) ACUMULAVA e deslocava as parcelas
+    // seguintes — borda corrigida: cada parcela é computada de forma
+    // independente pelo ciclo da SUA compra.
+    // ===================================================================
+    it('caso TORO: compra 19/09/2026, 4x, fech 16, venc 23 -> série 23/10, 23/11, 23/12, 23/01/2027 sem duplicar outubro nem pular novembro', () => {
+      const cronograma = gerarCronogramaParcelasCartao({
+        conta: contaNubank,
+        dataCompra: '2026-09-19',
+        totalParcelas: 4,
+      })
+
+      expect(cronograma.map((c) => c.competencia)).toEqual([
+        '2026-10',
+        '2026-11',
+        '2026-12',
+        '2027-01',
+      ])
+      expect(cronograma.map((c) => c.dataVencimento)).toEqual([
+        '2026-10-23',
+        '2026-11-23',
+        '2026-12-23',
+        '2027-01-23',
+      ])
+      cronograma.forEach((item, i) => {
+        expect(item.numeroParcela).toBe(i + 1)
+        expect(item.dataVencimentoIso).toBe(`${item.dataVencimento}T12:00:00.000Z`)
+      })
+    })
+
+    it('caso TORO via calcularCompetenciaEVencimento: cada parcela usa o ciclo da SUA compra (parcela 2: compra 19/10 > fech 16 -> 2026-11, venc 23/11)', () => {
+      const esperado = [
+        { numeroParcela: 1, competencia: '2026-10', dataVencimento: '2026-10-23' },
+        { numeroParcela: 2, competencia: '2026-11', dataVencimento: '2026-11-23' },
+        { numeroParcela: 3, competencia: '2026-12', dataVencimento: '2026-12-23' },
+        { numeroParcela: 4, competencia: '2027-01', dataVencimento: '2027-01-23' },
+      ]
+      for (const e of esperado) {
+        const res = calcularCompetenciaEVencimento({
+          dataCompra: '2026-09-19',
+          conta: contaNubank,
+          metodoEhCredito: true,
+          numeroParcela: e.numeroParcela,
+          totalParcelas: 4,
+        })
+        expect(res.competencia).toBe(e.competencia)
+        expect(res.dataVencimento).toBe(e.dataVencimento)
+        expect(res.isCartaoCredito).toBe(true)
+      }
+    })
+
+    it('borda que fez a migração 0147 falhar (caso TORO): o ajuste de ciclo da parcela N não se propaga às parcelas seguintes — cada parcela é recomputada independentemente', () => {
+      // Na migração 0147, quando a compra da parcela N caía após o fechamento
+      // (necessitando ajuste local), o offsetExtra ACUMULAVA e deslocava
+      // permanentemente as parcelas seguintes: a série virava 23/10, 23/12, 23/01
+      // (outubro duplicado na parcela 2, novembro ausente). A regra correta
+      // recomputa cada parcela pelo ciclo da SUA compra.
+      const parcela1 = calcularCicloParcelaCartao(contaNubank, '2026-09-19', 1, 4)
+      const parcela2 = calcularCicloParcelaCartao(contaNubank, '2026-09-19', 2, 4)
+      const parcela3 = calcularCicloParcelaCartao(contaNubank, '2026-09-19', 3, 4)
+      const parcela4 = calcularCicloParcelaCartao(contaNubank, '2026-09-19', 4, 4)
+
+      // Compra da parcela 1 (19/09) após fech 16/09 -> fatura de outubro
+      expect(parcela1.competencia).toBe('2026-10')
+      // Compra da parcela 2 (19/10) após fech 16/10 -> fatura de novembro (nunca outubro)
+      expect(parcela2.competencia).toBe('2026-11')
+      // As seguintes NÃO herdam ajuste da parcela 2 (nada acumulado)
+      expect(parcela3.competencia).toBe('2026-12')
+      expect(parcela4.competencia).toBe('2027-01')
+
+      // Série estritamente crescente, um mês por parcela
+      const serie = [parcela1, parcela2, parcela3, parcela4].map((p) => p.dataVencimento)
+      for (let i = 1; i < serie.length; i++) {
+        expect(serie[i] > serie[i - 1]).toBe(true)
+        expect(
+          competenciaOffsetMeses(
+            [parcela1, parcela2, parcela3, parcela4][i - 1].competencia,
+            [parcela1, parcela2, parcela3, parcela4][i].competencia,
+          ),
+        ).toBe(1)
+      }
+    })
+
+    it('caso TORO: data_fim_calculada = vencimento da última parcela (23/01/2027)', () => {
+      const dataFim = calcularDataFimParceladoCartao({
+        conta: contaNubank,
+        dataCompra: '2026-09-19',
+        totalParcelas: 4,
+      })
+      expect(dataFim).toBe('2027-01-23')
+    })
+
+    it('caso TORO via simularCronogramaParcelas: parcelas futuras ficam em 2026-12 e 2027-01 (a 1 e a 2 vêm das ocorrências reais do banco)', () => {
+      const cronograma = simularCronogramaParcelas({
+        compromisso: {
+          id: 'fhlmrrnph6hmbh3',
+          descricao: 'Conserto TORO - OK/Nov',
+          data_inicio: '2026-09-19',
+          total_parcelas: 4,
+          modalidade_parcelamento: 'parcelado',
+          valor_parcela: 356.75,
+        },
+        conta: contaNubank,
+        dataReferenciaHoje: '2026-11-06',
+      })
+      // Parcelas sem ocorrência real são projetadas pela regra corrigida
+      const proj3 = cronograma.find((c) => c.numeroParcela === 3)
+      const proj4 = cronograma.find((c) => c.numeroParcela === 4)
+      expect(proj3?.competencia).toBe('2026-12')
+      expect(proj3?.dataVencimento).toBe('2026-12-23')
+      expect(proj4?.competencia).toBe('2027-01')
+      expect(proj4?.dataVencimento).toBe('2027-01-23')
+      expect(proj3?.valor).toBe(356.75)
+      expect(proj4?.valor).toBe(356.75)
+    })
+
     it('compra APÓS o fechamento: parcela 1 vai para a fatura do mês seguinte', () => {
       const cronograma = gerarCronogramaParcelasCartao({
         conta: contaNubank,
