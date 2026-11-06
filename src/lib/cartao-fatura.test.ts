@@ -4,6 +4,8 @@ import {
   calcularFaturaCartao,
   calcularCicloParcelaCartao,
   calcularCompetenciaEVencimento,
+  gerarCronogramaParcelasCartao,
+  calcularDataFimParceladoCartao,
   simularCronogramaParcelas,
   getAvisoFaturaCartao,
   formatarSeloFaturaOcorrencia,
@@ -848,4 +850,167 @@ describe('calcularEstadoCicloFatura — Estado Financeiro Puro do Ciclo da Fatur
       })
     })
   })
+
+  // =====================================================================
+  // REGRA VIGENTE (0.0.286/0.0.288): CRONOGRAMA DE PARCELAS EM CARTÃO
+  // O vencimento de cada parcela N é o vencimento da fatura do ciclo da
+  // COMPRA da parcela N (mês da data_inicio + N - 1, ajustado pelo
+  // dia_fechamento da conta). Sequência de vencimentos ESTRITAMENTE
+  // CRESCENTE: nunca dois vencimentos iguais e nunca mês pulado.
+  // data_fim_calculada = vencimento da última parcela.
+  // Caso de referência: "Conserto Logan - ok" (compromisso iswtn97h6fdlq35),
+  // reparado pela migração 0147.
+  // =====================================================================
+  describe('gerarCronogramaParcelasCartao — Caso Conserto Logan (referência do reparo 0147)', () => {
+    const contaNubank: Conta = {
+      id: 'sglo7dfsqvgfsni',
+      collectionId: 'contas_col',
+      collectionName: 'contas',
+      nome: 'NuBank',
+      tipo: 'cartao',
+      ativa: true,
+      dia_fechamento: 16,
+      dia_vencimento: 23,
+      cor: '#8A05BE',
+      saldo_inicial: 0,
+    }
+
+    const LOGAN_ESPERADO = [
+      { numeroParcela: 1, competencia: '2026-09', dataVencimento: '2026-09-23' },
+      { numeroParcela: 2, competencia: '2026-10', dataVencimento: '2026-10-23' },
+      { numeroParcela: 3, competencia: '2026-11', dataVencimento: '2026-11-23' },
+      { numeroParcela: 4, competencia: '2026-12', dataVencimento: '2026-12-23' },
+      { numeroParcela: 5, competencia: '2027-01', dataVencimento: '2027-01-23' },
+    ]
+
+    it('caso Logan: compra 29/08/2026, 5x, fechamento 16, venc 23 -> série 23/09, 23/10, 23/11, 23/12, 23/01/2027 sem duplicar nem pular mês', () => {
+      const cronograma = gerarCronogramaParcelasCartao({
+        conta: contaNubank,
+        dataCompra: '2026-08-29',
+        totalParcelas: 5,
+      })
+
+      expect(cronograma).toHaveLength(5)
+      cronograma.forEach((item, i) => {
+        expect(item.numeroParcela).toBe(LOGAN_ESPERADO[i].numeroParcela)
+        expect(item.competencia).toBe(LOGAN_ESPERADO[i].competencia)
+        expect(item.dataVencimento).toBe(LOGAN_ESPERADO[i].dataVencimento)
+        expect(item.dataVencimentoIso).toBe(`${item.dataVencimento}T12:00:00.000Z`)
+      })
+
+      // Sem duplicar nem pular mês: competências consecutivas diferem exatamente 1 mês
+      for (let i = 1; i < cronograma.length; i++) {
+        expect(
+          competenciaOffsetMeses(cronograma[i - 1].competencia, cronograma[i].competencia),
+        ).toBe(1)
+      }
+    })
+
+    it('caso Logan via calcularCompetenciaEVencimento: parcela 3 tem competência 2026-11 e vencimento 23/11/2026 (parcela que o bug duplicava em outubro)', () => {
+      for (const esperado of LOGAN_ESPERADO) {
+        const res = calcularCompetenciaEVencimento({
+          dataCompra: '2026-08-29',
+          conta: contaNubank,
+          metodoEhCredito: true,
+          numeroParcela: esperado.numeroParcela,
+          totalParcelas: 5,
+        })
+        expect(res.competencia).toBe(esperado.competencia)
+        expect(res.dataVencimento).toBe(esperado.dataVencimento)
+        expect(res.isCartaoCredito).toBe(true)
+      }
+    })
+
+    it('compra APÓS o fechamento: parcela 1 vai para a fatura do mês seguinte', () => {
+      const cronograma = gerarCronogramaParcelasCartao({
+        conta: contaNubank,
+        dataCompra: '2026-09-17',
+        totalParcelas: 3,
+      })
+      expect(cronograma[0].competencia).toBe('2026-10')
+      expect(cronograma[0].dataVencimento).toBe('2026-10-23')
+      expect(cronograma[1].competencia).toBe('2026-11')
+      expect(cronograma[2].competencia).toBe('2026-12')
+    })
+
+    it('compra ANTES do fechamento: parcela 1 fica na fatura do mês corrente', () => {
+      const cronograma = gerarCronogramaParcelasCartao({
+        conta: contaNubank,
+        dataCompra: '2026-09-15',
+        totalParcelas: 3,
+      })
+      expect(cronograma[0].competencia).toBe('2026-09')
+      expect(cronograma[0].dataVencimento).toBe('2026-09-23')
+      expect(cronograma[1].competencia).toBe('2026-10')
+      expect(cronograma[2].competencia).toBe('2026-11')
+    })
+
+    it('compra NO dia do fechamento: fica na fatura do mês corrente (compra <= fechamento)', () => {
+      const cronograma = gerarCronogramaParcelasCartao({
+        conta: contaNubank,
+        dataCompra: '2026-09-16',
+        totalParcelas: 2,
+      })
+      expect(cronograma[0].competencia).toBe('2026-09')
+      expect(cronograma[1].competencia).toBe('2026-10')
+    })
+
+    it('data_fim_calculada = vencimento da ÚLTIMA parcela (Logan: 23/01/2027)', () => {
+      const dataFim = calcularDataFimParceladoCartao({
+        conta: contaNubank,
+        dataCompra: '2026-08-29',
+        totalParcelas: 5,
+      })
+      expect(dataFim).toBe('2027-01-23')
+    })
+
+    it('guarda de sanidade: nenhum par de vencimentos consecutivos é igual ou regressivo (série estritamente crescente)', () => {
+      const casos: Array<{ dataCompra: string; totalParcelas: number }> = [
+        { dataCompra: '2026-08-29', totalParcelas: 5 },
+        { dataCompra: '2026-01-31', totalParcelas: 13 }, // dia 31 em meses curtos + virada de ano
+        { dataCompra: '2026-09-17', totalParcelas: 24 },
+        { dataCompra: '2026-02-28', totalParcelas: 6 },
+      ]
+      for (const caso of casos) {
+        const cronograma = gerarCronogramaParcelasCartao({
+          conta: contaNubank,
+          dataCompra: caso.dataCompra,
+          totalParcelas: caso.totalParcelas,
+        })
+        for (let i = 1; i < cronograma.length; i++) {
+          expect(cronograma[i].dataVencimento).not.toBe(cronograma[i - 1].dataVencimento)
+          expect(cronograma[i].dataVencimento > cronograma[i - 1].dataVencimento).toBe(true)
+          expect(
+            competenciaOffsetMeses(cronograma[i - 1].competencia, cronograma[i].competencia),
+          ).toBe(1)
+        }
+      }
+    })
+
+    it('meses curtos: dia de vencimento clampado ao último dia do mês (31/01, 6x -> 28/02 não 02/03)', () => {
+      const cronograma = gerarCronogramaParcelasCartao({
+        conta: contaNubank,
+        dataCompra: '2026-01-31',
+        totalParcelas: 6,
+      })
+      expect(cronograma[0].dataVencimento).toBe('2026-02-23')
+      expect(cronograma[1].dataVencimento).toBe('2026-03-23')
+      // série continua sem duplicar nem pular mês
+      expect(cronograma.map((c) => c.competencia)).toEqual([
+        '2026-02',
+        '2026-03',
+        '2026-04',
+        '2026-05',
+        '2026-06',
+        '2026-07',
+      ])
+    })
+  })
 })
+
+// aux: diferença em meses entre duas competências 'YYYY-MM' (b - a)
+function competenciaOffsetMeses(a: string, b: string): number {
+  const [ya, ma] = a.split('-').map(Number)
+  const [yb, mb] = b.split('-').map(Number)
+  return (yb - ya) * 12 + (mb - ma)
+}
