@@ -15,6 +15,8 @@
 
 'use strict'
 
+console.log('googleAgendaSync.js carregado ok (v0.0.297)')
+
 // Datas do Google que já são "plain" (YYYY-MM-DD, sem hora e sem fuso) caem 12:00 UTC
 // do mesmo dia: leitura em qualquer fuso ocidental (inclusive America/Sao_Paulo) devolve
 // o mesmo dia, sem deslocamento de 1 dia para trás nem para frente.

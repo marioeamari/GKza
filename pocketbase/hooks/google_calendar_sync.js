@@ -110,7 +110,17 @@ routerAdd(
       }
     }
 
-    const syncLib = require(`${__hooks}/googleAgendaSync.js`)
+    // Carregamento da lib de sync: se o módulo falhar ao carregar (erro de parse no
+    // JSVM/goja, por exemplo), devolve 500 com o detalhe em vez de 400 genérico.
+    let syncLib = null
+    try {
+      syncLib = require(`${__hooks}/googleAgendaSync.js`)
+    } catch (loadErr) {
+      return e.json(500, {
+        error: 'Falha ao carregar o módulo de sincronização googleAgendaSync.js: ' + loadErr,
+        code: 'sync_module_load_failed',
+      })
+    }
     const calendarId = configRec.getString('calendar_id') || 'primary'
     const nowIso = new Date().toISOString()
     let importedCount = 0

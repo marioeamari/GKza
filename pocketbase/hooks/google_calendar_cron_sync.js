@@ -21,7 +21,14 @@ cronAdd('google_calendar_cron_sync', '0 * * * *', () => {
 
   if (configs.length === 0) return
 
-  const syncLib = require(`${__hooks}/googleAgendaSync.js`)
+  let syncLib = null
+  try {
+    syncLib = require(`${__hooks}/googleAgendaSync.js`)
+  } catch (loadErr) {
+    console.error('google_calendar_cron_sync: falha ao carregar googleAgendaSync.js:', loadErr)
+    return
+  }
+  console.log('googleAgendaSync.js carregado ok (cron)')
   const nowIso = new Date().toISOString()
 
   for (let c = 0; c < configs.length; c++) {
