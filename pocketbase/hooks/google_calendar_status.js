@@ -6,11 +6,42 @@ routerAdd(
     const clientId = $os.getenv('GOOGLE_CLIENT_ID')
     const clientSecret = $os.getenv('GOOGLE_CLIENT_SECRET')
 
-    const instanceUrl =
-      $os.getenv('PB_INSTANCE_URL') ||
-      'https://gestao-financeira-e-marketplaces-d7ede.shrd00.internal.goskip.dev'
+    // Resolve a base do backend a partir da requisição REAL de entrada (host público
+    // pelo qual o backend foi chamado). PB_INSTANCE_URL é só último recurso.
+    let backendBase = ''
+    let backendProto = ''
+    let backendHost = ''
+    try {
+      const headers = e.requestInfo().headers || {}
+      backendProto = (headers['x_forwarded_proto'] || 'https').trim()
+      backendHost = (headers['x_forwarded_host'] || headers['host'] || '').trim()
+    } catch (_) {}
 
-    const redirectUri = instanceUrl + '/backend/v1/google/callback'
+    if (!backendHost) {
+      try {
+        backendHost = (e.request.host || '').trim()
+      } catch (_) {}
+    }
+
+    // X-Forwarded-Host pode vir como lista: fica com o primeiro (host público original)
+    if (backendHost.indexOf(',') !== -1) {
+      backendHost = backendHost.split(',')[0].trim()
+    }
+    if (backendHost.endsWith('/')) {
+      backendHost = backendHost.slice(0, -1)
+    }
+
+    if (backendHost) {
+      backendBase = backendProto + '://' + backendHost
+    } else {
+      // Sem host na requisição (não deveria ocorrer em rota HTTP): usa a env normalizada.
+      backendBase = ($os.getenv('PB_INSTANCE_URL') || '').trim()
+      while (backendBase.endsWith('/')) {
+        backendBase = backendBase.slice(0, -1)
+      }
+    }
+
+    const redirectUri = backendBase + '/backend/v1/google/callback'
 
     let isConnected = false
     let connectedEmail = ''

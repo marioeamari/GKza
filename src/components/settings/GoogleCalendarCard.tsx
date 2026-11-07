@@ -17,6 +17,9 @@ import { googleCalendarService } from '@/services/googleCalendar'
 import { useToast } from '@/hooks/use-toast'
 import type { GoogleCalendarStatusResponse } from '@/types/domain'
 
+const BACKEND_CALLBACK_URI =
+  (import.meta.env.VITE_POCKETBASE_URL || '').replace(/\/+$/, '') + '/backend/v1/google/callback'
+
 export function GoogleCalendarCard() {
   const { toast } = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -202,8 +205,7 @@ export function GoogleCalendarCard() {
                 <KeyRound className="h-3 w-3 text-primary shrink-0" />
                 <span>URI Autorizada:</span>
                 <code className="font-mono text-[10px] bg-background/80 px-1.5 py-0.5 rounded border border-border/50 select-all">
-                  {status.redirect_uri ||
-                    'https://gestao-financeira-e-marketplaces-d7ede.shrd00.internal.goskip.dev/backend/v1/google/callback'}
+                  {status.redirect_uri || BACKEND_CALLBACK_URI}
                 </code>
               </div>
             </div>
@@ -276,8 +278,7 @@ export function GoogleCalendarCard() {
                 </div>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 font-mono text-[11px] bg-muted p-2 rounded-md border border-border select-all break-all font-semibold text-primary">
-                    {status?.redirect_uri ||
-                      'https://gestao-financeira-e-marketplaces-d7ede.shrd00.internal.goskip.dev/backend/v1/google/callback'}
+                    {status?.redirect_uri || BACKEND_CALLBACK_URI}
                   </code>
                 </div>
                 <p className="text-[11px] text-muted-foreground">
