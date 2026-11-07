@@ -110,9 +110,16 @@ export default function Agenda() {
 
       const res = await googleCalendarService.syncNow()
       setGoogleNeedsReconnect(false)
+      const partes: string[] = [
+        `${res.imported} entrada${res.imported === 1 ? '' : 's'}`,
+        `${res.exported} saída${res.exported === 1 ? '' : 's'}`,
+      ]
+      if (res.removed > 0) {
+        partes.push(`${res.removed} removido${res.removed === 1 ? '' : 's'} (excluídos no Google)`)
+      }
       toast({
         title: 'Sincronização Google concluída!',
-        description: `${res.imported} importados, ${res.exported} exportados.`,
+        description: partes.join(', ') + '.',
       })
       loadData()
     } catch (err: unknown) {

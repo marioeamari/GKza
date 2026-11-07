@@ -21,6 +21,7 @@ cronAdd('google_calendar_cron_sync', '0 * * * *', () => {
 
   if (configs.length === 0) return
 
+  const syncLib = require(`${__hooks}/googleAgendaSync.js`)
   const nowIso = new Date().toISOString()
 
   for (let c = 0; c < configs.length; c++) {
@@ -80,7 +81,9 @@ cronAdd('google_calendar_cron_sync', '0 * * * *', () => {
 
     const calendarId = configRec.getString('calendar_id') || 'primary'
 
-    // Importar eventos do Google Calendar
+    // Importar + limpar: upsert dos eventos válidos e REMOÇÃO dos que deixaram de
+    // existir no Google (status 'cancelled' ou ausentes na janela sincronizada).
+    // Compromissos manuais (sem google_event_id) nunca são removidos.
     try {
       const timeMin = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString()
       const timeMax = new Date(Date.now() + 60 * 24 * 3600 * 1000).toISOString()
@@ -100,68 +103,68 @@ cronAdd('google_calendar_cron_sync', '0 * * * *', () => {
       })
 
       if (eventsRes.statusCode === 200 && eventsRes.json && eventsRes.json.items) {
-        const items = eventsRes.json.items
         const agendaCol = $app.findCollectionByNameOrId('agenda_eventos')
 
-        for (let i = 0; i < items.length; i++) {
-          const gEv = items[i]
-          if (gEv.status === 'cancelled') continue
-
-          const gId = gEv.id
-          if (!gId) continue
-
-          let existingRec = null
-          try {
-            existingRec = $app.findFirstRecordByData('agenda_eventos', 'google_event_id', gId)
-          } catch (_) {}
-
-          const titulo = gEv.summary || '(Sem título)'
-          const descricao = gEv.description || ''
-          const local = gEv.location || ''
-
-          let dataInicio = ''
-          let dataFim = ''
-          let diaInteiro = false
-
-          if (gEv.start && gEv.start.dateTime) {
-            dataInicio = new Date(gEv.start.dateTime).toISOString()
-          } else if (gEv.start && gEv.start.date) {
-            dataInicio = new Date(gEv.start.date + 'T00:00:00.000Z').toISOString()
-            diaInteiro = true
-          }
-
-          if (gEv.end && gEv.end.dateTime) {
-            dataFim = new Date(gEv.end.dateTime).toISOString()
-          } else if (gEv.end && gEv.end.date) {
-            dataFim = new Date(gEv.end.date + 'T23:59:59.000Z').toISOString()
-          }
-
-          if (!dataInicio) continue
-
-          if (!existingRec) {
+        const adapters = {
+          buscarPorGoogleId: (gId) => {
+            try {
+              return $app.findFirstRecordByData('agenda_eventos', 'google_event_id', gId)
+            } catch (_) {
+              return null
+            }
+          },
+          criar: (campos, gId) => {
             const newEv = new Record(agendaCol)
-            newEv.set('titulo', titulo)
-            newEv.set('descricao', descricao)
-            newEv.set('local', local)
-            newEv.set('data_inicio', dataInicio)
-            if (dataFim) newEv.set('data_fim', dataFim)
-            newEv.set('dia_inteiro', diaInteiro)
+            newEv.set('titulo', campos.titulo)
+            newEv.set('descricao', campos.descricao)
+            newEv.set('local', campos.local)
+            newEv.set('data_inicio', campos.data_inicio)
+            if (campos.data_fim) newEv.set('data_fim', campos.data_fim)
+            newEv.set('dia_inteiro', campos.dia_inteiro)
             newEv.set('contexto_tipo', 'pessoal')
             newEv.set('status', 'ativo')
             newEv.set('origem', 'google')
             newEv.set('google_event_id', gId)
             newEv.set('recorrencia', 'nenhuma')
             $app.save(newEv)
-          } else if (existingRec.getString('origem') === 'google') {
-            existingRec.set('titulo', titulo)
-            existingRec.set('descricao', descricao)
-            existingRec.set('local', local)
-            existingRec.set('data_inicio', dataInicio)
-            if (dataFim) existingRec.set('data_fim', dataFim)
-            existingRec.set('dia_inteiro', diaInteiro)
-            $app.save(existingRec)
-          }
+          },
+          atualizar: (rec, campos) => {
+            rec.set('titulo', campos.titulo)
+            rec.set('descricao', campos.descricao)
+            rec.set('local', campos.local)
+            rec.set('data_inicio', campos.data_inicio)
+            if (campos.data_fim) rec.set('data_fim', campos.data_fim)
+            rec.set('dia_inteiro', campos.dia_inteiro)
+          },
+          salvar: (rec) => $app.save(rec),
+          remover: (rec) => $app.delete(rec),
+          // Candidatos à limpeza: tudo que tem id do Google e cuja data cai na janela
+          // sincronizada (com folga de 7 dias). Eventos fora da janela não são julgados.
+          listarVinculados: () => {
+            const limMin = new Date(new Date(timeMin).getTime() - 7 * 24 * 3600 * 1000)
+              .toISOString()
+              .replace('T', ' ')
+            const limMax = new Date(new Date(timeMax).getTime() + 7 * 24 * 3600 * 1000)
+              .toISOString()
+              .replace('T', ' ')
+            return $app.findRecordsByFilter(
+              'agenda_eventos',
+              "google_event_id != '' && data_inicio >= '" +
+                limMin +
+                "' && data_inicio <= '" +
+                limMax +
+                "'",
+              '-created',
+              500,
+              0,
+            )
+          },
         }
+
+        syncLib.aplicarSync(eventsRes.json.items, adapters, {
+          timeMin: timeMin,
+          timeMax: timeMax,
+        })
       }
     } catch (_) {}
 

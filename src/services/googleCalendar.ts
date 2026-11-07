@@ -41,12 +41,16 @@ export const googleCalendarService = {
   async syncNow(): Promise<{
     success: boolean
     imported: number
+    updated: number
+    removed: number
     exported: number
     last_sync_at: string
   }> {
     return pb.send<{
       success: boolean
       imported: number
+      updated: number
+      removed: number
       exported: number
       last_sync_at: string
     }>('/backend/v1/google/sync', {
