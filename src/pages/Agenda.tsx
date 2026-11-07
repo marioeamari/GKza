@@ -20,6 +20,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { ContextBadge } from '@/components/ContextBadge'
 import { EventoDialog } from '@/components/agenda/EventoDialog'
+import { PillEvento, PillLegenda } from '@/components/agenda/MonthGridPills'
+import type { EstadoDia } from '@/lib/agendaCores'
 import { agendaService } from '@/services/agenda'
 import {
   googleCalendarService,
@@ -760,41 +762,61 @@ export default function Agenda() {
         </div>
       ) : (
         <>
-          {/* 1. MÊS */}
+          {/* 1. MÊS — modelo "Limpo e Elegante": legenda no topo, pílulas por cor/estado */}
           {viewMode === 'mes' && (
-            <Card className="border-border/60 overflow-hidden">
+            <Card className="border-border/60 overflow-hidden rounded-2xl bg-card shadow-xs">
               <CardContent className="p-0">
-                <div className="grid grid-cols-7 border-b border-border bg-muted/30 text-center text-xs font-semibold py-2 text-muted-foreground">
+                {/* Legenda Passado / Hoje / Futuro — mesmo estilo das pílulas */}
+                <div className="flex justify-end items-center gap-4 px-4 py-2.5">
+                  <PillLegenda estado="passado" rotulo="Passado" />
+                  <PillLegenda estado="hoje" rotulo="Hoje" />
+                  <PillLegenda estado="futuro" rotulo="Futuro" />
+                </div>
+
+                {/* Cabeçalho dos dias da semana (faixa levemente rosada/creme) */}
+                <div className="grid grid-cols-7 border-y border-border/60 bg-[#F8EFE9] text-center text-sm font-bold py-2.5 text-foreground/90">
                   <div>Dom</div>
                   <div>Seg</div>
                   <div>Ter</div>
                   <div>Qua</div>
                   <div>Qui</div>
                   <div>Sex</div>
-                  <div>Sáb</div>
+                  <div className="bg-[#F6E7E0]/70">Sáb</div>
                 </div>
 
-                <div className="grid grid-cols-7 border-collapse">
+                <div className="grid grid-cols-7">
                   {daysInMonth.map((d, index) => {
                     const isHoje = d.dateStr === todayStr
+                    const estadoDia: EstadoDia = isHoje
+                      ? 'hoje'
+                      : d.dateStr < todayStr
+                        ? 'passado'
+                        : 'futuro'
                     const evList = eventosPorDia.get(d.dateStr) || []
+                    const isSabado = index % 7 === 6
 
                     return (
                       <div
                         key={index}
-                        className={`min-h-[95px] p-1.5 border-b border-r border-border/50 transition-colors flex flex-col justify-between ${
-                          !d.inMonth ? 'bg-muted/10 opacity-50' : 'bg-card'
-                        } ${isHoje ? 'bg-primary/5' : ''}`}
+                        className={`min-h-[95px] p-1.5 border-b border-r border-border/40 flex flex-col justify-start ${
+                          !d.inMonth ? 'opacity-45' : ''
+                        } ${isSabado && d.inMonth ? 'bg-[#FBF1EC]' : 'bg-card'}`}
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <span
-                            className={`text-xs font-semibold h-5 w-5 rounded-full flex items-center justify-center ${
-                              isHoje ? 'bg-primary text-white' : 'text-foreground'
-                            }`}
-                          >
-                            {d.dayNumber}
-                          </span>
-                          {evList.length > 0 && (
+                          {isHoje ? (
+                            <span className="text-xs font-bold h-5 w-5 rounded-full flex items-center justify-center bg-primary text-white shrink-0">
+                              {d.dayNumber}
+                            </span>
+                          ) : (
+                            <span
+                              className={`text-xs font-semibold ${
+                                !d.inMonth ? 'text-muted-foreground' : 'text-foreground'
+                              }`}
+                            >
+                              {d.dayNumber}
+                            </span>
+                          )}
+                          {evList.length > 3 && (
                             <span className="text-[10px] text-muted-foreground font-medium">
                               {evList.length}
                             </span>
@@ -806,29 +828,19 @@ export default function Agenda() {
                             const origId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
                             const baseEvent = eventos.find((e) => e.id === origId) || ev
                             return (
-                              <button
+                              <PillEvento
                                 key={ev.id}
-                                type="button"
+                                titulo={ev.titulo}
+                                cor={ev.cor}
+                                estado={estadoDia}
+                                isGoogle={ev.origem === 'google'}
+                                title={`${ev.origem === 'google' ? '[Google Calendar] ' : ''}${ev.titulo}${ev.local ? ' - ' + ev.local : ''}`}
                                 onClick={() => {
                                   setEditingEvento(baseEvent)
                                   setOccurrenceDate(d.dateStr)
                                   setDialogOpen(true)
                                 }}
-                                className="w-full text-left truncate text-[11px] px-1.5 py-0.5 rounded font-medium transition-opacity hover:opacity-80 flex items-center gap-1"
-                                style={{
-                                  backgroundColor: `${ev.cor || (ev.origem === 'google' ? '#2563EB' : '#DF5830')}15`,
-                                  borderLeft: `3px solid ${ev.cor || (ev.origem === 'google' ? '#2563EB' : '#DF5830')}`,
-                                  color: ev.cor || (ev.origem === 'google' ? '#1D4ED8' : '#DF5830'),
-                                }}
-                                title={`${ev.origem === 'google' ? '[Google Calendar] ' : ''}${ev.titulo}${ev.local ? ' - ' + ev.local : ''}`}
-                              >
-                                {ev.origem === 'google' && (
-                                  <span className="inline-flex items-center text-[9px] font-bold px-1 rounded bg-blue-100 text-blue-700 shrink-0">
-                                    G
-                                  </span>
-                                )}
-                                <span className="truncate">{ev.titulo}</span>
-                              </button>
+                              />
                             )
                           })}
                           {evList.length > 3 && (
