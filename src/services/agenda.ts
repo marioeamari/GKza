@@ -5,6 +5,7 @@ import type {
   AgendaEventoStatus,
   AgendaEventoOrigem,
 } from '@/types/domain'
+import { adicionarExcecao } from '@/lib/agendaRecorrencia'
 
 export interface CreateAgendaEventoInput {
   titulo: string
@@ -59,5 +60,17 @@ export const agendaService = {
 
   async deleteEvento(id: string): Promise<boolean> {
     return pb.collection('agenda_eventos').delete(id)
+  },
+
+  /**
+   * Exclui UMA ocorrência de um compromisso recorrente: grava o dia em
+   * recorrencia_excecoes e a projeção da agenda pula essa data.
+   * A série em si continua intacta.
+   */
+  async excluirOcorrencia(evento: AgendaEvento, dataOcorrencia: string): Promise<AgendaEvento> {
+    const atual = (evento.recorrencia_excecoes as string | undefined) || ''
+    return pb.collection('agenda_eventos').update<AgendaEvento>(evento.id, {
+      recorrencia_excecoes: adicionarExcecao(atual, dataOcorrencia),
+    })
   },
 }

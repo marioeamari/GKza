@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-07T23:04:03.194Z",
+  "generatedAt": "2026-11-07T23:21:12.919Z",
   "collections": [
     {
       "name": "users",
@@ -2182,6 +2182,12 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "recorrencia_excecoes",
+          "type": "json",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [

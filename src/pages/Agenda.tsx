@@ -32,6 +32,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { can } from '@/lib/permissions'
 import { useToast } from '@/hooks/use-toast'
 import { getLocalDateStr } from '@/lib/format'
+import { isOcorrenciaExcluida } from '@/lib/agendaRecorrencia'
 import { isLembreteVencidoOuNoMomento } from '@/hooks/use-pwa-notifications'
 import type { AgendaEvento, LembreteRapido } from '@/types/domain'
 
@@ -52,6 +53,7 @@ export default function Agenda() {
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingEvento, setEditingEvento] = useState<AgendaEvento | null>(null)
+  const [occurrenceDate, setOccurrenceDate] = useState<string | undefined>(undefined)
   const [syncingGoogle, setSyncingGoogle] = useState(false)
   const [googleNeedsReconnect, setGoogleNeedsReconnect] = useState(false)
   const [reconnectingGoogle, setReconnectingGoogle] = useState(false)
@@ -487,6 +489,10 @@ export default function Agenda() {
     filteredEventos.forEach((ev) => {
       if (!ev.data_inicio || ev.status === 'cancelado') return
 
+      // Exceções de ocorrência (recorrencia_excecoes, migração 0150): dias gravados
+      // aqui não são projetados na grade — verificação por ocorrência em addInstance
+      const temExcecoes = !!ev.recorrencia_excecoes
+
       const baseStartStr =
         ev.data_inicio.includes('T') || ev.data_inicio.includes(' ')
           ? getLocalDateStr(new Date(ev.data_inicio))
@@ -525,6 +531,9 @@ export default function Agenda() {
       const rangeEndUtc = new Date(Date.UTC(eY, eM - 1, eD, 12, 0, 0))
 
       const addInstance = (targetDateStr: string) => {
+        // Exceção de ocorrência: dia gravado em recorrencia_excecoes não aparece na grade
+        if (temExcecoes && isOcorrenciaExcluida(ev.recorrencia_excecoes, targetDateStr)) return
+
         const isOccurrenceOriginal = targetDateStr === baseStartStr
         const instance: AgendaEvento = isOccurrenceOriginal
           ? ev
@@ -652,6 +661,7 @@ export default function Agenda() {
             <Button
               onClick={() => {
                 setEditingEvento(null)
+                setOccurrenceDate(undefined)
                 setDialogOpen(true)
               }}
               className="bg-primary hover:bg-primary/90 text-white gap-2"
@@ -801,6 +811,7 @@ export default function Agenda() {
                                 type="button"
                                 onClick={() => {
                                   setEditingEvento(baseEvent)
+                                  setOccurrenceDate(d.dateStr)
                                   setDialogOpen(true)
                                 }}
                                 className="w-full text-left truncate text-[11px] px-1.5 py-0.5 rounded font-medium transition-opacity hover:opacity-80 flex items-center gap-1"
@@ -884,6 +895,7 @@ export default function Agenda() {
                                 const origId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
                                 const baseEvent = eventos.find((e) => e.id === origId) || ev
                                 setEditingEvento(baseEvent)
+                                setOccurrenceDate(wd.dateStr)
                                 setDialogOpen(true)
                               }}
                               className="p-2 rounded-lg border border-border bg-white text-xs cursor-pointer hover:shadow-xs transition-shadow space-y-1"
@@ -945,6 +957,7 @@ export default function Agenda() {
                     size="sm"
                     onClick={() => {
                       setEditingEvento(null)
+                      setOccurrenceDate(undefined)
                       setDialogOpen(true)
                     }}
                     className="h-8 text-xs bg-primary hover:bg-primary/90 text-white"
@@ -1040,6 +1053,7 @@ export default function Agenda() {
                                     const origId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
                                     const baseEvent = eventos.find((e) => e.id === origId) || ev
                                     setEditingEvento(baseEvent)
+                                    setOccurrenceDate(dStr)
                                     setDialogOpen(true)
                                   }}
                                 >
@@ -1053,7 +1067,18 @@ export default function Agenda() {
                                   className="h-8 w-8 text-destructive hover:bg-destructive/10"
                                   onClick={() => {
                                     const origId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
-                                    handleDelete(origId)
+                                    const baseEvent = eventos.find((e) => e.id === origId) || ev
+                                    // Recorrente: abre o diálogo para escolher o escopo
+                                    if (
+                                      baseEvent.recorrencia &&
+                                      baseEvent.recorrencia !== 'nenhuma'
+                                    ) {
+                                      setEditingEvento(baseEvent)
+                                      setOccurrenceDate(dStr)
+                                      setDialogOpen(true)
+                                    } else {
+                                      handleDelete(origId)
+                                    }
                                   }}
                                 >
                                   <Trash2 className="h-4 w-4" />
@@ -1161,6 +1186,7 @@ export default function Agenda() {
                                   // Abre o registro original para edição
                                   const baseEvent = eventos.find((e) => e.id === originalId) || ev
                                   setEditingEvento(baseEvent)
+                                  setOccurrenceDate(ev.data_inicio.slice(0, 10))
                                   setDialogOpen(true)
                                 }}
                               >
@@ -1172,7 +1198,20 @@ export default function Agenda() {
                                 size="icon"
                                 variant="ghost"
                                 className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                                onClick={() => handleDelete(originalId)}
+                                onClick={() => {
+                                  const baseEvent = eventos.find((e) => e.id === originalId) || ev
+                                  // Recorrente: abre o diálogo para escolher o escopo
+                                  if (
+                                    baseEvent.recorrencia &&
+                                    baseEvent.recorrencia !== 'nenhuma'
+                                  ) {
+                                    setEditingEvento(baseEvent)
+                                    setOccurrenceDate(ev.data_inicio.slice(0, 10))
+                                    setDialogOpen(true)
+                                  } else {
+                                    handleDelete(originalId)
+                                  }
+                                }}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -1394,6 +1433,7 @@ export default function Agenda() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         evento={editingEvento}
+        occurrenceDate={occurrenceDate}
         onSuccess={loadData}
       />
     </div>

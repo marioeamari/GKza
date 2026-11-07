@@ -639,6 +639,8 @@ export interface AgendaEvento extends RecordModel {
   dia_inteiro?: boolean
   local?: string
   recorrencia?: AgendaEventoRecorrencia
+  /** JSON string (array de datas YYYY-MM-DD) com ocorrências excluídas da série */
+  recorrencia_excecoes?: string
   status: AgendaEventoStatus
   origem: AgendaEventoOrigem
   google_event_id?: string

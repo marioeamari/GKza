@@ -20,10 +20,24 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useAppContext } from '@/contexts/AppContext'
+import { useAuth } from '@/contexts/AuthContext'
 import { agendaService } from '@/services/agenda'
 import { cadastrosService } from '@/services/cadastros'
 import { useToast } from '@/hooks/use-toast'
+import { can } from '@/lib/permissions'
 import { getLocalDateStr } from '@/lib/format'
+import { dataOcorrenciaDeEvento } from '@/lib/agendaRecorrencia'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Trash2, CalendarRange } from 'lucide-react'
 import type { AgendaEvento, Pessoa, Empresa, AgendaEventoRecorrencia } from '@/types/domain'
 
 interface EventoDialogProps {
@@ -32,6 +46,11 @@ interface EventoDialogProps {
   evento?: AgendaEvento | null
   initialDate?: string
   initialTitulo?: string
+  /**
+   * Dia (YYYY-MM-DD) da ocorrência clicada na grade — usado como escopo da
+   * exclusão quando o compromisso é recorrente. Opcional.
+   */
+  occurrenceDate?: string
   onSuccess: () => void
 }
 
@@ -41,10 +60,15 @@ export function EventoDialog({
   evento,
   initialDate,
   initialTitulo,
+  occurrenceDate,
   onSuccess,
 }: EventoDialogProps) {
   const { activeContext } = useAppContext()
+  const { user } = useAuth()
   const { toast } = useToast()
+
+  const [deleteScopeOpen, setDeleteScopeOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const [titulo, setTitulo] = useState('')
   const [descricao, setDescricao] = useState('')
@@ -174,6 +198,44 @@ export function EventoDialog({
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  const podeExcluir = !!evento && evento.origem !== 'google' && can(user?.role, 'deleteFinance')
+  const isRecorrente = !!evento && !!evento.recorrencia && evento.recorrencia !== 'nenhuma'
+
+  const confirmarExcluirSerie = async () => {
+    if (!evento) return
+    setDeleting(true)
+    try {
+      await agendaService.deleteEvento(evento.id)
+      toast({ title: 'Compromisso excluído da agenda.' })
+      setDeleteScopeOpen(false)
+      onOpenChange(false)
+      onSuccess()
+    } catch {
+      toast({ title: 'Erro ao excluir compromisso', variant: 'destructive' })
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const confirmarExcluirOcorrencia = async () => {
+    if (!evento) return
+    setDeleting(true)
+    try {
+      const alvo =
+        occurrenceDate ||
+        dataOcorrenciaDeEvento(evento.data_inicio, getLocalDateStr(new Date(evento.data_inicio)))
+      await agendaService.excluirOcorrencia(evento, alvo)
+      toast({ title: 'Ocorrência removida desta data.' })
+      setDeleteScopeOpen(false)
+      onOpenChange(false)
+      onSuccess()
+    } catch {
+      toast({ title: 'Erro ao excluir a ocorrência', variant: 'destructive' })
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -360,7 +422,19 @@ export function EventoDialog({
             </div>
           </div>
 
-          <DialogFooter className="pt-2">
+          <DialogFooter className="pt-2 flex items-center">
+            {podeExcluir && (
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={deleting || loading}
+                onClick={() => setDeleteScopeOpen(true)}
+                className="mr-auto text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5"
+              >
+                <Trash2 className="h-4 w-4" />
+                Excluir compromisso
+              </Button>
+            )}
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
@@ -369,6 +443,42 @@ export function EventoDialog({
             </Button>
           </DialogFooter>
         </form>
+
+        {/* ESCOPO DA EXCLUSÃO — só para compromissos recorrentes */}
+        <AlertDialog open={deleteScopeOpen} onOpenChange={setDeleteScopeOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Excluir compromisso recorrente</AlertDialogTitle>
+              <AlertDialogDescription>
+                <span className="font-semibold text-foreground">{evento?.titulo}</span> se repete na
+                agenda. O que você deseja excluir?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="flex flex-col gap-2 py-2">
+              <Button
+                variant="outline"
+                disabled={deleting}
+                onClick={confirmarExcluirOcorrencia}
+                className="justify-start gap-2"
+              >
+                <CalendarRange className="h-4 w-4" />
+                Somente esta ocorrência
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={deleting}
+                onClick={confirmarExcluirSerie}
+                className="justify-start gap-2"
+              >
+                <Trash2 className="h-4 w-4" />
+                Toda a série
+              </Button>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </DialogContent>
     </Dialog>
   )
