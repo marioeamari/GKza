@@ -1,7 +1,10 @@
 // googleAgendaSync.js — lógica compartilhada da sincronização Google Calendar → agenda_eventos.
-// Carregado nos hooks do PocketBase via require(`${__hooks}/googleAgendaSync.js`) e nos
-// testes do Node (vitest). SEM dependência de globais do JSVM ($app, $http): toda
-// interação com o PocketBase entra por injeção (adapters), permitindo testes unitários.
+// Fonte testada do Node (vitest, via ?raw). Os hooks do PocketBase NÃO usam require:
+// o JSVM (goja) desta instância recusa o módulo externo ("Invalid module") e não
+// compartilha declarações de topo com o pool dos callbacks — a lib está inline,
+// espelhada, dentro de google_calendar_sync.js e google_calendar_cron_sync.js
+// (manter em sync, v0.0.297). SEM dependência de globais do JSVM ($app, $http):
+// toda interação com o PocketBase entra por injeção (adapters), permitindo testes.
 //
 // Regras gravadas (0.0.296):
 // 1. Deleção lá = deleção aqui: evento com status "cancelled" na API OU ausente na
