@@ -21,6 +21,7 @@ import { Switch } from '@/components/ui/switch'
 import { ContextBadge } from '@/components/ContextBadge'
 import { EventoDialog } from '@/components/agenda/EventoDialog'
 import { PillEvento, PillLegenda } from '@/components/agenda/MonthGridPills'
+import { GradeSemana, GradeDia } from '@/components/agenda/GradeSemanaDia'
 import type { EstadoDia } from '@/lib/agendaCores'
 import { agendaService } from '@/services/agenda'
 import {
@@ -857,254 +858,42 @@ export default function Agenda() {
             </Card>
           )}
 
-          {/* 2. SEMANA */}
+          {/* 2. SEMANA — blocos posicionados por horário, pílulas por estado (mesmo sistema da visão de mês) */}
           {viewMode === 'semana' && (
-            <Card className="border-border/60">
-              <CardContent className="p-0">
-                <div className="grid grid-cols-7 border-b border-border bg-muted/20">
-                  {weekDays.map((wd) => {
-                    const isHoje = wd.dateStr === todayStr
-                    return (
-                      <div
-                        key={wd.dateStr}
-                        className={`p-3 text-center border-r border-border/50 ${
-                          isHoje ? 'bg-primary/10' : ''
-                        }`}
-                      >
-                        <span className="block text-xs text-muted-foreground uppercase">
-                          {wd.dayName}
-                        </span>
-                        <span
-                          className={`inline-block mt-0.5 text-base font-bold h-7 w-7 rounded-full leading-7 ${
-                            isHoje ? 'bg-primary text-white' : 'text-foreground'
-                          }`}
-                        >
-                          {wd.dayNumber}
-                        </span>
-                      </div>
-                    )
-                  })}
-                </div>
-
-                <div className="grid grid-cols-7 min-h-[350px]">
-                  {weekDays.map((wd) => {
-                    const evList = eventosPorDia.get(wd.dateStr) || []
-                    return (
-                      <div
-                        key={wd.dateStr}
-                        className="p-2 border-r border-border/50 space-y-2 flex flex-col"
-                      >
-                        {evList.map((ev) => {
-                          const dIni = new Date(ev.data_inicio)
-                          const timeStr = ev.dia_inteiro
-                            ? 'Dia todo'
-                            : `${String(dIni.getHours()).padStart(2, '0')}:${String(dIni.getMinutes()).padStart(2, '0')}`
-
-                          return (
-                            <div
-                              key={ev.id}
-                              onClick={() => {
-                                const origId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
-                                const baseEvent = eventos.find((e) => e.id === origId) || ev
-                                setEditingEvento(baseEvent)
-                                setOccurrenceDate(wd.dateStr)
-                                setDialogOpen(true)
-                              }}
-                              className="p-2 rounded-lg border border-border bg-white text-xs cursor-pointer hover:shadow-xs transition-shadow space-y-1"
-                              style={{ borderLeft: `3px solid ${ev.cor || '#DF5830'}` }}
-                            >
-                              <span className="text-[10px] text-muted-foreground font-semibold flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                {timeStr}
-                                {ev.recorrencia && ev.recorrencia !== 'nenhuma' && (
-                                  <span
-                                    title={`Recorrência: ${ev.recorrencia}`}
-                                    className="inline-flex items-center"
-                                  >
-                                    <Repeat className="h-2.5 w-2.5 ml-0.5 text-muted-foreground" />
-                                  </span>
-                                )}
-                              </span>
-                              <h5 className="font-semibold text-foreground line-clamp-2">
-                                {ev.titulo}
-                              </h5>
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <ContextBadge
-                                  tipo={ev.contexto_tipo}
-                                  pessoa={ev.expand?.pessoa}
-                                  empresa={ev.expand?.empresa}
-                                />
-                                {ev.origem === 'google' && (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-[10px] bg-blue-50/80 text-blue-700 border-blue-200 py-0 px-1.5 flex items-center gap-1"
-                                  >
-                                    <span className="font-bold text-[9px] bg-blue-600 text-white rounded px-0.5 leading-none">
-                                      G
-                                    </span>
-                                    Google
-                                  </Badge>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )
-                  })}
-                </div>
-              </CardContent>
-            </Card>
+            <GradeSemana
+              dias={weekDays}
+              eventosPorDia={eventosPorDia}
+              todayStr={todayStr}
+              onAbrir={(ev, dateStr) => {
+                const origId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
+                const baseEvent = eventos.find((e) => e.id === origId) || ev
+                setEditingEvento(baseEvent)
+                setOccurrenceDate(dateStr)
+                setDialogOpen(true)
+              }}
+            />
           )}
 
-          {/* 3. DIA */}
+          {/* 3. DIA — grade de horas com blocos por horário, pílulas por estado (mesmo sistema da visão de mês) */}
           {viewMode === 'dia' && (
-            <Card className="border-border/60">
-              <CardContent className="p-6 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-border">
-                  <h3 className="font-semibold text-foreground">
-                    Compromissos do Dia ({headerDateLabel})
-                  </h3>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setEditingEvento(null)
-                      setOccurrenceDate(undefined)
-                      setDialogOpen(true)
-                    }}
-                    className="h-8 text-xs bg-primary hover:bg-primary/90 text-white"
-                  >
-                    <Plus className="h-3.5 w-3.5 mr-1" />
-                    Adicionar no Dia
-                  </Button>
-                </div>
-
-                {(() => {
-                  const dStr = getLocalDateStr(currentDate)
-                  const list = eventosPorDia.get(dStr) || []
-                  if (list.length === 0) {
-                    return (
-                      <div className="text-center py-12 text-sm text-muted-foreground">
-                        Nenhum compromisso marcado para este dia.
-                      </div>
-                    )
-                  }
-
-                  return (
-                    <div className="divide-y divide-border">
-                      {list.map((ev) => {
-                        const dIni = new Date(ev.data_inicio)
-                        const hora = ev.dia_inteiro
-                          ? 'Dia todo'
-                          : `${String(dIni.getHours()).padStart(2, '0')}:${String(dIni.getMinutes()).padStart(2, '0')}`
-
-                        return (
-                          <div
-                            key={ev.id}
-                            className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                          >
-                            <div className="flex items-start gap-3">
-                              <div
-                                className="h-10 w-10 rounded-lg grid place-items-center font-bold text-xs shrink-0"
-                                style={{
-                                  backgroundColor: `${ev.cor || '#DF5830'}20`,
-                                  color: ev.cor || '#DF5830',
-                                }}
-                              >
-                                <Clock className="h-4 w-4" />
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <h4 className="font-bold text-foreground text-sm">{ev.titulo}</h4>
-                                  <ContextBadge
-                                    tipo={ev.contexto_tipo}
-                                    pessoa={ev.expand?.pessoa}
-                                    empresa={ev.expand?.empresa}
-                                  />
-                                  {ev.origem === 'google' && (
-                                    <Badge
-                                      variant="outline"
-                                      className="text-[10px] bg-blue-50 text-blue-700 border-blue-200 flex items-center gap-1"
-                                    >
-                                      <span className="font-bold text-[9px] bg-blue-600 text-white rounded px-1 leading-none">
-                                        G
-                                      </span>
-                                      Google Calendar
-                                    </Badge>
-                                  )}
-                                  {ev.recorrencia && ev.recorrencia !== 'nenhuma' && (
-                                    <Badge variant="secondary" className="text-[10px] capitalize">
-                                      {ev.recorrencia}
-                                    </Badge>
-                                  )}
-                                </div>
-                                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mt-1">
-                                  <span>{hora}</span>
-                                  {ev.local && (
-                                    <span className="flex items-center gap-1">
-                                      <MapPin className="h-3 w-3" />
-                                      {ev.local}
-                                    </span>
-                                  )}
-                                </div>
-                                {ev.descricao && (
-                                  <p className="text-xs text-muted-foreground mt-1">
-                                    {ev.descricao}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-2 self-end sm:self-center">
-                              {can(user?.role, 'writeFinance') && (
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                                  onClick={() => {
-                                    const origId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
-                                    const baseEvent = eventos.find((e) => e.id === origId) || ev
-                                    setEditingEvento(baseEvent)
-                                    setOccurrenceDate(dStr)
-                                    setDialogOpen(true)
-                                  }}
-                                >
-                                  <Edit2 className="h-4 w-4" />
-                                </Button>
-                              )}
-                              {can(user?.role, 'deleteFinance') && (
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                                  onClick={() => {
-                                    const origId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
-                                    const baseEvent = eventos.find((e) => e.id === origId) || ev
-                                    // Recorrente: abre o diálogo para escolher o escopo
-                                    if (
-                                      baseEvent.recorrencia &&
-                                      baseEvent.recorrencia !== 'nenhuma'
-                                    ) {
-                                      setEditingEvento(baseEvent)
-                                      setOccurrenceDate(dStr)
-                                      setDialogOpen(true)
-                                    } else {
-                                      handleDelete(origId)
-                                    }
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )
-                })()}
-              </CardContent>
-            </Card>
+            <GradeDia
+              dateStr={getLocalDateStr(currentDate)}
+              eventos={eventosPorDia.get(getLocalDateStr(currentDate)) || []}
+              todayStr={todayStr}
+              vazio={`Compromissos de ${currentDate.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}`}
+              onAbrir={(ev) => {
+                const origId = ev.id.includes('_') ? ev.id.split('_')[0] : ev.id
+                const baseEvent = eventos.find((e) => e.id === origId) || ev
+                setEditingEvento(baseEvent)
+                setOccurrenceDate(getLocalDateStr(currentDate))
+                setDialogOpen(true)
+              }}
+              onNovo={() => {
+                setEditingEvento(null)
+                setOccurrenceDate(undefined)
+                setDialogOpen(true)
+              }}
+            />
           )}
 
           {/* 4. LISTA DOS PRÓXIMOS COMPROMISSOS */}
