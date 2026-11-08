@@ -3,42 +3,42 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import {
   BadgeDollarSign,
   Building2,
+  CalendarCheck2,
+  CalendarDays,
+  Calculator,
+  BookmarkCheck,
+  Boxes,
   ChevronDown,
   ChevronRight,
   CircleUserRound,
+  Coins,
+  Factory,
   FilePenLine,
-  Grid2X2,
+  FileSpreadsheet,
+  HeartHandshake,
+  History,
   Home,
+  Layers,
+  LayoutDashboard,
+  ListTodo,
   LogOut,
+  Menu,
+  PackageCheck,
   PanelLeftClose,
   PanelLeftOpen,
   Receipt,
-  Coins,
   Settings,
   SlidersHorizontal,
   Sparkles,
   Store,
   Tags,
-  UserRound,
-  WalletCards,
-  CalendarCheck2,
-  CalendarDays,
   Target,
-  ListTodo,
-  HeartHandshake,
-  Calculator,
   TrendingUp,
   Truck,
+  UserRound,
   Users,
-  Layers,
-  LayoutDashboard,
-  PackageCheck,
-  BookmarkCheck,
-  Boxes,
-  FileSpreadsheet,
-  History,
-  Factory,
-  Package,
+  WalletCards,
+  X,
 } from 'lucide-react'
 import { ContextSelector } from '@/components/ContextSelector'
 
@@ -82,6 +82,100 @@ interface NavItemConfig {
   children?: SubItem[]
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Estrutura de navegação "A+B" (desktop e mobile compartilham a MESMA árvore):
+// 10 entradas no topo — 5 acordeons + 5 itens diretos. Configurações por último.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FINANCEIRO_CHILDREN: SubItem[] = [
+  { to: '/despesas', label: 'Despesas', icon: Receipt },
+  { to: '/lancamentos', label: 'Lançamentos', icon: BadgeDollarSign },
+  { to: '/contas', label: 'Contas & Cartões', icon: WalletCards },
+  { to: '/dizimos', label: 'Dízimos & Ofertas', icon: HeartHandshake },
+  { to: '/categorias', label: 'Classificações', icon: Tags },
+  { to: '/lucro', label: 'Lucro por Canais', icon: TrendingUp },
+]
+
+const PRECIFICACAO_CHILDREN: SubItem[] = [
+  { to: '/precificacao', label: 'Visão Geral & Hub', icon: Layers, end: true },
+  { to: '/precificacao/comparar', label: 'Comparador Lado a Lado', icon: Calculator },
+  { to: '/precificacao/aprovados', label: 'Cenários & Repositório', icon: BookmarkCheck },
+  { to: '/precificacao/dashboard', label: 'Dashboard de Margens', icon: LayoutDashboard },
+  { to: '/precificacao/produtos', label: 'Produtos & Kits', icon: PackageCheck },
+  { to: '/precificacao/canais', label: 'Canais & Taxas', icon: Store },
+  { to: '/precificacao/orcamentos', label: 'Orçamentos', icon: FileSpreadsheet },
+]
+
+const PRODUCAO_EXPEDICAO_CHILDREN: SubItem[] = [
+  { to: '/expedicao/separacao', label: 'Separação de Kits', icon: Boxes },
+  { to: '/expedicao/temas-modelos', label: 'Temas e Modelos', icon: Layers },
+  { to: '/expedicao/regras', label: 'Regras de Composição', icon: SlidersHorizontal },
+  { to: '/expedicao/pedidos', label: 'Pedidos / Personalizações', icon: FileSpreadsheet },
+  { to: '/expedicao/historico', label: 'Histórico de Separação', icon: History },
+  { to: '/producao', label: 'Produção Semanal', icon: Factory },
+]
+
+const ROTINA_CHILDREN: SubItem[] = [
+  { to: '/agenda', label: 'Agenda', icon: CalendarDays },
+  { to: '/metas-agenda', label: 'Metas & Agenda', icon: Target },
+  { to: '/habitos', label: 'Hábitos & Rotinas', icon: CalendarCheck2 },
+  { to: '/projetos', label: 'Projetos & Tarefas', icon: ListTodo },
+]
+
+const CADASTROS_CHILDREN: SubItem[] = [
+  { to: '/empresas', label: 'Empresas', icon: Building2 },
+  { to: '/pessoas', label: 'Pessoas', icon: CircleUserRound },
+  { to: '/fornecedores', label: 'Fornecedores', icon: Truck },
+]
+
+// Ordem acordada (A+B): Início, Triagem, Marketplaces, Equipe, Dívidas e os
+// 5 acordeons; Configurações sempre por último.
+const NAV_TREE: NavItemConfig[] = [
+  { to: '/', label: 'Início', icon: Home, end: true },
+  { to: '/pendentes', label: 'Triagem', icon: Sparkles },
+  { to: '/marketplaces', label: 'Marketplaces', icon: Store },
+  { to: '/funcionarios', label: 'Equipe', icon: Users },
+  { to: '/dividas', label: 'Dívidas & Máquinas', icon: Coins },
+  {
+    to: '/financeiro',
+    label: 'Financeiro',
+    icon: BadgeDollarSign,
+    children: FINANCEIRO_CHILDREN,
+  },
+  {
+    to: '/precificacao',
+    label: 'Precificação',
+    icon: Calculator,
+    children: PRECIFICACAO_CHILDREN,
+  },
+  {
+    to: '/expedicao/separacao',
+    label: 'Produção & Expedição',
+    icon: Boxes,
+    children: PRODUCAO_EXPEDICAO_CHILDREN,
+  },
+  {
+    to: '/agenda',
+    label: 'Rotina & Planejamento',
+    icon: CalendarDays,
+    children: ROTINA_CHILDREN,
+  },
+  { to: '/empresas', label: 'Cadastros', icon: Building2, children: CADASTROS_CHILDREN },
+  { to: '/configuracoes', label: 'Configurações', icon: Settings },
+]
+
+// Metadados de cada acordeon: key (estado), itemTo (caminho da entrada no menu)
+// e to (prefixo de rota que ativa/expande o grupo). IMPORTANTE: 'producao-
+// expedicao' usa '/expedicao' como prefixo para cobrir tanto as rotas de
+// expedição quanto '/producao' (absorvida no grupo).
+const NAV_GROUP_PREFIXES: Array<{ key: string; itemTo: string; to: string }> = [
+  { key: 'financeiro', itemTo: '/financeiro', to: '/financeiro' },
+  { key: 'precificacao', itemTo: '/precificacao', to: '/precificacao' },
+  { key: 'producao-expedicao', itemTo: '/expedicao/separacao', to: '/expedicao' },
+  { key: 'rotina', itemTo: '/agenda', to: '/agenda' },
+  { key: 'cadastros', itemTo: '/empresas', to: '/empresas' },
+]
+
 export function AppLayout() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -97,21 +191,25 @@ export function AppLayout() {
     }
   })
 
-  // Controla abertura de submenus no modo expandido (ex: precificação)
+  // Menu mobile (drawer) — mesma árvore do desktop
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+
+  // Controla abertura de submenus (acordeons) — inicia aberto no setor ativo.
+  // Estado indexado pelo caminho da entrada no menu (item.to).
   const [openSubmenus, setOpenSubmenus] = useState<Record<string, boolean>>(() => {
-    return {
-      '/precificacao': location.pathname.startsWith('/precificacao'),
-      '/expedicao': location.pathname.startsWith('/expedicao'),
+    const initial: Record<string, boolean> = {}
+    for (const { itemTo, to } of NAV_GROUP_PREFIXES) {
+      initial[itemTo] = location.pathname.startsWith(to)
     }
+    return initial
   })
 
-  // Se navegar para uma rota filha de um submenu, mantém ele aberto
+  // Setor ativo abre o acordeon sozinho: observa o pathname e expande o grupo
   useEffect(() => {
-    if (location.pathname.startsWith('/precificacao')) {
-      setOpenSubmenus((prev) => ({ ...prev, '/precificacao': true }))
-    }
-    if (location.pathname.startsWith('/expedicao')) {
-      setOpenSubmenus((prev) => ({ ...prev, '/expedicao': true }))
+    for (const { itemTo, to } of NAV_GROUP_PREFIXES) {
+      if (location.pathname.startsWith(to)) {
+        setOpenSubmenus((prev) => (prev[itemTo] ? prev : { ...prev, [itemTo]: true }))
+      }
     }
   }, [location.pathname])
 
@@ -187,102 +285,34 @@ export function AppLayout() {
     }
   }, [location.pathname])
 
-  const precificacaoChildren: SubItem[] = [
-    { to: '/precificacao', label: 'Visão Geral & Hub', icon: Layers, end: true },
-    { to: '/composicao-produtos', label: 'Composição de Produtos', icon: Layers },
-    { to: '/precificacao/comparar', label: 'Comparador Lado a Lado', icon: Calculator },
-    { to: '/precificacao/aprovados', label: 'Cenários & Repositório', icon: BookmarkCheck },
-    { to: '/precificacao/dashboard', label: 'Dashboard de Margens', icon: LayoutDashboard },
-    { to: '/precificacao/produtos', label: 'Produtos & Kits', icon: PackageCheck },
-    { to: '/precificacao/canais', label: 'Canais & Taxas', icon: Store },
-    { to: '/precificacao/orcamentos', label: 'Orçamentos', icon: FileSpreadsheet },
-  ]
+  // Triagem recebe o badge de pendentes na árvore compartilhada
+  const navTree: NavItemConfig[] = NAV_TREE.map((item) =>
+    item.to === '/pendentes' ? { ...item, badge: pendentesCount } : item,
+  )
 
-  const expedicaoChildren: SubItem[] = [
-    { to: '/expedicao/separacao', label: 'Separação de Kits', icon: Boxes },
-    { to: '/expedicao/temas-modelos', label: 'Temas e Modelos', icon: Layers },
-    { to: '/expedicao/regras', label: 'Regras de Composição', icon: SlidersHorizontal },
-    { to: '/expedicao/pedidos', label: 'Pedidos / Personalizações', icon: FileSpreadsheet },
-    { to: '/expedicao/historico', label: 'Histórico de Separação', icon: History },
-  ]
-
-  const desktopItems: NavItemConfig[] = [
-    { to: '/', label: 'Dashboard', icon: Grid2X2, end: true },
-    {
-      to: '/expedicao/separacao',
-      label: 'Expedição',
-      icon: Boxes,
-      highlight: true,
-      children: expedicaoChildren,
-    },
-    {
-      to: '/pendentes',
-      label: 'Triagem',
-      icon: Sparkles,
-      badge: pendentesCount,
-      highlight: pendentesCount > 0,
-    },
-    { to: '/despesas', label: 'Despesas', icon: Receipt },
-    { to: '/lucro', label: 'Lucro por Canais', icon: TrendingUp },
-    { to: '/funcionarios', label: 'Funcionários & Ponto', icon: Users },
-    { to: '/producao', label: 'Produção Semanal', icon: Factory },
-    { to: '/dividas', label: 'Dívidas & Máquinas', icon: Coins },
-    { to: '/lancamentos', label: 'Lançamentos', icon: BadgeDollarSign },
-    {
-      to: '/precificacao',
-      label: 'Precificação',
-      icon: Calculator,
-      children: precificacaoChildren,
-    },
-    { to: '/metas-agenda', label: 'Metas & Agenda', icon: Target },
-    { to: '/habitos', label: 'Hábitos & Rotinas', icon: CalendarCheck2 },
-    { to: '/agenda', label: 'Agenda', icon: CalendarDays },
-    { to: '/projetos', label: 'Projetos & Tarefas', icon: ListTodo },
-    { to: '/contas', label: 'Contas & Cartões', icon: WalletCards },
-    { to: '/dizimos', label: 'Dízimos & Ofertas', icon: HeartHandshake },
-    { to: '/categorias', label: 'Classificações', icon: Tags },
-    { to: '/composicao-produtos', label: 'Composição de Produtos', icon: Layers },
-    { to: '/marketplaces', label: 'Marketplaces', icon: Store },
-    { to: '/empresas', label: 'Empresas', icon: Building2 },
-    { to: '/pessoas', label: 'Pessoas', icon: CircleUserRound },
-    { to: '/fornecedores', label: 'Fornecedores', icon: Truck },
-    { to: '/configuracoes', label: 'Configurações', icon: Settings },
-  ]
-
-  const mobileItems: NavItemConfig[] = [
-    { to: '/', label: 'Início', icon: Home, end: true },
-    {
-      to: '/expedicao/separacao',
-      label: 'Expedição',
-      icon: Boxes,
-      highlight: true,
-    },
-    {
-      to: '/pendentes',
-      label: 'Pendentes',
-      icon: Sparkles,
-      badge: pendentesCount,
-      highlight: pendentesCount > 0,
-    },
-    { to: '/despesas', label: 'Despesas', icon: Receipt },
-    { to: '/lucro', label: 'Lucro', icon: TrendingUp },
-    { to: '/funcionarios', label: 'Funcionários', icon: Users },
-    { to: '/producao', label: 'Produção', icon: Factory },
-    { to: '/dividas', label: 'Dívidas', icon: Coins },
-    { to: '/lancamentos', label: 'Lançamentos', icon: BadgeDollarSign },
-    { to: '/precificacao', label: 'Precificação', icon: Calculator },
-    { to: '/metas-agenda', label: 'Metas & Agenda', icon: Target },
-    { to: '/habitos', label: 'Hábitos', icon: CalendarCheck2 },
-    { to: '/agenda', label: 'Agenda', icon: CalendarDays },
-    { to: '/projetos', label: 'Projetos', icon: ListTodo },
-    { to: '/contas', label: 'Contas', icon: WalletCards },
-    { to: '/dizimos', label: 'Dízimos', icon: HeartHandshake },
-    { to: '/categorias', label: 'Categorias', icon: Tags },
-    { to: '/composicao-produtos', label: 'Composição de Produtos', icon: Layers },
-    { to: '/marketplaces', label: 'Marketplaces', icon: Store },
-    { to: '/cadastros', label: 'Cadastros', icon: Building2 },
-    { to: '/configuracoes', label: 'Configurações', icon: Settings },
-  ]
+  const renderSubItem = (sub: SubItem, compact = false) => {
+    const SubIcon = sub.icon || Calculator
+    const isSubActive = sub.end
+      ? location.pathname === sub.to
+      : location.pathname === sub.to || location.pathname.startsWith(`${sub.to}/`)
+    return (
+      <Link
+        key={sub.to}
+        to={sub.to}
+        onClick={() => setIsMobileMenuOpen(false)}
+        className={cn(
+          'flex items-center gap-2.5 rounded-lg font-semibold transition',
+          compact ? 'px-2.5 py-2 text-xs' : 'px-2.5 py-1.5 text-xs',
+          isSubActive
+            ? 'bg-primary/10 font-bold text-primary'
+            : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+        )}
+      >
+        <SubIcon className={cn('shrink-0', compact ? 'h-4 w-4' : 'h-3.5 w-3.5')} />
+        <span className="truncate">{sub.label}</span>
+      </Link>
+    )
+  }
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -366,19 +396,21 @@ export function AppLayout() {
               className={cn('space-y-1', isCollapsed ? 'px-2' : 'px-3')}
               aria-label="Navegação principal"
             >
-              {desktopItems.map((item) => {
+              {navTree.map((item) => {
                 const Icon = item.icon
                 const hasChildren = Boolean(item.children && item.children.length > 0)
                 const isGroupActive = hasChildren
-                  ? location.pathname.startsWith(item.to)
+                  ? location.pathname.startsWith(
+                      NAV_GROUP_PREFIXES.find((g) => g.itemTo === item.to)?.to ?? item.to,
+                    )
                   : item.end
                     ? location.pathname === item.to
                     : location.pathname.startsWith(item.to)
                 const isSubmenuOpen = openSubmenus[item.to] ?? false
 
-                // CASO 1: MODO RECOLHIDO (mostrar apenas ícones com tooltips / popover para submenus)
+                // CASO 1: MODO RECOLHIDO (apenas ícones com tooltips / popover para acordeons)
                 if (isCollapsed) {
-                  // Se tiver filhos (como Precificação), abre um Popover ao clicar/hover
+                  // Se tiver filhos, abre um Popover ao clicar
                   if (hasChildren) {
                     return (
                       <Popover key={item.to}>
@@ -390,17 +422,11 @@ export function AppLayout() {
                                 className={cn(
                                   'nav-item nav-item-collapsed w-full',
                                   isGroupActive && 'nav-item-active',
-                                  item.highlight &&
-                                    !isGroupActive &&
-                                    'text-foreground font-semibold',
                                 )}
                                 aria-label={item.label}
                               >
                                 <div className="relative flex items-center justify-center">
-                                  <Icon
-                                    className={cn('h-5 w-5', item.highlight ? 'text-primary' : '')}
-                                    strokeWidth={1.8}
-                                  />
+                                  <Icon className="h-5 w-5" strokeWidth={1.8} />
                                   {item.badge !== undefined && item.badge > 0 && (
                                     <span
                                       className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-extrabold text-white ring-2 ring-white"
@@ -432,28 +458,7 @@ export function AppLayout() {
                             {item.label}
                           </div>
                           <div className="space-y-0.5">
-                            {item.children?.map((sub) => {
-                              const SubIcon = sub.icon || Calculator
-                              const isSubActive = sub.end
-                                ? location.pathname === sub.to
-                                : location.pathname === sub.to ||
-                                  location.pathname.startsWith(`${sub.to}/`)
-                              return (
-                                <Link
-                                  key={sub.to}
-                                  to={sub.to}
-                                  className={cn(
-                                    'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition',
-                                    isSubActive
-                                      ? 'bg-primary/10 font-bold text-primary'
-                                      : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-                                  )}
-                                >
-                                  <SubIcon className="h-4 w-4 shrink-0" />
-                                  <span className="truncate">{sub.label}</span>
-                                </Link>
-                              )
-                            })}
+                            {item.children?.map((sub) => renderSubItem(sub, true))}
                           </div>
                         </PopoverContent>
                       </Popover>
@@ -468,19 +473,12 @@ export function AppLayout() {
                           to={item.to}
                           end={item.end}
                           className={({ isActive }) =>
-                            cn(
-                              'nav-item nav-item-collapsed w-full',
-                              isActive && 'nav-item-active',
-                              item.highlight && !isActive && 'text-foreground font-semibold',
-                            )
+                            cn('nav-item nav-item-collapsed w-full', isActive && 'nav-item-active')
                           }
                           aria-label={item.label}
                         >
                           <div className="relative flex items-center justify-center">
-                            <Icon
-                              className={cn('h-5 w-5', item.highlight ? 'text-primary' : '')}
-                              strokeWidth={1.8}
-                            />
+                            <Icon className="h-5 w-5" strokeWidth={1.8} />
                             {item.badge !== undefined && item.badge > 0 && (
                               <span
                                 className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-extrabold text-white ring-2 ring-white"
@@ -497,23 +495,13 @@ export function AppLayout() {
                         sideOffset={12}
                         className="text-xs font-semibold"
                       >
-                        <div className="flex items-center gap-2">
-                          <span>{item.label}</span>
-                          {item.badge !== undefined && item.badge > 0 && (
-                            <Badge
-                              variant="secondary"
-                              className="h-4 border-0 bg-primary px-1 text-[9px] font-bold text-white"
-                            >
-                              {item.badge}
-                            </Badge>
-                          )}
-                        </div>
+                        {item.label}
                       </TooltipContent>
                     </Tooltip>
                   )
                 }
 
-                // CASO 2: MODO EXPANDIDO (sidebar completa com rótulos e submenus)
+                // CASO 2: MODO EXPANDIDO (sidebar completa com rótulos e acordeons)
                 if (hasChildren) {
                   return (
                     <div key={item.to} className="space-y-0.5">
@@ -523,17 +511,10 @@ export function AppLayout() {
                           className={cn(
                             'nav-item flex-1 justify-between pr-2',
                             isGroupActive && 'nav-item-active',
-                            item.highlight && !isGroupActive && 'text-foreground font-semibold',
                           )}
                         >
                           <div className="flex min-w-0 items-center gap-3">
-                            <Icon
-                              className={cn(
-                                'h-5 w-5 shrink-0',
-                                item.highlight ? 'text-primary' : '',
-                              )}
-                              strokeWidth={1.75}
-                            />
+                            <Icon className="h-5 w-5 shrink-0" strokeWidth={1.75} />
                             <span className="truncate">{item.label}</span>
                           </div>
 
@@ -566,31 +547,10 @@ export function AppLayout() {
                         </NavLink>
                       </div>
 
-                      {/* Lista de subpáginas quando expandido */}
+                      {/* Lista de subpáginas quando o acordeon está aberto */}
                       {isSubmenuOpen && item.children && (
                         <div className="relative ml-5 space-y-0.5 border-l-2 border-border/70 pl-2 pt-0.5 pb-1">
-                          {item.children.map((sub) => {
-                            const SubIcon = sub.icon || Calculator
-                            const isSubActive = sub.end
-                              ? location.pathname === sub.to
-                              : location.pathname === sub.to ||
-                                location.pathname.startsWith(`${sub.to}/`)
-                            return (
-                              <Link
-                                key={sub.to}
-                                to={sub.to}
-                                className={cn(
-                                  'flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition',
-                                  isSubActive
-                                    ? 'bg-primary/10 font-bold text-primary'
-                                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-                                )}
-                              >
-                                <SubIcon className="h-3.5 w-3.5 shrink-0" />
-                                <span className="truncate">{sub.label}</span>
-                              </Link>
-                            )
-                          })}
+                          {item.children.map((sub) => renderSubItem(sub))}
                         </div>
                       )}
                     </div>
@@ -606,15 +566,11 @@ export function AppLayout() {
                       cn(
                         'nav-item relative flex items-center justify-between',
                         isActive && 'nav-item-active',
-                        item.highlight && !isActive && 'text-foreground font-semibold',
                       )
                     }
                   >
                     <div className="flex min-w-0 items-center gap-3">
-                      <Icon
-                        className={cn('h-5 w-5 shrink-0', item.highlight ? 'text-primary' : '')}
-                        strokeWidth={1.75}
-                      />
+                      <Icon className="h-5 w-5 shrink-0" strokeWidth={1.75} />
                       <span className="truncate">{item.label}</span>
                     </div>
                     {item.badge !== undefined && item.badge > 0 && (
@@ -622,7 +578,7 @@ export function AppLayout() {
                         variant="secondary"
                         className="h-5 border-0 bg-primary px-1.5 text-[11px] font-extrabold text-white shadow-xs"
                       >
-                        {item.badge}
+                        {item.badge > 99 ? '99+' : item.badge}
                       </Badge>
                     )}
                   </NavLink>
@@ -648,7 +604,7 @@ export function AppLayout() {
                   )}
                   aria-label="Menu do usuário"
                 >
-                  <Avatar className="h-10 w-10 shrink-0 border border-border">
+                  <Avatar className="block h-10 w-10 shrink-0 border border-border">
                     <AvatarImage src={avatarUrl} alt={user?.name} />
                     <AvatarFallback>{initials(user?.name)}</AvatarFallback>
                   </Avatar>
@@ -703,25 +659,155 @@ export function AppLayout() {
             <Brand />
             <ContextSelector className="w-auto min-w-[110px] max-w-[150px]" compact />
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="rounded-full">
-                <Avatar className="h-9 w-9">
-                  <AvatarImage src={avatarUrl} />
-                  <AvatarFallback>{initials(user?.name)}</AvatarFallback>
-                </Avatar>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem asChild>
-                <Link to="/configuracoes">Meu perfil</Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="text-destructive" onClick={signOut}>
-                Sair
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full"
+              aria-label="Abrir menu"
+              onClick={() => setIsMobileMenuOpen(true)}
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="rounded-full">
+                  <Avatar className="h-9 w-9">
+                    <AvatarImage src={avatarUrl} />
+                    <AvatarFallback>{initials(user?.name)}</AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem asChild>
+                  <Link to="/configuracoes">Meu perfil</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem className="text-destructive" onClick={signOut}>
+                  Sair
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </header>
+
+        {/* DRAWER MOBILE — mesma árvore do desktop (A+B) */}
+        {isMobileMenuOpen && (
+          <div
+            className="fixed inset-0 z-50 lg:hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menu principal"
+          >
+            <button
+              type="button"
+              aria-label="Fechar menu"
+              className="absolute inset-0 bg-foreground/40 backdrop-blur-sm"
+              onClick={() => setIsMobileMenuOpen(false)}
+            />
+            <div className="absolute inset-y-0 left-0 flex w-80 max-w-[85vw] flex-col border-r border-border bg-white shadow-soft">
+              <div className="flex h-16 shrink-0 items-center justify-between border-b border-border/60 px-4">
+                <Brand />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-lg"
+                  aria-label="Fechar menu"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-3 py-3 scrollbar-thin">
+                <nav className="space-y-1" aria-label="Navegação móvel">
+                  {navTree.map((item) => {
+                    const Icon = item.icon
+                    const hasChildren = Boolean(item.children && item.children.length > 0)
+                    const isGroupActive = hasChildren
+                      ? location.pathname.startsWith(
+                          NAV_GROUP_PREFIXES.find((g) => g.itemTo === item.to)?.to ?? item.to,
+                        )
+                      : item.end
+                        ? location.pathname === item.to
+                        : location.pathname.startsWith(item.to)
+                    const isSubmenuOpen = openSubmenus[item.to] ?? false
+
+                    if (hasChildren) {
+                      return (
+                        <div key={item.to} className="space-y-0.5">
+                          <div className="group relative flex items-center">
+                            <NavLink
+                              to={item.to}
+                              onClick={() => setIsMobileMenuOpen(false)}
+                              className={cn(
+                                'nav-item flex-1 justify-between pr-2',
+                                isGroupActive && 'nav-item-active',
+                              )}
+                            >
+                              <div className="flex min-w-0 items-center gap-3">
+                                <Icon className="h-5 w-5 shrink-0" strokeWidth={1.75} />
+                                <span className="truncate">{item.label}</span>
+                              </div>
+                            </NavLink>
+                            <button
+                              type="button"
+                              onClick={(e) => toggleSubmenu(item.to, e)}
+                              className="absolute right-2 inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
+                              title={isSubmenuOpen ? 'Ocultar subpáginas' : 'Mostrar subpáginas'}
+                              aria-label={
+                                isSubmenuOpen ? 'Ocultar subpáginas' : 'Mostrar subpáginas'
+                              }
+                            >
+                              <ChevronRight
+                                className={cn(
+                                  'h-3.5 w-3.5 transition-transform duration-200',
+                                  isSubmenuOpen && 'rotate-90',
+                                )}
+                              />
+                            </button>
+                          </div>
+
+                          {isSubmenuOpen && item.children && (
+                            <div className="relative ml-5 space-y-0.5 border-l-2 border-border/70 pl-2 pb-1">
+                              {item.children.map((sub) => renderSubItem(sub))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    }
+
+                    return (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        end={item.end}
+                        onClick={() => setIsMobileMenuOpen(false)}
+                        className={({ isActive }) =>
+                          cn(
+                            'nav-item relative flex items-center justify-between',
+                            isActive && 'nav-item-active',
+                          )
+                        }
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <Icon className="h-5 w-5 shrink-0" strokeWidth={1.75} />
+                          <span className="truncate">{item.label}</span>
+                        </div>
+                        {item.badge !== undefined && item.badge > 0 && (
+                          <Badge
+                            variant="secondary"
+                            className="h-5 border-0 bg-primary px-1.5 text-[11px] font-extrabold text-white shadow-xs"
+                          >
+                            {item.badge > 99 ? '99+' : item.badge}
+                          </Badge>
+                        )}
+                      </NavLink>
+                    )
+                  })}
+                </nav>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* CONTEÚDO PRINCIPAL (ajusta margem esquerda com base em isCollapsed) */}
         <main
@@ -730,41 +816,8 @@ export function AppLayout() {
             isCollapsed ? 'lg:ml-20' : 'lg:ml-64',
           )}
         >
-          <div
-            key={location.pathname}
-            className="route-enter mx-auto w-full max-w-[1480px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8"
-          >
-            <Outlet />
-          </div>
+          <Outlet />
         </main>
-
-        {/* NAVEGAÇÃO MOBILE */}
-        <nav
-          className="mobile-nav lg:hidden"
-          aria-label="Navegação móvel com rolagem horizontal"
-          data-testid="mobile-nav-bar"
-        >
-          {mobileItems.map(({ to, label, icon: Icon, end, badge }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) =>
-                cn('mobile-nav-item relative', isActive && 'mobile-nav-item-active')
-              }
-            >
-              <div className="relative">
-                <Icon className="h-5 w-5" strokeWidth={1.75} />
-                {badge !== undefined && badge > 0 && (
-                  <span className="absolute -top-1 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-extrabold text-white">
-                    {badge}
-                  </span>
-                )}
-              </div>
-              <span className="truncate max-w-[76px] text-center leading-tight">{label}</span>
-            </NavLink>
-          ))}
-        </nav>
       </div>
     </TooltipProvider>
   )
