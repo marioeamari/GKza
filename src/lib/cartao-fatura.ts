@@ -508,7 +508,10 @@ export function calcularCompetenciaEVencimento(params: {
 
   const ehCredito = isContaCartao && (metodoEhCredito === undefined ? true : metodoEhCredito)
 
-  const offsetParcela = Math.max(0, numeroParcela - 1)
+  // O offset de parcela só se aplica quando o compromisso é de fato parcelado (totalParcelas > 1).
+  // Para despesas recorrentes mensais ou avulsas (totalParcelas <= 1), a competência é sempre a do mês base.
+  const isParcelado = Number(totalParcelas) > 1
+  const offsetParcela = isParcelado ? Math.max(0, numeroParcela - 1) : 0
 
   if (ehCredito && conta) {
     // Para cartão de crédito:

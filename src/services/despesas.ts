@@ -1894,9 +1894,11 @@ export const despesasService = {
       return
     }
 
-    // Regra mensal não-cartão (comportamento original)
-    // Extrai o mês e ano de início de forma robusta e independente de fuso,
-    // garantindo que nunca seja anterior ao mês de criação do compromisso.
+    // Regra mensal não-cartão
+    // REGRA DE OURO (0.0.304): para compromisso mensal não-cartão, o gerador é estritamente
+    // sequencial mês a mês a partir da maior competência já registrada (ou da data_inicio se nenhuma existir).
+    // O vencimento é SEMPRE no próprio mês da competência (dia_vencimento clamped no último dia).
+    // Idempotente: se a competência já existe (seja prevista ou paga), NUNCA cria duplicata.
     const startCompStr = (() => {
       let candidate = ''
       if (compromisso.data_inicio) {
@@ -1924,10 +1926,34 @@ export const despesasService = {
       return candidate
     })()
 
+    // Identifica todas as competências já existentes para este compromisso (em cache ou banco)
+    let competenciasExistentes: string[] = []
+    if (cachedOcorrencias !== undefined) {
+      competenciasExistentes = cachedOcorrencias
+        .filter((oc) => {
+          const compId =
+            typeof oc.compromisso === 'object' && oc.compromisso
+              ? (oc.compromisso as any).id
+              : oc.compromisso
+          return compId === compromisso.id && oc.competencia
+        })
+        .map((oc) => oc.competencia!)
+    } else {
+      try {
+        const ocs = await pb.collection<DespesaOcorrencia>('despesas_ocorrencias').getFullList({
+          filter: `compromisso = '${compromisso.id}'`,
+          fields: 'id,competencia,status,valor_pago,data_pagamento,lancamento',
+        })
+        competenciasExistentes = ocs.map((o) => o.competencia).filter(Boolean) as string[]
+      } catch {
+        competenciasExistentes = []
+      }
+    }
+
     const meses = (() => {
       // Determina a competência final desejada:
-      // se targetCompetencias foi informada, cobre continuamente do startCompStr até a maior competência pedida.
-      // Se não, cobre continuamente do startCompStr até o mês atual + 3.
+      // Se targetCompetencias foi informada, cobre continuamente até a maior competência pedida.
+      // Se não, cobre continuamente até o mês atual + 3.
       const [sYStr, sMStr] = startCompStr.split('-')
       const startYear = parseInt(sYStr, 10)
       const startMonth = parseInt(sMStr, 10) - 1
@@ -1936,7 +1962,6 @@ export const despesasService = {
       let targetEndMonth: number
 
       if (targetCompetencias && targetCompetencias.length > 0) {
-        // Encontra a maior competência da lista requisitada
         const sortedTargets = [...targetCompetencias].sort()
         const maxTarget = sortedTargets[sortedTargets.length - 1]
         const [maxYStr, maxMStr] = maxTarget.split('-')
@@ -1962,16 +1987,15 @@ export const despesasService = {
         cursor = new Date(Date.UTC(cY, cM + 1, 1))
       }
 
-      // Se houver alguma competência adicional específica em targetCompetencias que exceda ou difira, inclui-a também
       if (targetCompetencias && targetCompetencias.length > 0) {
         for (const tComp of targetCompetencias) {
           if (tComp >= startCompStr && !list.includes(tComp)) {
             list.push(tComp)
           }
         }
-        list.sort()
       }
 
+      list.sort()
       return list
     })()
 
@@ -1980,6 +2004,11 @@ export const despesasService = {
     for (const compStr of meses) {
       // NUNCA gerar ocorrência anterior ao mês/competência de data_inicio do compromisso
       if (compStr < startCompStr) {
+        continue
+      }
+
+      // Barreira de duplicata em memória: se já existe competência nas existentes, não re-insere
+      if (competenciasExistentes.includes(compStr)) {
         continue
       }
 
@@ -2028,7 +2057,10 @@ export const despesasService = {
           direcionamento: compromisso.direcionamento || null,
           link_pagamento: compromisso.link_pagamento || null,
           observacoes: compromisso.observacoes || null,
+          numero_parcela: 0,
+          total_parcelas: 0,
         })
+        competenciasExistentes.push(compStr)
         if (cachedOcorrencias) {
           cachedOcorrencias.push(newRecord)
         }
