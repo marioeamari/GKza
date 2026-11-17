@@ -1,43 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
-  BadgeDollarSign,
-  Building2,
-  CalendarCheck2,
-  CalendarDays,
-  Calculator,
-  BookmarkCheck,
-  Boxes,
   ChevronDown,
   ChevronRight,
-  CircleUserRound,
-  Coins,
-  Factory,
-  FilePenLine,
-  FileSpreadsheet,
-  HeartHandshake,
-  History,
-  Home,
-  Layers,
-  LayoutDashboard,
-  ListTodo,
   LogOut,
   Menu,
-  PackageCheck,
   PanelLeftClose,
   PanelLeftOpen,
-  Receipt,
-  Settings,
-  SlidersHorizontal,
-  Sparkles,
-  Store,
-  Tags,
-  Target,
-  TrendingUp,
-  Truck,
   UserRound,
-  Users,
-  WalletCards,
   X,
 } from 'lucide-react'
 import { ContextSelector } from '@/components/ContextSelector'
@@ -62,119 +32,17 @@ import pb from '@/lib/pocketbase/client'
 import { telegramPendentesService } from '@/services/telegramPendentes'
 import { DespesaRapidaModal } from '@/components/DespesaRapidaModal'
 import { MobileDesktopNotice } from '@/components/MobileDesktopNotice'
+import {
+  isSubItemActive,
+  menuGroupForUrl,
+  NAV_GROUP_PREFIXES,
+  NAV_TREE,
+  type NavItemConfig,
+  type SubItem,
+} from '@/lib/menuNav'
+import { Calculator, FilePenLine } from 'lucide-react'
 
 const SIDEBAR_COLLAPSED_KEY = 'erpgkza_sidebar_collapsed'
-
-interface SubItem {
-  to: string
-  label: string
-  icon?: typeof Calculator
-  end?: boolean
-}
-
-interface NavItemConfig {
-  to: string
-  label: string
-  icon: typeof Calculator
-  end?: boolean
-  badge?: number
-  highlight?: boolean
-  children?: SubItem[]
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Estrutura de navegação "A+B" (desktop e mobile compartilham a MESMA árvore):
-// 10 entradas no topo — 5 acordeons + 5 itens diretos. Configurações por último.
-// ─────────────────────────────────────────────────────────────────────────────
-
-const FINANCEIRO_CHILDREN: SubItem[] = [
-  { to: '/despesas', label: 'Despesas', icon: Receipt },
-  { to: '/lancamentos', label: 'Lançamentos', icon: BadgeDollarSign },
-  { to: '/contas', label: 'Contas & Cartões', icon: WalletCards },
-  { to: '/dizimos', label: 'Dízimos & Ofertas', icon: HeartHandshake },
-  { to: '/categorias', label: 'Classificações', icon: Tags },
-  { to: '/lucro', label: 'Lucro por Canais', icon: TrendingUp },
-]
-
-const PRECIFICACAO_CHILDREN: SubItem[] = [
-  { to: '/precificacao', label: 'Visão Geral & Hub', icon: Layers, end: true },
-  { to: '/precificacao/comparar', label: 'Comparador Lado a Lado', icon: Calculator },
-  { to: '/precificacao/aprovados', label: 'Cenários & Repositório', icon: BookmarkCheck },
-  { to: '/precificacao/dashboard', label: 'Dashboard de Margens', icon: LayoutDashboard },
-  { to: '/precificacao/produtos', label: 'Produtos & Kits', icon: PackageCheck },
-  { to: '/precificacao/canais', label: 'Canais & Taxas', icon: Store },
-  { to: '/precificacao/orcamentos', label: 'Orçamentos', icon: FileSpreadsheet },
-]
-
-const PRODUCAO_EXPEDICAO_CHILDREN: SubItem[] = [
-  { to: '/expedicao/separacao', label: 'Separação de Kits', icon: Boxes },
-  { to: '/expedicao/temas-modelos', label: 'Temas e Modelos', icon: Layers },
-  { to: '/expedicao/regras', label: 'Regras de Composição', icon: SlidersHorizontal },
-  { to: '/expedicao/pedidos', label: 'Pedidos / Personalizações', icon: FileSpreadsheet },
-  { to: '/expedicao/historico', label: 'Histórico de Separação', icon: History },
-  { to: '/producao', label: 'Produção Semanal', icon: Factory },
-]
-
-const ROTINA_CHILDREN: SubItem[] = [
-  { to: '/agenda', label: 'Agenda', icon: CalendarDays },
-  { to: '/metas-agenda', label: 'Metas & Agenda', icon: Target },
-  { to: '/habitos', label: 'Hábitos & Rotinas', icon: CalendarCheck2 },
-  { to: '/projetos', label: 'Projetos & Tarefas', icon: ListTodo },
-]
-
-const CADASTROS_CHILDREN: SubItem[] = [
-  { to: '/empresas', label: 'Empresas', icon: Building2 },
-  { to: '/pessoas', label: 'Pessoas', icon: CircleUserRound },
-  { to: '/fornecedores', label: 'Fornecedores', icon: Truck },
-]
-
-// Ordem acordada (A+B): Início, Triagem, Marketplaces, Equipe, Dívidas e os
-// 5 acordeons; Configurações sempre por último.
-const NAV_TREE: NavItemConfig[] = [
-  { to: '/', label: 'Início', icon: Home, end: true },
-  { to: '/pendentes', label: 'Triagem', icon: Sparkles },
-  { to: '/marketplaces', label: 'Marketplaces', icon: Store },
-  { to: '/funcionarios', label: 'Equipe', icon: Users },
-  { to: '/dividas', label: 'Dívidas & Máquinas', icon: Coins },
-  {
-    to: '/financeiro',
-    label: 'Financeiro',
-    icon: BadgeDollarSign,
-    children: FINANCEIRO_CHILDREN,
-  },
-  {
-    to: '/precificacao',
-    label: 'Precificação',
-    icon: Calculator,
-    children: PRECIFICACAO_CHILDREN,
-  },
-  {
-    to: '/expedicao/separacao',
-    label: 'Produção & Expedição',
-    icon: Boxes,
-    children: PRODUCAO_EXPEDICAO_CHILDREN,
-  },
-  {
-    to: '/agenda',
-    label: 'Rotina & Planejamento',
-    icon: CalendarDays,
-    children: ROTINA_CHILDREN,
-  },
-  { to: '/empresas', label: 'Cadastros', icon: Building2, children: CADASTROS_CHILDREN },
-  { to: '/configuracoes', label: 'Configurações', icon: Settings },
-]
-
-// Metadados de cada acordeon: key (estado), itemTo (caminho da entrada no menu)
-// e to (prefixo de rota que ativa/expande o grupo). IMPORTANTE: 'producao-
-// expedicao' usa '/expedicao' como prefixo para cobrir tanto as rotas de
-// expedição quanto '/producao' (absorvida no grupo).
-const NAV_GROUP_PREFIXES: Array<{ key: string; itemTo: string; to: string }> = [
-  { key: 'financeiro', itemTo: '/financeiro', to: '/financeiro' },
-  { key: 'precificacao', itemTo: '/precificacao', to: '/precificacao' },
-  { key: 'producao-expedicao', itemTo: '/expedicao/separacao', to: '/expedicao' },
-  { key: 'rotina', itemTo: '/agenda', to: '/agenda' },
-  { key: 'cadastros', itemTo: '/empresas', to: '/empresas' },
-]
 
 export function AppLayout() {
   const { user, logout } = useAuth()
@@ -198,20 +66,20 @@ export function AppLayout() {
   // Estado indexado pelo caminho da entrada no menu (item.to).
   const [openSubmenus, setOpenSubmenus] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {}
-    for (const { itemTo, to } of NAV_GROUP_PREFIXES) {
-      initial[itemTo] = location.pathname.startsWith(to)
+    for (const { itemTo, prefixes } of NAV_GROUP_PREFIXES) {
+      initial[itemTo] = menuGroupForUrl(location.pathname, location.search) === itemTo
     }
     return initial
   })
 
-  // Setor ativo abre o acordeon sozinho: observa o pathname e expande o grupo
+  // Setor ativo abre o acordeon sozinho: observa a URL (pathname + search) e
+  // expande o grupo correspondente — ex. /produtos abre Precificação e
+  // /composicao-produtos?aba=base (Insumos) abre Cadastros.
   useEffect(() => {
-    for (const { itemTo, to } of NAV_GROUP_PREFIXES) {
-      if (location.pathname.startsWith(to)) {
-        setOpenSubmenus((prev) => (prev[itemTo] ? prev : { ...prev, [itemTo]: true }))
-      }
-    }
-  }, [location.pathname])
+    const activeGroup = menuGroupForUrl(location.pathname, location.search)
+    if (!activeGroup) return
+    setOpenSubmenus((prev) => (prev[activeGroup] ? prev : { ...prev, [activeGroup]: true }))
+  }, [location.pathname, location.search])
 
   const toggleSidebar = () => {
     setIsCollapsed((prev) => {
@@ -253,7 +121,7 @@ export function AppLayout() {
 
     fetchCount()
 
-    // Só assina se houver token válido no authStore para evitar requisições realtime rejeitadas
+    // Só assina se houver token válido no authStore para evitar requisições realtime rejetadas
     if (pb.authStore.isValid) {
       pb.collection('telegram_registros_pendentes')
         .subscribe('*', () => {
@@ -292,9 +160,7 @@ export function AppLayout() {
 
   const renderSubItem = (sub: SubItem, compact = false) => {
     const SubIcon = sub.icon || Calculator
-    const isSubActive = sub.end
-      ? location.pathname === sub.to
-      : location.pathname === sub.to || location.pathname.startsWith(`${sub.to}/`)
+    const isSubActive = isSubItemActive(sub, location.pathname, location.search)
     return (
       <Link
         key={sub.to}
@@ -399,13 +265,8 @@ export function AppLayout() {
               {navTree.map((item) => {
                 const Icon = item.icon
                 const hasChildren = Boolean(item.children && item.children.length > 0)
-                const isGroupActive = hasChildren
-                  ? location.pathname.startsWith(
-                      NAV_GROUP_PREFIXES.find((g) => g.itemTo === item.to)?.to ?? item.to,
-                    )
-                  : item.end
-                    ? location.pathname === item.to
-                    : location.pathname.startsWith(item.to)
+                const isGroupActive =
+                  menuGroupForUrl(location.pathname, location.search) === item.to
                 const isSubmenuOpen = openSubmenus[item.to] ?? false
 
                 // CASO 1: MODO RECOLHIDO (apenas ícones com tooltips / popover para acordeons)
@@ -722,13 +583,8 @@ export function AppLayout() {
                   {navTree.map((item) => {
                     const Icon = item.icon
                     const hasChildren = Boolean(item.children && item.children.length > 0)
-                    const isGroupActive = hasChildren
-                      ? location.pathname.startsWith(
-                          NAV_GROUP_PREFIXES.find((g) => g.itemTo === item.to)?.to ?? item.to,
-                        )
-                      : item.end
-                        ? location.pathname === item.to
-                        : location.pathname.startsWith(item.to)
+                    const isGroupActive =
+                      menuGroupForUrl(location.pathname, location.search) === item.to
                     const isSubmenuOpen = openSubmenus[item.to] ?? false
 
                     if (hasChildren) {
