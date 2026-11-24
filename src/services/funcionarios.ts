@@ -690,6 +690,11 @@ export const funcionariosService = {
     motivoDivergencia?: string
   }): Promise<FuncionarioFolhaRecord> {
     const agoraIso = new Date().toISOString()
+    // REGRA (0152): o colaborador usa a tela por token_sessao, SEM usuário
+    // PocketBase autenticado. O update anônimo de funcionarios_folhas só é
+    // aceito quando o PATCH altera EXATAMENTE os três campos de conferência
+    // abaixo — nada mais pode ir no corpo (a regra da coleção recusa). Sempre
+    // atualize os campos por aqui, nunca com pb.collection(...).update direto.
     const payload: Partial<FuncionarioFolhaRecord> = {
       status_conferencia_colaborador: params.status,
       conferido_colaborador_em: agoraIso,

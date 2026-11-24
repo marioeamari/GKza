@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-24T00:31:53.012Z",
+  "generatedAt": "2026-11-24T00:48:23.215Z",
   "collections": [
     {
       "name": "users",
@@ -5776,7 +5776,7 @@
         "list": "",
         "view": "",
         "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
-        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "(@request.auth.id != '' && @request.auth.role != 'visualizador') || (@request.auth.id = '' && @request.body.status_conferencia_colaborador:changed = true && @request.body.conferido_colaborador_em:changed = true && @request.body.motivo_divergencia_colaborador:changed = true && @request.body.quitada:changed = false && @request.body.a_receber:changed = false && @request.body.ganho_total:changed = false && @request.body.descontos:changed = false && @request.body.divida_semanal:changed = false && @request.body.data_quitacao:changed = false && @request.body.lancamento_id:changed = false && @request.body.funcionario:changed = false && @request.body.periodo_inicio:changed = false && @request.body.periodo_fim:changed = false && @request.body.dias_pendentes_fechamento:changed = false && @request.body.notificacao_pagamento_enviada:changed = false && @request.body.notificacao_pagamento_em:changed = false && @request.body.observacoes:changed = false)",
         "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
       },
       "fields": [
