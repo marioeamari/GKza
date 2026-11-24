@@ -355,6 +355,7 @@ export const funcionariosService = {
     funcionarioId: string
     data?: string // YYYY-MM-DD (se omitido usa getLocalDateStr() em America/Sao_Paulo)
     hora: string // HH:mm
+    saida?: string // HH:mm (opcional; lançamento admin pode já gravar a saída)
     origem: 'estacao_qr' | 'fora_do_local' | 'manual' | 'admin'
     estacao?: string
     localAproximado?: string
@@ -375,12 +376,29 @@ export const funcionariosService = {
       if (!validacao.pode) {
         throw new Error(validacao.motivo || 'Entrada não permitida: ponto já registrado hoje.')
       }
+    } else {
+      // REGRA (anti-duplicata do lançamento admin): origem 'admin' pode lançar ponto
+      // retroativo mesmo com o dia já batido, MAS não pode gravar uma entrada
+      // idêntica duas vezes no mesmo dia (clique duplo / retry do usuário).
+      const pontosDoDia = await this.buscarPontosDoDia(params.funcionarioId, diaAlvo)
+      const duplicata = pontosDoDia.some(
+        (p) =>
+          normalizarDataPonto(p.data) === diaAlvo &&
+          p.entrada.trim() === params.hora.trim() &&
+          (p.saida || '').trim() === (params.saida || '').trim(),
+      )
+      if (duplicata) {
+        throw new Error(
+          'Já existe um ponto idêntico lançado neste dia (mesma entrada e saída). Se precisar alterar horários, edite o ponto existente.',
+        )
+      }
     }
 
     const pontoCriado = await pb.collection('funcionarios_pontos').create<FuncionarioPontoRecord>({
       funcionario: params.funcionarioId,
       data: toPocketBaseDate(diaAlvo),
       entrada: params.hora,
+      ...(params.saida ? { saida: params.saida } : {}),
       pausas: [],
       origem: params.origem,
       estacao: params.estacao || '',

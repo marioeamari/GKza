@@ -769,10 +769,25 @@ export default function FuncionariosPage() {
         )
         toast({ title: 'Ponto corrigido pelo administrador!' })
       } else {
+        const dataAlvo = normalizarDataPonto(pontoForm.data)
+        // REGRA (1): o espelho mostra APENAS períodos abertos. Se o admin lança
+        // um ponto num dia já coberto por folha quitada, o registro é gravado
+        // (visível no Histórico de Fechamentos) mas NÃO aparece no espelho —
+        // avisa aqui para o lançamento nunca parecer ter "falhado em silêncio".
+        if (isDataCobertaPorFolhaQuitada(dataAlvo, folhasQuitadas)) {
+          toast({
+            title: 'Ponto gravado em período já quitado',
+            description: `O dia ${formatarDataDDMMAAAA(
+              dataAlvo,
+            )} pertence a uma folha já fechada. O registro foi salvo e pode ser conferido no Histórico de Fechamentos; ele não entra no espelho do período aberto.`,
+            variant: 'destructive',
+          })
+        }
         await funcionariosService.registrarEntrada({
           funcionarioId: pontoForm.funcionario || selectedFuncionarioId,
           data: pontoForm.data,
           hora: pontoForm.entrada,
+          saida: pontoForm.saida || undefined,
           origem: 'admin',
           editadoPor: adminNome,
           observacao: pontoForm.observacao,

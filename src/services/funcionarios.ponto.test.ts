@@ -181,4 +181,72 @@ describe('funcionariosService - bloqueio de batida fora da estação QR', () => 
       }),
     ).rejects.toThrow()
   })
+
+  it('lançamento admin NÃO grava duplicata idêntica (mesmo dia, mesma entrada e saída)', async () => {
+    const collection = montarCollection()
+    collection.getFullList.mockResolvedValue([
+      {
+        id: 'p_dia',
+        funcionario: 'f1',
+        data: '2026-01-05 12:00:00.000Z',
+        entrada: '10:00',
+        saida: '',
+        origem: 'admin',
+      },
+    ])
+
+    await expect(
+      funcionariosService.registrarEntrada({
+        funcionarioId: 'f1',
+        data: '2026-01-05',
+        hora: '10:00',
+        saida: '',
+        origem: 'admin',
+      }),
+    ).rejects.toThrow('Já existe um ponto idêntico')
+
+    expect(collection.create).not.toHaveBeenCalled()
+  })
+
+  it('lançamento admin grava entrada e SAÍDA informadas no modal (não deixa ponto em aberto)', async () => {
+    const collection = montarCollection()
+
+    await funcionariosService.registrarEntrada({
+      funcionarioId: 'f1',
+      data: '2026-01-05',
+      hora: '13:00',
+      saida: '17:00',
+      origem: 'admin',
+      editadoPor: 'Mario Eduardo',
+    })
+
+    expect(collection.create).toHaveBeenCalledWith(
+      expect.objectContaining({ entrada: '13:00', saida: '17:00' }),
+    )
+  })
+
+  it('lançamento admin de horário DIFERENTE no mesmo dia é permitido (retroativo mantido)', async () => {
+    const collection = montarCollection()
+    collection.getFullList.mockResolvedValue([
+      {
+        id: 'p_dia',
+        funcionario: 'f1',
+        data: '2026-01-05 12:00:00.000Z',
+        entrada: '10:00',
+        saida: '16:00',
+        origem: 'admin',
+      },
+    ])
+
+    await expect(
+      funcionariosService.registrarEntrada({
+        funcionarioId: 'f1',
+        data: '2026-01-05',
+        hora: '13:00',
+        saida: '17:00',
+        origem: 'admin',
+      }),
+    ).resolves.toBeTruthy()
+    expect(collection.create).toHaveBeenCalled()
+  })
 })
