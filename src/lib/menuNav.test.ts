@@ -17,6 +17,17 @@ describe('menuNav — páginas que faltavam na reorganização A+B', () => {
     expect(PRECIFICACAO_CHILDREN[idx].to).not.toBe('/composicao-produtos')
   })
 
+  it('Precificação contém Triagem de Produtos apontando /precificacao/triagem (após Produtos & Kits)', () => {
+    const labels = PRECIFICACAO_CHILDREN.map((s) => s.label)
+    const idx = labels.indexOf('Triagem de Produtos')
+    expect(idx).toBeGreaterThan(-1)
+    expect(labels[idx - 1]).toBe('Produtos & Kits')
+    expect(PRECIFICACAO_CHILDREN[idx].to).toBe('/precificacao/triagem')
+    expect(
+      NAV_TREE.flatMap((g) => g.children ?? []).some((s) => s.to === '/precificacao/triagem'),
+    ).toBe(true)
+  })
+
   it('Precificação contém Clientes apontando /precificacao/clientes ao final (após Orçamentos)', () => {
     const last = PRECIFICACAO_CHILDREN[PRECIFICACAO_CHILDREN.length - 1]
     expect(last.label).toBe('Clientes')
@@ -73,7 +84,7 @@ describe('menuNav — páginas que faltavam na reorganização A+B', () => {
     ]) {
       expect(rotas).toContain(rota)
     }
-    expect(rotas).toHaveLength(23)
+    expect(rotas).toHaveLength(24)
   })
 })
 

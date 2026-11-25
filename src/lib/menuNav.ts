@@ -19,6 +19,7 @@ import {
   Package,
   PackageCheck,
   Receipt,
+  Search,
   Settings,
   SlidersHorizontal,
   Sparkles,
@@ -78,6 +79,7 @@ export const PRECIFICACAO_CHILDREN: SubItem[] = [
   { to: '/precificacao/aprovados', label: 'Cenários & Repositório', icon: BookmarkCheck },
   { to: '/precificacao/dashboard', label: 'Dashboard de Margens', icon: LayoutDashboard },
   { to: '/precificacao/produtos', label: 'Produtos & Kits', icon: PackageCheck },
+  { to: '/precificacao/triagem', label: 'Triagem de Produtos', icon: Search },
   // Composição de Produtos: volta ao acordeon de Precificação (saiu nas duas
   // posições na deduplicação da 0.0.302); menu aponta /produtos e o alias
   // /composicao-produtos segue funcionando, exceto com aba=base (Insumos).

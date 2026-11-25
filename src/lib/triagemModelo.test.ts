@@ -61,7 +61,10 @@ describe('avaliarProdutoTriagem', () => {
       basePorOrigem: new Map([['p1', { id: 'b1' }]]),
     }
     const compOk = avaliarProdutoTriagem(
-      produto({ id: 'p1', composicao: [{ insumo: 'i1', qtd: 2, unidade: 'un' }] }),
+      produto({
+        id: 'p1',
+        composicao: [{ descricao: 'Insumo 1', qtd: 2, unidade: 'un', custo_unitario: 1 }],
+      }),
       base,
     )
     expect(compOk.etapas.composicao.status).toBe('verde')
@@ -72,7 +75,7 @@ describe('avaliarProdutoTriagem', () => {
       produto({
         id: 'p1',
         tipo: 'kit',
-        composicao: [{ insumo: 'i1', qtd: 2, unidade: 'un' }],
+        composicao: [{ descricao: 'Insumo 1', qtd: 2, unidade: 'un', custo_unitario: 1 }],
       }),
       { ...base, kitPorProdutoPai: new Map([['p1', kitConfig]]) },
     )
@@ -92,6 +95,7 @@ describe('avaliarProdutoTriagem', () => {
           [
             {
               id: 'c1',
+              produto: 'p1',
               status: 'rascunho',
               preco_aprovado: 0,
               canal: 'canal1',
@@ -115,6 +119,7 @@ describe('avaliarProdutoTriagem', () => {
           [
             {
               id: 'c1',
+              produto: 'p1',
               status: 'aprovada',
               preco_aprovado: 24.9,
               canal: 'canal1',
@@ -124,11 +129,15 @@ describe('avaliarProdutoTriagem', () => {
         ],
       ]),
     }
-    const r2 = avaliarProdutoTriagem(produto({ id: 'p1' }), aprovado)
+    const r2 = avaliarProdutoTriagem(
+      produto({ id: 'p1', composicao: [{ insumo: 'i1', qtd: 1, unidade: 'un' }] }),
+      aprovado,
+    )
     expect(r2.etapas.cenario.status).toBe('verde')
     expect(r2.etapas.aprovado.status).toBe('verde')
-    expect(r2.etapas.aprovado.dados?.rotulo).toContain('R$')
-    expect(r2.etapas.aprovado.dados?.rotulo).toContain('06/11')
+    // O rótulo da etapa carrega o dado que qualificou (preço e data da aprovação)
+    expect(r2.etapas.aprovado.rotulo).toContain('R$')
+    expect(r2.etapas.aprovado.rotulo).toContain('06/11')
     // Aprovado sem matriz nem uso comercial: parou na etapa Matriz/Canais (5)
     expect(r2.parouNaEtapaNumero).toBe(5)
   })
@@ -143,6 +152,7 @@ describe('avaliarProdutoTriagem', () => {
           [
             {
               id: 'c1',
+              produto: 'p1',
               status: 'desatualizada',
               preco_aprovado: 19.9,
               canal: 'canal1',
@@ -152,10 +162,13 @@ describe('avaliarProdutoTriagem', () => {
         ],
       ]),
     }
-    const r = avaliarProdutoTriagem(produto({ id: 'p1' }), fontes)
+    const r = avaliarProdutoTriagem(
+      produto({ id: 'p1', composicao: [{ insumo: 'i1', qtd: 1, unidade: 'un' }] }),
+      fontes,
+    )
     expect(r.etapas.aprovado.status).toBe('amarelo')
     expect(r.etapas.aprovado.dados?.rotulo).toContain('desatualizado')
-    expect(r.etapas.aprovado.dados?.rotulo).toContain('19,90')
+    expect(r.etapas.aprovado.rotulo).toContain('19,90')
     expect(r.parouNaEtapaNumero).toBe(4)
   })
 
@@ -169,6 +182,7 @@ describe('avaliarProdutoTriagem', () => {
           [
             {
               id: 'c1',
+              produto: 'p1',
               status: 'desatualizada',
               preco_aprovado: 10,
               canal: 'c1',
@@ -176,6 +190,7 @@ describe('avaliarProdutoTriagem', () => {
             },
             {
               id: 'c2',
+              produto: 'p1',
               status: 'aprovada',
               preco_aprovado: 20,
               canal: 'c2',
@@ -187,7 +202,7 @@ describe('avaliarProdutoTriagem', () => {
     }
     const r = avaliarProdutoTriagem(produto({ id: 'p1' }), fontes)
     expect(r.etapas.aprovado.status).toBe('verde')
-    expect(r.etapas.aprovado.dados?.rotulo).toContain('20,00')
+    expect(r.etapas.aprovado.rotulo).toContain('20,00')
   })
 
   it('matriz com legenda ativa vira verde; legenda inativa amarela; sem legenda vermelho', () => {
@@ -197,14 +212,14 @@ describe('avaliarProdutoTriagem', () => {
     }
     const verde = avaliarProdutoTriagem(produto({ id: 'p1' }), {
       ...base,
-      matrizPorProduto: new Map([['p1', [{ id: 'm1', legenda: 'l1' }]]]),
+      matrizPorProduto: new Map([['p1', [{ id: 'm1', canal: 'ch1', legenda: 'l1' }]]]),
     })
     expect(verde.etapas.matriz.status).toBe('verde')
 
     const amarelo = avaliarProdutoTriagem(produto({ id: 'p1' }), {
       ...base,
       matrizPorProduto: new Map([
-        ['p1', [{ id: 'm1', legenda: 'l1', expand: { legenda: { ativo: false } } }]],
+        ['p1', [{ id: 'm1', canal: 'ch1', legenda: 'l1', expand: { legenda: { ativo: false } } }]],
       ]),
     })
     expect(amarelo.etapas.matriz.status).toBe('amarelo')
@@ -212,15 +227,40 @@ describe('avaliarProdutoTriagem', () => {
 
     const vermelho = avaliarProdutoTriagem(produto({ id: 'p1' }), {
       ...base,
-      matrizPorProduto: new Map([['p1', [{ id: 'm1', legenda: '' }]]]),
+      matrizPorProduto: new Map([['p1', [{ id: 'm1', canal: 'ch1', legenda: '' }]]]),
     })
     expect(vermelho.etapas.matriz.status).toBe('vermelho')
   })
 
   it('Comercial: item de orçamento vira verde com data e nome do cliente; sem uso fica CINZA com selo próprio', () => {
+    // Produto com Base, Composição e Cenário/Aprovado verdes (Matriz nunca feita):
+    // com uso comercial o primeiro pendente é a Matriz (5), com ou sem o verde do Comercial.
     const base: TriagemFontes = {
       ...fontesVazias,
       basePorOrigem: new Map([['p1', { id: 'b1' }]]),
+      cenariosPorProduto: new Map([
+        [
+          'p1',
+          [
+            {
+              id: 'c1',
+              produto: 'p1',
+              status: 'aprovada',
+              preco_aprovado: 24.9,
+              canal: 'canal1',
+              aprovado_em: '2026-11-06T00:00:00.000Z',
+            },
+          ],
+        ],
+      ]),
+    }
+    const produtoCompleto = produto({
+      id: 'p1',
+      composicao: [{ descricao: 'Insumo 1', qtd: 1, unidade: 'un', custo_unitario: 1 }],
+    })
+
+    const comUso = avaliarProdutoTriagem(produtoCompleto, {
+      ...base,
       orcamentoItensPorProduto: new Map([['p1', [{ id: 'oi1', orcamento: 'orc1' }]]]),
       orcamentosPorId: new Map([
         [
@@ -233,19 +273,17 @@ describe('avaliarProdutoTriagem', () => {
           },
         ],
       ]),
-    }
-    const r = avaliarProdutoTriagem(produto({ id: 'p1' }), base)
-    expect(r.etapas.comercial.status).toBe('verde')
-    expect(r.etapas.comercial.dados?.rotulo).toContain('Maria')
-    expect(r.parouNaEtapaNumero).toBe(6)
-
-    const semUso = avaliarProdutoTriagem(produto({ id: 'p1' }), {
-      ...fontesVazias,
-      basePorOrigem: new Map([['p1', { id: 'b1' }]]),
     })
+    expect(comUso.etapas.comercial.status).toBe('verde')
+    expect(comUso.etapas.comercial.rotulo).toContain('Maria')
+    // Comercial verde, mas Matriz nunca feita → parou na etapa 5 (Matriz/Canais)
+    expect(comUso.parouNaEtapaNumero).toBe(5)
+    expect(comUso.selo).toContain('Parou na etapa 5')
+
+    const semUso = avaliarProdutoTriagem(produtoCompleto, base)
     expect(semUso.etapas.comercial.status).toBe('cinza')
     expect(semUso.etapas.comercial.dados?.rotulo).toContain('sem uso comercial')
-    // Última alcançada é Aprovado verde → parou na etapa 5
+    // Última alcançada é Aprovado verde → parou na etapa 5 (Matriz/Canais)
     expect(semUso.parouNaEtapaNumero).toBe(5)
     expect(semUso.selo).toContain('Parou na etapa 5')
   })
@@ -282,7 +320,10 @@ describe('avaliarProdutoTriagem', () => {
         ],
       ]),
     }
-    const r = avaliarProdutoTriagem(produto({ id: 'p1' }), fontes)
+    const r = avaliarProdutoTriagem(
+      produto({ id: 'p1', composicao: [{ insumo: 'i1', qtd: 1, unidade: 'un' }] }),
+      fontes,
+    )
     for (const chave of [
       'base',
       'composicao',
@@ -298,7 +339,7 @@ describe('avaliarProdutoTriagem', () => {
     expect(r.selo).toContain('100% integrado')
   })
 
-  it('kits/combos são avaliados como produto próprio e o detalhe lista os componentes', () => {
+  it('kits/combos são avaliados como produto próprio e o detalhe lista os componentes (com uso comercial ordenados primeiro)', () => {
     const fontes: TriagemFontes = {
       ...fontesVazias,
       basePorOrigem: new Map([['p1', { id: 'b1' }]]),
@@ -314,6 +355,10 @@ describe('avaliarProdutoTriagem', () => {
           },
         ],
       ]),
+      nomeProdutoPorId: new Map([
+        ['f1', 'Filho A'],
+        ['f2', 'Filho B'],
+      ]),
       orcamentoItensPorProduto: new Map([['f2', [{ id: 'oi2', orcamento: 'orc1' }]]]),
       orcamentosPorId: new Map([
         [
@@ -325,11 +370,12 @@ describe('avaliarProdutoTriagem', () => {
     const r = avaliarProdutoTriagem(produto({ id: 'p1', tipo: 'kit' }), fontes)
     // O kit é avaliado por si só (não herda comercial dos filhos)…
     expect(r.etapas.comercial.status).toBe('cinza')
-    // …mas o detalhe lista os componentes do kit
+    // …mas o detalhe lista os componentes do kit, com uso comercial primeiro
     expect(r.detalheKitComponentes).toHaveLength(2)
-    expect(r.detalheKitComponentes[0].nome).toBe('Filho A')
-    expect(r.detalheKitComponentes[1].nome).toBe('Filho B')
-    expect(r.detalheKitComponentes[1].temUsoComercial).toBe(true)
+    expect(r.detalheKitComponentes[0].nome).toBe('Filho B')
+    expect(r.detalheKitComponentes[0].temUsoComercial).toBe(true)
+    expect(r.detalheKitComponentes[1].nome).toBe('Filho A')
+    expect(r.detalheKitComponentes[1].temUsoComercial).toBe(false)
   })
 })
 
@@ -356,9 +402,26 @@ describe('resumirTriagem', () => {
           ],
         ],
       ]),
+      matrizPorProduto: new Map([['p1', [{ id: 'm1', legenda: 'l1' }]]]),
+      orcamentoItensPorProduto: new Map([['p1', [{ id: 'oi1', orcamento: 'orc1' }]]]),
+      orcamentosPorId: new Map([
+        [
+          'orc1',
+          {
+            id: 'orc1',
+            codigo: 'ORC-42',
+            cliente_nome: 'Maria',
+            created: '2026-11-10T00:00:00.000Z',
+          },
+        ],
+      ]),
     }
     const prods = [
-      produto({ id: 'p1', nome: 'Completo' }),
+      produto({
+        id: 'p1',
+        nome: 'Completo',
+        composicao: [{ insumo: 'i1', qtd: 1, unidade: 'un' }],
+      }),
       produto({ id: 'p2', nome: 'Só base' }),
       produto({ id: 'p3', nome: 'Só base 2' }),
     ]
@@ -366,6 +429,7 @@ describe('resumirTriagem', () => {
     const resumo = resumirTriagem(avaliacoes)
     expect(resumo.total).toBe(3)
     expect(resumo.integrados).toBe(1)
+    // p2 e p3 têm Base verde e travam na Composição (vermelha)
     expect(resumo.pararamEtapa?.chave).toBe('composicao')
     expect(resumo.pararamEtapa?.quantidade).toBe(2)
     expect(resumo.semNenhumCenario).toBe(2)

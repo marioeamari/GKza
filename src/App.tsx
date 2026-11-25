@@ -27,6 +27,7 @@ import PrecificacaoComparar from '@/pages/precificacao/PrecificacaoComparar'
 import PrecificacaoCanais from '@/pages/precificacao/PrecificacaoCanais'
 import PrecificacaoProdutos from '@/pages/precificacao/PrecificacaoProdutos'
 import PrecificacaoAprovados from '@/pages/precificacao/PrecificacaoAprovados'
+import TriagemProdutosPage from '@/pages/precificacao/TriagemProdutosPage'
 import ComposicaoProdutosPage from '@/pages/ComposicaoProdutosPage'
 import PrecificacaoOrcamentos from '@/pages/precificacao/PrecificacaoOrcamentos'
 import PrecificacaoClientes from '@/pages/precificacao/PrecificacaoClientes'
@@ -121,6 +122,7 @@ export default function App() {
           <Route path="/precificacao/aprovados" element={<PrecificacaoAprovados />} />
           <Route path="/precificacao/canais" element={<PrecificacaoCanais />} />
           <Route path="/precificacao/produtos" element={<PrecificacaoProdutos />} />
+          <Route path="/precificacao/triagem" element={<TriagemProdutosPage />} />
           <Route path="/composicao-produtos" element={<ComposicaoProdutosPage />} />
           <Route path="/produtos" element={<ComposicaoProdutosPage />} />
           <Route path="/precificacao/orcamentos" element={<PrecificacaoOrcamentos />} />{' '}

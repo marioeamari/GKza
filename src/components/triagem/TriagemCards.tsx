@@ -292,17 +292,22 @@ export function TriagemCardProduto({
 export function destinoRetomar(avaliacao: TriagemAvaliacao): string | undefined {
   const chave = ETAPAS_TRIAGEM[avaliacao.parouNaEtapaNumero - 1]
   const id = avaliacao.produto.id
+  const sku = avaliacao.produto.sku
   switch (chave) {
     case 'base':
     case 'composicao':
-      return `/composicao-produtos?aba=base&produto=${id}`
+      // aba 'compostos' da Composição de Produtos (aba=base é a de Insumos)
+      return `/composicao-produtos?produto=${id}`
     case 'cenario':
-      return `/precificacao/canais?produto=${id}`
+      // Repositório de Cenários (lista com busca por sku)
+      return `/precificacao/aprovados?sku=${encodeURIComponent(sku)}`
     case 'aprovado':
-      return `/precificacao/aprovados?produto=${id}`
+      return `/precificacao/aprovados?sku=${encodeURIComponent(sku)}`
     case 'matriz':
-      return `/precificacao/comparar?produto=${id}`
+      // Comparador Lado a Lado (deep-link por sku)
+      return `/precificacao/comparar?sku=${encodeURIComponent(sku)}`
     case 'comercial':
+      // Uso comercial = item de orçamento com produto vinculado
       return `/precificacao/orcamentos`
     case 'lucro':
       return `/lucro`
