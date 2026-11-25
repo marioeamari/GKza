@@ -277,7 +277,7 @@ export function TriagemCardProduto({
                 e.preventDefault()
                 onAbrir(avaliacao)
               }}
-              className="text-xs font-medium text-muted-underline hover:underline"
+              className="text-xs font-medium text-muted-foreground hover:underline"
             >
               Retomar daqui →
             </a>

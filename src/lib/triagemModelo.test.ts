@@ -130,7 +130,10 @@ describe('avaliarProdutoTriagem', () => {
       ]),
     }
     const r2 = avaliarProdutoTriagem(
-      produto({ id: 'p1', composicao: [{ insumo: 'i1', qtd: 1, unidade: 'un' }] }),
+      produto({
+        id: 'p1',
+        composicao: [{ descricao: 'Insumo 1', qtd: 1, unidade: 'un', custo_unitario: 1 }],
+      }),
       aprovado,
     )
     expect(r2.etapas.cenario.status).toBe('verde')
@@ -163,7 +166,10 @@ describe('avaliarProdutoTriagem', () => {
       ]),
     }
     const r = avaliarProdutoTriagem(
-      produto({ id: 'p1', composicao: [{ insumo: 'i1', qtd: 1, unidade: 'un' }] }),
+      produto({
+        id: 'p1',
+        composicao: [{ descricao: 'Insumo 1', qtd: 1, unidade: 'un', custo_unitario: 1 }],
+      }),
       fontes,
     )
     expect(r.etapas.aprovado.status).toBe('amarelo')
@@ -298,6 +304,7 @@ describe('avaliarProdutoTriagem', () => {
           [
             {
               id: 'c1',
+              produto: 'p1',
               status: 'aprovada',
               preco_aprovado: 24.9,
               canal: 'canal1',
@@ -306,7 +313,7 @@ describe('avaliarProdutoTriagem', () => {
           ],
         ],
       ]),
-      matrizPorProduto: new Map([['p1', [{ id: 'm1', legenda: 'l1' }]]]),
+      matrizPorProduto: new Map([['p1', [{ id: 'm1', canal: 'ch1', legenda: 'l1' }]]]),
       orcamentoItensPorProduto: new Map([['p1', [{ id: 'oi1', orcamento: 'orc1' }]]]),
       orcamentosPorId: new Map([
         [
@@ -321,7 +328,10 @@ describe('avaliarProdutoTriagem', () => {
       ]),
     }
     const r = avaliarProdutoTriagem(
-      produto({ id: 'p1', composicao: [{ insumo: 'i1', qtd: 1, unidade: 'un' }] }),
+      produto({
+        id: 'p1',
+        composicao: [{ descricao: 'Insumo 1', qtd: 1, unidade: 'un', custo_unitario: 1 }],
+      }),
       fontes,
     )
     for (const chave of [
@@ -394,6 +404,7 @@ describe('resumirTriagem', () => {
           [
             {
               id: 'c1',
+              produto: 'p1',
               status: 'aprovada',
               preco_aprovado: 10,
               canal: 'c',
@@ -402,7 +413,7 @@ describe('resumirTriagem', () => {
           ],
         ],
       ]),
-      matrizPorProduto: new Map([['p1', [{ id: 'm1', legenda: 'l1' }]]]),
+      matrizPorProduto: new Map([['p1', [{ id: 'm1', canal: 'ch1', legenda: 'l1' }]]]),
       orcamentoItensPorProduto: new Map([['p1', [{ id: 'oi1', orcamento: 'orc1' }]]]),
       orcamentosPorId: new Map([
         [
@@ -420,7 +431,7 @@ describe('resumirTriagem', () => {
       produto({
         id: 'p1',
         nome: 'Completo',
-        composicao: [{ insumo: 'i1', qtd: 1, unidade: 'un' }],
+        composicao: [{ descricao: 'Insumo 1', qtd: 1, unidade: 'un', custo_unitario: 1 }],
       }),
       produto({ id: 'p2', nome: 'Só base' }),
       produto({ id: 'p3', nome: 'Só base 2' }),
@@ -443,7 +454,7 @@ describe('resumirTriagem', () => {
     const completo = avaliarProdutoTriagem(
       produto({
         id: 'p1',
-        composicao: [{ insumo: 'i1', qtd: 1, unidade: 'un' }],
+        composicao: [{ descricao: 'Insumo 1', qtd: 1, unidade: 'un', custo_unitario: 1 }],
         created: '2026-01-01T00:00:00.000Z',
       }),
       fontes,
