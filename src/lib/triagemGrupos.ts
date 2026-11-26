@@ -72,6 +72,11 @@ export function montarGruposSalvos(registros: TriagemGrupoRecord[]): TriagemGrup
  * - grupo com 1 membro restante vira card solto (sem registro órfão exibido);
  * - grupo sem nenhum membro some da grade;
  * - um produto em dois grupos só aparece no primeiro (dado corrompido).
+ *
+ * Filtro ativo (0.0.322): a lista recebida é a FILTRADA da página — ids
+ * ausentes da lista são tratados igual a membros inexistentes, mas SÓ na
+ * grade: o grupo permanece no estado (`reordenarGrupos`) e no banco e volta
+ * inteiro quando o filtro é limpo.
  */
 export function montarPosicoes(
   avaliacoes: TriagemAvaliacao[],
@@ -245,6 +250,25 @@ export function interpretarSoltar(
     return { acao: 'agrupar', produtoId, alvoProdutoId: alvo.produtoId }
   }
   return { acao: 'reordenar', de, para }
+}
+
+/**
+ * Reordena a lista de GRUPOS persistida a partir da grade VISÍVEL (0.0.322).
+ *
+ * Com um filtro ativo, a grade mostra só parte dos produtos: a ordem nova
+ * (calculada por `moverPosicao` sobre as posições visíveis) vale apenas para
+ * os grupos que aparecem nela. Grupos ocultos pelo filtro NÃO aparecem na
+ * grade — logo, não entram na lista `idsVisiveis` — e preservam a ordem que
+ * já tinham, no lugar de serem descartados (o que os apagaria do estado e do
+ * banco). Regra travada em testes.
+ */
+export function reordenarGrupos(grupos: TriagemGrupo[], idsVisiveis: string[]): TriagemGrupo[] {
+  const mapa = new Map(grupos.map((g) => [g.id, g]))
+  const ordenados = idsVisiveis
+    .map((id) => mapa.get(id))
+    .filter((g): g is TriagemGrupo => g !== undefined)
+  const fora = grupos.filter((g) => !idsVisiveis.includes(g.id))
+  return [...ordenados, ...fora]
 }
 
 /** Id temporário de grupo em memória (antes de salvar no banco). */

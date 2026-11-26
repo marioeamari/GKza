@@ -29,8 +29,17 @@ import { useToast } from '@/hooks/use-toast'
  * `prec_triagem_grupos` com titulo + ordem + membros (JSON de ids, frente =
  * primeiro). Cards soltos não geram registro. Toda mutação de grupo grava no
  * banco; falha de rede volta o estado anterior e avisa (toast).
+ *
+ * Filtros (0.0.322): o hook recebe, além da lista de avaliações, os IDS
+ * VISÍVEIS (resultado dos filtros da página). A grade (`posicoes`) é montada
+ * SÓ com o que está visível — grupo cujos membros não batem com o filtro some
+ * da grade MAS NÃO sai do estado nem do banco (volta quando o filtro é
+ * limpo). Toda mutação (agrupar, desagrupar, reordenar…) usa a lista visível
+ * para ler a grade, mas nunca grava ids invisíveis: agrupar/desagrupar só
+ * tocam membros visíveis; reordenar usa reordenarGrupos, que preserva os
+ * grupos ocultos com a ordem que já tinham.
  */
-export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[]) {
+export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[], idsVisiveis?: string[]) {
   const { toast } = useToast()
   const [grupos, setGrupos] = useState<TriagemGrupo[]>([])
   const [carregandoGrupos, setCarregandoGrupos] = useState(true)
