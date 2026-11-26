@@ -19,6 +19,13 @@ import type { GetFileUrlFn } from './TriagemCards'
  * - 0.0.320: nome e SKU SEM ellipsis — quebram linha (break-words) com a
  *   linha crescendo em altura, igual ao card da frente (pedido: ver o título
  *   e o SKU completos);
+ * - 0.0.324: a linha do membro da FRENTE (o exibido no card) fica claramente
+ *   destacada (pedido: "destaca o produto que está sendo exibido"): faixa de
+ *   fundo laranja intensa + borda esquerda grossa na cor primária #DF5830 +
+ *   nome/SKU em negrito + pill "Exibido" à direita da linha; as demais linhas
+ *   ficam levemente atenuadas (opacity) para dar contraste. O destaque é
+ *   derivado da posição (índice 0), então se move sozinho quando a frente
+ *   muda (clique numa linha, navegação ‹ › do grupo ou desagrupar da frente);
  * - clicar num membro o traz para a FRENTE do grupo (mesma ação do clique no
  *   card da pilha), com a supressão de clique pós-arrasto; o membro que JÁ
  *   está na frente fica desabilitado (nada a fazer);
@@ -67,18 +74,21 @@ export function TriagemMembrosGrupo({
             <button
               type="button"
               onClick={() => {
+                if (i === 0) return
                 if (cliqueSuprimido()) return
                 onTrazerParaFrente(grupo.id, id)
               }}
               disabled={i === 0}
               aria-label={
                 i === 0
-                  ? `${p.nome} já está na frente do grupo`
+                  ? `${p.nome} está sendo exibido no card do grupo`
                   : `Trazer ${p.nome} para a frente do grupo`
               }
               className={cn(
-                'flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-[#DF5830] disabled:cursor-default disabled:hover:bg-transparent',
-                i === 0 && 'bg-background font-medium',
+                'flex w-full items-center gap-2 rounded border-l-4 py-1 pr-1.5 pl-1.5 text-left text-xs focus-visible:outline-2 focus-visible:outline-[#DF5830]',
+                i === 0
+                  ? 'border-l-[#DF5830] bg-[#DF5830]/15 font-semibold'
+                  : 'border-l-transparent opacity-70 hover:bg-accent hover:opacity-100 focus-visible:opacity-100',
               )}
             >
               {url ? (
@@ -100,12 +110,19 @@ export function TriagemMembrosGrupo({
               {/* 0.0.320: nome e SKU SEM ellipsis — mesma regra do card da
                   frente: quebram linha (break-words) e a linha cresce. */}
               <span className="min-w-0 flex-1">
-                <span className="block break-words">{p.nome}</span>
+                <span className={cn('block break-words', i === 0 && 'font-bold')}>{p.nome}</span>
                 <span className="block break-words text-[11px] text-muted-foreground">
                   {p.sku || 'sem SKU'}
-                  {i === 0 ? ' · na frente' : ''}
                 </span>
               </span>
+              {i === 0 && (
+                <span
+                  aria-hidden="true"
+                  className="shrink-0 rounded-full bg-[#DF5830] px-1.5 py-0.5 text-[10px] leading-none font-bold text-white"
+                >
+                  Exibido
+                </span>
+              )}
               <span
                 title={rotuloEtapaCompacto(av)}
                 className={cn('shrink-0 text-[11px] font-semibold', COR_SEVERIDADE[corDaEtapa(av)])}
