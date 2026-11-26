@@ -4,7 +4,15 @@
 // prec_produtos NA ORDEM; o PRIMEIRO é o card da frente da pilha).
 migrate(
   (app) => {
-    if (app.findCollectionByNameOrId('prec_triagem_grupos')) return
+    // findCollectionByNameOrId LANÇA "sql: no rows in result set" quando a
+    // coleção não existe (nunca devolve null) — a guarda tem de capturar.
+    let existente = null
+    try {
+      existente = app.findCollectionByNameOrId('prec_triagem_grupos')
+    } catch (_e) {
+      existente = null
+    }
+    if (existente) return // idempotente: rodar duas vezes não quebra
 
     const auth = "@request.auth.id != ''"
     const adminOrManager = "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
@@ -29,7 +37,11 @@ migrate(
     app.save(col)
   },
   (app) => {
-    const col = app.findCollectionByNameOrId('prec_triagem_grupos')
-    if (col) app.delete(col)
+    try {
+      const col = app.findCollectionByNameOrId('prec_triagem_grupos')
+      app.delete(col)
+    } catch (_e) {
+      // coleção já não existe — down idempotente
+    }
   },
 )

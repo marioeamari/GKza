@@ -1,4 +1,5 @@
 import { resolvePocketBaseBaseUrl } from './pocketbaseBaseUrl'
+import type { TriagemProdutoInput } from './triagemModelo'
 
 /** Campos do produto exigidos por urlImagemProdutoTriagem (entrada enxuta). */
 export type TriagemImagemInput = Pick<
