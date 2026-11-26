@@ -1,5 +1,18 @@
 import { resolvePocketBaseBaseUrl } from './pocketbaseBaseUrl'
 
+/** Campos do produto exigidos por urlImagemProdutoTriagem (entrada enxuta). */
+export type TriagemImagemInput = Pick<
+  TriagemProdutoInput,
+  | 'id'
+  | 'imagem'
+  | 'origem_id'
+  | 'tipo'
+  | 'imagem_produtos'
+  | 'fornecedor_produto_id'
+  | 'fornecedor_produto_imagem'
+> &
+  Pick<TriagemProdutoInput, 'nome' | 'sku' | 'created'>
+
 /**
  * Regra gravada (protocolo acordado, v0.0.314): o arquivo FÍSICO da foto vive no
  * registro onde o upload aconteceu; o espelho prec_produtos só carrega o nome.
@@ -21,18 +34,7 @@ import { resolvePocketBaseBaseUrl } from './pocketbaseBaseUrl'
  * services/triagem.ts via expand 'fornecedor_produto'), então a URL sai
  * completa — sem parâmetro fallback= (não há handler onError nos <img>).
  */
-export function urlImagemProdutoTriagem(
-  produto: Pick<
-    TriagemProdutoInput,
-    | 'id'
-    | 'imagem'
-    | 'origem_id'
-    | 'tipo'
-    | 'imagem_produtos'
-    | 'fornecedor_produto_id'
-    | 'fornecedor_produto_imagem'
-  >,
-): string | undefined {
+export function urlImagemProdutoTriagem(produto: TriagemImagemInput): string | undefined {
   if (!produto) return undefined
   // Resolvido aqui (não no import) para os testes poderem stubar a env.
   const base = resolvePocketBaseBaseUrl()
