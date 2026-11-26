@@ -82,7 +82,12 @@ export function TriagemDetalheDialog({ avaliacao, onClose }: TriagemDetalheDialo
 
             <ol className="mt-2 space-y-2" aria-label="Linha do tempo das 7 etapas">
               {ETAPAS_TRIAGEM.map((chave, i) => {
-                const info = avaliacao.etapas[chave]
+                // Defesa: etapa ausente é tratada como vermelha, nunca quebra a renderização
+                const info = avaliacao.etapas[chave] ?? {
+                  chave,
+                  status: 'vermelho' as const,
+                  rotulo: 'Etapa não avaliada',
+                }
                 const cores = CORES_STATUS[info.status]
                 const pendente = chave === chavePendente
                 const dadosRotulo = info.dados?.rotulo

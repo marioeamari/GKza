@@ -262,6 +262,7 @@ export function avaliarProdutoTriagem(
   const totalCenarios = cenarios.length
   if (totalCenarios === 0) {
     etapas.cenario = etapa('cenario', 'vermelho', 'Nenhum cenário salvo')
+    etapas.aprovado = etapa('aprovado', 'vermelho', 'Aguarda cenário com preço aprovado')
   } else if (vigente) {
     const nomeCanal = fontes.canalNome?.get(vigente.cenario.canal) || ''
     const quando = vigente.cenario.aprovado_em || vigente.cenario.updated || vigente.cenario.created
@@ -352,7 +353,11 @@ export function avaliarProdutoTriagem(
   // ⑧ Lucro — etapa final automática: verde quando todo o trilho anterior é verde
   const anterioresVerdes = (
     ['base', 'composicao', 'cenario', 'aprovado', 'matriz', 'comercial'] as const
-  ).every((chave) => etapas[chave].status === 'verde' || etapas[chave].status === 'cinza')
+  ).every(
+    (chave) =>
+      etapas[chave]?.status === 'verde' ||
+      (etapas[chave]?.status === 'cinza' && chave !== 'aprovado'),
+  )
   etapas.lucro = anterioresVerdes
     ? etapa('lucro', 'verde', 'Consolidado no Lucro por Canais')
     : etapa(
@@ -364,23 +369,25 @@ export function avaliarProdutoTriagem(
       )
 
   // Selo geral e etapa pendente
-  const etapasCinzas = ETAPAS_TRIAGEM.filter((k) => etapas[k].status === 'cinza')
-  const etapasAmarelas = ETAPAS_TRIAGEM.filter((k) => etapas[k].status === 'amarelo')
+  // Defesa: leitura opcional — etapa ausente é tratada como pendente/vermelha
+  // e nunca derruba o cálculo com "Cannot read properties of undefined".
+  const etapasCinzas = ETAPAS_TRIAGEM.filter((k) => etapas[k]?.status === 'cinza')
+  const etapasAmarelas = ETAPAS_TRIAGEM.filter((k) => etapas[k]?.status === 'amarelo')
   const pendentes = ETAPAS_TRIAGEM.filter((k) => {
-    const s = etapas[k].status
-    return s === 'vermelho' || s === 'amarelo'
+    const s = etapas[k]?.status
+    return s === undefined || s === 'vermelho' || s === 'amarelo'
   })
   const integrado = pendentes.length === 0
   let ultima = 0
   for (let i = ETAPAS_TRIAGEM.length - 1; i >= 0; i--) {
-    if (etapas[ETAPAS_TRIAGEM[i]].status === 'verde') {
+    if (etapas[ETAPAS_TRIAGEM[i]]?.status === 'verde') {
       ultima = i + 1
       break
     }
   }
   const parou = pendentes.length > 0 ? numeroEtapaTriagem(pendentes[0]) : ETAPAS_TRIAGEM.length
   const severidadePendencia: 'amarelo' | 'vermelho' = pendentes.some(
-    (k) => etapas[k].status === 'amarelo',
+    (k) => etapas[k]?.status === 'amarelo',
   )
     ? 'amarelo'
     : 'vermelho'

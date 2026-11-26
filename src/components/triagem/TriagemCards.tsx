@@ -175,7 +175,12 @@ function TrilhoEtapasCard({ avaliacao }: { avaliacao: TriagemAvaliacao }) {
   return (
     <ol className="flex flex-wrap items-center gap-1" aria-label="Trilho das 7 etapas">
       {ETAPAS_TRIAGEM.map((chave, i) => {
-        const info = avaliacao.etapas[chave]
+        // Defesa: etapa ausente é tratada como vermelha, nunca quebra a renderização
+        const info = avaliacao.etapas[chave] ?? {
+          chave,
+          status: 'vermelho' as const,
+          rotulo: 'Etapa não avaliada',
+        }
         const cores = CORES_STATUS[info.status]
         return (
           <li key={chave} className="flex items-center gap-1">

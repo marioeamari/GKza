@@ -349,6 +349,33 @@ describe('avaliarProdutoTriagem', () => {
     expect(r.selo).toContain('100% integrado')
   })
 
+  it('produto SEM nenhum cenário: Cenário e Aprovado vermelhos, selo "Parou na etapa 3 — Cenário" (não derruba o cálculo)', () => {
+    const fontes: TriagemFontes = {
+      ...fontesVazias,
+      basePorOrigem: new Map([['p1', { id: 'b1' }]]),
+      // p1 não tem NENHUM cenário em cenariosPorProduto
+    }
+    const r = avaliarProdutoTriagem(
+      produto({
+        id: 'p1',
+        composicao: [{ descricao: 'Insumo 1', qtd: 1, unidade: 'un', custo_unitario: 1 }],
+      }),
+      fontes,
+    )
+    expect(r.etapas.cenario.status).toBe('vermelho')
+    expect(r.etapas.cenario.rotulo).toBe('Nenhum cenário salvo')
+    // Causa raiz do bug de runtime: esta etapa precisa existir mesmo sem cenários
+    expect(r.etapas.aprovado).toBeDefined()
+    expect(r.etapas.aprovado.status).toBe('vermelho')
+    // O selo/resumo não pode quebrar nem ler etapa undefined
+    expect(r.selo).toBe('⚠️ Parou na etapa 3 — Cenário')
+    expect(r.parouNaEtapaNumero).toBe(3)
+    expect(r.severidadePendencia).toBe('vermelho')
+    const resumo = resumirTriagem([r])
+    expect(resumo.semNenhumCenario).toBe(1)
+    expect(resumo.pararamEtapa?.chave).toBe('cenario')
+  })
+
   it('kits/combos são avaliados como produto próprio e o detalhe lista os componentes (com uso comercial ordenados primeiro)', () => {
     const fontes: TriagemFontes = {
       ...fontesVazias,
