@@ -5,6 +5,7 @@ import type {
   PrecPrecificacaoRecord,
   PrecProdutoRecord,
 } from '@/types/precificacao'
+import type { TriagemProdutoInput } from '@/lib/triagemModelo'
 import type { OrcamentoItemRecord, OrcamentoRecord } from '@/types/orcamento'
 import type {
   TriagemFontes,
@@ -16,14 +17,21 @@ import type {
  * Carrega (somente leitura) todas as fontes do painel de Triagem de Produtos.
  * Cálculo de status é feito no cliente a cada carregamento — sem nova coleção,
  * sem cache a manter.
+ *
+ * Regra da foto (protocolo acordado): para cada espelho prec_produtos injeta
+ * imagem_produtos / fornecedor_produto_id / fornecedor_produto_imagem com o
+ * nome REAL do arquivo no registro dono dele — o `imagem` do espelho de
+ * revenda é um nome fabricado que não corresponde a arquivo físico nenhum.
  */
 export async function carregarFontesTriagem(): Promise<{
-  produtos: PrecProdutoRecord[]
+  produtos: TriagemProdutoInput[]
   fontes: TriagemFontes
 }> {
   const [produtos, produtosBase, cenarios, matriz, orcamentoItens, orcamentos, kits] =
     await Promise.all([
-      pb.collection('prec_produtos').getFullList<PrecProdutoRecord>({ sort: 'nome' }),
+      pb
+        .collection('prec_produtos')
+        .getFullList<PrecProdutoRecord>({ sort: 'nome', expand: 'fornecedor_produto' }),
       pb
         .collection('produtos_base')
         .getFullList<{ id: string; nome?: string }>({ fields: 'id,nome' }),
@@ -121,8 +129,33 @@ export async function carregarFontesTriagem(): Promise<{
   const nomeProdutoPorId = new Map<string, string>()
   for (const p of produtos) nomeProdutoPorId.set(p.id, p.nome)
 
+  // Foto real por origem: espelhos com origem_id herdam o arquivo do cadastro
+  // de Produto Composto (coleção `produtos`).
+  const imagemProdutosPorOrigem = new Map<string, string>()
+  const origens = [...new Set(produtos.map((p) => p.origem_id).filter(Boolean))] as string[]
+  if (origens.length > 0) {
+    const registrosOrigem = await pb.collection('produtos').getFullList<{
+      id: string
+      imagem?: string
+    }>({
+      fields: 'id,imagem',
+    })
+    for (const ro of registrosOrigem) imagemProdutosPorOrigem.set(ro.id, ro.imagem || '')
+  }
+
+  // Foto real do catálogo de fornecedor: expand 'fornecedor_produto' na query
+  // de prec_produtos traz o registro com o nome REAL do arquivo.
+  const produtosComImagem: TriagemProdutoInput[] = produtos.map((p) => ({
+    ...p,
+    imagem_produtos: p.origem_id
+      ? imagemProdutosPorOrigem.get(p.origem_id) || undefined
+      : undefined,
+    fornecedor_produto_id: p.fornecedor_produto || undefined,
+    fornecedor_produto_imagem: p.expand?.fornecedor_produto?.imagem || undefined,
+  }))
+
   return {
-    produtos,
+    produtos: produtosComImagem,
     fontes: {
       basePorOrigem,
       canalNome,

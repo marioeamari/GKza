@@ -1,4 +1,4 @@
-import { VITE_POCKETBASE_URL } from './pocketbaseBaseUrl'
+import { resolvePocketBaseBaseUrl } from './pocketbaseBaseUrl'
 
 /**
  * Regra gravada (protocolo acordado, v0.0.314): o arquivo FÍSICO da foto vive no
@@ -17,11 +17,9 @@ import { VITE_POCKETBASE_URL } from './pocketbaseBaseUrl'
  * Campos imagem_produtos / fornecedor_produto_id / fornecedor_produto_imagem
  * são injetados por services/triagem.ts (somente leitura).
  *
- * Quando a coleção correta não tem filename conhecido (ex.: foto herdada do
- * catálogo de fornecedor), a função devolve a URL com `fallback=` apontando
- * para /api/files/fornecedores_produtos/{id}/ — o PocketBase recusa filename
- * vazio na rota, então um pb_hook (triagem_imagem.js) completa o nome real
- * em runtime a partir do registro dono do arquivo.
+ * O nome REAL do arquivo chega em fornecedor_produto_imagem (injetado por
+ * services/triagem.ts via expand 'fornecedor_produto'), então a URL sai
+ * completa — sem parâmetro fallback= (não há handler onError nos <img>).
  */
 export function urlImagemProdutoTriagem(
   produto: Pick<
@@ -36,7 +34,8 @@ export function urlImagemProdutoTriagem(
   >,
 ): string | undefined {
   if (!produto) return undefined
-  const base = VITE_POCKETBASE_URL || ''
+  // Resolvido aqui (não no import) para os testes poderem stubar a env.
+  const base = resolvePocketBaseBaseUrl()
   if (!base) return undefined
   const thumb = '100x100'
 
@@ -65,12 +64,10 @@ export function urlImagemProdutoTriagem(
     return montar('produtos', produto.origem_id, produto.imagem_produtos)
   }
   //    3b. foto herdada do catálogo de fornecedor (fornecedores_produtos.imagem):
-  //        o nome no espelho é fabricado, então o filename vem do pb_hook em runtime
+  //        o nome REAL chega injetado em fornecedor_produto_imagem
   const fpId = produto.fornecedor_produto_id || ''
   if (fpId && produto.fornecedor_produto_imagem) {
-    const principal = montar('fornecedores_produtos', fpId, produto.fornecedor_produto_imagem)
-    const fallback = `${base}/api/files/fornecedores_produtos/${fpId}/?thumb=${thumb}`
-    return `${principal}&fallback=${fallback}`
+    return montar('fornecedores_produtos', fpId, produto.fornecedor_produto_imagem)
   }
   //    3c. último recurso: upload antigo feito direto no espelho
   if (produto.imagem) {
