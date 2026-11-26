@@ -11,7 +11,9 @@ import {
   montarPosicoes,
   moverPosicao,
   normalizarMembros,
+  projetarGruposVisiveis,
   proximaOrdem,
+  reordenarGrupos,
   tituloGrupo,
   trazerParaFrente,
   type TriagemGrupoRecord,
@@ -278,5 +280,133 @@ describe('persistência (regra da coleção prec_triagem_grupos)', () => {
     expect(tituloGrupo({ titulo: '' })).toBe('Grupo')
     expect(tituloGrupo({ titulo: '   ' })).toBe('Grupo')
     expect(tituloGrupo({ titulo: 'Toalhas' })).toBe('Toalhas')
+  })
+})
+
+// ── Filtro ativo (0.0.322) ────────────────────────────────────────────────────
+//
+// Regra gravada: sob filtro, a lista de avaliações recebida por montarPosicoes
+// é a FILTRADA e os grupos entram PROJETADOS (só membros visíveis). O estado
+// real dos grupos NUNCA é alterado pela projeção; ao limpar o filtro a grade
+// volta completa. Mutações sob filtro tocam só membros visíveis; grupos
+// ocultos preservam a ordem relativa (reordenarGrupos).
+
+describe('filtro ativo: projeção da grade', () => {
+  const gruposCompleto = [{ id: 'g1', titulo: 'Kit', membros: [A, B, C] }]
+
+  it('montarPosicoes com lista filtrada: só membros visíveis aparecem; grupo reduzido a 1 vira solto', () => {
+    // filtro deixa passar só A e C (B oculto)
+    const visiveis = [av(A), av(C)]
+    const projetados = projetarGruposVisiveis(gruposCompleto, [A, C])
+    const posicoes = montarPosicoes(visiveis, projetados)
+    // grupo g1 fica com [A, C] → continua grupo (2+ membros)
+    expect(posicoes).toEqual([{ tipo: 'grupo', grupoId: 'g1' }])
+  })
+
+  it('grupo com apenas 1 membro visível aparece como card solto (sem pilha vazia)', () => {
+    const visiveis = [av(A), av(D)]
+    const projetados = projetarGruposVisiveis(gruposCompleto, [A])
+    const posicoes = montarPosicoes(visiveis, projetados)
+    expect(posicoes).toEqual([
+      { tipo: 'solto', produtoId: A }, // grupo degradado = card solto, não pilha
+      { tipo: 'solto', produtoId: D },
+    ])
+  })
+
+  it('grupo cujo todos os membros estão ocultos some da grade (não vira posição vazia)', () => {
+    const visiveis = [av(D)]
+    const projetados = projetarGruposVisiveis(gruposCompleto, [])
+    expect(projetados).toEqual([{ id: 'g1', titulo: 'Kit', membros: [] }])
+    expect(montarPosicoes(visiveis, projetados)).toEqual([{ tipo: 'solto', produtoId: D }])
+  })
+
+  it('limpar o filtro (idsVisiveis=undefined) devolve os grupos INTACTOS', () => {
+    expect(projetarGruposVisiveis(gruposCompleto, undefined)).toEqual(gruposCompleto)
+    const posicoes = montarPosicoes([av(A), av(B), av(C), av(D)], gruposCompleto)
+    expect(posicoes).toEqual([
+      { tipo: 'grupo', grupoId: 'g1' },
+      { tipo: 'solto', produtoId: D },
+    ])
+  })
+})
+
+describe('filtro ativo: desagrupar/girar/frente com membros visíveis', () => {
+  const g = { id: 'g1', titulo: '', membros: [A, B, C] }
+
+  it('desagruparFrente sob filtro libera o PRIMEIRO membro VISÍVEL (ocultos ficam)', () => {
+    // frente real é A, mas A está oculto: frente exibida é B
+    const r = desagruparFrente(g, [B, C])
+    expect(r.liberado).toBe(B)
+    expect(r.grupo?.membros).toEqual([A, C]) // A oculto permanece no grupo
+  })
+
+  it('desagruparFrente sem filtro reduz exatamente ao comportamento antigo', () => {
+    const r = desagruparFrente(g, undefined)
+    expect(r.liberado).toBe(A)
+    expect(r.grupo?.membros).toEqual([B, C])
+  })
+
+  it('girarPilha sob filtro gira só a subsequência visível (oculto não vira frente)', () => {
+    // visíveis B, C: › desloca B→frente exibida; A fica na posição 0 real
+    const girado = girarPilha(g, true, [B, C])
+    expect(girado.membros).toEqual([A, C, B])
+    // A (oculto) segue fora da frente; ao limpar o filtro, frente real é A
+    expect(girado.membros[0]).toBe(A)
+    // sem filtro: redução exata ao comportamento antigo
+    expect(girarPilha(g, true, undefined).membros).toEqual([B, C, A])
+  })
+
+  it('trazerParaFrente sob filtro assume a posição do primeiro membro VISÍVEL', () => {
+    // C visível é trazido à frente exibida (posição de B); A oculto segue antes
+    const movido = trazerParaFrente(g, C, [B, C])
+    expect(movido.membros).toEqual([A, C, B])
+    // oculto não pode ser trazido (não está na pilha exibida)
+    expect(trazerParaFrente(g, A, [B, C]).membros).toEqual([A, B, C])
+  })
+})
+
+describe('filtro ativo: reordenarGrupos preserva grupos ocultos', () => {
+  it('reordena só os grupos visíveis; ocultos mantêm a ordem relativa no fim', () => {
+    const grupos = [
+      { id: 'g1', titulo: '', membros: [A, B] },
+      { id: 'g2', titulo: '', membros: [C, D] },
+      { id: 'g3', titulo: '', membros: [A, D] }, // hipotético: interseção
+    ]
+    // só g3 e g1 aparecem na grade filtrada, nessa ordem nova
+    const out = reordenarGrupos(grupos, ['g3', 'g1'])
+    expect(out.map((x) => x.id)).toEqual(['g3', 'g1', 'g2']) // g2 oculto preservado
+  })
+
+  it('sem filtro (todos os ids) a ordem é exatamente a da grade completa', () => {
+    const grupos = [
+      { id: 'g1', titulo: '', membros: [A, B] },
+      { id: 'g2', titulo: '', membros: [C, D] },
+    ]
+    expect(reordenarGrupos(grupos, ['g2', 'g1']).map((x) => x.id)).toEqual(['g2', 'g1'])
+  })
+
+  it('grade projetada permite reordenar sob filtro sem perder grupos ocultos', () => {
+    // grade: g1, g2, D — filtro oculta C (membro de g2) e D vira solto após g2
+    const grupos = [
+      { id: 'g1', titulo: '', membros: [A, B] },
+      { id: 'g2', titulo: '', membros: [C, D] },
+    ]
+    const visiveis = [av(A), av(B), av(D)]
+    const projetados = projetarGruposVisiveis(grupos, ['A', 'B', 'D'])
+    const posicoes = montarPosicoes(visiveis, projetados)
+    expect(posicoes).toEqual([
+      { tipo: 'grupo', grupoId: 'g1' },
+      { tipo: 'solto', produtoId: D }, // g2 com só D visível = solto
+    ])
+    // mover D para a frente: grade nova é [D, g1] → grupos visíveis = [g1]
+    const novas = moverPosicao(posicoes, 1, 0)
+    expect(novas).toEqual([
+      { tipo: 'solto', produtoId: D },
+      { tipo: 'grupo', grupoId: 'g1' },
+    ])
+    const ordem = reordenarGrupos(grupos, ['g1'])
+    expect(ordem.map((x) => x.id)).toEqual(['g1', 'g2']) // g2 intacto
+    // e limpar o filtro devolve os membros: g2 segue [C, D]
+    expect(projetarGruposVisiveis(ordem, undefined)[1].membros).toEqual([C, D])
   })
 })

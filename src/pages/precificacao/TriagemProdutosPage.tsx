@@ -72,22 +72,15 @@ export default function TriagemProdutosPage() {
     void carregar()
   }, [carregar])
 
-  const grupos = useTriagemGrupos(avaliacoes)
-
   const avaliacaoPorId = useMemo(
     () => new Map(avaliacoes.map((a) => [a.produto.id, a])),
     [avaliacoes],
   )
 
-  const aoSoltar = useCallback(
-    (arrastadoKey: string, alvoKey: string, zona: 'antes' | 'depois' | 'centro') => {
-      grupos.soltar(arrastadoKey, alvoKey, zona)
-    },
-    [grupos],
-  )
-
-  // Filtros (comportamento inalterado): só enxugam a lista de avaliações que
-  // alimenta a grade — o agrupamento se aplica ao resultado filtrado.
+  // Filtros: enxugam a lista de avaliações que alimenta a grade. Com o filtro
+  // ativo, o hook recebe A LISTA FILTRADA + os ids visíveis: a grade (posições
+  // e grupos) mostra só o que passa no filtro; o estado dos grupos e o banco
+  // permanecem completos (0.0.322 — ver lib/triagemGrupos.ts).
   const avaliacoesFiltradas = useMemo(() => {
     const busca = filtros.busca.trim().toLowerCase()
     return avaliacoes.filter((av) => {
@@ -103,6 +96,18 @@ export default function TriagemProdutosPage() {
       return i >= 0 && av.parouNaEtapaNumero === i + 1
     })
   }, [avaliacoes, filtros])
+
+  const idsVisiveis = useMemo(
+    () => avaliacoesFiltradas.map((a) => a.produto.id),
+    [avaliacoesFiltradas],
+  )
+
+  const grupos = useTriagemGrupos(avaliacoesFiltradas, idsVisiveis)
+
+  // decisão do soltar (agrupar/entrar em grupo/reordenar) — o hook interpreta
+  // sobre as posições PROJETADAS e os grupos visíveis, então o arraste sob
+  // filtro usa a frente exibida (e não a real) como alvo.
+  const aoSoltar = grupos.soltar
 
   const categorias = useMemo(
     () => [...new Set(avaliacoes.map((a) => a.produto.categoria).filter(Boolean))] as string[],
@@ -163,7 +168,7 @@ export default function TriagemProdutosPage() {
         <TriagemGradeAgrupada
           posicoes={grupos.posicoes}
           avaliacaoPorId={avaliacaoPorId}
-          grupos={grupos.grupos}
+          grupos={grupos.gruposVisiveis}
           onAbrir={setSelecionado}
           onTitulo={grupos.renomearGrupo}
           onTrazerParaFrente={grupos.trazerFrente}

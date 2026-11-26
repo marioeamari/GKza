@@ -7,6 +7,8 @@ import {
   interpretarSoltar,
   montarPosicoes,
   moverPosicao,
+  projetarGruposVisiveis,
+  reordenarGrupos,
   trazerParaFrente,
   girarPilha,
   type TriagemGrupo,
@@ -30,22 +32,34 @@ import { useToast } from '@/hooks/use-toast'
  * primeiro). Cards soltos não geram registro. Toda mutação de grupo grava no
  * banco; falha de rede volta o estado anterior e avisa (toast).
  *
- * Filtros (0.0.322): o hook recebe, além da lista de avaliações, os IDS
- * VISÍVEIS (resultado dos filtros da página). A grade (`posicoes`) é montada
- * SÓ com o que está visível — grupo cujos membros não batem com o filtro some
- * da grade MAS NÃO sai do estado nem do banco (volta quando o filtro é
- * limpo). Toda mutação (agrupar, desagrupar, reordenar…) usa a lista visível
- * para ler a grade, mas nunca grava ids invisíveis: agrupar/desagrupar só
- * tocam membros visíveis; reordenar usa reordenarGrupos, que preserva os
- * grupos ocultos com a ordem que já tinham.
+ * Filtros (0.0.322): o hook recebe os IDS VISÍVEIS (resultado dos filtros da
+ * página). A grade (`posicoes`) é montada SÓ com o que está visível — grupo
+ * cujos membros não batem com o filtro some da grade MAS NÃO sai do estado
+ * nem do banco (volta quando o filtro é limpo). Toda mutação usa a lista
+ * visível:
+ * - desagrupar/girar/trazer-frente só tocam membros visíveis (frente exibida =
+ *   primeiro membro VISÍVEL); membro oculto permanece no grupo;
+ * - agrupar mantém o grupo tocado na MESMA posição da grade visível (nunca no
+ *   fim — o que esconderia os grupos depois dele sob filtro);
+ * - reordenar usa `reordenarGrupos`, que preserva os grupos ocultos com a
+ *   ordem relativa que já tinham.
+ * Persistência gravando só o que mudou (`persistirDiferencas`): o filtro é
+ * projeção — nada de membro oculto é apagado do banco.
  */
-export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[], idsVisiveis?: string[]) {
+export function useTriagemGrupos(
+  avaliacoes: TriagemAvaliacao[],
+  idsVisiveis?: string[],
+): TriagemGruposApi {
   const { toast } = useToast()
   const [grupos, setGrupos] = useState<TriagemGrupo[]>([])
   const [carregandoGrupos, setCarregandoGrupos] = useState(true)
 
   const gruposRef = useRef<TriagemGrupo[]>([])
   gruposRef.current = grupos
+
+  /** ids visíveis em ref (leitura sem re-render nas mutações de arrasto). */
+  const visiveisRef = useRef<string[] | undefined>(idsVisiveis)
+  visiveisRef.current = idsVisiveis
 
   /** espelho das posições atuais para o reordenar (leitura sem re-render). */
   const posicoesRef = useRef<TriagemPosicao[]>([])
@@ -74,12 +88,23 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[], idsVisiveis?: s
     void recarregar()
   }, [recarregar])
 
-  /** posições da grade = grupos salvos + cards soltos (na ordem recebida). */
+  /**
+   * posições da grade = grupos salvos + cards soltos, SÓ com o visível:
+   * a lista de avaliações vem já filtrada pela página; os grupos entram
+   * PROJETADOS (`projetarGruposVisiveis`) para que a frente de cada grupo sob
+   * filtro seja o primeiro membro visível — sem tocar no estado real.
+   */
   const posicoes = useMemo<TriagemPosicao[]>(() => {
-    const p = montarPosicoes(avaliacoes, grupos)
+    const p = montarPosicoes(avaliacoes, projetarGruposVisiveis(grupos, idsVisiveis))
     posicoesRef.current = p
     return p
-  }, [avaliacoes, grupos])
+  }, [avaliacoes, grupos, idsVisiveis])
+
+  /** grupos exibíveis (projeção): a grade renderiza a partir destes. */
+  const gruposVisiveis = useMemo(
+    () => projetarGruposVisiveis(grupos, idsVisiveis),
+    [grupos, idsVisiveis],
+  )
 
   /**
    * Aplica mutação com rollback em erro de rede: estado volta ao anterior e
@@ -91,9 +116,14 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[], idsVisiveis?: s
     async (fn: (atuais: TriagemGrupo[]) => TriagemGrupo[]) => {
       const anteriores = gruposRef.current
       const rascunho = fn(anteriores)
-      setGrupos(rascunho)
+      // estado otimista já normalizado: grupo com <2 membros não existe como
+      // grupo (vira solto) — a projeção do filtro NUNCA dissolve grupo real.
+      const rascunhoNormalizado = idsVisiveis
+        ? rascunho.filter((g) => g.membros.length >= 2)
+        : rascunho
+      setGrupos(rascunhoNormalizado)
       try {
-        const novos = await persistirDiferencas(anteriores, rascunho)
+        const novos = await persistirDiferencas(anteriores, rascunhoNormalizado)
         setGrupos(novos)
       } catch (e) {
         console.error('Falha ao salvar grupos da triagem', e)
@@ -123,8 +153,19 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[], idsVisiveis?: s
           .map((g) => (g.membros.includes(arrastado) ? removerMembro(g, arrastado) : g))
           .filter((g): g is TriagemGrupo => g !== null)
         const semAlvo = semArrastado.filter((g) => g.id !== (gAlvo ? gAlvo.id : grupoFinal.id))
-        // o grupo tocado assume o fim da grade (ordem nova é persistida)
-        return [...semAlvo, grupoFinal]
+        // o grupo tocado assume a MESMA posição que o alvo tinha na grade
+        // visível (soltos não geram registro, então a "posição" é contada só
+        // entre grupos): sob filtro, grupos depois dele não pulam para o fim.
+        const idsVisiveisAtuais = visiveisRef.current
+        if (!idsVisiveisAtuais) return [...semAlvo, grupoFinal]
+        const visiveis = new Set(idsVisiveisAtuais)
+        const posAlvoNaGrade = semAlvo
+          .filter((g) => g.membros.some((m) => visiveis.has(m)))
+          .findIndex((g) => g.id === (gAlvo ? gAlvo.id : ''))
+        if (posAlvoNaGrade < 0) return [...semAlvo, grupoFinal]
+        const out = [...semAlvo]
+        out.splice(posAlvoNaGrade, 0, grupoFinal)
+        return out
       })
     },
     [aplicarGrupos],
@@ -135,7 +176,7 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[], idsVisiveis?: s
     (arrastadoKey: string, alvoKey: string | null, zona: ZonaSoltar) => {
       const decisao = interpretarSoltar(
         posicoesRef.current,
-        gruposRef.current,
+        projetarGruposVisiveis(gruposRef.current, visiveisRef.current),
         arrastadoKey,
         alvoKey,
         zona,
@@ -152,7 +193,9 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[], idsVisiveis?: s
   const trazerFrente = useCallback(
     (grupoId: string, produtoId: string) => {
       void aplicarGrupos((atuais) =>
-        atuais.map((g) => (g.id === grupoId ? trazerParaFrente(g, produtoId) : g)),
+        atuais.map((g) =>
+          g.id === grupoId ? trazerParaFrente(g, produtoId, visiveisRef.current) : g,
+        ),
       )
     },
     [aplicarGrupos],
@@ -160,18 +203,20 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[], idsVisiveis?: s
 
   const girar = useCallback(
     (grupoId: string, dir: boolean) => {
-      void aplicarGrupos((atuais) => atuais.map((g) => (g.id === grupoId ? girarPilha(g, dir) : g)))
+      void aplicarGrupos((atuais) =>
+        atuais.map((g) => (g.id === grupoId ? girarPilha(g, dir, visiveisRef.current) : g)),
+      )
     },
     [aplicarGrupos],
   )
 
-  /** tira o card da frente do grupo; com 1 membro restante vira solto. */
+  /** tira o card da frente VISÍVEL do grupo; com 1 membro restante vira solto. */
   const desagruparUm = useCallback(
     (grupoId: string) => {
       void aplicarGrupos((atuais) =>
         atuais.flatMap((g) => {
           if (g.id !== grupoId) return [g]
-          const r = desagruparFrente(g)
+          const r = desagruparFrente(g, visiveisRef.current)
           return r.grupo ? [r.grupo] : []
         }),
       )
@@ -194,26 +239,30 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[], idsVisiveis?: s
     [aplicarGrupos],
   )
 
-  /** reordena a grade; grupo se move como bloco (só a ordem dos grupos persiste). */
+  /**
+   * reordena a grade; grupo se move como bloco (só a ordem dos grupos
+   * persiste). Sob filtro, usa `reordenarGrupos`: grupos ocultos preservam a
+   * ordem relativa em vez de serem descartados.
+   */
   const reordenar = useCallback(
     (de: number, para: number) => {
       const atuais = gruposRef.current
       const novas = moverPosicao(posicoesRef.current, de, para)
       if (novas === posicoesRef.current) return
-      setGrupos(() => {
-        const ids = novas.flatMap((p) => (p.tipo === 'grupo' ? [p.grupoId] : []))
-        const mapa = new Map(atuais.map((g) => [g.id, g]))
-        return ids.map((id) => mapa.get(id)).filter((g): g is TriagemGrupo => g !== undefined)
-      })
+      const ids = novas.flatMap((p) => (p.tipo === 'grupo' ? [p.grupoId] : []))
+      const novaOrdem = reordenarGrupos(atuais, ids)
+      setGrupos(novaOrdem)
       void (async () => {
         try {
-          const ids = novas.flatMap((p) => (p.tipo === 'grupo' ? [p.grupoId] : []))
+          // Persiste a ordem de TODOS os grupos na ordem do estado: visíveis
+          // primeiro (reordenados), ocultos depois (ordem relativa mantida).
+          // Gravar só os visíveis deixaria ordens antigas menores no banco e
+          // o recarregamento embaralharia a ordem — estado e banco têm que
+          // refletir a MESMA sequência.
           await Promise.all(
-            ids.map((id, i) => {
-              const g = atuais.find((x) => x.id === id)
-              if (!g) return Promise.resolve()
-              return salvarGrupoTriagem({ id, titulo: g.titulo, ordem: i + 1, membros: g.membros })
-            }),
+            novaOrdem.map((g, i) =>
+              salvarGrupoTriagem({ id: g.id, titulo: g.titulo, ordem: i + 1, membros: g.membros }),
+            ),
           )
         } catch (e) {
           console.error('Falha ao salvar a ordem dos grupos', e)
@@ -226,6 +275,7 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[], idsVisiveis?: s
 
   return {
     grupos,
+    gruposVisiveis,
     posicoes,
     carregandoGrupos,
     agrupar,
@@ -238,6 +288,22 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[], idsVisiveis?: s
     reordenar,
     recarregarGrupos: recarregar,
   }
+}
+
+export interface TriagemGruposApi {
+  grupos: TriagemGrupo[]
+  gruposVisiveis: TriagemGrupo[]
+  posicoes: TriagemPosicao[]
+  carregandoGrupos: boolean
+  agrupar: (arrastado: string, alvo: string) => void
+  soltar: (arrastadoKey: string, alvoKey: string | null, zona: ZonaSoltar) => void
+  trazerFrente: (grupoId: string, produtoId: string) => void
+  girar: (grupoId: string, dir: boolean) => void
+  desagruparUm: (grupoId: string) => void
+  desagruparTodos: (grupoId: string) => void
+  renomearGrupo: (grupoId: string, titulo: string) => void
+  reordenar: (de: number, para: number) => void
+  recarregarGrupos: () => Promise<void>
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -258,11 +324,15 @@ async function persistirDiferencas(
   anteriores: TriagemGrupo[],
   novos: TriagemGrupo[],
 ): Promise<TriagemGrupo[]> {
+  // Regra: grupo vale como grupo com 2+ membros REAIS. Mutação sob filtro que
+  // deixa um grupo com <2 membros dissolve o grupo (o registro é excluído e o
+  // membro restante vira card solto) — sem isso o registro ficava no banco
+  // com os membros antigos e o grupo "voltava" ao recarregar.
+  const validos = novos.filter((g) => g.membros.length >= 2)
   const mapaAntes = new Map(anteriores.map((g) => [g.id, g]))
   const fila: Array<{ id: string; input: Parameters<typeof salvarGrupoTriagem>[0] }> = []
-  for (let i = 0; i < novos.length; i++) {
-    const g = novos[i]
-    if (g.membros.length < 2) continue // solto/degradado: sem registro
+  for (let i = 0; i < validos.length; i++) {
+    const g = validos[i]
     const antes = mapaAntes.get(g.id)
     const mudou =
       !antes ||
@@ -271,8 +341,8 @@ async function persistirDiferencas(
     if (!mudou) continue
     fila.push({ id: g.id, input: { id: g.id, titulo: g.titulo, ordem: i + 1, membros: g.membros } })
   }
-  const excluidos = anteriores.filter((g) => !novos.some((n) => n.id === g.id))
-  if (fila.length === 0 && excluidos.length === 0) return novos
+  const excluidos = anteriores.filter((g) => !validos.some((n) => n.id === g.id))
+  if (fila.length === 0 && excluidos.length === 0) return validos
 
   const resultados = await Promise.all(fila.map((f) => salvarGrupoTriagem(f.input)))
   await Promise.all(excluidos.map((g) => excluirGrupoTriagem(g.id)))
@@ -284,8 +354,8 @@ async function persistirDiferencas(
     const real = reais[i]
     if (real && f.id !== real.id) troca.set(f.id, real.id)
   })
-  if (troca.size === 0) return novos
-  return novos.map((g) => {
+  if (troca.size === 0) return validos
+  return validos.map((g) => {
     const real = troca.get(g.id)
     return real ? { ...g, id: real } : g
   })

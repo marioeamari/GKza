@@ -76,7 +76,10 @@ export function montarGruposSalvos(registros: TriagemGrupoRecord[]): TriagemGrup
  * Filtro ativo (0.0.322): a lista recebida é a FILTRADA da página — ids
  * ausentes da lista são tratados igual a membros inexistentes, mas SÓ na
  * grade: o grupo permanece no estado (`reordenarGrupos`) e no banco e volta
- * inteiro quando o filtro é limpo.
+ * inteiro quando o filtro é limpo. Grupo reduzido a 1 membro visível aparece
+ * como card solto (mesma degradação de membro removido); a FRENTE exibida de
+ * um grupo sob filtro é o primeiro membro VISÍVEL (`projetarGruposVisiveis`) —
+ * o grupo real nunca é reordenado pelo filtro.
  */
 export function montarPosicoes(
   avaliacoes: TriagemAvaliacao[],
@@ -135,35 +138,79 @@ export function adicionarAoGrupo(grupo: TriagemGrupo, produtoId: string): Triage
   return { ...grupo, membros: [...grupo.membros, produtoId] }
 }
 
-/** Traz o produto para a FRENTE do grupo (primeiro da lista) — clique no card. */
-export function trazerParaFrente(grupo: TriagemGrupo, produtoId: string): TriagemGrupo {
-  if (!grupo.membros.includes(produtoId) || grupo.membros[0] === produtoId) return grupo
-  return { ...grupo, membros: [produtoId, ...grupo.membros.filter((m) => m !== produtoId)] }
+/**
+ * Índices dos membros visíveis de um grupo (filtro 0.0.322). Sem
+ * `idsVisiveis` (ou com `undefined`), TODOS os índices são visíveis — as
+ * funções abaixo reduzem exatamente ao comportamento sem filtro.
+ */
+function indicesVisiveis(membros: string[], idsVisiveis?: string[]): number[] {
+  if (!idsVisiveis) return membros.map((_, i) => i)
+  const visiveis = new Set(idsVisiveis)
+  return membros.map((_, i) => i).filter((i) => visiveis.has(membros[i]))
 }
 
-/** Navegação circular ‹ ›: desloca a pilha em 1 (dir=true → próximo). */
-export function girarPilha(grupo: TriagemGrupo, dir: boolean): TriagemGrupo {
-  const n = grupo.membros.length
-  if (n < 2) return grupo
+/**
+ * Traz o produto para a FRENTE do grupo (primeiro da lista) — clique no card.
+ * `idsVisiveis` (filtro ativo, 0.0.322): o produto assume a posição do
+ * primeiro membro VISÍVEL (frente exibida); membros ocultos continuam à
+ * frente dele na ordem real — ao limpar o filtro, a frente real volta.
+ */
+export function trazerParaFrente(
+  grupo: TriagemGrupo,
+  produtoId: string,
+  idsVisiveis?: string[],
+): TriagemGrupo {
+  const idx = indicesVisiveis(grupo.membros, idsVisiveis)
+  const k = idx.find((i) => grupo.membros[i] === produtoId)
+  if (k === undefined || idx[0] === k) return grupo
   const membros = [...grupo.membros]
-  if (dir) {
-    const primeiro = membros.shift() as string
-    membros.push(primeiro)
-  } else {
-    const ultimo = membros.pop() as string
-    membros.unshift(ultimo)
-  }
+  const demais = idx.filter((i) => i !== k).map((i) => grupo.membros[i])
+  idx.forEach((posicaoOriginal, j) => {
+    membros[posicaoOriginal] = j === 0 ? produtoId : demais[j - 1]
+  })
   return { ...grupo, membros }
 }
 
-/** Desagrupa só o card da frente (vira solto; o grupo segue com o resto). */
-export function desagruparFrente(grupo: TriagemGrupo): {
+/**
+ * Navegação circular ‹ ›: desloca a pilha em 1 (dir=true → próximo).
+ * `idsVisiveis` (filtro ativo, 0.0.322): gira só a subsequência VISÍVEL,
+ * mantendo cada membro oculto na posição que ocupa (nunca vira frente).
+ */
+export function girarPilha(
+  grupo: TriagemGrupo,
+  dir: boolean,
+  idsVisiveis?: string[],
+): TriagemGrupo {
+  const idx = indicesVisiveis(grupo.membros, idsVisiveis)
+  if (idx.length < 2) return grupo
+  const girados = dir
+    ? [...idx.slice(1).map((i) => grupo.membros[i]), grupo.membros[idx[0]]]
+    : [grupo.membros[idx[idx.length - 1]], ...idx.slice(0, -1).map((i) => grupo.membros[i])]
+  const membros = [...grupo.membros]
+  idx.forEach((posicaoOriginal, k) => {
+    membros[posicaoOriginal] = girados[k]
+  })
+  return { ...grupo, membros }
+}
+
+/**
+ * Desagrupa só o card da frente (vira solto; o grupo segue com o resto).
+ * `idsVisiveis` (filtro ativo, 0.0.322): a frente liberada é o primeiro
+ * membro VISÍVEL — membros ocultos pelo filtro permanecem no grupo.
+ */
+export function desagruparFrente(
+  grupo: TriagemGrupo,
+  idsVisiveis?: string[],
+): {
   grupo: TriagemGrupo | null
   liberado: string | null
 } {
-  if (grupo.membros.length === 0) return { grupo: null, liberado: null }
-  const [frente, ...resto] = grupo.membros
-  return { grupo: resto.length > 0 ? { ...grupo, membros: resto } : null, liberado: frente }
+  const idx = indicesVisiveis(grupo.membros, idsVisiveis)
+  const posicao = idx[0]
+  if (posicao === undefined) return { grupo: null, liberado: null }
+  const liberado = grupo.membros[posicao]
+  const membros = grupo.membros.filter((_, i) => i !== posicao)
+  return { grupo: membros.length > 0 ? { ...grupo, membros } : null, liberado }
 }
 
 /** Desfaz o grupo inteiro: todos os membros voltam a ser cards soltos. */
@@ -219,6 +266,8 @@ export type SoltarDecisao =
  * - soltar card sobre um grupo (qualquer zona) faz o card ENTRAR no grupo;
  * - soltar card na borda (30% superior/inferior) de um card solto reordena.
  * `alvoProdutoId` para grupo é o card da FRENTE (dono da posição na grade).
+ * Sob filtro (0.0.322) o hook passa os grupos PROJETADOS (`projetarGruposVisiveis`),
+ * então a frente considerada é a que está exibida.
  */
 export function interpretarSoltar(
   posicoes: TriagemPosicao[],
@@ -258,9 +307,9 @@ export function interpretarSoltar(
  * Com um filtro ativo, a grade mostra só parte dos produtos: a ordem nova
  * (calculada por `moverPosicao` sobre as posições visíveis) vale apenas para
  * os grupos que aparecem nela. Grupos ocultos pelo filtro NÃO aparecem na
- * grade — logo, não entram na lista `idsVisiveis` — e preservam a ordem que
- * já tinham, no lugar de serem descartados (o que os apagaria do estado e do
- * banco). Regra travada em testes.
+ * grade — logo, não entram na lista `idsVisiveis` — e preservam a ordem relativa
+ * que já tinham, no fim da lista, em vez de serem descartados (o que os
+ * apagaria do estado e do banco). Regra travada em testes.
  */
 export function reordenarGrupos(grupos: TriagemGrupo[], idsVisiveis: string[]): TriagemGrupo[] {
   const mapa = new Map(grupos.map((g) => [g.id, g]))
@@ -269,6 +318,22 @@ export function reordenarGrupos(grupos: TriagemGrupo[], idsVisiveis: string[]): 
     .filter((g): g is TriagemGrupo => g !== undefined)
   const fora = grupos.filter((g) => !idsVisiveis.includes(g.id))
   return [...ordenados, ...fora]
+}
+
+/**
+ * Projeção dos grupos para EXIBIÇÃO sob filtro (0.0.322): cada grupo é
+ * apresentado só com seus membros visíveis, na ordem real — a frente exibida
+ * é o primeiro membro visível. O estado (`grupos`) e o banco NUNCA são
+ * alterados por essa projeção; ao limpar o filtro, os grupos voltam inteiros.
+ * Sem filtro, devolve os grupos como estão.
+ */
+export function projetarGruposVisiveis(
+  grupos: TriagemGrupo[],
+  idsVisiveis?: string[],
+): TriagemGrupo[] {
+  if (!idsVisiveis) return grupos
+  const visiveis = new Set(idsVisiveis)
+  return grupos.map((g) => ({ ...g, membros: g.membros.filter((m) => visiveis.has(m)) }))
 }
 
 /** Id temporário de grupo em memória (antes de salvar no banco). */
