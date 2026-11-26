@@ -206,6 +206,22 @@ function TrilhoEtapasCard({ avaliacao }: { avaliacao: TriagemAvaliacao }) {
   )
 }
 
+/**
+ * Card de produto da Triagem (usado pelos cards soltos e pelo card da frente
+ * das pilhas de grupo — TriagemGradeAgrupada).
+ *
+ * Regra de layout 0.0.321 (mockup do usuário): de cima para baixo —
+ *  1. grip de arraste NO CANTO SUPERIOR ESQUERDO (absoluto, left/top), quando
+ *     a alça é fornecida; a linha de cabeçalho abaixo dele é imagem/foto +
+ *     coluna de texto (título grande em negrito e, na linha de baixo, os
+ *     metadados "SKU · tipo · categoria" em texto pequeno cinza);
+ *  2. selo de status geral ("⚠️ Parou na etapa X — Y" / "✅ 100% integrado")
+ *     DEPOIS do bloco imagem+título, em linha própria à esquerda;
+ *  3. trilho das 7 etapas (pills coloridas com setas, quebra em 2 linhas);
+ *  4. rodapé "Ver detalhe" (esquerda) e "Retomar daqui →" (direita).
+ * 0.0.320 segue valendo: nome e SKU SEM ellipsis — break-words e o card
+ * cresce em altura conforme necessário.
+ */
 export function TriagemCardProduto({
   avaliacao,
   onAbrir,
@@ -215,7 +231,7 @@ export function TriagemCardProduto({
   avaliacao: TriagemAvaliacao
   onAbrir: (av: TriagemAvaliacao) => void
   getUrlImagem?: GetFileUrlFn
-  /** Alça de arraste opcional (grip), renderizada ao lado do selo no topo. */
+  /** Alça de arraste opcional (grip), renderizada no canto superior esquerdo. */
   alca?: ReactNode
 }) {
   const p = avaliacao.produto
@@ -223,53 +239,53 @@ export function TriagemCardProduto({
   const urlRetomar = destinoRetomar(avaliacao)
   const inicial = (p.sku || p.nome).slice(0, 1).toUpperCase()
   return (
-    <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+    <Card className="relative overflow-hidden shadow-sm hover:shadow-md transition-shadow">
       <CardContent className="p-4">
-        <div className="flex items-start gap-3">
+        {/* 0.0.321: grip no canto superior esquerdo; o cabeçalho (imagem +
+            título) ganha respiro para não ficar por baixo dele */}
+        {alca && <div className="absolute left-1 top-1 z-10">{alca}</div>}
+        <div className={`flex items-start gap-3${alca ? ' pl-2.5 pt-3' : ''}`}>
           {urlImagem ? (
             <img
               src={urlImagem}
               alt={`Imagem do produto ${p.nome}`}
               width={56}
               height={56}
-              className="h-14 w-14 rounded-md object-cover"
+              className="h-14 w-14 shrink-0 rounded-md object-cover"
             />
           ) : (
             <div
               aria-hidden="true"
-              className="flex h-14 w-14 items-center justify-center rounded-md bg-orange-100 text-lg font-bold text-[#DF5830]"
+              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md bg-orange-100 text-lg font-bold text-[#DF5830]"
             >
               {inicial}
             </div>
           )}
+          {/* 0.0.320: nome e SKU SEM ellipsis — quebram linha e o card cresce
+              (pedido: "preciso ver o titulo e o SKU por completo"). O SKU é
+              longo (inclui sufixo de variante) e quebra linha também. */}
           <div className="min-w-0 flex-1">
-            <div className="flex items-start justify-between gap-2">
-              {/* 0.0.320: nome e SKU SEM ellipsis — quebram linha e o card cresce
-                  (pedido: "preciso ver o titulo e o SKU por completo"). O SKU é
-                  longo (inclui sufixo de variante) e quebra linha também. */}
-              <div className="min-w-0 pr-1">
-                <p className="break-words text-sm font-semibold">{p.nome}</p>
-                <p className="break-words text-xs text-muted-foreground">
-                  {p.sku || 'sem SKU'} · {ROTULO_TIPO[p.tipo] || p.tipo}
-                  {p.categoria ? ` · ${p.categoria}` : ''}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-start gap-1">
-                {alca}
-                <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                    avaliacao.integrado
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : avaliacao.severidadePendencia === 'amarelo'
-                        ? 'bg-amber-100 text-amber-800'
-                        : 'bg-red-100 text-red-700'
-                  }`}
-                >
-                  {avaliacao.selo}
-                </span>
-              </div>
-            </div>
+            <p className="break-words text-[15px] font-bold leading-snug">{p.nome}</p>
+            <p className="break-words text-xs text-muted-foreground">
+              {p.sku || 'sem SKU'} · {ROTULO_TIPO[p.tipo] || p.tipo}
+              {p.categoria ? ` · ${p.categoria}` : ''}
+            </p>
           </div>
+        </div>
+
+        {/* 0.0.321: selo geral abaixo do cabeçalho, em linha própria */}
+        <div className="mt-3">
+          <span
+            className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+              avaliacao.integrado
+                ? 'bg-emerald-100 text-emerald-700'
+                : avaliacao.severidadePendencia === 'amarelo'
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-red-100 text-red-700'
+            }`}
+          >
+            {avaliacao.selo}
+          </span>
         </div>
 
         <div className="mt-3">

@@ -27,10 +27,13 @@ import { useArrastoGrade } from './useArrastoGrade'
  * O gesto (mouse arrasta; toque = long-press) vem de useArrastoGrade; a
  * decisão de agrupar/reordenar vem de useTriagemGrupos.soltar.
  *
- * Alça de arraste (0.0.318): cada card tem um grip de 6 pontinhos no canto
- * superior direito — é o ponto de pegada preferencial do arraste. O
- * pointerdown no grip sobe até o wrapper (mesmo gesto de arrastar o corpo),
- * mas o clique nele não faz nada (nunca traz para a frente nem abre detalhe).
+ * Alça de arraste (0.0.318): cada card tem um grip de 6 pontinhos — é o ponto
+ * de pegada preferencial do arraste. O pointerdown no grip sobe até o wrapper
+ * (mesmo gesto de arrastar o corpo), mas o clique nele não faz nada (nunca traz
+ * para a frente nem abre detalhe).
+ * Posição do grip (0.0.321): nos CARDS DE PRODUTO (soltos e frente de pilha) o
+ * grip fica NO CANTO SUPERIOR ESQUERDO (mockup do usuário). O grip do
+ * CABEÇALHO DO GRUPO continua no canto superior direito.
  *
  * Card de grupo (0.0.319): além do card da frente (completo), mostra a lista
  * compacta dos membros (TriagemMembrosGrupo) — imagem, nome, SKU e etapa de
@@ -155,7 +158,8 @@ export function TriagemGradeAgrupada({
  *   (mouse: clique+arraste; toque: long-press de ~420ms);
  * - o onClick para a propagação para que o clique no grip não traga o card da
  *   pilha para a frente nem abra o detalhe;
- * - visual pequeno e discreto, no canto superior direito do card.
+ * - visual pequeno e discreto; nos cards de produto fica no canto superior
+ *   ESQUERDO (0.0.321 — quem posiciona é TriagemCardProduto / CardGrupo).
  */
 function AlcaArraste() {
   return (
@@ -313,6 +317,7 @@ function CardGrupo({
         {avFrente && (
           <TriagemCardProduto
             avaliacao={avFrente}
+            // 0.0.321: no card de produto o grip vira canto superior ESQUERDO
             alca={alca}
             onAbrir={(av) => {
               // clique no card da pilha: traz para a frente; 2º clique abre
