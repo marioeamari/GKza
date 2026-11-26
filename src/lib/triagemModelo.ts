@@ -62,10 +62,20 @@ export interface TriagemProdutoInput {
   categoria?: string
   status?: string
   imagem?: string
-  /** id do registro de `produtos` que originou o espelho (legado: ausente). */
+  /** id do registro de `produtos` que originou o espelho (legado: ausente).
+   */
   origem_id?: string
   base_origem?: string
   fornecedor_produto?: string
+  /**
+   * Nome REAL do arquivo em produtos.imagem (registro de origem) — injetado
+   * por services/triagem.ts. Difere de `imagem` (nome fabricado no espelho).
+   */
+  imagem_produtos?: string
+  /** id do registro de fornecedores_produtos dono da foto física (injetado). */
+  fornecedor_produto_id?: string
+  /** Nome REAL do arquivo em fornecedores_produtos.imagem (injetado). */
+  fornecedor_produto_imagem?: string
   created: string
   updated?: string
   composicao?: ItemComposicaoCusto[]
