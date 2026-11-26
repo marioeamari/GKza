@@ -466,6 +466,21 @@ export function resumirTriagem(avaliacoes: TriagemAvaliacao[]): TriagemResumo {
   return { total, integrados, pararamEtapa, semNenhumCenario }
 }
 
+/**
+ * Rótulo compacto da etapa pendente, para listagens enxutas (membros de grupo):
+ * "⚠️ Etapa 1 — Base" (ou "✅ 100% integrado"). Sem integrado, o ícone sai da
+ * severidade da pendência (amarelo = aviso, vermelho = nunca feita).
+ */
+export function rotuloEtapaCompacto(
+  avaliacao: Pick<TriagemAvaliacao, 'parouNaEtapaNumero' | 'severidadePendencia' | 'integrado'>,
+): string {
+  if (avaliacao.integrado) return '✅ 100% integrado'
+  const chave = ETAPAS_TRIAGEM[avaliacao.parouNaEtapaNumero - 1]
+  const nome = chave ? nomeEtapaTriagem(chave) : 'Etapa desconhecida'
+  const icone = avaliacao.severidadePendencia === 'amarelo' ? '⚠️' : '🔴'
+  return `${icone} Etapa ${avaliacao.parouNaEtapaNumero} — ${nome}`
+}
+
 /** Ordenação padrão: mais atrasados primeiro (menor última etapa alcançada; empate: mais antigo). */
 export function ordenarPorAtraso(avaliacoes: TriagemAvaliacao[]): TriagemAvaliacao[] {
   return [...avaliacoes].sort((a, b) => {

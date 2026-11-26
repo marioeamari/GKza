@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { rotuloEtapaCompacto } from './triagemModelo'
 
 import {
   ETAPAS_TRIAGEM,
@@ -494,5 +495,44 @@ describe('resumirTriagem', () => {
     expect(ordenadas[0].produto.id).toBe('p2')
     expect(ordenadas[1].produto.id).toBe('p1')
     expect(ETAPAS_TRIAGEM).toHaveLength(7)
+  })
+})
+
+describe('rotuloEtapaCompacto (lista de membros do grupo)', () => {
+  it('produto pendente mostra "🔴 Etapa N — Nome" com o nome da etapa', () => {
+    const r = rotuloEtapaCompacto({
+      parouNaEtapaNumero: 1,
+      severidadePendencia: 'vermelho',
+      integrado: false,
+    })
+    expect(r).toBe('🔴 Etapa 1 — Base')
+  })
+
+  it('pendência amarela usa ⚠️ (aviso, não erro)', () => {
+    const r = rotuloEtapaCompacto({
+      parouNaEtapaNumero: 5,
+      severidadePendencia: 'amarelo',
+      integrado: false,
+    })
+    expect(r).toBe('⚠️ Etapa 5 — Matriz/Canais')
+  })
+
+  it('produto integrado mostra "✅ 100% integrado"', () => {
+    expect(
+      rotuloEtapaCompacto({
+        parouNaEtapaNumero: 7,
+        severidadePendencia: 'vermelho',
+        integrado: true,
+      }),
+    ).toBe('✅ 100% integrado')
+  })
+
+  it('número de etapa fora do trilho não quebra (defesa)', () => {
+    const r = rotuloEtapaCompacto({
+      parouNaEtapaNumero: 99,
+      severidadePendencia: 'vermelho',
+      integrado: false,
+    })
+    expect(r).toContain('Etapa desconhecida')
   })
 })
