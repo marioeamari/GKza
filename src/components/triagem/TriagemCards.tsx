@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
@@ -210,10 +210,13 @@ export function TriagemCardProduto({
   avaliacao,
   onAbrir,
   getUrlImagem,
+  alca,
 }: {
   avaliacao: TriagemAvaliacao
   onAbrir: (av: TriagemAvaliacao) => void
   getUrlImagem?: GetFileUrlFn
+  /** Alça de arraste opcional (grip), renderizada ao lado do selo no topo. */
+  alca?: ReactNode
 }) {
   const p = avaliacao.produto
   const urlImagem = getUrlImagem?.(p)
@@ -250,17 +253,20 @@ export function TriagemCardProduto({
                   {p.categoria ? ` · ${p.categoria}` : ''}
                 </p>
               </div>
-              <span
-                className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                  avaliacao.integrado
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : avaliacao.severidadePendencia === 'amarelo'
-                      ? 'bg-amber-100 text-amber-800'
-                      : 'bg-red-100 text-red-700'
-                }`}
-              >
-                {avaliacao.selo}
-              </span>
+              <div className="flex shrink-0 items-start gap-1">
+                {alca}
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    avaliacao.integrado
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : avaliacao.severidadePendencia === 'amarelo'
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-red-100 text-red-700'
+                  }`}
+                >
+                  {avaliacao.selo}
+                </span>
+              </div>
             </div>
           </div>
         </div>

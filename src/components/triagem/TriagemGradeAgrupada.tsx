@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Pencil, Unlink, Unlink2 } from 'lucide-react'
+import { useRef, useState, type ReactNode } from 'react'
+import { ChevronLeft, ChevronRight, GripVertical, Pencil, Unlink, Unlink2 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,11 @@ import { useArrastoGrade } from './useArrastoGrade'
  * - grupo se move como bloco; soltar grupo em card/grupo só reordena.
  * O gesto (mouse arrasta; toque = long-press) vem de useArrastoGrade; a
  * decisão de agrupar/reordenar vem de useTriagemGrupos.soltar.
+ *
+ * Alça de arraste (0.0.318): cada card tem um grip de 6 pontinhos no canto
+ * superior direito — é o ponto de pegada preferencial do arraste. O
+ * pointerdown no grip sobe até o wrapper (mesmo gesto de arrastar o corpo),
+ * mas o clique nele não faz nada (nunca traz para a frente nem abre detalhe).
  */
 export interface TriagemGradeAgrupadaProps {
   posicoes: TriagemPosicao[]
@@ -90,6 +95,7 @@ export function TriagemGradeAgrupada({
             {pos.tipo === 'solto' ? (
               <CardSolto
                 avaliacao={avaliacaoPorId.get(pos.produtoId)}
+                alca={<AlcaArraste />}
                 onAbrir={onAbrir}
                 getUrlImagem={getUrlImagem}
                 cliqueSuprimido={arrasto.suprimirClique}
@@ -98,6 +104,7 @@ export function TriagemGradeAgrupada({
               <CardGrupo
                 grupo={grupos.find((g) => g.id === pos.grupoId)}
                 avaliacaoPorId={avaliacaoPorId}
+                alca={<AlcaArraste />}
                 onTitulo={onTitulo}
                 onTrazerParaFrente={onTrazerParaFrente}
                 onNavegar={onNavegar}
@@ -115,6 +122,36 @@ export function TriagemGradeAgrupada({
   )
 }
 
+/* ------------------------------ Alça de arraste ----------------------------- */
+
+/**
+ * Alça de clique-e-arraste (grip de 6 pontinhos, 2 colunas x 3 linhas).
+ *
+ * - o onPointerDown NÃO é tratado aqui de propósito: ele sobe (bubble) até o
+ *   wrapper do card, que registra o gesto em useArrastoGrade — assim arrastar
+ *   pelo grip faz EXATAMENTE o mesmo movimento de arrastar pelo corpo do card
+ *   (mouse: clique+arraste; toque: long-press de ~420ms);
+ * - o onClick para a propagação para que o clique no grip não traga o card da
+ *   pilha para a frente nem abra o detalhe;
+ * - visual pequeno e discreto, no canto superior direito do card.
+ */
+function AlcaArraste() {
+  return (
+    <button
+      type="button"
+      data-alca-arraste="true"
+      aria-hidden="true"
+      tabIndex={-1}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.preventDefault()}
+      className="-mr-0.5 -mt-0.5 shrink-0 cursor-grab touch-none rounded p-0.5 text-gray-400 active:cursor-grabbing"
+    >
+      <GripVertical className="h-4 w-4" />
+    </button>
+  )
+}
+
 /* ------------------------------- Card solto ------------------------------- */
 
 function CardSolto({
@@ -122,16 +159,19 @@ function CardSolto({
   onAbrir,
   getUrlImagem,
   cliqueSuprimido,
+  alca,
 }: {
   avaliacao?: TriagemAvaliacao
   onAbrir: (avaliacao: TriagemAvaliacao) => void
   getUrlImagem?: GetFileUrlFn
   cliqueSuprimido: () => boolean
+  alca?: ReactNode
 }) {
   if (!avaliacao) return null
   return (
     <TriagemCardProduto
       avaliacao={avaliacao}
+      alca={alca}
       onAbrir={(av) => {
         if (!cliqueSuprimido()) onAbrir(av)
       }}
@@ -153,6 +193,7 @@ function CardGrupo({
   onAbrir,
   getUrlImagem,
   cliqueSuprimido,
+  alca,
 }: {
   grupo?: TriagemGrupo
   avaliacaoPorId: Map<string, TriagemAvaliacao>
@@ -164,6 +205,7 @@ function CardGrupo({
   onAbrir: (avaliacao: TriagemAvaliacao) => void
   getUrlImagem?: GetFileUrlFn
   cliqueSuprimido: () => boolean
+  alca?: ReactNode
 }) {
   const [editandoTitulo, setEditandoTitulo] = useState(false)
   const [rascunhoTitulo, setRascunhoTitulo] = useState('')
@@ -195,6 +237,8 @@ function CardGrupo({
       )}
 
       <div className="relative rounded-xl border bg-card p-1.5 shadow-sm">
+        {/* alça de arraste: fica à direita do título, discreta */}
+        <div className="absolute right-1 top-1 z-10">{alca}</div>
         {/* título personalizado editável + contador */}
         {editandoTitulo ? (
           <Input
@@ -231,6 +275,7 @@ function CardGrupo({
         {avFrente && (
           <TriagemCardProduto
             avaliacao={avFrente}
+            alca={alca}
             onAbrir={(av) => {
               // clique no card da pilha: traz para a frente; 2º clique abre
               if (cliqueSuprimido()) return
