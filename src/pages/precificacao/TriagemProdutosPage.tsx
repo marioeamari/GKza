@@ -1,54 +1,114 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/PageHeader'
-import { TriagemCarregando, TriagemGrade } from '@/components/triagem/TriagemCards'
+import {
+  FILTRO_ETAPA_TODOS,
+  TriagemCarregando,
+  TriagemFiltrosBar,
+  TriagemLegenda,
+  type FiltrosTriagem,
+} from '@/components/triagem/TriagemCards'
+import { TriagemGradeAgrupada } from '@/components/triagem/TriagemGradeAgrupada'
 import { TriagemDetalheDialog } from '@/components/triagem/TriagemDetalheDialog'
 import { carregarFontesTriagem } from '@/services/triagem'
 import {
   avaliarProdutoTriagem,
+  ETAPAS_TRIAGEM,
   ordenarPorAtraso,
   resumirTriagem,
   type TriagemAvaliacao,
 } from '@/lib/triagemModelo'
 import { urlImagemProdutoTriagem } from '@/lib/triagemImagem'
+import { useTriagemGrupos } from '@/components/triagem/useTriagemGrupos'
 import { useToast } from '@/hooks/use-toast'
 
 /**
- * Triagem de Produtos — painel visual SOMENTE LEITURA que mostra, por
- * produto/SKU, em qual das 7 etapas do sistema o produto está. O usuário
- * esquece onde parou quando interrompe o cadastro; esta tela responde isso.
- * Não altera nenhum módulo: tudo calculado das coleções existentes.
+ * Triagem de Produtos — painel visual que mostra, por produto/SKU, em qual
+ * das 7 etapas do sistema o produto está. O usuário esquece onde parou quando
+ * interrompe o cadastro; esta tela responde isso.
+ *
+ * Agrupamento manual (0.0.317): arrastar um card sobre outro agrupa; grupo é
+ * pilha de cards com título editável, navegação ‹ › e desagrupar. A avaliação
+ * das 7 etapas, filtros, resumo e "Retomar daqui" NÃO mudam — o agrupamento é
+ * camada visual por cima. Estado dos grupos persiste em `prec_triagem_grupos`
+ * (migração 0153): ao recarregar, grupos, títulos, ordem e membros voltam.
  */
 export default function TriagemProdutosPage() {
   const [avaliacoes, setAvaliacoes] = useState<TriagemAvaliacao[]>([])
   const [carregando, setCarregando] = useState(true)
   const [selecionado, setSelecionado] = useState<TriagemAvaliacao | null>(null)
+  const [filtros, setFiltros] = useState<FiltrosTriagem>({
+    etapa: FILTRO_ETAPA_TODOS,
+    categoria: 'todas',
+    tipo: 'todos',
+    busca: '',
+  })
   const { toast } = useToast()
 
-  const carregar = async () => {
-    setCarregando(true)
-    try {
-      const { produtos, fontes } = await carregarFontesTriagem()
-      const lista = produtos.map((p) => avaliarProdutoTriagem(p, fontes))
-      setAvaliacoes(ordenarPorAtraso(lista))
-    } catch (e) {
-      console.error('Falha ao carregar triagem', e)
-      toast({
-        title: 'Erro ao carregar a triagem',
-        description: 'Verifique a conexão e tente novamente.',
-        variant: 'destructive',
-      })
-    } finally {
-      setCarregando(false)
-    }
-  }
+  const carregar = useCallback(
+    async (silencioso = false) => {
+      if (!silencioso) setCarregando(true)
+      try {
+        const { produtos, fontes } = await carregarFontesTriagem()
+        const lista = produtos.map((p) => avaliarProdutoTriagem(p, fontes))
+        setAvaliacoes(ordenarPorAtraso(lista))
+      } catch (e) {
+        console.error('Falha ao carregar triagem', e)
+        toast({
+          title: 'Erro ao carregar a triagem',
+          description: 'Verifique a conexão e tente novamente.',
+          variant: 'destructive',
+        })
+      } finally {
+        setCarregando(false)
+      }
+    },
+    [toast],
+  )
 
   useEffect(() => {
-    carregar()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    void carregar()
+  }, [carregar])
+
+  const grupos = useTriagemGrupos(avaliacoes)
+
+  const avaliacaoPorId = useMemo(
+    () => new Map(avaliacoes.map((a) => [a.produto.id, a])),
+    [avaliacoes],
+  )
+
+  const aoSoltar = useCallback(
+    (arrastadoKey: string, alvoKey: string, zona: 'antes' | 'depois' | 'centro') => {
+      grupos.soltar(arrastadoKey, alvoKey, zona)
+    },
+    [grupos],
+  )
+
+  // Filtros (comportamento inalterado): só enxugam a lista de avaliações que
+  // alimenta a grade — o agrupamento se aplica ao resultado filtrado.
+  const avaliacoesFiltradas = useMemo(() => {
+    const busca = filtros.busca.trim().toLowerCase()
+    return avaliacoes.filter((av) => {
+      if (filtros.categoria !== 'todas' && (av.produto.categoria || '') !== filtros.categoria)
+        return false
+      if (filtros.tipo !== 'todos' && av.produto.tipo !== filtros.tipo) return false
+      if (busca && !`${av.produto.nome} ${av.produto.sku}`.toLowerCase().includes(busca))
+        return false
+      if (filtros.etapa === FILTRO_ETAPA_TODOS) return true
+      if (filtros.etapa === 'integrados') return av.integrado
+      if (filtros.etapa === 'sem_cenario') return av.etapas.cenario.status === 'vermelho'
+      const i = ETAPAS_TRIAGEM.indexOf(filtros.etapa as never)
+      return i >= 0 && av.parouNaEtapaNumero === i + 1
+    })
+  }, [avaliacoes, filtros])
+
+  const categorias = useMemo(
+    () => [...new Set(avaliacoes.map((a) => a.produto.categoria).filter(Boolean))] as string[],
+    [avaliacoes],
+  )
+  const tipos = useMemo(() => [...new Set(avaliacoes.map((a) => a.produto.tipo))], [avaliacoes])
 
   const resumo = useMemo(() => resumirTriagem(avaliacoes), [avaliacoes])
 
@@ -73,7 +133,7 @@ export default function TriagemProdutosPage() {
         <Button
           variant="outline"
           size="sm"
-          onClick={carregar}
+          onClick={() => void carregar()}
           disabled={carregando}
           aria-label="Recarregar triagem"
         >
@@ -88,12 +148,29 @@ export default function TriagemProdutosPage() {
         </p>
       )}
 
+      <TriagemFiltrosBar
+        filtros={filtros}
+        onChange={setFiltros}
+        categorias={categorias}
+        tipos={tipos}
+      />
+
+      <TriagemLegenda />
+
       {carregando ? (
         <TriagemCarregando />
       ) : (
-        <TriagemGrade
-          avaliacoes={avaliacoes}
+        <TriagemGradeAgrupada
+          posicoes={grupos.posicoes}
+          avaliacaoPorId={avaliacaoPorId}
+          grupos={grupos.grupos}
           onAbrir={setSelecionado}
+          onTitulo={grupos.renomearGrupo}
+          onTrazerParaFrente={grupos.trazerFrente}
+          onNavegar={grupos.girar}
+          onDesagruparFrente={grupos.desagruparUm}
+          onDesagruparTudo={grupos.desagruparTodos}
+          aoSoltar={aoSoltar}
           getUrlImagem={(p) => urlImagemProdutoTriagem(p)}
         />
       )}

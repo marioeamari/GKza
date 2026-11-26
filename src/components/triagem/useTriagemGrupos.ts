@@ -124,7 +124,13 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[]) {
   /** decide entre agrupar / reordenar a partir da chave e da zona do alvo. */
   const soltar = useCallback(
     (arrastadoKey: string, alvoKey: string | null, zona: ZonaSoltar) => {
-      const decisao = interpretarSoltar(posicoesRef.current, gruposRef.current, arrastadoKey, alvoKey, zona)
+      const decisao = interpretarSoltar(
+        posicoesRef.current,
+        gruposRef.current,
+        arrastadoKey,
+        alvoKey,
+        zona,
+      )
       if (!decisao) return
       if (decisao.acao === 'agrupar') agrupar(decisao.produtoId, decisao.alvoProdutoId)
       else reordenar(decisao.de, decisao.para)
@@ -180,31 +186,34 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[]) {
   )
 
   /** reordena a grade; grupo se move como bloco (só a ordem dos grupos persiste). */
-  const reordenar = useCallback((de: number, para: number) => {
-    const atuais = gruposRef.current
-    const novas = moverPosicao(posicoesRef.current, de, para)
-    if (novas === posicoesRef.current) return
-    setGrupos(() => {
-      const ids = novas.flatMap((p) => (p.tipo === 'grupo' ? [p.grupoId] : []))
-      const mapa = new Map(atuais.map((g) => [g.id, g]))
-      return ids.map((id) => mapa.get(id)).filter((g): g is TriagemGrupo => g !== undefined)
-    })
-    void (async () => {
-      try {
+  const reordenar = useCallback(
+    (de: number, para: number) => {
+      const atuais = gruposRef.current
+      const novas = moverPosicao(posicoesRef.current, de, para)
+      if (novas === posicoesRef.current) return
+      setGrupos(() => {
         const ids = novas.flatMap((p) => (p.tipo === 'grupo' ? [p.grupoId] : []))
-        await Promise.all(
-          ids.map((id, i) => {
-            const g = atuais.find((x) => x.id === id)
-            if (!g) return Promise.resolve()
-            return salvarGrupoTriagem({ id, titulo: g.titulo, ordem: i + 1, membros: g.membros })
-          }),
-        )
-      } catch (e) {
-        console.error('Falha ao salvar a ordem dos grupos', e)
-        avisarFalha()
-      }
-    })()
-  }, [avisarFalha])
+        const mapa = new Map(atuais.map((g) => [g.id, g]))
+        return ids.map((id) => mapa.get(id)).filter((g): g is TriagemGrupo => g !== undefined)
+      })
+      void (async () => {
+        try {
+          const ids = novas.flatMap((p) => (p.tipo === 'grupo' ? [p.grupoId] : []))
+          await Promise.all(
+            ids.map((id, i) => {
+              const g = atuais.find((x) => x.id === id)
+              if (!g) return Promise.resolve()
+              return salvarGrupoTriagem({ id, titulo: g.titulo, ordem: i + 1, membros: g.membros })
+            }),
+          )
+        } catch (e) {
+          console.error('Falha ao salvar a ordem dos grupos', e)
+          avisarFalha()
+        }
+      })()
+    },
+    [avisarFalha],
+  )
 
   return {
     grupos,
