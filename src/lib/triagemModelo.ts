@@ -62,6 +62,8 @@ export interface TriagemProdutoInput {
   categoria?: string
   status?: string
   imagem?: string
+  /** id do registro de `produtos` que originou o espelho (legado: ausente). */
+  origem_id?: string
   base_origem?: string
   fornecedor_produto?: string
   created: string

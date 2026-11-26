@@ -305,16 +305,33 @@ export function ProdutoCompostoDialog({
         observacoes,
       }
 
-      // Foto: envia FormData quando há arquivo novo ou remoção pedida
+      // Foto: para o FormData do PocketBase os campos vão direto (sem envelope "data"):
+      // campo file `imagem` + campos escalares que o espelho/sync usa.
       const formData = new FormData()
-      formData.append('data', JSON.stringify(payload))
       if (arquivoImagem) {
         formData.append('imagem', arquivoImagem, arquivoImagem.name)
       } else if (removerImagem) {
         formData.append('imagem', '') // PocketBase: string vazia limpa o campo file
       }
+      formData.append('nome', payload.nome ?? '')
+      formData.append('classificacao', payload.classificacao ?? 'revenda')
+      if (payload.base_origem) formData.append('base_origem', payload.base_origem)
+      formData.append('sku', payload.sku ?? '')
+      formData.append('unidade', payload.unidade ?? 'un')
+      formData.append('status', payload.status ?? 'ativo')
+      for (const emp of payload.empresas ?? []) formData.append('empresas', emp)
+      formData.append('composicao', JSON.stringify(payload.composicao ?? []))
+      formData.append('custo_aquisicao', String(payload.custo_aquisicao ?? 0))
+      formData.append('custo_embalagem', String(payload.custo_embalagem ?? 0))
+      formData.append('custo_etiqueta', String(payload.custo_etiqueta ?? 0))
+      formData.append('perda_pct', String(payload.perda_pct ?? 0))
+      formData.append('peso_g', String(payload.peso_g ?? 0))
+      formData.append('dimensao_comprimento_cm', String(payload.dimensao_comprimento_cm ?? 0))
+      formData.append('dimensao_largura_cm', String(payload.dimensao_largura_cm ?? 0))
+      formData.append('dimensao_altura_cm', String(payload.dimensao_altura_cm ?? 0))
+      formData.append('observacoes', payload.observacoes ?? '')
 
-      await produtosCompostosService.save(formData as any, record?.id)
+      await produtosCompostosService.save(formData, record?.id)
 
       toast({
         title: 'Produto Composto salvo',

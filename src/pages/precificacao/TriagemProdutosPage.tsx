@@ -94,7 +94,7 @@ export default function TriagemProdutosPage() {
         <TriagemGrade
           avaliacoes={avaliacoes}
           onAbrir={setSelecionado}
-          getUrlImagem={urlImagemProdutoTriagem}
+          getUrlImagem={(p) => urlImagemProdutoTriagem(p)}
         />
       )}
 

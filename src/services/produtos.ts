@@ -218,12 +218,11 @@ export const produtosCompostosService = {
 
     let recordSalvo: ProdutoCompostoRecord
     if (data instanceof FormData) {
-      recordSalvo = (await pb
-        .collection('produtos')
-        .send(id ? `produtos/records/${id}` : 'produtos/records', {
-          method: id ? 'PATCH' : 'POST',
-          body: data,
-        })) as ProdutoCompostoRecord
+      // Multipart (upload da foto): o RecordService do SDK aceita FormData
+      // diretamente em create/update — sem rota manual.
+      recordSalvo = id
+        ? await pb.collection('produtos').update<ProdutoCompostoRecord>(id, data)
+        : await pb.collection('produtos').create<ProdutoCompostoRecord>(data)
     } else {
       const payload = {
         ...data,
