@@ -201,30 +201,41 @@ export const produtosCompostosService = {
     })
   },
 
-  async save(data: Partial<ProdutoCompostoRecord>, id?: string): Promise<ProdutoCompostoRecord> {
+  async save(
+    data: Partial<ProdutoCompostoRecord> | FormData,
+    id?: string,
+  ): Promise<ProdutoCompostoRecord> {
+    // FormData (com arquivo de imagem) segue direto; JSON passa pelo recálculo de custos
+    const dadosJson = data instanceof FormData ? null : data
     const custos = calcularCustosProdutoComposto({
-      classificacao: (data.classificacao || 'revenda') as ProdutoCompostoClassificacao,
-      custo_aquisicao: data.custo_aquisicao,
-      composicao: data.composicao,
-      custo_embalagem: data.custo_embalagem,
-      custo_etiqueta: data.custo_etiqueta,
-      perda_pct: data.perda_pct,
+      classificacao: (dadosJson?.classificacao || 'revenda') as ProdutoCompostoClassificacao,
+      custo_aquisicao: dadosJson?.custo_aquisicao,
+      composicao: dadosJson?.composicao,
+      custo_embalagem: dadosJson?.custo_embalagem,
+      custo_etiqueta: dadosJson?.custo_etiqueta,
+      perda_pct: dadosJson?.perda_pct,
     })
 
-    const payload = {
-      ...data,
-      custo_aquisicao: custos.custo_aquisicao,
-      custo_composicao: custos.custo_composicao,
-      custo_embalagem: custos.custo_embalagem, // já zerado se composição tiver embalagem
-      custo_etiqueta: custos.custo_etiqueta,
-      custo_total: custos.custo_total,
-    }
-
     let recordSalvo: ProdutoCompostoRecord
-    if (id) {
-      recordSalvo = await pb.collection('produtos').update<ProdutoCompostoRecord>(id, payload)
+    if (data instanceof FormData) {
+      recordSalvo = (await pb
+        .collection('produtos')
+        .send(id ? `produtos/records/${id}` : 'produtos/records', {
+          method: id ? 'PATCH' : 'POST',
+          body: data,
+        })) as ProdutoCompostoRecord
     } else {
-      recordSalvo = await pb.collection('produtos').create<ProdutoCompostoRecord>(payload)
+      const payload = {
+        ...data,
+        custo_aquisicao: custos.custo_aquisicao,
+        custo_composicao: custos.custo_composicao,
+        custo_embalagem: custos.custo_embalagem, // já zerado se composição tiver embalagem
+        custo_etiqueta: custos.custo_etiqueta,
+        custo_total: custos.custo_total,
+      }
+      recordSalvo = id
+        ? await pb.collection('produtos').update<ProdutoCompostoRecord>(id, payload)
+        : await pb.collection('produtos').create<ProdutoCompostoRecord>(payload)
     }
 
     // Sincroniza espelho com prec_produtos automaticamente
@@ -448,6 +459,12 @@ export const produtosCompostosService = {
       status: prod.status || 'ativo',
       composicao: prod.composicao || [],
       origem_id: prod.id,
+      // Foto (file) propagada do produto composto p/ o espelho — a Triagem lê prec_produtos.
+      // IMPORTANTE: `imagem` aqui é o NOME do arquivo (string), não o conteúdo —
+      // o arquivo físico já está anexado ao registro de `produtos`; espelhar o nome
+      // não basta para o PocketBase servir o arquivo do espelho, por isso a Triagem
+      // resolve a URL pela coleção `produtos` (ver urlImagemProdutoTriagem).
+      imagem: prod.imagem || '',
     }
 
     if (prod.base_origem) {

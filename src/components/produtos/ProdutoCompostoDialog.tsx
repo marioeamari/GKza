@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -17,7 +17,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Plus, Trash2, Layers, Calculator, Sparkles, Building2, Package } from 'lucide-react'
+import {
+  Plus,
+  Trash2,
+  Layers,
+  Calculator,
+  Sparkles,
+  Building2,
+  Package,
+  ImageIcon,
+} from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import type {
   ProdutoCompostoRecord,
@@ -27,6 +36,7 @@ import type {
 } from '@/types/domain'
 import type { ItemComposicaoCusto } from '@/lib/precificacao/calculo'
 import { produtosCompostosService, calcularCustosProdutoComposto } from '@/services/produtos'
+import { getFileUrl } from '@/lib/pocketbase/files'
 import { formatCurrency } from '@/lib/format'
 
 interface ProdutoCompostoDialogProps {
@@ -50,6 +60,7 @@ export function ProdutoCompostoDialog({
 }: ProdutoCompostoDialogProps) {
   const { toast } = useToast()
   const [salvando, setSalvando] = useState(false)
+  const inputArquivoRef = useRef<HTMLInputElement>(null)
 
   // Campos principais
   const [nome, setNome] = useState('')
@@ -78,6 +89,45 @@ export function ProdutoCompostoDialog({
   const [qtdInsumo, setQtdInsumo] = useState<number>(1)
   const [perdaInsumo, setPerdaInsumo] = useState<number>(0)
 
+  // Foto do produto (file único em `produtos.imagem`, espelhado em prec_produtos)
+  const [arquivoImagem, setArquivoImagem] = useState<File | null>(null)
+  const [previewImagem, setPreviewImagem] = useState<string>('')
+  const [removerImagem, setRemoverImagem] = useState(false)
+
+  const resetImagem = () => {
+    setArquivoImagem(null)
+    setPreviewImagem('')
+    setRemoverImagem(false)
+  }
+
+  // Preview local da foto escolhida (revogado ao trocar/fechar)
+  useEffect(() => {
+    if (!arquivoImagem) return
+    const url = URL.createObjectURL(arquivoImagem)
+    setPreviewImagem(url)
+    return () => URL.revokeObjectURL(url)
+  }, [arquivoImagem])
+
+  // Foto atual do registro (exibida quando não há arquivo novo escolhido)
+  const imagemAtualUrl = useMemo(() => {
+    if (removerImagem || arquivoImagem) return ''
+    if (!record?.id || !record?.imagem) return ''
+    return getFileUrl('produtos', record.id, record.imagem, { thumb: '200x200' })
+  }, [record?.id, record?.imagem, removerImagem, arquivoImagem])
+
+  const handleEscolherArquivo = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setArquivoImagem(file)
+    setRemoverImagem(false)
+  }
+
+  const handleRemoverImagem = () => {
+    setArquivoImagem(null)
+    setPreviewImagem('')
+    setRemoverImagem(true)
+  }
+
   useEffect(() => {
     if (open) {
       if (record) {
@@ -97,6 +147,7 @@ export function ProdutoCompostoDialog({
         setCompCm(record.dimensao_comprimento_cm || 0)
         setLargCm(record.dimensao_largura_cm || 0)
         setAltCm(record.dimensao_altura_cm || 0)
+        resetImagem()
       } else {
         setNome('')
         setClassificacao('revenda')
@@ -114,6 +165,7 @@ export function ProdutoCompostoDialog({
         setCompCm(0)
         setLargCm(0)
         setAltCm(0)
+        resetImagem()
       }
       setInsumoSelecionadoId('')
       setQtdInsumo(1)
@@ -253,7 +305,16 @@ export function ProdutoCompostoDialog({
         observacoes,
       }
 
-      await produtosCompostosService.save(payload, record?.id)
+      // Foto: envia FormData quando há arquivo novo ou remoção pedida
+      const formData = new FormData()
+      formData.append('data', JSON.stringify(payload))
+      if (arquivoImagem) {
+        formData.append('imagem', arquivoImagem, arquivoImagem.name)
+      } else if (removerImagem) {
+        formData.append('imagem', '') // PocketBase: string vazia limpa o campo file
+      }
+
+      await produtosCompostosService.save(formData as any, record?.id)
 
       toast({
         title: 'Produto Composto salvo',
@@ -298,6 +359,72 @@ export function ProdutoCompostoDialog({
         </DialogHeader>
 
         <div className="space-y-5 py-2">
+          {/* Foto do produto (file único em produtos.imagem, espelhado p/ prec_produtos → Triagem) */}
+          <div className="flex items-start gap-4 p-3.5 rounded-lg border border-neutral-200 bg-neutral-50/70">
+            {(previewImagem || imagemAtualUrl) && !removerImagem ? (
+              <img
+                src={previewImagem || imagemAtualUrl}
+                alt={`Imagem do produto ${record?.nome || nome || ''}`}
+                width={72}
+                height={72}
+                className="h-18 w-18 shrink-0 rounded-md object-cover border border-neutral-200"
+              />
+            ) : (
+              <div
+                aria-hidden="true"
+                className="flex h-18 w-18 shrink-0 items-center justify-center rounded-md border border-dashed border-neutral-300 bg-white text-neutral-300"
+              >
+                <ImageIcon className="h-6 w-6" />
+              </div>
+            )}
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="imagem-produto" className="text-xs font-semibold text-neutral-800">
+                Foto do Produto (opcional)
+              </Label>
+              <p className="text-[11px] text-muted-foreground">
+                Aparece nos cards e no detalhe da Triagem de Produtos. JPG, PNG ou WebP.
+              </p>
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                <Input
+                  ref={inputArquivoRef}
+                  id="imagem-produto"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  disabled={readOnly || salvando}
+                  onChange={handleEscolherArquivo}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={readOnly || salvando}
+                  onClick={() => inputArquivoRef.current?.click()}
+                >
+                  <ImageIcon className="mr-1.5 h-3.5 w-3.5" />
+                  {arquivoImagem || imagemAtualUrl ? 'Trocar foto' : 'Escolher foto'}
+                </Button>
+                {(arquivoImagem || imagemAtualUrl) && !readOnly && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={salvando}
+                    onClick={handleRemoverImagem}
+                    className="text-red-500 hover:bg-red-50"
+                  >
+                    Remover
+                  </Button>
+                )}
+                {arquivoImagem && (
+                  <span className="text-[11px] text-muted-foreground max-w-48 truncate">
+                    {arquivoImagem.name}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Classificação e Dados Básicos */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1 md:col-span-2">

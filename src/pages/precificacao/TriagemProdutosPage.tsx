@@ -12,6 +12,7 @@ import {
   resumirTriagem,
   type TriagemAvaliacao,
 } from '@/lib/triagemModelo'
+import { urlImagemProdutoTriagem } from '@/lib/triagemImagem'
 import { useToast } from '@/hooks/use-toast'
 
 /**
@@ -90,10 +91,18 @@ export default function TriagemProdutosPage() {
       {carregando ? (
         <TriagemCarregando />
       ) : (
-        <TriagemGrade avaliacoes={avaliacoes} onAbrir={setSelecionado} />
+        <TriagemGrade
+          avaliacoes={avaliacoes}
+          onAbrir={setSelecionado}
+          getUrlImagem={urlImagemProdutoTriagem}
+        />
       )}
 
-      <TriagemDetalheDialog avaliacao={selecionado} onClose={() => setSelecionado(null)} />
+      <TriagemDetalheDialog
+        avaliacao={selecionado}
+        onClose={() => setSelecionado(null)}
+        getUrlImagem={urlImagemProdutoTriagem}
+      />
     </div>
   )
 }

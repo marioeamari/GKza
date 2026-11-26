@@ -18,6 +18,7 @@ import {
   type TriagemStatusEtapa,
 } from '@/lib/triagemModelo'
 import { destinoRetomar } from '@/components/triagem/TriagemCards'
+import type { GetFileUrlFn } from '@/components/triagem/TriagemCards'
 
 const CORES_STATUS: Record<TriagemStatusEtapa, { dot: string; texto: string; fundo: string }> = {
   verde: { dot: 'bg-emerald-500', texto: 'text-emerald-700', fundo: 'bg-emerald-50' },
@@ -43,6 +44,8 @@ function formatarDataHora(iso?: string): string {
 interface TriagemDetalheDialogProps {
   avaliacao: TriagemAvaliacao | null
   onClose: () => void
+  /** Url da foto do produto (thumb); ausente = placeholder. */
+  getUrlImagem?: GetFileUrlFn
 }
 
 /**
@@ -50,7 +53,11 @@ interface TriagemDetalheDialogProps {
  * cada uma com o dado real que a qualificou, e botão "Retomar daqui" levando
  * à tela correta da etapa pendente.
  */
-export function TriagemDetalheDialog({ avaliacao, onClose }: TriagemDetalheDialogProps) {
+export function TriagemDetalheDialog({
+  avaliacao,
+  onClose,
+  getUrlImagem,
+}: TriagemDetalheDialogProps) {
   const navigate = useNavigate()
   const botaoRetomarRef = useRef<HTMLButtonElement>(null)
 
@@ -64,6 +71,7 @@ export function TriagemDetalheDialog({ avaliacao, onClose }: TriagemDetalheDialo
 
   const urlRetomar = avaliacao ? destinoRetomar(avaliacao) : undefined
   const chavePendente = avaliacao ? ETAPAS_TRIAGEM[avaliacao.parouNaEtapaNumero - 1] : undefined
+  const urlImagem = avaliacao && getUrlImagem ? getUrlImagem(avaliacao.produto) : undefined
 
   return (
     <Dialog open={!!avaliacao} onOpenChange={(aberto) => !aberto && onClose()}>
@@ -71,10 +79,28 @@ export function TriagemDetalheDialog({ avaliacao, onClose }: TriagemDetalheDialo
         {avaliacao && (
           <>
             <DialogHeader>
-              <DialogTitle className="flex flex-wrap items-baseline gap-x-2 text-left">
-                <span>{avaliacao.produto.nome}</span>
-                <span className="text-sm font-normal text-muted-foreground">
-                  {avaliacao.produto.sku || 'sem SKU'}
+              <DialogTitle className="flex flex-wrap items-center gap-x-3 gap-y-1 text-left">
+                {urlImagem ? (
+                  <img
+                    src={urlImagem}
+                    alt={`Imagem do produto ${avaliacao.produto.nome}`}
+                    width={48}
+                    height={48}
+                    className="h-12 w-12 shrink-0 rounded-md object-cover"
+                  />
+                ) : (
+                  <span
+                    aria-hidden="true"
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-orange-100 text-base font-bold text-[#DF5830]"
+                  >
+                    {(avaliacao.produto.sku || avaliacao.produto.nome).slice(0, 1).toUpperCase()}
+                  </span>
+                )}
+                <span className="min-w-0">
+                  <span className="block truncate">{avaliacao.produto.nome}</span>
+                  <span className="block text-sm font-normal text-muted-foreground">
+                    {avaliacao.produto.sku || 'sem SKU'}
+                  </span>
                 </span>
               </DialogTitle>
               <DialogDescription>{avaliacao.selo}</DialogDescription>

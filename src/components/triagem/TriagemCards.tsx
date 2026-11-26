@@ -22,6 +22,9 @@ import {
   type TriagemStatusEtapa,
 } from '@/lib/triagemModelo'
 
+/** Função que resolve a URL da foto do produto (thumb) ou undefined p/ placeholder. */
+export type GetFileUrlFn = (p: TriagemAvaliacao['produto']) => string | undefined
+
 const CORES_STATUS: Record<TriagemStatusEtapa, { dot: string; texto: string; bg: string }> = {
   verde: { dot: 'bg-emerald-500', texto: 'text-emerald-700', bg: 'bg-emerald-50' },
   amarelo: { dot: 'bg-amber-500', texto: 'text-amber-700', bg: 'bg-amber-50' },
@@ -210,11 +213,12 @@ export function TriagemCardProduto({
 }: {
   avaliacao: TriagemAvaliacao
   onAbrir: (av: TriagemAvaliacao) => void
-  getUrlImagem?: (p: TriagemAvaliacao['produto']) => string | undefined
+  getUrlImagem?: GetFileUrlFn
 }) {
   const p = avaliacao.produto
   const urlImagem = getUrlImagem?.(p)
   const urlRetomar = destinoRetomar(avaliacao)
+  const inicial = (p.sku || p.nome).slice(0, 1).toUpperCase()
   return (
     <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow">
       <CardContent className="p-4">
@@ -232,7 +236,7 @@ export function TriagemCardProduto({
               aria-hidden="true"
               className="flex h-14 w-14 items-center justify-center rounded-md bg-orange-100 text-lg font-bold text-[#DF5830]"
             >
-              {p.nome.slice(0, 1).toUpperCase()}
+              {inicial}
             </div>
           )}
           <div className="min-w-0 flex-1">
