@@ -4,12 +4,14 @@ import {
   adicionarAoGrupo,
   criarGrupoDePar,
   desagruparFrente,
+  interpretarSoltar,
   montarPosicoes,
   moverPosicao,
   trazerParaFrente,
   girarPilha,
   type TriagemGrupo,
   type TriagemPosicao,
+  type ZonaSoltar,
 } from '@/lib/triagemGrupos'
 import type { TriagemAvaliacao } from '@/lib/triagemModelo'
 import {
@@ -39,6 +41,14 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[]) {
   /** espelho das posições atuais para o reordenar (leitura sem re-render). */
   const posicoesRef = useRef<TriagemPosicao[]>([])
 
+  const avisarFalha = useCallback(() => {
+    toast({
+      title: 'Não foi possível salvar o grupo',
+      description: 'Verifique a conexão e tente novamente.',
+      variant: 'destructive',
+    })
+  }, [toast])
+
   const recarregar = useCallback(async () => {
     try {
       const salvos = await carregarGruposTriagem()
@@ -62,25 +72,27 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[]) {
     return p
   }, [avaliacoes, grupos])
 
-  /** aplica mutação com rollback em erro de rede (estado volta ao anterior). */
+  /**
+   * Aplica mutação com rollback em erro de rede: estado volta ao anterior e
+   * o usuário é avisado. Diferenças são persistidas por `persistirDiferencas`
+   * (salva novos/alterados, exclui removidos) e ids tmp_* são trocados pelos
+   * reais do banco no estado.
+   */
   const aplicarGrupos = useCallback(
     async (fn: (atuais: TriagemGrupo[]) => TriagemGrupo[]) => {
       const anteriores = gruposRef.current
-      const novos = fn(anteriores)
-      setGrupos(novos)
+      const rascunho = fn(anteriores)
+      setGrupos(rascunho)
       try {
-        await persistirDiferencas(anteriores, novos)
+        const novos = await persistirDiferencas(anteriores, rascunho)
+        setGrupos(novos)
       } catch (e) {
         console.error('Falha ao salvar grupos da triagem', e)
         setGrupos(anteriores)
-        toast({
-          title: 'Não foi possível salvar o grupo',
-          description: 'Verifique a conexão e tente novamente.',
-          variant: 'destructive',
-        })
+        avisarFalha()
       }
     },
-    [toast],
+    [avisarFalha],
   )
 
   // ── operações expostas à grade ────────────────────────────────────────────
@@ -102,12 +114,24 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[]) {
           .map((g) => (g.membros.includes(arrastado) ? removerMembro(g, arrastado) : g))
           .filter((g): g is TriagemGrupo => g !== null)
         const semAlvo = semArrastado.filter((g) => g.id !== (gAlvo ? gAlvo.id : grupoFinal.id))
-        // o grupo tocado assume a posição do fim da grade (ordem nova é
-        // persistida; cards soltos entre grupos não geram registro)
+        // o grupo tocado assume o fim da grade (ordem nova é persistida)
         return [...semAlvo, grupoFinal]
       })
     },
     [aplicarGrupos],
+  )
+
+  /** decide entre agrupar / reordenar a partir da chave e da zona do alvo. */
+  const soltar = useCallback(
+    (arrastadoKey: string, alvoKey: string | null, zona: ZonaSoltar) => {
+      const decisao = interpretarSoltar(posicoesRef.current, gruposRef.current, arrastadoKey, alvoKey, zona)
+      if (!decisao) return
+      if (decisao.acao === 'agrupar') agrupar(decisao.produtoId, decisao.alvoProdutoId)
+      else reordenar(decisao.de, decisao.para)
+    },
+    // reordenar é estável (sem dependências) e declarado adiante
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [agrupar],
   )
 
   const trazerFrente = useCallback(
@@ -177,26 +201,17 @@ export function useTriagemGrupos(avaliacoes: TriagemAvaliacao[]) {
         )
       } catch (e) {
         console.error('Falha ao salvar a ordem dos grupos', e)
-        toastRef.current?.('Não foi possível salvar a ordem dos grupos')
+        avisarFalha()
       }
     })()
-  }, [])
-
-  const toastRef = useRef<((msg: string) => void) | null>(null)
-  useEffect(() => {
-    toastRef.current = (msg: string) =>
-      toast({
-        title: msg,
-        description: 'Verifique a conexão e tente novamente.',
-        variant: 'destructive',
-      })
-  }, [toast])
+  }, [avisarFalha])
 
   return {
     grupos,
     posicoes,
     carregandoGrupos,
     agrupar,
+    soltar,
     trazerFrente,
     girar,
     desagruparUm,
@@ -216,29 +231,44 @@ function removerMembro(g: TriagemGrupo, id: string): TriagemGrupo | null {
 
 /**
  * Persiste a diferença entre o estado anterior e o novo: salva grupos novos
- * ou alterados (membros/título/ordem), exclui os removidos.
+ * ou alterados (membros/título/ordem), exclui os removidos; devolve o estado
+ * com os ids REAIS do banco no lugar dos temporários (tmp_* → id gravado),
+ * preservando a ordem — o grupo criado permanece na posição em que a UI o
+ * colocou.
  */
 async function persistirDiferencas(
   anteriores: TriagemGrupo[],
   novos: TriagemGrupo[],
-): Promise<void> {
-  const mapaAntes = new Map(anteriores.map((g, i) => [g.id, { g, i }]))
-  const mapaDepois = new Map(novos.map((g, i) => [g.id, { g, i }]))
-
-  const fila: Array<Promise<unknown>> = []
-  for (const [id, { g, i }] of mapaDepois) {
+): Promise<TriagemGrupo[]> {
+  const mapaAntes = new Map(anteriores.map((g) => [g.id, g]))
+  const fila: Array<{ id: string; input: Parameters<typeof salvarGrupoTriagem>[0] }> = []
+  for (let i = 0; i < novos.length; i++) {
+    const g = novos[i]
     if (g.membros.length < 2) continue // solto/degradado: sem registro
-    const antes = mapaAntes.get(id)
+    const antes = mapaAntes.get(g.id)
     const mudou =
       !antes ||
-      antes.g.membros.join('|') !== g.membros.join('|') ||
-      (antes.g.titulo || '') !== (g.titulo || '') ||
-      antes.i !== i
+      antes.membros.join('|') !== g.membros.join('|') ||
+      (antes.titulo || '') !== (g.titulo || '')
     if (!mudou) continue
-    fila.push(salvarGrupoTriagem({ id, titulo: g.titulo, ordem: i + 1, membros: g.membros }))
+    fila.push({ id: g.id, input: { id: g.id, titulo: g.titulo, ordem: i + 1, membros: g.membros } })
   }
-  for (const [id] of mapaAntes) {
-    if (!mapaDepois.has(id)) fila.push(excluirGrupoTriagem(id))
-  }
-  await Promise.all(fila)
+  const excluidos = anteriores.filter((g) => !novos.some((n) => n.id === g.id))
+  if (fila.length === 0 && excluidos.length === 0) return novos
+
+  const resultados = await Promise.all(fila.map((f) => salvarGrupoTriagem(f.input)))
+  await Promise.all(excluidos.map((g) => excluirGrupoTriagem(g.id)))
+
+  // troca tmp_ pelos ids reais (a ordem do save é a ordem da fila = ordem nova)
+  const reais = resultados.filter((r): r is NonNullable<typeof r> => Boolean(r && r.id))
+  const troca = new Map<string, string>()
+  fila.forEach((f, i) => {
+    const real = reais[i]
+    if (real && f.id !== real.id) troca.set(f.id, real.id)
+  })
+  if (troca.size === 0) return novos
+  return novos.map((g) => {
+    const real = troca.get(g.id)
+    return real ? { ...g, id: real } : g
+  })
 }

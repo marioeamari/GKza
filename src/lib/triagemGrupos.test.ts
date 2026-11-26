@@ -6,6 +6,7 @@ import {
   desagruparFrente,
   desfazerGrupo,
   girarPilha,
+  interpretarSoltar,
   montarGruposSalvos,
   montarPosicoes,
   moverPosicao,
@@ -165,6 +166,71 @@ describe('operações de grupo', () => {
 
   it('desfazerGrupo: todos os membros voltam a ser cards soltos', () => {
     expect(desfazerGrupo({ id: 'g1', titulo: '', membros: [A, B, C] })).toEqual([A, B, C])
+  })
+})
+
+describe('interpretarSoltar', () => {
+  it('soltar card sobre o CENTRO de outro card solto agrupa os dois', () => {
+    const posicoes = montarPosicoes([av(A), av(B), av(C)], [])
+    const d = interpretarSoltar(posicoes, [], 'p:' + B, 'p:' + A, 'centro')
+    expect(d).toEqual({ acao: 'agrupar', produtoId: B, alvoProdutoId: A })
+  })
+
+  it('soltar card na borda de outro card solto REORDENA (não agrupa)', () => {
+    const posicoes = montarPosicoes([av(A), av(B), av(C)], [])
+    expect(interpretarSoltar(posicoes, [], 'p:' + B, 'p:' + A, 'antes')).toEqual({
+      acao: 'reordenar',
+      de: 1,
+      para: 0,
+    })
+    expect(interpretarSoltar(posicoes, [], 'p:' + B, 'p:' + A, 'depois')).toEqual({
+      acao: 'reordenar',
+      de: 1,
+      para: 0,
+    })
+  })
+
+  it('soltar card sobre um grupo faz o card ENTRAR no grupo (alvo = frente)', () => {
+    const grupos = [{ id: 'g1', titulo: '', membros: [A, B] }]
+    const posicoes = montarPosicoes([av(A), av(B), av(C)], grupos)
+    expect(interpretarSoltar(posicoes, grupos, 'p:' + C, 'g:g1', 'centro')).toEqual({
+      acao: 'agrupar',
+      produtoId: C,
+      alvoProdutoId: A,
+    })
+    // qualquer zona sobre grupo agrupa (grupo não tem borda de reordenar)
+    expect(interpretarSoltar(posicoes, grupos, 'p:' + C, 'g:g1', 'antes')).toEqual({
+      acao: 'agrupar',
+      produtoId: C,
+      alvoProdutoId: A,
+    })
+  })
+
+  it('arrastar um GRUPO sempre move o bloco (nunca funde grupos)', () => {
+    const grupos = [
+      { id: 'g1', titulo: '', membros: [A, B] },
+      { id: 'g2', titulo: '', membros: [C, D] },
+    ]
+    const posicoes = montarPosicoes([av(A), av(B), av(C), av(D)], grupos)
+    expect(interpretarSoltar(posicoes, grupos, 'g:g1', 'g:g2', 'centro')).toEqual({
+      acao: 'reordenar',
+      de: 0,
+      para: 1,
+    })
+  })
+
+  it('soltar sobre si mesmo ou alvo inexistente devolve null', () => {
+    const posicoes = montarPosicoes([av(A), av(B)], [])
+    expect(interpretarSoltar(posicoes, [], 'p:' + A, 'p:' + A, 'centro')).toBeNull()
+    expect(interpretarSoltar(posicoes, [], 'p:' + A, null, 'centro')).toBeNull()
+    expect(interpretarSoltar(posicoes, [], 'p:' + A, 'g:inexistente', 'centro')).toBeNull()
+  })
+
+  it('soltar card que já pertence ao grupo alvo devolve null (idempotente)', () => {
+    const grupos = [{ id: 'g1', titulo: '', membros: [A, B] }]
+    const posicoes = montarPosicoes([av(A), av(B)], grupos)
+    // A é a frente do g1 → chave do grupo é g:g1; arrastar B sobre g1
+    expect(interpretarSoltar(posicoes, grupos, 'p:' + B, 'g:g1', 'centro')).toBeNull()
   })
 })
 

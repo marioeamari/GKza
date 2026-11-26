@@ -96,6 +96,7 @@ export interface PrecProdutoRecord {
       descricao: string
       sku_fornecedor?: string
       preco_custo_unitario: number
+      imagem?: string
     }
   }
 }

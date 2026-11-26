@@ -192,6 +192,61 @@ export function moverPosicao(
   return out
 }
 
+/** Zona do card alvo onde o arrasto foi solto (borda superior/inferior/centro). */
+export type ZonaSoltar = 'antes' | 'depois' | 'centro'
+
+/** Chave estável de uma posição da grade para o motor de arraste. */
+export function chavePosicao(p: TriagemPosicao): string {
+  return p.tipo === 'grupo' ? `g:${p.grupoId}` : `p:${p.produtoId}`
+}
+
+/** Decisão do que o arraste faz — interpretada antes de tocar no estado. */
+export type SoltarDecisao =
+  | { acao: 'agrupar'; produtoId: string; alvoProdutoId: string }
+  | { acao: 'reordenar'; de: number; para: number }
+
+/**
+ * Interpreta um soltar do arraste e devolve a ação a executar.
+ *
+ * Regras gravadas (travadas em testes):
+ * - arrastar um GRUPO (chave g:*) sempre move o bloco (nunca funde grupos);
+ * - soltar card sobre o CENTRO de um card solto agrupa os dois;
+ * - soltar card sobre um grupo (qualquer zona) faz o card ENTRAR no grupo;
+ * - soltar card na borda (30% superior/inferior) de um card solto reordena.
+ * `alvoProdutoId` para grupo é o card da FRENTE (dono da posição na grade).
+ */
+export function interpretarSoltar(
+  posicoes: TriagemPosicao[],
+  grupos: TriagemGrupo[],
+  arrastadoKey: string,
+  alvoKey: string | null,
+  zona: ZonaSoltar,
+): SoltarDecisao | null {
+  if (!alvoKey || alvoKey === arrastadoKey) return null
+  const de = posicoes.findIndex((p) => chavePosicao(p) === arrastadoKey)
+  const para = posicoes.findIndex((p) => chavePosicao(p) === alvoKey)
+  if (de < 0 || para < 0) return null
+  const arrastado = posicoes[de]
+  const alvo = posicoes[para]
+  if (!arrastado || !alvo) return null
+
+  if (arrastado.tipo === 'grupo') {
+    if (alvo.tipo === 'grupo' && alvo.grupoId === arrastado.grupoId) return null
+    return { acao: 'reordenar', de, para }
+  }
+
+  const produtoId = arrastado.produtoId
+  if (alvo.tipo === 'grupo') {
+    const frente = grupos.find((g) => g.id === alvo.grupoId)?.membros[0]
+    if (!frente || frente === produtoId) return null
+    return { acao: 'agrupar', produtoId, alvoProdutoId: frente }
+  }
+  if (zona === 'centro' && alvo.produtoId !== produtoId) {
+    return { acao: 'agrupar', produtoId, alvoProdutoId: alvo.produtoId }
+  }
+  return { acao: 'reordenar', de, para }
+}
+
 /** Id temporário de grupo em memória (antes de salvar no banco). */
 export function novoIdTemporario(): string {
   return `tmp_${Math.random().toString(36).slice(2, 10)}`
