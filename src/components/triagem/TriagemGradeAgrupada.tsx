@@ -37,6 +37,13 @@ import { useArrastoGrade } from './useArrastoGrade'
  * cada um; clicar num membro o traz para a frente. Os botões da base têm
  * tooltip (title + aria-label) e o lápis de renomear fica à ESQUERDA do grip,
  * sem sobreposição.
+ *
+ * Título/SKU completos (0.0.320): no card da frente e nos soltos o nome e o
+ * SKU ficam visíveis POR COMPLETO — sem ellipsis/truncate; quebram linha
+ * (break-words) e o card cresce em altura conforme necessário (o SKU inclui o
+ * sufixo da variante, ex. "KIT-Blsa-5 - Kit Toalha de Banho 5 peças", então
+ * quebra linha também). O grip e o selo de etapa seguem visíveis no topo (o
+ * bloco de texto tem padding-right para não cobri-los).
  */
 export interface TriagemGradeAgrupadaProps {
   posicoes: TriagemPosicao[]

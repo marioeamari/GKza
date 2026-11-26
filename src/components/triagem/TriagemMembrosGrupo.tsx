@@ -16,6 +16,9 @@ import type { GetFileUrlFn } from './TriagemCards'
  *   quando não há foto), nome, SKU e a etapa compacta (rotuloEtapaCompacto:
  *   "✅ 100% integrado" ou "⚠️/🔴 Etapa N — Nome"), com o mesmo título
  *   (tooltip) do selo dos cards soltos;
+ * - 0.0.320: nome e SKU SEM ellipsis — quebram linha (break-words) com a
+ *   linha crescendo em altura, igual ao card da frente (pedido: ver o título
+ *   e o SKU completos);
  * - clicar num membro o traz para a FRENTE do grupo (mesma ação do clique no
  *   card da pilha), com a supressão de clique pós-arrasto; o membro que JÁ
  *   está na frente fica desabilitado (nada a fazer);
@@ -94,11 +97,11 @@ export function TriagemMembrosGrupo({
                   {inicial}
                 </span>
               )}
+              {/* 0.0.320: nome e SKU SEM ellipsis — mesma regra do card da
+                  frente: quebram linha (break-words) e a linha cresce. */}
               <span className="min-w-0 flex-1">
-                <span className="block truncate" title={p.nome}>
-                  {p.nome}
-                </span>
-                <span className="block truncate text-[11px] text-muted-foreground">
+                <span className="block break-words">{p.nome}</span>
+                <span className="block break-words text-[11px] text-muted-foreground">
                   {p.sku || 'sem SKU'}
                   {i === 0 ? ' · na frente' : ''}
                 </span>

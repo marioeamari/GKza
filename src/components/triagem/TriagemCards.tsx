@@ -244,11 +244,12 @@ export function TriagemCardProduto({
           )}
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold" title={p.nome}>
-                  {p.nome}
-                </p>
-                <p className="text-xs text-muted-foreground">
+              {/* 0.0.320: nome e SKU SEM ellipsis — quebram linha e o card cresce
+                  (pedido: "preciso ver o titulo e o SKU por completo"). O SKU é
+                  longo (inclui sufixo de variante) e quebra linha também. */}
+              <div className="min-w-0 pr-1">
+                <p className="break-words text-sm font-semibold">{p.nome}</p>
+                <p className="break-words text-xs text-muted-foreground">
                   {p.sku || 'sem SKU'} · {ROTULO_TIPO[p.tipo] || p.tipo}
                   {p.categoria ? ` · ${p.categoria}` : ''}
                 </p>
