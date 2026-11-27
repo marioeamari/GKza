@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { canaisDoProduto, type CanalLite } from './triagemCanais'
+import {
+  canaisDoProduto,
+  chaveProdutoCanal,
+  iconesCanaisPorProduto,
+  type CanalLite,
+  type MapaPrecoPorProdCanal,
+} from './triagemCanais'
 
 const canais: CanalLite[] = [
   { id: 'c1', nome: 'Shopee', cor: '#EE4D2D', ativo: true },
@@ -8,12 +14,14 @@ const canais: CanalLite[] = [
   { id: 'c3', nome: 'Antigo', cor: '#123456', ativo: false },
 ]
 
+const mapa: MapaPrecoPorProdCanal = {
+  [chaveProdutoCanal('p1', 'c1')]: { preco_aprovado: 24.9 },
+  [chaveProdutoCanal('p2', 'c2')]: { preco_aprovado: 12.5 },
+}
+
 describe('canaisDoProduto (fileira de canais da Triagem)', () => {
-  it('canal com preço aprovado fica classificado com cor original; demais cinza', () => {
-    const icones = canaisDoProduto(
-      [{ canal: 'c1', status: 'aprovada', preco_aprovado: 49.9, updated: '2026-01-01' }],
-      canais,
-    )
+  it('canal presente no mapa oficial fica classificado com cor original; demais cinza', () => {
+    const icones = canaisDoProduto('p1', mapa, canais)
     expect(icones.map((i) => i.canalId)).toEqual(['c1', 'c2'])
     expect(icones[0].classificado).toBe(true)
     expect(icones[0].cor).toBe('#EE4D2D')
@@ -22,57 +30,38 @@ describe('canaisDoProduto (fileira de canais da Triagem)', () => {
   })
 
   it('produto sem nenhuma classificação: todos os círculos cinza', () => {
-    const icones = canaisDoProduto([], canais)
+    const icones = canaisDoProduto('p-sem', mapa, canais)
     expect(icones.every((i) => !i.classificado)).toBe(true)
     expect(icones.every((i) => i.rotuloTooltip.endsWith('sem preço aprovado'))).toBe(true)
   })
 
   it('canais inativos não aparecem', () => {
-    const icones = canaisDoProduto([], canais)
+    const icones = canaisDoProduto('p1', mapa, canais)
     expect(icones.find((i) => i.canalId === 'c3')).toBeUndefined()
   })
 
-  it('tooltip mostra o preço aprovado quando existe', () => {
-    const icones = canaisDoProduto(
-      [{ canal: 'c2', status: 'aprovada', preco_aprovado: 12.5 }],
-      canais,
-    )
+  it('tooltip mostra o nome do canal e o preço aprovado quando existe', () => {
+    const icones = canaisDoProduto('p2', mapa, canais)
     expect(icones[1].rotuloTooltip).toContain('Site')
     expect(icones[1].rotuloTooltip).toContain('aprovado')
     expect(icones[1].rotuloTooltip).toContain('12,50')
   })
 
-  it('ignora cenário sem preço ou com status fora de aprovada/desatualizada', () => {
+  it('entrada com preço zero não conta como classificada', () => {
     const icones = canaisDoProduto(
-      [
-        { canal: 'c1', status: 'aprovada', preco_aprovado: 0 },
-        { canal: 'c1', status: 'rascunho', preco_aprovado: 30 },
-      ],
+      'p3',
+      { [chaveProdutoCanal('p3', 'c1')]: { preco_aprovado: 0 } },
       canais,
     )
     expect(icones[0].classificado).toBe(false)
   })
+})
 
-  it('desatualizada conta, mas aprovada tem prioridade sobre ela', () => {
-    const icones = canaisDoProduto(
-      [
-        { canal: 'c1', status: 'desatualizada', preco_aprovado: 20, updated: '2026-03-01' },
-        { canal: 'c1', status: 'aprovada', preco_aprovado: 25, updated: '2026-01-01' },
-      ],
-      canais,
-    )
-    expect(icones[0].classificado).toBe(true)
-    expect(icones[0].precoAprovado).toBe(25)
-  })
-
-  it('entre cenários de mesmo status, vence o mais recente', () => {
-    const icones = canaisDoProduto(
-      [
-        { canal: 'c1', status: 'aprovada', preco_aprovado: 10, updated: '2026-01-01' },
-        { canal: 'c1', status: 'aprovada', preco_aprovado: 15, updated: '2026-02-01' },
-      ],
-      canais,
-    )
-    expect(icones[0].precoAprovado).toBe(15)
+describe('iconesCanaisPorProduto', () => {
+  it('monta uma fileira por produto da Triagem, na mesma ordem dos canais', () => {
+    const mapaIcones = iconesCanaisPorProduto(['p1', 'p2'], mapa, canais)
+    expect(mapaIcones.get('p1')?.[0].classificado).toBe(true)
+    expect(mapaIcones.get('p2')?.[0].classificado).toBe(false)
+    expect(mapaIcones.get('p2')?.[1].classificado).toBe(true)
   })
 })

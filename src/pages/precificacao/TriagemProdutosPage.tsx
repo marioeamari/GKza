@@ -13,6 +13,13 @@ import {
 import { TriagemGradeAgrupada } from '@/components/triagem/TriagemGradeAgrupada'
 import { TriagemDetalheDialog } from '@/components/triagem/TriagemDetalheDialog'
 import { carregarFontesTriagem } from '@/services/triagem'
+import { precificacaoService } from '@/services/precificacao'
+import { TriagemIconesContext } from '@/components/triagem/triagemIconesContext'
+import {
+  iconesCanaisPorProduto,
+  type CanalLite,
+  type MapaPrecoPorProdCanal,
+} from '@/lib/triagemCanais'
 import {
   avaliarProdutoTriagem,
   ETAPAS_TRIAGEM,
@@ -45,7 +52,24 @@ export default function TriagemProdutosPage() {
     tipo: 'todos',
     busca: '',
   })
+  const [canais, setCanais] = useState<CanalLite[]>([])
+  const [mapaCanais, setMapaCanais] = useState<MapaPrecoPorProdCanal>({})
   const { toast } = useToast()
+
+  // Canais de venda ativos + classificação oficial (mesmo mapa da Matriz).
+  // Falha aqui não derruba a triagem: só os círculos ficam sem dados.
+  const carregarIconesCanais = useCallback(async () => {
+    try {
+      const [canaisDb, mapaRes] = await Promise.all([
+        precificacaoService.listCanais(true),
+        precificacaoService.getMapaProdutosAprovadosPorCanal(),
+      ])
+      setCanais(canaisDb.map((c) => ({ id: c.id, nome: c.nome, cor: c.cor, ativo: c.ativo })))
+      setMapaCanais(mapaRes.mapaPrecoPorProdCanal)
+    } catch (e) {
+      console.error('Falha ao carregar canais da triagem', e)
+    }
+  }, [])
 
   const carregar = useCallback(
     async (silencioso = false) => {
@@ -64,8 +88,9 @@ export default function TriagemProdutosPage() {
       } finally {
         setCarregando(false)
       }
+      void carregarIconesCanais()
     },
-    [toast],
+    [toast, carregarIconesCanais],
   )
 
   useEffect(() => {
@@ -75,6 +100,18 @@ export default function TriagemProdutosPage() {
   const avaliacaoPorId = useMemo(
     () => new Map(avaliacoes.map((a) => [a.produto.id, a])),
     [avaliacoes],
+  )
+
+  // Fileira de canais por produto (um círculo por canal ativo) — regra única
+  // em lib/triagemCanais.ts, alimentada pelo mapa oficial da Matriz.
+  const iconesPorProduto = useMemo(
+    () =>
+      iconesCanaisPorProduto(
+        avaliacoes.map((a) => a.produto.id),
+        mapaCanais,
+        canais,
+      ),
+    [avaliacoes, mapaCanais, canais],
   )
 
   // Filtros: enxugam a lista de avaliações que alimenta a grade. Com o filtro
@@ -165,26 +202,30 @@ export default function TriagemProdutosPage() {
       {carregando ? (
         <TriagemCarregando />
       ) : (
-        <TriagemGradeAgrupada
-          posicoes={grupos.posicoes}
-          avaliacaoPorId={avaliacaoPorId}
-          grupos={grupos.gruposVisiveis}
-          onAbrir={setSelecionado}
-          onTitulo={grupos.renomearGrupo}
-          onTrazerParaFrente={grupos.trazerFrente}
-          onNavegar={grupos.girar}
-          onDesagruparFrente={grupos.desagruparUm}
-          onDesagruparTudo={grupos.desagruparTodos}
-          aoSoltar={aoSoltar}
-          getUrlImagem={(p) => urlImagemProdutoTriagem(p)}
-        />
+        <TriagemIconesContext.Provider value={iconesPorProduto}>
+          <TriagemGradeAgrupada
+            posicoes={grupos.posicoes}
+            avaliacaoPorId={avaliacaoPorId}
+            grupos={grupos.gruposVisiveis}
+            onAbrir={setSelecionado}
+            onTitulo={grupos.renomearGrupo}
+            onTrazerParaFrente={grupos.trazerFrente}
+            onNavegar={grupos.girar}
+            onDesagruparFrente={grupos.desagruparUm}
+            onDesagruparTudo={grupos.desagruparTodos}
+            aoSoltar={aoSoltar}
+            getUrlImagem={(p) => urlImagemProdutoTriagem(p)}
+          />
+        </TriagemIconesContext.Provider>
       )}
 
-      <TriagemDetalheDialog
-        avaliacao={selecionado}
-        onClose={() => setSelecionado(null)}
-        getUrlImagem={urlImagemProdutoTriagem}
-      />
+      <TriagemIconesContext.Provider value={iconesPorProduto}>
+        <TriagemDetalheDialog
+          avaliacao={selecionado}
+          onClose={() => setSelecionado(null)}
+          getUrlImagem={urlImagemProdutoTriagem}
+        />
+      </TriagemIconesContext.Provider>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useContext, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
@@ -238,6 +238,7 @@ export function TriagemCardProduto({
   const urlImagem = getUrlImagem?.(p)
   const urlRetomar = destinoRetomar(avaliacao)
   const inicial = (p.sku || p.nome).slice(0, 1).toUpperCase()
+  const icones = useContext(TriagemIconesContext).get(p.id) ?? []
   return (
     <Card className="relative overflow-hidden shadow-sm hover:shadow-md transition-shadow">
       <CardContent className="p-4">
@@ -270,6 +271,11 @@ export function TriagemCardProduto({
               {p.sku || 'sem SKU'} · {ROTULO_TIPO[p.tipo] || p.tipo}
               {p.categoria ? ` · ${p.categoria}` : ''}
             </p>
+            {icones.length > 0 && (
+              <div className="mt-1.5">
+                <TriagemIconesCanais icones={icones} tamanho="card" />
+              </div>
+            )}
           </div>
         </div>
 

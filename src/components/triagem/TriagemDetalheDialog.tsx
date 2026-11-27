@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useContext, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CheckCircle2, ExternalLink, X } from 'lucide-react'
 
@@ -19,6 +19,8 @@ import {
 } from '@/lib/triagemModelo'
 import { destinoRetomar } from '@/components/triagem/TriagemCards'
 import type { GetFileUrlFn } from '@/components/triagem/TriagemCards'
+import { TriagemIconesCanais } from '@/components/triagem/TriagemIconesCanais'
+import { TriagemIconesContext } from '@/components/triagem/triagemIconesContext'
 
 const CORES_STATUS: Record<TriagemStatusEtapa, { dot: string; texto: string; fundo: string }> = {
   verde: { dot: 'bg-emerald-500', texto: 'text-emerald-700', fundo: 'bg-emerald-50' },
@@ -60,6 +62,7 @@ export function TriagemDetalheDialog({
 }: TriagemDetalheDialogProps) {
   const navigate = useNavigate()
   const botaoRetomarRef = useRef<HTMLButtonElement>(null)
+  const iconesPorProduto = useContext(TriagemIconesContext)
 
   // Foco no botão "Retomar daqui" quando o painel abre (movimento de foco p/ overlay)
   useEffect(() => {
@@ -72,6 +75,7 @@ export function TriagemDetalheDialog({
   const urlRetomar = avaliacao ? destinoRetomar(avaliacao) : undefined
   const chavePendente = avaliacao ? ETAPAS_TRIAGEM[avaliacao.parouNaEtapaNumero - 1] : undefined
   const urlImagem = avaliacao && getUrlImagem ? getUrlImagem(avaliacao.produto) : undefined
+  const icones = avaliacao ? (iconesPorProduto.get(avaliacao.produto.id) ?? []) : []
 
   return (
     <Dialog open={!!avaliacao} onOpenChange={(aberto) => !aberto && onClose()}>
@@ -101,6 +105,11 @@ export function TriagemDetalheDialog({
                   <span className="block text-sm font-normal text-muted-foreground">
                     {avaliacao.produto.sku || 'sem SKU'}
                   </span>
+                  {icones.length > 0 && (
+                    <span className="mt-1 block font-normal">
+                      <TriagemIconesCanais icones={icones} tamanho="card" />
+                    </span>
+                  )}
                 </span>
               </DialogTitle>
               <DialogDescription>{avaliacao.selo}</DialogDescription>

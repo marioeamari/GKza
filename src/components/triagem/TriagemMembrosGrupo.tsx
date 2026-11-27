@@ -1,7 +1,11 @@
+import { useContext } from 'react'
+
 import { cn } from '@/lib/utils'
 import { rotuloEtapaCompacto, type TriagemAvaliacao } from '@/lib/triagemModelo'
 import type { TriagemGrupo } from '@/lib/triagemGrupos'
 import type { GetFileUrlFn } from './TriagemCards'
+import { TriagemIconesCanais } from './TriagemIconesCanais'
+import { TriagemIconesContext } from './triagemIconesContext'
 
 /**
  * Listagem compacta dos produtos membros de um grupo da Triagem (pedido do
@@ -58,6 +62,7 @@ export function TriagemMembrosGrupo({
   onTrazerParaFrente,
   cliqueSuprimido,
 }: TriagemMembrosGrupoProps) {
+  const iconesPorProduto = useContext(TriagemIconesContext)
   return (
     <ul
       className="mt-1 max-h-36 space-y-0.5 overflow-y-auto rounded-md bg-muted/40 p-1"
@@ -69,6 +74,7 @@ export function TriagemMembrosGrupo({
         const p = av.produto
         const url = getUrlImagem?.(p)
         const inicial = (p.sku || p.nome).slice(0, 1).toUpperCase()
+        const icones = iconesPorProduto.get(id) ?? []
         return (
           <li key={id}>
             <button
@@ -114,6 +120,11 @@ export function TriagemMembrosGrupo({
                 <span className="block break-words text-[11px] text-muted-foreground">
                   {p.sku || 'sem SKU'}
                 </span>
+                {icones.length > 0 && (
+                  <span className="mt-0.5 block">
+                    <TriagemIconesCanais icones={icones} tamanho="membro" />
+                  </span>
+                )}
               </span>
               {i === 0 && (
                 <span
