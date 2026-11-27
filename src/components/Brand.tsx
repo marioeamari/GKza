@@ -13,7 +13,7 @@ export function Brand({ compact = false, className }: { compact?: boolean; class
             Gestão Financeira
           </p>
           <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
-            & Marketplaces
+            & Marketplaces · teste sync
           </p>
         </div>
       )}
