@@ -12,6 +12,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+// Fileira de ícones de canais (0.0.326): consumida via contexto, que a página
+// TriagemProdutosPage alimenta com o mapa oficial da Matriz
+// (getMapaProdutosAprovadosPorCanal) — o critério NÃO é reimplementado aqui.
+import { TriagemIconesCanais } from '@/components/triagem/TriagemIconesCanais'
+import { TriagemIconesContext } from '@/components/triagem/triagemIconesContext'
 import {
   ETAPAS_TRIAGEM,
   nomeEtapaTriagem,
