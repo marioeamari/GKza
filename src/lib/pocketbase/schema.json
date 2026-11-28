@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-27T11:00:41.737Z",
+  "generatedAt": "2026-11-28T05:09:13.968Z",
   "collections": [
     {
       "name": "users",
@@ -7,7 +7,7 @@
       "apiRules": {
         "list": "@request.auth.id != ''",
         "view": "@request.auth.id != ''",
-        "create": "(@request.auth.role = 'admin') || (@request.auth.id = '' && @request.body.role = 'visualizador' && @request.body.active = true)",
+        "create": null,
         "update": "(@request.auth.id = id && @request.body.role:changed = false && @request.body.active:changed = false) || @request.auth.role = 'admin'",
         "delete": "@request.auth.role = 'admin'"
       },
@@ -1529,11 +1529,11 @@
       "name": "telegram_sessions",
       "type": "base",
       "apiRules": {
-        "list": "",
-        "view": "",
-        "create": "",
-        "update": "",
-        "delete": ""
+        "list": null,
+        "view": null,
+        "create": null,
+        "update": null,
+        "delete": null
       },
       "fields": [
         {
@@ -1651,7 +1651,7 @@
       "apiRules": {
         "list": "@request.auth.id != ''",
         "view": "@request.auth.id != ''",
-        "create": "",
+        "create": "@request.auth.id != ''",
         "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
         "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
@@ -3088,7 +3088,7 @@
         "view": "@request.auth.id != ''",
         "create": "@request.auth.id != ''",
         "update": "@request.auth.id != ''",
-        "delete": "@request.auth.id != ''"
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
       "fields": [
         {
@@ -3175,7 +3175,7 @@
         "view": "@request.auth.id != ''",
         "create": "@request.auth.id != ''",
         "update": "@request.auth.id != ''",
-        "delete": "@request.auth.id != ''"
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
       "fields": [
         {
@@ -3240,7 +3240,7 @@
         "view": "@request.auth.id != ''",
         "create": "@request.auth.id != ''",
         "update": "@request.auth.id != ''",
-        "delete": "@request.auth.id != ''"
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
       "fields": [
         {
@@ -3462,7 +3462,7 @@
         "view": "@request.auth.id != ''",
         "create": "@request.auth.id != ''",
         "update": "@request.auth.id != ''",
-        "delete": "@request.auth.id != ''"
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
       "fields": [
         {
@@ -5424,11 +5424,11 @@
       "name": "funcionarios",
       "type": "base",
       "apiRules": {
-        "list": "",
-        "view": "",
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
         "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
-        "update": "",
-        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
       "fields": [
         {
@@ -5542,11 +5542,11 @@
       "name": "funcionarios_dividas",
       "type": "base",
       "apiRules": {
-        "list": "",
-        "view": "",
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
         "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
         "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
-        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
       "fields": [
         {
@@ -5610,11 +5610,11 @@
       "name": "funcionarios_estacoes",
       "type": "base",
       "apiRules": {
-        "list": "",
-        "view": "",
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
         "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
         "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
-        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
       "fields": [
         {
@@ -5679,11 +5679,11 @@
       "name": "funcionarios_pontos",
       "type": "base",
       "apiRules": {
-        "list": "",
-        "view": "",
-        "create": "",
-        "update": "",
-        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
       "fields": [
         {
@@ -5773,11 +5773,11 @@
       "name": "funcionarios_folhas",
       "type": "base",
       "apiRules": {
-        "list": "",
-        "view": "",
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
         "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
-        "update": "(@request.auth.id != '' && @request.auth.role != 'visualizador') || (@request.auth.id = '' && @request.body.status_conferencia_colaborador:changed = true && @request.body.conferido_colaborador_em:changed = true && @request.body.motivo_divergencia_colaborador:changed = true && @request.body.quitada:changed = false && @request.body.a_receber:changed = false && @request.body.ganho_total:changed = false && @request.body.descontos:changed = false && @request.body.divida_semanal:changed = false && @request.body.data_quitacao:changed = false && @request.body.lancamento_id:changed = false && @request.body.funcionario:changed = false && @request.body.periodo_inicio:changed = false && @request.body.periodo_fim:changed = false && @request.body.dias_pendentes_fechamento:changed = false && @request.body.notificacao_pagamento_enviada:changed = false && @request.body.notificacao_pagamento_em:changed = false && @request.body.observacoes:changed = false)",
-        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
       "fields": [
         {
@@ -6472,11 +6472,11 @@
       "name": "funcionarios_confirmacoes",
       "type": "base",
       "apiRules": {
-        "list": "@request.auth.id != '' || @request.auth.id = ''",
-        "view": "@request.auth.id != '' || @request.auth.id = ''",
-        "create": "@request.auth.id != '' || @request.auth.id = ''",
-        "update": "@request.auth.id != '' || @request.auth.id = ''",
-        "delete": "@request.auth.id != ''"
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
       "fields": [
         {
@@ -7111,11 +7111,11 @@
       "name": "funcionarios_funcoes",
       "type": "base",
       "apiRules": {
-        "list": "",
-        "view": "",
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
         "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
         "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
-        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
       "fields": [
         {
@@ -7145,11 +7145,11 @@
       "name": "funcionarios_checklists",
       "type": "base",
       "apiRules": {
-        "list": "",
-        "view": "",
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
         "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
         "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
-        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
       "fields": [
         {
@@ -7211,11 +7211,11 @@
       "name": "funcionarios_checklist_execucoes",
       "type": "base",
       "apiRules": {
-        "list": "",
-        "view": "",
-        "create": "",
-        "update": "",
-        "delete": "@request.auth.id != '' && (@request.auth.role = 'admin' || @request.auth.role = 'gestor')"
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "update": "@request.auth.id != '' && @request.auth.role != 'visualizador'",
+        "delete": "@request.auth.role = 'admin' || @request.auth.role = 'gestor'"
       },
       "fields": [
         {

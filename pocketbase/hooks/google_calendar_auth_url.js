@@ -86,10 +86,22 @@ routerAdd(
       candidateOrigin = candidateOrigin.slice(0, -1)
     }
 
-    // Envia o user id e a origin no state para associação no callback
+    // C9 — nonce aleatório vinculado ao usuário, válido por 10 minutos e de uso único.
+    // O callback só aceita o state se o nonce existir, não tiver vencido e pertencer ao usuário.
+    const userIdState = auth ? auth.id : ''
+    const nonce = $security.randomString(40)
+    $app
+      .store()
+      .set(
+        'gcal_oauth_nonce:' + nonce,
+        JSON.stringify({ userId: userIdState, exp: Date.now() + 10 * 60 * 1000 }),
+      )
+
+    // Envia o user id, a origin e o nonce no state para associação no callback
     const statePayload = JSON.stringify({
-      userId: auth ? auth.id : '',
+      userId: userIdState,
       origin: candidateOrigin,
+      nonce: nonce,
     })
     const encodedState = encodeURIComponent(statePayload)
 

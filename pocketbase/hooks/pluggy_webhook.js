@@ -4,8 +4,6 @@ routerAdd('POST', '/backend/v1/pluggy/webhook', (e) => {
     payload = e.requestInfo().body || {}
   } catch (_) {}
 
-  console.log('[PluggyWebhook] Payload recebido:', JSON.stringify(payload))
-
   const event = payload.event || payload.type || ''
   const itemId = payload.itemId || (payload.data && payload.data.itemId) || ''
 

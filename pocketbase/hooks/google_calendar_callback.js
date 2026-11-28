@@ -12,6 +12,7 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
   // 1. Extração segura de state (userId e origin)
   let userId = ''
   let stateOrigin = ''
+  let stateNonce = ''
   try {
     if (stateStr) {
       const decodedState = decodeURIComponent(stateStr)
@@ -25,10 +26,29 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
       if (parsed) {
         userId = parsed.userId || ''
         stateOrigin = parsed.origin || ''
+        stateNonce = parsed.nonce || ''
       }
     }
   } catch (err) {
     console.log('[Google Callback] Falha ao processar state:', err)
+  }
+
+  // C9 — valida o nonce: existe, não venceu e pertence ao usuário do state. Uso único.
+  let nonceValido = false
+  if (stateNonce && typeof stateNonce === 'string') {
+    const storeKey = 'gcal_oauth_nonce:' + stateNonce
+    const raw = $app.store().get(storeKey)
+    $app.store().remove(storeKey)
+    if (raw) {
+      try {
+        const info = JSON.parse(raw)
+        nonceValido = !!info && info.exp > Date.now() && !!userId && info.userId === userId
+      } catch (_) {}
+    }
+  }
+  if (!nonceValido) {
+    console.log('[Google Callback] State sem nonce válido — autorização recusada')
+    userId = ''
   }
 
   // 2. Validação da origin do state e resolução de fallback
@@ -225,19 +245,6 @@ routerAdd('GET', '/backend/v1/google/callback', (e) => {
           googleEmail = profileRes.json.email
         }
       } catch (_) {}
-    }
-
-    // Se não temos userId pelo state, tenta associar ao primeiro admin existente
-    if (!userId) {
-      try {
-        const adminUser = $app.findFirstRecordByData('users', 'role', 'admin')
-        if (adminUser) {
-          userId = adminUser.id
-          console.log('[Google Callback] UserId identificado via fallback admin:', userId)
-        }
-      } catch (_) {}
-    } else {
-      console.log('[Google Callback] UserId identificado via state:', userId)
     }
 
     if (!userId) {

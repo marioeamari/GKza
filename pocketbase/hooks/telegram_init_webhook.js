@@ -1,4 +1,8 @@
 routerAdd('GET', '/backend/v1/telegram/init-webhook', (e) => {
+  const auth = e.auth
+  if (!auth || auth.collection().name !== 'users' || auth.getString('role') !== 'admin') {
+    return e.json(403, { error: 'Apenas administradores' })
+  }
   const token = $os.getenv('TELEGRAM_BOT_TOKEN')
 
   if (!token) {

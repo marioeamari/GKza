@@ -1,15 +1,13 @@
 routerAdd('POST', '/backend/v1/telegram/webhook', (e) => {
-  // 1. Validar Secret Token do Telegram (se configurado)
+  // 1. Segredo do webhook é OBRIGATÓRIO: sem TELEGRAM_WEBHOOK_SECRET configurado, recusa tudo.
+  // Aceito somente pelo cabeçalho X-Telegram-Bot-Api-Secret-Token (nunca pela URL).
   const configuredSecret = $os.getenv('TELEGRAM_WEBHOOK_SECRET') || ''
-  if (configuredSecret) {
-    const incomingSecret =
-      e.request.header.get('X-Telegram-Bot-Api-Secret-Token') ||
-      e.requestInfo().query['secret'] ||
-      ''
-    if (incomingSecret !== configuredSecret) {
-      console.log('Telegram webhook secret mismatch')
-      return e.json(403, { error: 'invalid_secret' })
-    }
+  if (!configuredSecret) {
+    return e.json(403, { error: 'webhook_secret_not_configured' })
+  }
+  const incomingSecret = e.request.header.get('X-Telegram-Bot-Api-Secret-Token') || ''
+  if (incomingSecret !== configuredSecret) {
+    return e.json(403, { error: 'invalid_secret' })
   }
 
   const token = $os.getenv('TELEGRAM_BOT_TOKEN')
