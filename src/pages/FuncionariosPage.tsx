@@ -424,7 +424,8 @@ export default function FuncionariosPage() {
         ciclo_pagamento: func.ciclo_pagamento || 'semanal',
         pix: func.pix || '',
         telefone: func.telefone || '',
-        pin: func.pin || '',
+        // PIN é SÓ-ESCRITA: nunca exibimos o valor salvo. Deixe em branco para manter o PIN atual.
+        pin: '',
         ativo: func.ativo ?? true,
         funcoes: func.funcoes || [],
       })

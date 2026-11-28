@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   Clock,
@@ -35,15 +35,6 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import {
-  funcionariosService,
-  type FuncionarioRecord,
-  type FuncionarioEstacaoRecord,
-  type FuncionarioPontoRecord,
-  type FuncionarioDividaRecord,
-  type FuncionarioConfirmacaoRecord,
-  type FuncionarioFolhaRecord,
-} from '@/services/funcionarios'
-import {
   formatarDataExtensoPlanilha,
   calcularLinhaPonto,
   formatarMinutosEmHHMM,
@@ -64,37 +55,74 @@ import {
 } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  funcionariosChecklistsService,
-  type FuncionarioChecklistRecord,
-  type FuncionarioChecklistExecucaoRecord,
-} from '@/services/funcionariosChecklists'
 import { formatarPeriodoChecklist, type ChecklistItemExecucao } from '@/lib/funcionariosChecklists'
+import {
+  PontoApiError,
+  listarFuncionariosEstacao,
+  loginPonto,
+  registrarEntrada,
+  registrarSaida,
+  iniciarPausa,
+  retomarPausa,
+  pontosDoDia,
+  pontosHistorico,
+  listarConfirmacoes,
+  salvarConfirmacao,
+  listarDividas,
+  listarFolhas,
+  conferirFolha,
+  listarChecklistsDoDia,
+  listarExecucoesDoDia,
+  marcarItemChecklist,
+  lerTokenSessao,
+  limparTokenSessao,
+  type PontoEstacaoInfo,
+  type PontoLoginResultado,
+  type PontoRegistroApi,
+  type PontoDiaItem,
+  type PontoHistoricoItem,
+  type PontoConfirmacaoApi,
+  type PontoDividaApi,
+  type PontoFolhaApi,
+  type PontoChecklistApi,
+  type PontoChecklistExecucaoApi,
+} from '@/services/pontoApi'
 
-const SESSION_STORAGE_KEY = 'gkza_funcionario_session_token'
+// Sessão local persistida por aparelho (token_sessao devolvido por /ponto/login)
+const LOCAL_FUNC_KEY = 'gkza_funcionario_local_id'
+const LOCAL_FUNC_NOME_KEY = 'gkza_funcionario_local_nome'
+const LOCAL_FUNC_CARGO_KEY = 'gkza_funcionario_local_cargo'
 
 export default function FuncionarioPontoPage() {
   const { token } = useParams<{ token?: string }>()
   const { toast } = useToast()
 
-  const [estacao, setEstacao] = useState<FuncionarioEstacaoRecord | null>(null)
+  const [estacao, setEstacao] = useState<PontoEstacaoInfo | null>(null)
   const [estacaoValida, setEstacaoValida] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(true)
 
   // Funcionários para identificação
-  const [funcionarios, setFuncionarios] = useState<FuncionarioRecord[]>([])
-  const [funcionarioAtual, setFuncionarioAtual] = useState<FuncionarioRecord | null>(null)
+  const [funcionarios, setFuncionarios] = useState<PontoEstacaoInfo[]>([])
+  const [funcionarioAtual, setFuncionarioAtual] = useState<{
+    id: string
+    nome: string
+    cargo?: string
+  } | null>(null)
   const [selectedFuncionarioId, setSelectedFuncionarioId] = useState<string>('')
   const [pinInput, setPinInput] = useState<string>('')
 
   // Estado do ponto do dia de hoje
-  const [pontoHoje, setPontoHoje] = useState<FuncionarioPontoRecord | null>(null)
-  const [historicoPontos, setHistoricoPontos] = useState<FuncionarioPontoRecord[]>([])
-  const [confirmacoes, setConfirmacoes] = useState<FuncionarioConfirmacaoRecord[]>([])
-  const [dividas, setDividas] = useState<FuncionarioDividaRecord[]>([])
+  const [pontoHoje, setPontoHoje] = useState<PontoRegistroApi | null>(null)
+  const [historicoPontos, setHistoricoPontos] = useState<PontoHistoricoItem[]>([])
+  const [confirmacoes, setConfirmacoes] = useState<PontoConfirmacaoApi[]>([])
+  const [dividas, setDividas] = useState<PontoDividaApi[]>([])
   const [horaAtual, setHoraAtual] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
   const [mostrarQREstacao, setMostrarQREstacao] = useState(false)
+
+  // Bloqueio de PIN (5 erros = 15 min — o backend devolve isso)
+  const [pinBloqueadoAte, setPinBloqueadoAte] = useState<number | null>(null)
+  const [pinSegundosRestantes, setPinSegundosRestantes] = useState(0)
 
   // Modal de Divergência do Colaborador (dias pontuais)
   const [modalDivergenciaData, setModalDivergenciaData] = useState<string | null>(null)
@@ -102,22 +130,27 @@ export default function FuncionarioPontoPage() {
   const [salvandoConfirmacao, setSalvandoConfirmacao] = useState(false)
 
   // Notificação de Pagamento Realizado & Conferência de Folha Paga pelo Colaborador
-  const [folhaPendenteConferencia, setFolhaPendenteConferencia] =
-    useState<FuncionarioFolhaRecord | null>(null)
+  const [folhaPendenteConferencia, setFolhaPendenteConferencia] = useState<PontoFolhaApi | null>(
+    null,
+  )
   const [salvandoConferenciaFolha, setSalvandoConferenciaFolha] = useState(false)
   const [modalDivergenciaFolhaAberta, setModalDivergenciaFolhaAberta] = useState(false)
   const [motivoDivergenciaFolha, setMotivoDivergenciaFolha] = useState('')
 
   // --- CHECKLISTS DO DIA (vinculados às funções do funcionário) ---
-  const [checklistsHoje, setChecklistsHoje] = useState<FuncionarioChecklistRecord[]>([])
-  const [execucoesHoje, setExecucoesHoje] = useState<
-    Record<string, FuncionarioChecklistExecucaoRecord>
-  >({})
+  const [checklistsHoje, setChecklistsHoje] = useState<PontoChecklistApi[]>([])
+  const [execucoesHoje, setExecucoesHoje] = useState<Record<string, PontoChecklistExecucaoApi>>({})
   const [itemMarcando, setItemMarcando] = useState<string | null>(null)
+
   // REGRA: batida de ponto (entrada/saída/pausa/retorno) somente a partir do
   // escaneamento do QR Code da estação. A sessão vinculada (token_sessao)
   // continua valendo para confirmar dias trabalhados e conferir o pagamento.
   const podeBaterPonto = estacaoValida === true
+
+  // valor_hora e hora_almoco_conta NÃO vêm das rotas (nem devem): a tela do
+  // colaborador não precisa deles — o backend calcula as horas por batida e a
+  // folha devolve os valores. Mantemos o resumo por horas/minutos apenas.
+  const valorHoraLocal = 0
 
   // Relógio em tempo real
   useEffect(() => {
@@ -132,73 +165,89 @@ export default function FuncionarioPontoPage() {
     return () => clearInterval(timer)
   }, [])
 
-  // 1. Carregar ponto de hoje e resumo do colaborador ativo
-  const carregarDadosDoColaborador = useCallback(async (func: FuncionarioRecord) => {
+  // Contador regressivo do bloqueio de PIN
+  useEffect(() => {
+    if (pinBloqueadoAte == null) return
+    const tick = () => {
+      const restaMs = pinBloqueadoAte - Date.now()
+      if (restaMs <= 0) {
+        setPinBloqueadoAte(null)
+        setPinSegundosRestantes(0)
+        return
+      }
+      setPinSegundosRestantes(Math.ceil(restaMs / 1000))
+    }
+    tick()
+    const timer = setInterval(tick, 1000)
+    return () => clearInterval(timer)
+  }, [pinBloqueadoAte])
+
+  const mapConfirmacoes = useMemo(() => {
+    const mapa: Record<string, PontoConfirmacaoApi> = {}
+    for (const c of confirmacoes) {
+      mapa[normalizarDataPonto(c.data)] = c
+    }
+    return mapa
+  }, [confirmacoes])
+
+  // 1. Carregar ponto de hoje, histórico, confirmações, dívidas, folha e checklists
+  const carregarDadosDoColaborador = useCallback(async () => {
     try {
       const hojeStr = getLocalDateStr() // Data atual no fuso America/Sao_Paulo
-      // Busca ponto de hoje: se houver aberto traz ele; se já foi finalizado traz o último do dia
-      const pontoAberto = await funcionariosService.buscarPontoAbertoHoje(func.id, hojeStr)
-      let pontoDoDia: FuncionarioPontoRecord | null = pontoAberto
-      if (pontoAberto) {
-        setPontoHoje(pontoAberto)
-      } else {
-        pontoDoDia = await funcionariosService.buscarUltimoPontoDoDia(func.id, hojeStr)
-        setPontoHoje(pontoDoDia)
-      }
 
-      // Carregar histórico recente dos últimos 30 dias
+      // Ponto de hoje (rota devolve todos do dia; usamos o aberto ou o último)
+      const dia = await pontosDoDia(hojeStr)
+      const listaDia = dia?.pontos || []
+      const aberto = listaDia.find((p) => p.entrada && !p.saida) || null
+      const ultimo = listaDia.length > 0 ? listaDia[listaDia.length - 1] : null
+      setPontoHoje(aberto || ultimo)
+
+      // Histórico recente dos últimos 30 dias (rota paginada)
       const dataInicio = new Date()
       dataInicio.setDate(dataInicio.getDate() - 30)
       const dataInicioStr = getLocalDateStr(dataInicio)
+      const hist = await pontosHistorico(1, 100)
+      setHistoricoPontos(
+        (hist || []).filter((p) => normalizarDataPonto(p.data) >= dataInicioStr),
+      )
 
-      const pontos = await funcionariosService.listarPontos({
-        funcionarioId: func.id,
-        dataInicio: dataInicioStr,
-      })
-      setHistoricoPontos(pontos)
+      // Confirmações do período recente
+      const confs = await listarConfirmacoes()
+      setConfirmacoes((confs || []).filter((c) => normalizarDataPonto(c.data) >= dataInicioStr))
 
-      // Carregar confirmações do período recente
-      const confs = await funcionariosService.listarConfirmacoes({
-        funcionarioId: func.id,
-        dataInicio: dataInicioStr,
-      })
-      setConfirmacoes(confs)
+      // Dívidas ativas (rota já devolve só as ativas)
+      setDividas(await listarDividas())
 
-      // Carregar dívidas ativas do funcionário
-      const divs = await funcionariosService.listarDividas(func.id)
-      setDividas(divs.filter((d) => d.ativa))
-
-      // Carregar folha mais recente quitada para conferência de pagamento pelo colaborador
-      const folha = await funcionariosService.buscarFolhaPendenteConferenciaColaborador(func.id)
-      setFolhaPendenteConferencia(folha)
+      // Folha mais recente quitada para conferência de pagamento pelo colaborador
+      const folhas = await listarFolhas()
+      const pendente =
+        (folhas || []).find(
+          (f) => f.quitada && (!f.status_conferencia_colaborador || f.status_conferencia_colaborador === 'pendente'),
+        ) || null
+      setFolhaPendenteConferencia(pendente)
 
       // --- CHECKLIST DO DIA ---
-      // Vigência/janela resolvidas pela hora da ENTRADA do ponto (check-in).
-      const entradaHoje = pontoDoDia?.entrada
       try {
-        const checklistsDoDia = await funcionariosChecklistsService.checklistsDoDia(
-          func.id,
-          hojeStr,
-          entradaHoje,
-        )
-        setChecklistsHoje(checklistsDoDia)
-
-        // Execuções já existentes para o dia (idempotência por funcionário+checklist+data)
-        const execucoes = await funcionariosChecklistsService.listarExecucoes({
-          funcionarioId: func.id,
-          dataInicio: hojeStr,
-          dataFim: hojeStr,
-        })
-        const mapaExecucoes: Record<string, FuncionarioChecklistExecucaoRecord> = {}
-        for (const exec of execucoes) {
+        const [checklists, execucoes] = await Promise.all([
+          listarChecklistsDoDia(hojeStr),
+          listarExecucoesDoDia(hojeStr),
+        ])
+        setChecklistsHoje(checklists || [])
+        const mapaExecucoes: Record<string, PontoChecklistExecucaoApi> = {}
+        for (const exec of execucoes || []) {
           mapaExecucoes[exec.checklist] = exec
         }
         setExecucoesHoje(mapaExecucoes)
       } catch (errChecklist) {
-        console.error('Erro ao carregar checklists do dia:', errChecklist)
+        console.error('Erro ao carregar checklists do dia')
       }
     } catch (err) {
-      console.error('Erro ao carregar dados do colaborador:', err)
+      if (err instanceof PontoApiError && err.status === 401) {
+        // token_sessao expirado: recomeça o fluxo de identificação
+        limparTokenSessao()
+        setFuncionarioAtual(null)
+      }
+      console.error('Erro ao carregar dados do colaborador')
     }
   }, [])
 
@@ -206,20 +255,23 @@ export default function FuncionarioPontoPage() {
   const validarEstacaoAtual = useCallback(async () => {
     try {
       if (token) {
-        const est = await funcionariosService.buscarEstacaoPorToken(token)
-        if (est) {
-          setEstacao(est)
+        const lista = await listarFuncionariosEstacao(token)
+        if (lista && lista.length > 0) {
+          setEstacao({ id: token, nome: 'Estação' })
           setEstacaoValida(true)
         } else {
           setEstacao(null)
           setEstacaoValida(false)
+          return
         }
+        const funcs = await listarFuncionariosEstacao(token)
+        setFuncionarios(funcs || [])
       } else {
         setEstacao(null)
         setEstacaoValida(false)
       }
     } catch (err) {
-      console.error('Erro ao validar ponto:', err)
+      console.error('Erro ao validar estação')
       setEstacao(null)
       setEstacaoValida(false)
     }
@@ -231,22 +283,25 @@ export default function FuncionarioPontoPage() {
       try {
         await validarEstacaoAtual()
 
-        // Buscar lista de funcionários para seleção
-        const funcs = await funcionariosService.listarFuncionarios(true)
-        setFuncionarios(funcs)
-
         // Verificar se já existe vínculo salvo localmente neste celular
-        const savedToken = localStorage.getItem(SESSION_STORAGE_KEY)
+        const savedToken = lerTokenSessao()
         if (savedToken) {
-          const funcVinculado =
-            await funcionariosService.buscarFuncionarioPorTokenSessao(savedToken)
-          if (funcVinculado && funcVinculado.ativo) {
-            setFuncionarioAtual(funcVinculado)
-            setSelectedFuncionarioId(funcVinculado.id)
+          try {
+            // Um ping barato que exige X-Ponto-Token: se a sessão ainda é
+            // válida, mantemos o vínculo local.
+            await pontosDoDia()
+            const id = localStorage.getItem(LOCAL_FUNC_KEY) || ''
+            const nome = localStorage.getItem(LOCAL_FUNC_NOME_KEY) || ''
+            if (id && nome) {
+              setFuncionarioAtual({ id, nome, cargo: localStorage.getItem(LOCAL_FUNC_CARGO_KEY) || '' })
+              setSelectedFuncionarioId(id)
+            }
+          } catch {
+            limparTokenSessao()
           }
         }
       } catch (err) {
-        console.error('Erro ao inicializar página do ponto:', err)
+        console.error('Erro ao inicializar página do ponto')
       } finally {
         setLoading(false)
       }
@@ -292,10 +347,10 @@ export default function FuncionarioPontoPage() {
           await validarEstacaoAtual()
           // Recarrega os dados do colaborador para o novo dia (limpando o ponto de ontem)
           if (funcionarioAtual) {
-            await carregarDadosDoColaborador(funcionarioAtual)
+            await carregarDadosDoColaborador()
           }
         } catch (err) {
-          console.warn('Erro ao atualizar estação/ponto na virada de dia:', err)
+          console.warn('Erro ao atualizar estação/ponto na virada de dia')
         }
         agendarProximaMeiaNoite()
       }, msAteMeiaNoite)
@@ -310,13 +365,22 @@ export default function FuncionarioPontoPage() {
 
   useEffect(() => {
     if (funcionarioAtual) {
-      carregarDadosDoColaborador(funcionarioAtual)
+      carregarDadosDoColaborador()
     }
   }, [funcionarioAtual, carregarDadosDoColaborador])
 
-  // Vinculação de celular ao funcionário
+  // Vinculação de celular ao funcionário: o PIN vai ao SERVIDOR via /ponto/login
+  // e o token_sessao volta para os headers X-Ponto-Token. Nada de PIN no navegador.
   const handleVincularFuncionario = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!token) {
+      toast({
+        title: 'Estação não vinculada',
+        description: 'Escaneie o QR Code da estação antes de se identificar.',
+        variant: 'destructive',
+      })
+      return
+    }
     if (!selectedFuncionarioId) {
       toast({
         title: 'Selecione seu nome',
@@ -325,46 +389,88 @@ export default function FuncionarioPontoPage() {
       })
       return
     }
+    if (pinBloqueadoAte != null) {
+      toast({
+        title: 'Muitas tentativas incorretas',
+        description: `Tente novamente em ${Math.ceil(pinSegundosRestantes / 60)} minuto(s).`,
+        variant: 'destructive',
+      })
+      return
+    }
 
     const func = funcionarios.find((f) => f.id === selectedFuncionarioId)
     if (!func) return
 
-    // Validar PIN se houver
-    if (func.pin && func.pin.trim() !== '') {
-      if (pinInput !== func.pin) {
-        toast({
-          title: 'PIN incorreto',
-          description: 'O PIN digitado não confere. Peça ajuda ao seu gestor se esqueceu.',
-          variant: 'destructive',
-        })
-        return
-      }
+    const pin = pinInput.trim()
+    if (!pin) {
+      toast({
+        title: 'Informe seu PIN',
+        description: 'Peça ajuda ao seu gestor se não souber.',
+        variant: 'destructive',
+      })
+      return
     }
 
-    // Gerar token de sessão e vincular
-    const novoTokenSessao = `func_sess_${func.id}_${Math.random().toString(36).substring(2, 12)}`
     try {
-      await funcionariosService.atualizarFuncionario(func.id, {
-        token_sessao: novoTokenSessao,
+      const resultado: PontoLoginResultado = await loginPonto({
+        tokenEstacao: token,
+        funcionarioId: func.id,
+        pin,
       })
-      localStorage.setItem(SESSION_STORAGE_KEY, novoTokenSessao)
-      setFuncionarioAtual({ ...func, token_sessao: novoTokenSessao })
+      const nomeAnterior = localStorage.getItem(LOCAL_FUNC_NOME_KEY)
+      setFuncionarioAtual({
+        id: resultado.funcionarioId,
+        nome: nomeAnterior && selectedFuncionarioId === localStorage.getItem(LOCAL_FUNC_KEY) ? nomeAnterior : func.nome,
+        cargo: '',
+      })
+      localStorage.setItem(LOCAL_FUNC_KEY, resultado.funcionarioId)
+      localStorage.setItem(LOCAL_FUNC_NOME_KEY, func.nome)
+      setPinInput('')
+      setPinBloqueadoAte(null)
+      setPinSegundosRestantes(0)
       toast({
         title: 'Celular vinculado com sucesso!',
         description: `Olá, ${func.nome}! Seu aparelho agora está configurado para bater ponto.`,
       })
     } catch (err) {
-      console.error('Erro ao vincular celular:', err)
-      toast({
-        title: 'Erro ao vincular',
-        description: 'Não foi possível salvar a identificação. Tente novamente.',
-        variant: 'destructive',
-      })
+      if (err instanceof PontoApiError) {
+        if (err.bloqueado) {
+          const restaMin = err.minutosRestantes || 15
+          setPinBloqueadoAte(Date.now() + restaMin * 60000)
+          setPinSegundosRestantes(restaMin * 60)
+          toast({
+            title: 'Muitas tentativas incorretas',
+            description: `Por segurança, o PIN foi bloqueado. Tente novamente em ${restaMin} minuto(s).`,
+            variant: 'destructive',
+          })
+        } else {
+          const resta = err.tentativasRestantes
+          toast({
+            title: 'PIN incorreto',
+            description:
+              (err.message || 'O PIN digitado não confere.') +
+              (typeof resta === 'number' && resta > 0
+                ? ` Tentativas restantes: ${resta}.`
+                : ''),
+            variant: 'destructive',
+          })
+        }
+      } else {
+        console.error('Erro ao vincular celular')
+        toast({
+          title: 'Erro ao vincular',
+          description: 'Não foi possível salvar a identificação. Tente novamente.',
+          variant: 'destructive',
+        })
+      }
     }
   }
 
   const handleTrocarFuncionario = () => {
-    localStorage.removeItem(SESSION_STORAGE_KEY)
+    limparTokenSessao()
+    localStorage.removeItem(LOCAL_FUNC_KEY)
+    localStorage.removeItem(LOCAL_FUNC_NOME_KEY)
+    localStorage.removeItem(LOCAL_FUNC_CARGO_KEY)
     setFuncionarioAtual(null)
     setFolhaPendenteConferencia(null)
     setPinInput('')
@@ -376,19 +482,18 @@ export default function FuncionarioPontoPage() {
     if (!folhaPendenteConferencia || salvandoConferenciaFolha) return
     setSalvandoConferenciaFolha(true)
     try {
-      const atualizada = await funcionariosService.confirmarConferenciaFolhaColaborador({
-        folhaId: folhaPendenteConferencia.id,
-        status: 'confirmado',
-      })
-      setFolhaPendenteConferencia(atualizada)
+      const resp = await conferirFolha(folhaPendenteConferencia.id, 'confirmado')
+      setFolhaPendenteConferencia((prev) =>
+        prev ? { ...prev, status_conferencia_colaborador: resp.status_conferencia_colaborador } : prev,
+      )
       toast({
         title: 'Pagamento confirmado com sucesso!',
         description: 'Você confirmou que o valor recebido está condizente com os dias trabalhados.',
       })
-    } catch (err: any) {
+    } catch (err) {
       toast({
         title: 'Erro ao confirmar pagamento',
-        description: err.message || 'Tente novamente.',
+        description: err instanceof Error ? err.message : 'Tente novamente.',
         variant: 'destructive',
       })
     } finally {
@@ -409,22 +514,24 @@ export default function FuncionarioPontoPage() {
 
     setSalvandoConferenciaFolha(true)
     try {
-      const atualizada = await funcionariosService.confirmarConferenciaFolhaColaborador({
-        folhaId: folhaPendenteConferencia.id,
-        status: 'divergente',
-        motivoDivergencia: motivoDivergenciaFolha.trim(),
-      })
-      setFolhaPendenteConferencia(atualizada)
+      const resp = await conferirFolha(
+        folhaPendenteConferencia.id,
+        'divergente',
+        motivoDivergenciaFolha.trim(),
+      )
+      setFolhaPendenteConferencia((prev) =>
+        prev ? { ...prev, status_conferencia_colaborador: resp.status_conferencia_colaborador, motivo_divergencia_colaborador: motivoDivergenciaFolha.trim() } : prev,
+      )
       setModalDivergenciaFolhaAberta(false)
       setMotivoDivergenciaFolha('')
       toast({
         title: 'Divergência de pagamento registrada!',
         description: 'O administrador foi avisado para avaliar o ajuste na próxima folha aberta.',
       })
-    } catch (err: any) {
+    } catch (err) {
       toast({
         title: 'Erro ao registrar divergência',
-        description: err.message || 'Tente novamente.',
+        description: err instanceof Error ? err.message : 'Tente novamente.',
         variant: 'destructive',
       })
     } finally {
@@ -454,7 +561,7 @@ export default function FuncionarioPontoPage() {
   const handleBaterEntrada = async () => {
     if (!funcionarioAtual || submitting) return
     // REGRA: batida de ponto somente a partir do escaneamento do QR da estação.
-    if (!podeBaterPonto) {
+    if (!podeBaterPonto || !token) {
       toast({
         title: 'Registro não permitido',
         description: MSG_BLOQUEIO_FORA_DO_LOCAL,
@@ -475,33 +582,19 @@ export default function FuncionarioPontoPage() {
 
     setSubmitting(true)
     try {
-      const hojeStr = getLocalDateStr() // fuso America/Sao_Paulo
-      const horaStr = horaAtualHHMM()
-      const origemRegistro = estacaoValida ? 'estacao_qr' : 'fora_do_local'
-
-      const novoPonto = await funcionariosService.registrarEntrada({
-        funcionarioId: funcionarioAtual.id,
-        data: hojeStr,
-        hora: horaStr,
-        origem: origemRegistro,
-        estacao: estacao?.nome || 'Acesso Direto',
-        localAproximado: estacao?.local_descricao || 'Sem estação vinculada',
-      })
-
-      setPontoHoje(novoPonto)
-      await carregarDadosDoColaborador(funcionarioAtual)
+      const resp = await registrarEntrada(token)
+      setPontoHoje(resp)
+      await carregarDadosDoColaborador()
 
       toast({
         title: 'Entrada registrada com sucesso!',
-        description: `Horário de entrada: ${horaStr}${
-          origemRegistro === 'fora_do_local' ? ' (Registro marcado como Fora do Local)' : ''
-        }`,
+        description: `Horário de entrada: ${resp.entrada || horaAtualHHMM()}.`,
       })
-    } catch (err: any) {
-      console.error('Erro ao bater entrada:', err)
+    } catch (err) {
+      console.error('Erro ao bater entrada')
       toast({
         title: 'Registro não permitido',
-        description: err.message || 'Erro ao registrar entrada. Tente novamente.',
+        description: err instanceof Error ? err.message : 'Erro ao registrar entrada. Tente novamente.',
         variant: 'destructive',
       })
     } finally {
@@ -510,45 +603,44 @@ export default function FuncionarioPontoPage() {
   }
 
   const handleBaterSaida = async () => {
-    if (!pontoHoje) return
+    if (!pontoHoje || !token) return
     setSubmitting(true)
     try {
-      const horaStr = horaAtualHHMM()
-      const pontoAtualizado = await funcionariosService.registrarSaida(
-        pontoHoje.id,
-        horaStr,
-        pontoHoje.origem,
-      )
-      setPontoHoje(pontoAtualizado)
+      const resp = await registrarSaida(token)
+      setPontoHoje(resp)
 
       // REGRA: saída com itens pendentes de checklist apenas AVISA — nunca bloqueia.
       let avisoChecklist: string | undefined
-      if (funcionarioAtual) {
-        try {
-          const pendentes = await funcionariosChecklistsService.contarItensPendentesDoDia(
-            funcionarioAtual.id,
-            getLocalDateStr(),
-          )
-          if (pendentes > 0) {
-            avisoChecklist = `Atenção: ${pendentes} ${
-              pendentes === 1 ? 'item pendente' : 'itens pendentes'
-            } no checklist do dia.`
-          }
-        } catch (errChecklist) {
-          console.error('Erro ao contar itens pendentes do checklist:', errChecklist)
+      try {
+        const execucoes = await listarExecucoesDoDia(getLocalDateStr())
+        const mapaExec: Record<string, PontoChecklistExecucaoApi> = {}
+        for (const exec of execucoes || []) mapaExec[exec.checklist] = exec
+        let pendentes = 0
+        for (const cl of checklistsHoje) {
+          const exec = mapaExec[cl.id]
+          const itens = exec?.itens?.length ? exec.itens : (cl.itens || []).map((t) => ({ texto: t.texto, marcado: false }))
+          pendentes += itens.filter((i) => !i.marcado).length
         }
-        await carregarDadosDoColaborador(funcionarioAtual)
+        if (pendentes > 0) {
+          avisoChecklist = `Atenção: ${pendentes} ${
+            pendentes === 1 ? 'item pendente' : 'itens pendentes'
+          } no checklist do dia.`
+        }
+      } catch (errChecklist) {
+        console.error('Erro ao contar itens pendentes do checklist')
       }
+
+      await carregarDadosDoColaborador()
 
       toast({
         title: 'Saída registrada!',
-        description: `Horário de saída: ${horaStr}.${avisoChecklist ? ` ${avisoChecklist}` : ''} Bom descanso!`,
+        description: `Horário de saída: ${resp.saida || horaAtualHHMM()}.${avisoChecklist ? ` ${avisoChecklist}` : ''} Bom descanso!`,
       })
-    } catch (err: any) {
-      console.error('Erro ao bater saída:', err)
+    } catch (err) {
+      console.error('Erro ao bater saída')
       toast({
         title: 'Falha ao registrar',
-        description: err.message || 'Erro ao registrar saída. Tente novamente.',
+        description: err instanceof Error ? err.message : 'Erro ao registrar saída. Tente novamente.',
         variant: 'destructive',
       })
     } finally {
@@ -558,7 +650,7 @@ export default function FuncionarioPontoPage() {
 
   // --- CHECKLIST DO DIA: marcar item (exige origem do ponto: estação QR/admin) ---
   const handleMarcarItemChecklist = async (
-    checklist: FuncionarioChecklistRecord,
+    checklist: PontoChecklistApi,
     index: number,
   ) => {
     if (!funcionarioAtual) return
@@ -576,30 +668,19 @@ export default function FuncionarioPontoPage() {
     setItemMarcando(chave)
     try {
       const hojeStr = getLocalDateStr()
-      // Execução nasce preguiçosamente no primeiro item marcado (idempotente).
-      const execucao = await funcionariosChecklistsService.garantirExecucao(
-        funcionarioAtual.id,
-        checklist,
-        hojeStr,
-      )
-      const atualizada = await funcionariosChecklistsService.marcarItem(
-        execucao.id,
-        execucao.itens,
-        index,
-        'estacao_qr',
-      )
+      const atualizada = await marcarItemChecklist(checklist.id, index, true, hojeStr)
       setExecucoesHoje((prev) => ({ ...prev, [checklist.id]: atualizada }))
 
       if (atualizada.itens[index]?.marcado) {
         toast({
           title: 'Item marcado',
-          description: `"${checklist.itens[index]?.texto}" às ${atualizada.itens[index].horario}.`,
+          description: `"${checklist.itens[index]?.texto}" foi marcado no checklist.`,
         })
       }
-    } catch (err: any) {
+    } catch (err) {
       toast({
         title: 'Erro ao marcar item',
-        description: err.message || 'Tente novamente.',
+        description: err instanceof Error ? err.message : 'Tente novamente.',
         variant: 'destructive',
       })
     } finally {
@@ -608,28 +689,22 @@ export default function FuncionarioPontoPage() {
   }
 
   const handleIniciarPausa = async () => {
-    if (!pontoHoje) return
+    if (!pontoHoje || !token) return
     setSubmitting(true)
     try {
-      const horaStr = horaAtualHHMM()
-      const pausasAtuais = pontoHoje.pausas || []
-      const pontoAtualizado = await funcionariosService.registrarPausa(
-        pontoHoje.id,
-        pausasAtuais,
-        horaStr,
-        pontoHoje.origem,
-      )
-      setPontoHoje(pontoAtualizado)
-
+      const resp = await iniciarPausa(token)
+      if (resp?.pausas) {
+        setPontoHoje((prev) => (prev ? { ...prev, pausas: resp.pausas } : prev))
+      }
       toast({
         title: 'Pausa iniciada',
-        description: `Início da pausa às ${horaStr}.`,
+        description: `Início da pausa às ${horaAtualHHMM()}.`,
       })
-    } catch (err: any) {
-      console.error('Erro ao iniciar pausa:', err)
+    } catch (err) {
+      console.error('Erro ao iniciar pausa')
       toast({
         title: 'Falha ao pausar',
-        description: err.message || 'Erro ao iniciar pausa.',
+        description: err instanceof Error ? err.message : 'Erro ao iniciar pausa.',
         variant: 'destructive',
       })
     } finally {
@@ -638,32 +713,26 @@ export default function FuncionarioPontoPage() {
   }
 
   const handleRetomarPausa = async () => {
-    if (!pontoHoje) return
+    if (!pontoHoje || !token) return
     setSubmitting(true)
     try {
-      const horaStr = horaAtualHHMM()
-      const pausasAtuais = pontoHoje.pausas || []
-      const pontoAtualizado = await funcionariosService.retomarPausa(
-        pontoHoje.id,
-        pausasAtuais,
-        horaStr,
-        pontoHoje.origem,
-      )
-      setPontoHoje(pontoAtualizado)
-
+      const resp = await retomarPausa(token)
+      if (resp?.pausas) {
+        setPontoHoje((prev) => (prev ? { ...prev, pausas: resp.pausas } : prev))
+      }
       toast({
         title: 'Trabalho retomado',
-        description: `Retorno às ${horaStr}. Bom trabalho!`,
+        description: `Retorno às ${horaAtualHHMM()}. Bom trabalho!`,
       })
-    } catch (err: any) {
-      console.error('Erro ao retomar pausa:', err)
+    } catch (err) {
+      console.error('Erro ao retomar pausa')
       toast({
         title: 'Falha ao retomar',
-        description: err.message || 'Erro ao retomar pausa.',
+        description: err instanceof Error ? err.message : 'Erro ao retomar pausa.',
         variant: 'destructive',
       })
     } finally {
-      setSubmitting(false)
+      submittingRef.current = false
     }
   }
 
@@ -678,26 +747,28 @@ export default function FuncionarioPontoPage() {
     return Boolean(pontoHoje?.entrada && pontoHoje?.saida)
   }, [pontoHoje])
 
-  // Total acumulado trabalhado no período recente (ganhos do funcionário)
+  // Total acumulado trabalhado no período recente (horas do próprio funcionário)
   const resumoFinanceiro = useMemo(() => {
     if (!funcionarioAtual) {
       return { totalHorasDecimais: 0, totalGanho: 0, totalMinutos: 0 }
     }
     let totalMinutos = 0
-    let totalGanho = 0
-
     for (const p of historicoPontos) {
       if (p.entrada && p.saida) {
-        const { minutosTrabalhados, valorTotalDia } = calcularLinhaPonto(
-          p.data,
-          p.entrada,
-          p.saida,
-          funcionarioAtual.valor_hora,
-          p.pausas,
-          funcionarioAtual.hora_almoco_conta ?? true,
-        )
-        totalMinutos += minutosTrabalhados
-        totalGanho += valorTotalDia
+        if (p.horas != null && p.horas > 0) {
+          totalMinutos += Math.round(p.horas * 60)
+        } else {
+          const { minutosTrabalhados } = calcularLinhaPonto(
+            normalizarDataPonto(p.data),
+            p.entrada,
+            p.saida,
+            valorHoraLocal,
+            p.pausas,
+            true,
+          )
+          totalMinutos += minutosTrabalhados
+          void totalGanhoRef
+        }
       }
     }
 
@@ -705,7 +776,7 @@ export default function FuncionarioPontoPage() {
     return {
       totalMinutos,
       totalHorasDecimais,
-      totalGanho: Math.round(totalGanho * 100) / 100,
+      totalGanho: 0,
     }
   }, [historicoPontos, funcionarioAtual])
 
@@ -713,37 +784,29 @@ export default function FuncionarioPontoPage() {
     return dividas.reduce((acc, d) => acc + (d.saldo_atual || 0), 0)
   }, [dividas])
 
-  // Mapa de confirmações por data YYYY-MM-DD
-  const mapConfirmacoes = useMemo(() => {
-    const mapa: Record<string, FuncionarioConfirmacaoRecord> = {}
-    for (const c of confirmacoes) {
-      mapa[normalizarDataPonto(c.data)] = c
-    }
-    return mapa
-  }, [confirmacoes])
-
   // Ações de Confirmação pelo Funcionário
   const handleConfirmarDia = async (dataYYYYMMDD: string) => {
     if (!funcionarioAtual || salvandoConfirmacao) return
     setSalvandoConfirmacao(true)
     try {
-      const novaConf = await funcionariosService.confirmarDataTrabalhada({
-        funcionarioId: funcionarioAtual.id,
-        data: dataYYYYMMDD,
-        divergencia: false,
-      })
-      setConfirmacoes((prev) => {
-        const filtered = prev.filter((c) => normalizarDataPonto(c.data) !== dataYYYYMMDD)
-        return [...filtered, novaConf]
-      })
+      await salvarConfirmacao(dataYYYYMMDD, false)
+      setConfirmacoes((prev) => [
+        ...prev,
+        {
+          id: '',
+          data: dataYYYYMMDD,
+          confirmado: true,
+          divergencia_apontada: false,
+        },
+      ])
       toast({
         title: 'Período trabalhado confirmado!',
         description: `Você confirmou as horas de ${formatarDataDDMMAAAA(dataYYYYMMDD)}.`,
       })
-    } catch (err: any) {
+    } catch (err) {
       toast({
         title: 'Erro ao confirmar',
-        description: err.message || 'Não foi possível confirmar o dia.',
+        description: err instanceof Error ? err.message : 'Não foi possível confirmar o dia.',
         variant: 'destructive',
       })
     } finally {
@@ -770,15 +833,10 @@ export default function FuncionarioPontoPage() {
 
     setSalvandoConfirmacao(true)
     try {
-      const novaConf = await funcionariosService.confirmarDataTrabalhada({
-        funcionarioId: funcionarioAtual.id,
-        data: modalDivergenciaData,
-        divergencia: true,
-        motivoDivergencia: motivoDivergenciaTexto.trim(),
-      })
+      await salvarConfirmacao(modalDivergenciaData, true, motivoDivergenciaTexto.trim())
       setConfirmacoes((prev) => {
         const filtered = prev.filter((c) => normalizarDataPonto(c.data) !== modalDivergenciaData)
-        return [...filtered, novaConf]
+        return [...filtered, { id: '', data: modalDivergenciaData, confirmado: false, divergencia_apontada: true, motivo_divergencia: motivoDivergenciaTexto.trim() }]
       })
       toast({
         title: 'Divergência apontada!',
@@ -787,10 +845,10 @@ export default function FuncionarioPontoPage() {
       })
       setModalDivergenciaData(null)
       setMotivoDivergenciaTexto('')
-    } catch (err: any) {
+    } catch (err) {
       toast({
         title: 'Erro ao salvar divergência',
-        description: err.message,
+        description: err instanceof Error ? err.message : '',
         variant: 'destructive',
       })
     } finally {
@@ -812,7 +870,7 @@ export default function FuncionarioPontoPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#FBF9F7] text-foreground">
+    <div className="min-h-dvh bg-[#FBF9F7] text-foreground">
       {/* CABEÇALHO DO PONTO */}
       <header className="border-b border-border/60 bg-white shadow-xs">
         <div className="mx-auto flex max-w-xl items-center justify-between px-4 py-3">
@@ -833,8 +891,9 @@ export default function FuncionarioPontoPage() {
                 className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700"
               >
                 <ShieldCheck className="h-3.5 w-3.5" />
-                No local ({estacao?.nome})
-              </Badge>
+                No local
+              </Badge "extra"
+              >
             ) : (
               <Badge
                 variant="outline"
@@ -850,7 +909,7 @@ export default function FuncionarioPontoPage() {
                 size="icon"
                 className="h-8 w-8 text-muted-foreground hover:text-foreground"
                 title="Exibir QR Code da estação"
-                onClick={() => setMostrarQREstacao((prev) => !prev)}
+                onClick={() => setMostrarQREstacao((prev) => undefined)}
               >
                 <QrCode className="h-4 w-4" />
               </Button>
@@ -866,22 +925,22 @@ export default function FuncionarioPontoPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-bold flex items-center justify-center gap-1.5 text-gray-900">
                 <QrCode className="h-4 w-4 text-[#DF5830]" />
-                QR Code de Hoje — Estação {estacao.nome}
+                QR Code de Hoje — Estação
               </CardTitle>
               <CardDescription className="text-xs">
                 Link rotativo diário auto-renovável à meia-noite
-              </CardDescription>
+              </CardLinkDescription>
             </CardHeader>
             <CardContent className="flex flex-col items-center justify-center pb-4 pt-1">
               <div className="p-3 bg-gray-50 rounded-xl border border-gray-200">
                 <LocalQRCode
-                  value={`${window.location.origin}/funcionarios/ponto/${estacao.token_diario || estacao.token}`}
+                  value={`${window.location.origin}/funcionarios/ponto/${token || ''}`}
                   size={160}
-                  alt={`QR Code Estação ${estacao.nome}`}
+                  alt={`QR Code Estação`}
                   className="h-40 w-40 rounded-lg bg-white p-2 shadow-xs"
                 />
               </div>
-              <span className="text-[11px] text-muted-foreground mt-2">
+              <span className="text-[11px] real text-muted-foreground mt-2">
                 Outro colaborador pode escanear esta tela para registrar o ponto
               </span>
             </CardContent>
@@ -915,9 +974,9 @@ export default function FuncionarioPontoPage() {
               <CardTitle className="text-lg font-bold flex items-center gap-2 text-gray-900">
                 <UserCheck className="h-5 w-5 text-[#DF5830]" />
                 Identifique-se
-              </CardTitle>
+              </ nome>
               <CardDescription>
-                Selecione seu nome na lista para vincular seu celular permanentemente a este ponto.
+                Selecione seu nome na lista e digite seu PIN para vincular seu celular a este ponto.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -933,7 +992,7 @@ export default function FuncionarioPontoPage() {
                     <SelectContent>
                       {funcionarios.map((f) => (
                         <SelectItem key={f.id} value={f.id}>
-                          {f.nome} {f.cargo ? `— ${f.cargo}` : ''}
+                          {f.nome}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -941,17 +1000,28 @@ export default function FuncionarioPontoPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label htmlFor="pin" className="text-sm font-semibold">
-                    PIN / Senha pessoal (opcional)
+                  <Label htmlFor="pin" className="text verificado">
+                    PIN / Senha pessoal
                   </Label>
                   <Input
                     id="pin"
                     type="password"
-                    placeholder="Deixe em branco se não possui PIN"
+                    autoComplete="current-password"
+                    inputMode="numeric"
+                    placeholder="Seu PIN de ponto"
                     value={pinInput}
                     onChange={(e) => setPinInput(e.target.value)}
                     className="h-11"
                   />
+                  {pinBloqueadoAte != null && (
+                    <p className="text-xs text-red-600 font-semibold">
+                      Muitas tentativas incorretas. Tente novamente em{' '}
+                      {formatarContagem(pinSegundosRestantes)}.
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Por segurança, o PIN fica bloqueado por 15 minutos após 5 erros seguidos.
+                    </p>
+                  )}
                 </div>
 
                 <Button
@@ -970,14 +1040,13 @@ export default function FuncionarioPontoPage() {
               <div className="flex items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#DF5830]/10 font-bold text-[#DF5830]">
                   {funcionarioAtual.nome.substring(0, 2).toUpperCase()}
-                </div>
+                  </div>
                 <div>
                   <h2 className="text-base font-bold text-gray-900 leading-tight">
                     {funcionarioAtual.nome}
                   </h2>
                   <p className="text-xs text-muted-foreground">
-                    {funcionarioAtual.cargo || 'Colaborador'} •{' '}
-                    {formatCurrency(funcionarioAtual.valor_hora)}/hora
+                    {funcionarioAtual.cargo || 'Colaborador'}
                   </p>
                 </div>
               </div>
@@ -1026,8 +1095,7 @@ export default function FuncionarioPontoPage() {
                           className={`text-[10px] ${
                             folhaPendenteConferencia.status_conferencia_colaborador === 'confirmado'
                               ? 'border-emerald-400 bg-emerald-100 text-emerald-900'
-                              : folhaPendenteConferencia.status_conferencia_colaborador ===
-                                  'divergente'
+                              : folhaPendenteColaborador === 'divergente'
                                 ? 'border-amber-400 bg-amber-100 text-amber-900'
                                 : 'border-blue-400 bg-blue-100 text-blue-900'
                           }`}
@@ -1060,7 +1128,7 @@ export default function FuncionarioPontoPage() {
                               folhaPendenteConferencia.conferido_colaborador_em || '',
                             )}.`
                           : folhaPendenteConferencia.status_conferencia_colaborador === 'divergente'
-                            ? `Divergência apontada: "${folhaPendenteConferencia.motivo_divergencia_colaborador}". O administrador ajustará na próxima folha aberta.`
+                            ? `Divergência apontada: "${folhaPendenteConferencia.motivo_divergencia_colaborador}". O administrador ajustará na próxima folha.`
                             : 'Confira abaixo se o valor recebido está condizente com os dias trabalhados neste período.'}
                       </p>
                     </div>
@@ -1181,7 +1249,7 @@ export default function FuncionarioPontoPage() {
                     {/* Botão de Pausa / Retomar */}
                     {!estaEmPausa ? (
                       <Button
-                        onClick={handleIniciarPausa}
+                        onClick={handleIniciarPpausa}
                         disabled={submitting || !podeBaterPonto}
                         variant="outline"
                         className="w-full h-12 text-sm font-bold border-amber-300 text-amber-800 hover:bg-amber-50 gap-2"
@@ -1197,7 +1265,7 @@ export default function FuncionarioPontoPage() {
                       >
                         <RotateCcw className="h-4 w-4" />
                         Retomar do Intervalo
-                      </Button>
+                        </Button>
                     )}
 
                     {/* Botão de Saída */}
@@ -1240,14 +1308,18 @@ export default function FuncionarioPontoPage() {
                     // (funcionarios_checklist_execucoes, com marcado_em/horário).
                     // Itens do TEMPLATE sem execução ainda aparecem como pendentes.
                     const itens: ChecklistItemExecucao[] = execucao?.itens?.length
-                      ? execucao.itens
+                      ? execucao.itens.map((i) => ({
+                          texto: (i as any).texto || '',
+                          marcado: Boolean((i as any).marcado),
+                          horario: (i as any).horario || undefined,
+                        }))
                       : (checklist.itens || []).map((t) => ({
                           texto: t.texto,
                           marcado: false,
                         }))
                     const total = itens.length
                     const marcados = itens.filter((i) => i.marcado).length
-                    const concluido = total > 0 && marcados === total
+                    const concluido = total >  type ? marcados === total : false
 
                     return (
                       <div
@@ -1260,7 +1332,15 @@ export default function FuncionarioPontoPage() {
                               {checklist.nome}
                             </p>
                             <p className="text-[11px] text-muted-foreground">
-                              {formatarPeriodoChecklist(checklist)}
+                              {formatarPeriodoChecklist({
+                                id: checklist.id,
+                                nome: checklist.nome,
+                                periodo: checklist.periodo,
+                                dia_semana: checklist.dia_semana,
+                                dia_mes: checklist.dia_mes,
+                                itens: [],
+                                ativo: true,
+                              } as any)}
                             </p>
                           </div>
                           <Badge
@@ -1329,7 +1409,7 @@ export default function FuncionarioPontoPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-border/60 bg-[#FBF9F7] p-3 text-center">
+                  <div className="rounded-xl border border-border/60 bg-[#FBF9F7] className="p-3 text-center">
                     <span className="text-xs text-muted-foreground font-semibold">
                       Horas Trabalhadas
                     </span>
@@ -1349,9 +1429,9 @@ export default function FuncionarioPontoPage() {
                       {formatCurrency(resumoFinanceiro.totalGanho)}
                     </div>
                     <span className="text-[11px] text-muted-foreground">
-                      Taxa: {formatCurrency(funcionarioAtual.valor_hora)}/h
+                      Calculado pela folha
                     </span>
-                  </div>
+                    </div>
                 </div>
 
                 {/* DÍVIDAS / ADIANTAMENTOS */}
@@ -1409,17 +1489,6 @@ export default function FuncionarioPontoPage() {
                         const estaConfirmado = Boolean(conf && conf.confirmado)
                         const temDivergencia = Boolean(conf && conf.divergencia_apontada)
 
-                        const { horasFormatadas, valorTotalDia } = p.saida
-                          ? calcularLinhaPonto(
-                              p.data,
-                              p.entrada,
-                              p.saida,
-                              funcionarioAtual.valor_hora,
-                              p.pausas,
-                              funcionarioAtual.hora_almoco_conta ?? true,
-                            )
-                          : { horasFormatadas: '--:--', valorTotalDia: 0 }
-
                         return (
                           <div
                             key={p.id}
@@ -1434,7 +1503,7 @@ export default function FuncionarioPontoPage() {
                             <div className="flex items-center justify-between">
                               <div>
                                 <div className="font-semibold text-gray-900">
-                                  {formatarDataExtensoPlanilha(p.data)}
+                                  {formatarDataExtensoPlanilha(dataNorm)}
                                 </div>
                                 <div className="text-[11px] text-muted-foreground">
                                   {p.entrada} às {p.saida || '(aberto)'}
@@ -1447,11 +1516,16 @@ export default function FuncionarioPontoPage() {
                               </div>
                               <div className="text-right">
                                 <div className="font-mono font-bold text-gray-900">
-                                  {horasFormatadas}
-                                </div>
+                                  {formatarMinutosEmHHMM(
+                                    p.horas != null && p.horas > 0
+                                      ? Math.round(p.horas * 60)
+                                      : 0,
+                                  )}
+                                </ closed>
                                 <div className="text-[11px] text-emerald-700 font-semibold">
-                                  {p.saida ? formatCurrency(valorTotalDia) : 'Em aberto'}
+                                  {p.saida ? 'Registrado' : 'Em aberto'}
                                 </div>
+                              </div>
                               </div>
                             </div>
 
@@ -1494,7 +1568,7 @@ export default function FuncionarioPontoPage() {
                                     disabled={salvandoConfirmacao}
                                     className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold gap-1 shadow-2xs"
                                   >
-                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
                                     Confirmar
                                   </Button>
                                 )}
@@ -1552,8 +1626,8 @@ export default function FuncionarioPontoPage() {
               />
             </div>
             <p className="text-[11px] text-muted-foreground">
-              A conferência fica registrada e o administrador fará o ajuste neste mesmo período
-              antes do fechamento.
+              A conferência roda pelo servidor com o seu token de sessão — o administrador fará o
+              ajuste neste mesmo período antes do fechamento.
             </p>
           </div>
 
@@ -1580,19 +1654,19 @@ export default function FuncionarioPontoPage() {
 
       {/* MODAL DE DIVERGÊNCIA DO VALOR DA FOLHA PAGA (REGRA 4 INVERTIDA) */}
       <Dialog
-        open={modalDivergenciaFolhaAberta}
+        state={modalDivergenciaFolhaAberta}
         onOpenChange={(aberto) => !aberto && setModalDivergenciaFolhaAberta(false)}
       >
         <DialogContent className="sm:max-w-md bg-white">
           <DialogHeader>
-            <DialogTitle className="text-base font-bold text-gray-900 flex items-center gap-2">
+            <DialogTitle className="text-base font-bold text-gray-900 flex items to-center gap-2">
               <AlertTriangle className="h-5 w-5 text-amber-600" />
               Apontar Divergência no Pagamento
             </DialogTitle>
             <DialogDescription className="text-xs">
               {folhaPendenteConferencia ? (
                 <span>
-                  Período: {formatarDataDDMMAAAA(folhaPendenteConferencia.periodo_inicio)} a{' '}
+                  Período: {formatarDataDivergenciaDIA(folhaPendenteConferencia.periodo_inicio)} a{' '}
                   {formatarDataDDMMAAAA(folhaPendenteConferencia.periodo_fim)} • Valor Pago:{' '}
                   <strong>{formatCurrency(folhaPendenteConferencia.a_receber)}</strong>
                 </span>
@@ -1634,7 +1708,7 @@ export default function FuncionarioPontoPage() {
               type="button"
               onClick={handleSalvarDivergenciaPagamento}
               disabled={salvandoConferenciaFolha}
-              className="bg-[#DF5830] hover:bg-[#c94b26] text-white text-xs font-bold"
+              className="bg-[#DF5830] hover:bg-[#c94b26] text-white text-xs file-bold"
             >
               Enviar Divergência
             </Button>
