@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-28T08:17:21.336Z",
+  "generatedAt": "2026-11-28T17:20:56.643Z",
   "collections": [
     {
       "name": "users",
@@ -5530,12 +5530,25 @@
           "required": false,
           "system": false,
           "collectionRef": "funcionarios_funcoes"
+        },
+        {
+          "name": "pin_tentativas",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "pin_bloqueio_ate",
+          "type": "date",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [
         "CREATE INDEX idx_func_nome ON funcionarios (nome)",
         "CREATE INDEX idx_func_ativo ON funcionarios (ativo)",
-        "CREATE INDEX idx_func_token_sessao ON funcionarios (token_sessao)"
+        "CREATE INDEX idx_func_token_sessao ON funcionarios (token_sessao)",
+        "CREATE INDEX `idx_func_pin_tentativas` ON `funcionarios` (pin_tentativas)"
       ]
     },
     {
